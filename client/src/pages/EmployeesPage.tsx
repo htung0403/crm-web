@@ -1,0 +1,558 @@
+import { useState } from 'react';
+import { Plus, Search, Edit, Trash2, Eye, Phone, Mail, Shield, Calendar, MoreVertical, UserPlus } from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Badge } from '@/components/ui/badge';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { users, roleLabels } from '@/data/mockData';
+import { formatCurrency } from '@/lib/utils';
+import type { User, UserRole } from '@/types';
+
+// Extended employee interface for HR management
+interface Employee extends User {
+    department?: string;
+    joinDate?: string;
+    status: 'active' | 'inactive' | 'onleave';
+    salary?: number;
+    commission?: number;
+    bankAccount?: string;
+    bankName?: string;
+}
+
+// Mock employee data
+const mockEmployees: Employee[] = users.map((user, index) => ({
+    ...user,
+    department: user.role === 'sale' ? 'Kinh doanh' :
+        user.role === 'technician' ? 'Kỹ thuật' :
+            user.role === 'accountant' ? 'Kế toán' : 'Quản lý',
+    joinDate: `2024-0${(index % 9) + 1}-15`,
+    status: index === 4 ? 'onleave' : 'active' as const,
+    salary: 15000000 + (index * 2000000),
+    commission: user.role === 'sale' ? 5 : user.role === 'technician' ? 3 : 0,
+    bankAccount: `100${index}456789${index}`,
+    bankName: index % 2 === 0 ? 'Vietcombank' : 'Techcombank'
+}));
+
+const statusLabels = {
+    active: { label: 'Đang làm', variant: 'success' as const },
+    inactive: { label: 'Nghỉ việc', variant: 'danger' as const },
+    onleave: { label: 'Nghỉ phép', variant: 'warning' as const }
+};
+
+const roleOptions: { value: UserRole; label: string }[] = [
+    { value: 'manager', label: 'Quản lý' },
+    { value: 'accountant', label: 'Kế toán' },
+    { value: 'sale', label: 'Sale' },
+    { value: 'technician', label: 'Kỹ thuật' },
+];
+
+const departmentOptions = ['Kinh doanh', 'Kỹ thuật', 'Kế toán', 'Quản lý', 'Marketing', 'Hỗ trợ'];
+
+// Employee Form Dialog
+function EmployeeFormDialog({
+    open,
+    onClose,
+    employee
+}: {
+    open: boolean;
+    onClose: () => void;
+    employee?: Employee | null;
+}) {
+    const [name, setName] = useState(employee?.name || '');
+    const [email, setEmail] = useState(employee?.email || '');
+    const [phone, setPhone] = useState(employee?.phone || '');
+    const [role, setRole] = useState<UserRole>(employee?.role || 'sale');
+    const [department, setDepartment] = useState(employee?.department || '');
+    const [salary, setSalary] = useState(employee?.salary || 0);
+    const [commission, setCommission] = useState(employee?.commission || 0);
+    const [bankAccount, setBankAccount] = useState(employee?.bankAccount || '');
+    const [bankName, setBankName] = useState(employee?.bankName || '');
+    const [joinDate, setJoinDate] = useState(employee?.joinDate || new Date().toISOString().split('T')[0]);
+
+    const handleSubmit = () => {
+        if (!name || !email || !phone) {
+            alert('Vui lòng điền đầy đủ thông tin bắt buộc');
+            return;
+        }
+        console.log('Saving employee:', { name, email, phone, role, department, salary, commission, bankAccount, bankName, joinDate });
+        alert(employee ? 'Đã cập nhật nhân viên!' : 'Đã thêm nhân viên mới!');
+        onClose();
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={onClose}>
+            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                        <UserPlus className="h-5 w-5 text-primary" />
+                        {employee ? 'Sửa thông tin nhân viên' : 'Thêm nhân viên mới'}
+                    </DialogTitle>
+                    <DialogDescription>Nhập thông tin nhân viên</DialogDescription>
+                </DialogHeader>
+
+                <div className="space-y-4 py-4">
+                    {/* Basic Info */}
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="col-span-2 space-y-2">
+                            <Label>Họ và tên *</Label>
+                            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nhập họ và tên" />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Email *</Label>
+                            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@company.com" />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Số điện thoại *</Label>
+                            <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0912345678" />
+                        </div>
+                    </div>
+
+                    {/* Role & Department */}
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <Label>Vai trò *</Label>
+                            <Select value={role} onValueChange={(v: UserRole) => setRole(v)}>
+                                <SelectTrigger>
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {roleOptions.map(r => (
+                                        <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Phòng ban</Label>
+                            <Select value={department} onValueChange={setDepartment}>
+                                <SelectTrigger>
+                                    <SelectValue placeholder="Chọn phòng ban" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {departmentOptions.map(d => (
+                                        <SelectItem key={d} value={d}>{d}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+
+                    {/* Salary & Commission */}
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <Label>Lương cơ bản</Label>
+                            <Input type="number" value={salary} onChange={(e) => setSalary(Number(e.target.value))} />
+                            {salary > 0 && <p className="text-xs text-muted-foreground">{formatCurrency(salary)}</p>}
+                        </div>
+                        <div className="space-y-2">
+                            <Label>% Hoa hồng mặc định</Label>
+                            <Input type="number" min="0" max="100" value={commission} onChange={(e) => setCommission(Number(e.target.value))} />
+                        </div>
+                    </div>
+
+                    {/* Bank Info */}
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <Label>Ngân hàng</Label>
+                            <Input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Tên ngân hàng" />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Số tài khoản</Label>
+                            <Input value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} placeholder="Số tài khoản" />
+                        </div>
+                    </div>
+
+                    {/* Join Date */}
+                    <div className="space-y-2">
+                        <Label>Ngày vào làm</Label>
+                        <Input type="date" value={joinDate} onChange={(e) => setJoinDate(e.target.value)} />
+                    </div>
+                </div>
+
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Huỷ</Button>
+                    <Button onClick={handleSubmit}>Lưu</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+// Employee Detail Dialog
+function EmployeeDetailDialog({
+    open,
+    onClose,
+    employee
+}: {
+    open: boolean;
+    onClose: () => void;
+    employee: Employee | null;
+}) {
+    if (!employee) return null;
+
+    return (
+        <Dialog open={open} onOpenChange={onClose}>
+            <DialogContent className="max-w-md">
+                <DialogHeader>
+                    <DialogTitle>Chi tiết nhân viên</DialogTitle>
+                </DialogHeader>
+
+                <div className="space-y-6">
+                    {/* Header */}
+                    <div className="flex items-center gap-4">
+                        <Avatar className="h-16 w-16">
+                            <AvatarImage src={employee.avatar} />
+                            <AvatarFallback className="text-xl">{employee.name.charAt(0)}</AvatarFallback>
+                        </Avatar>
+                        <div>
+                            <h3 className="text-xl font-bold">{employee.name}</h3>
+                            <div className="flex items-center gap-2 mt-1">
+                                <Badge variant={employee.role === 'manager' ? 'purple' : employee.role === 'sale' ? 'info' : 'secondary'}>
+                                    {roleLabels[employee.role]}
+                                </Badge>
+                                <Badge variant={statusLabels[employee.status].variant}>
+                                    {statusLabels[employee.status].label}
+                                </Badge>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Info Grid */}
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                            <p className="text-xs text-muted-foreground">Email</p>
+                            <p className="text-sm font-medium flex items-center gap-2">
+                                <Mail className="h-4 w-4 text-muted-foreground" />
+                                {employee.email}
+                            </p>
+                        </div>
+                        <div className="space-y-1">
+                            <p className="text-xs text-muted-foreground">Điện thoại</p>
+                            <p className="text-sm font-medium flex items-center gap-2">
+                                <Phone className="h-4 w-4 text-muted-foreground" />
+                                {employee.phone}
+                            </p>
+                        </div>
+                        <div className="space-y-1">
+                            <p className="text-xs text-muted-foreground">Phòng ban</p>
+                            <p className="text-sm font-medium">{employee.department}</p>
+                        </div>
+                        <div className="space-y-1">
+                            <p className="text-xs text-muted-foreground">Ngày vào làm</p>
+                            <p className="text-sm font-medium flex items-center gap-2">
+                                <Calendar className="h-4 w-4 text-muted-foreground" />
+                                {employee.joinDate}
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Salary Info */}
+                    <div className="p-4 rounded-lg bg-muted/50 space-y-3">
+                        <h4 className="font-semibold flex items-center gap-2">
+                            <Shield className="h-4 w-4 text-primary" />
+                            Thông tin lương
+                        </h4>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <p className="text-xs text-muted-foreground">Lương cơ bản</p>
+                                <p className="text-lg font-bold text-primary">{formatCurrency(employee.salary || 0)}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-muted-foreground">% Hoa hồng</p>
+                                <p className="text-lg font-bold">{employee.commission}%</p>
+                            </div>
+                        </div>
+                        <div className="pt-2 border-t">
+                            <p className="text-xs text-muted-foreground">Tài khoản ngân hàng</p>
+                            <p className="text-sm font-medium">{employee.bankName} - {employee.bankAccount}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <DialogFooter>
+                    <Button variant="outline" onClick={onClose}>Đóng</Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+export function EmployeesPage() {
+    const [searchTerm, setSearchTerm] = useState('');
+    const [roleFilter, setRoleFilter] = useState<string>('all');
+    const [statusFilter, setStatusFilter] = useState<string>('all');
+    const [showForm, setShowForm] = useState(false);
+    const [showDetail, setShowDetail] = useState(false);
+    const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+
+    const filteredEmployees = mockEmployees.filter(emp => {
+        const matchesSearch = emp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            emp.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            (emp.phone || '').includes(searchTerm);
+        const matchesRole = roleFilter === 'all' || emp.role === roleFilter;
+        const matchesStatus = statusFilter === 'all' || emp.status === statusFilter;
+        return matchesSearch && matchesRole && matchesStatus;
+    });
+
+    // Stats
+    const totalEmployees = mockEmployees.length;
+    const activeEmployees = mockEmployees.filter(e => e.status === 'active').length;
+    const onLeaveEmployees = mockEmployees.filter(e => e.status === 'onleave').length;
+    const totalSalary = mockEmployees.filter(e => e.status === 'active').reduce((sum, e) => sum + (e.salary || 0), 0);
+
+    return (
+        <div className="space-y-6 animate-fade-in">
+            {/* Page Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                    <h1 className="text-2xl font-bold text-foreground">Danh sách nhân viên</h1>
+                    <p className="text-muted-foreground">Quản lý thông tin nhân viên trong công ty</p>
+                </div>
+                <Button onClick={() => { setSelectedEmployee(null); setShowForm(true); }}>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Thêm nhân viên
+                </Button>
+            </div>
+
+            {/* Stats Cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Card className="bg-blue-50 border-0">
+                    <CardContent className="p-4">
+                        <p className="text-sm text-muted-foreground">Tổng nhân viên</p>
+                        <p className="text-2xl font-bold text-blue-600">{totalEmployees}</p>
+                    </CardContent>
+                </Card>
+                <Card className="bg-emerald-50 border-0">
+                    <CardContent className="p-4">
+                        <p className="text-sm text-muted-foreground">Đang làm việc</p>
+                        <p className="text-2xl font-bold text-emerald-600">{activeEmployees}</p>
+                    </CardContent>
+                </Card>
+                <Card className="bg-amber-50 border-0">
+                    <CardContent className="p-4">
+                        <p className="text-sm text-muted-foreground">Đang nghỉ phép</p>
+                        <p className="text-2xl font-bold text-amber-600">{onLeaveEmployees}</p>
+                    </CardContent>
+                </Card>
+                <Card className="bg-purple-50 border-0">
+                    <CardContent className="p-4">
+                        <p className="text-sm text-muted-foreground">Tổng lương/tháng</p>
+                        <p className="text-2xl font-bold text-purple-600">{formatCurrency(totalSalary)}</p>
+                    </CardContent>
+                </Card>
+            </div>
+
+            {/* Filters */}
+            <Card>
+                <CardContent className="p-4">
+                    <div className="flex flex-col sm:flex-row gap-3">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                                placeholder="Tìm theo tên, email, SĐT..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="pl-9"
+                            />
+                        </div>
+                        <Select value={roleFilter} onValueChange={setRoleFilter}>
+                            <SelectTrigger className="w-full sm:w-40">
+                                <SelectValue placeholder="Vai trò" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tất cả vai trò</SelectItem>
+                                {roleOptions.map(r => (
+                                    <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="w-full sm:w-40">
+                                <SelectValue placeholder="Trạng thái" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tất cả</SelectItem>
+                                <SelectItem value="active">Đang làm</SelectItem>
+                                <SelectItem value="onleave">Nghỉ phép</SelectItem>
+                                <SelectItem value="inactive">Nghỉ việc</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </CardContent>
+            </Card>
+
+            {/* Employee List */}
+            <Card>
+                <CardHeader>
+                    <CardTitle>Danh sách ({filteredEmployees.length} nhân viên)</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                    {/* Desktop Table */}
+                    <div className="hidden md:block overflow-x-auto">
+                        <table className="w-full">
+                            <thead className="bg-muted/50 border-y">
+                                <tr>
+                                    <th className="p-3 text-left text-sm font-medium text-muted-foreground">Nhân viên</th>
+                                    <th className="p-3 text-left text-sm font-medium text-muted-foreground">Liên hệ</th>
+                                    <th className="p-3 text-left text-sm font-medium text-muted-foreground">Vai trò</th>
+                                    <th className="p-3 text-left text-sm font-medium text-muted-foreground">Phòng ban</th>
+                                    <th className="p-3 text-right text-sm font-medium text-muted-foreground">Lương</th>
+                                    <th className="p-3 text-center text-sm font-medium text-muted-foreground">Trạng thái</th>
+                                    <th className="p-3 text-right text-sm font-medium text-muted-foreground">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {filteredEmployees.map((emp) => (
+                                    <tr key={emp.id} className="border-b hover:bg-muted/30 transition-colors">
+                                        <td className="p-3">
+                                            <div className="flex items-center gap-3">
+                                                <Avatar className="h-10 w-10">
+                                                    <AvatarImage src={emp.avatar} />
+                                                    <AvatarFallback>{emp.name.charAt(0)}</AvatarFallback>
+                                                </Avatar>
+                                                <div>
+                                                    <p className="font-medium">{emp.name}</p>
+                                                    <p className="text-xs text-muted-foreground">Từ {emp.joinDate}</p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="p-3">
+                                            <p className="text-sm">{emp.email}</p>
+                                            <p className="text-xs text-muted-foreground">{emp.phone}</p>
+                                        </td>
+                                        <td className="p-3">
+                                            <Badge variant={
+                                                emp.role === 'manager' ? 'purple' :
+                                                    emp.role === 'sale' ? 'info' :
+                                                        emp.role === 'accountant' ? 'warning' : 'secondary'
+                                            }>
+                                                {roleLabels[emp.role]}
+                                            </Badge>
+                                        </td>
+                                        <td className="p-3 text-sm">{emp.department}</td>
+                                        <td className="p-3 text-right">
+                                            <p className="font-semibold">{formatCurrency(emp.salary || 0)}</p>
+                                            {(emp.commission || 0) > 0 && (
+                                                <p className="text-xs text-muted-foreground">+{emp.commission}% HH</p>
+                                            )}
+                                        </td>
+                                        <td className="p-3 text-center">
+                                            <Badge variant={statusLabels[emp.status].variant}>
+                                                {statusLabels[emp.status].label}
+                                            </Badge>
+                                        </td>
+                                        <td className="p-3 text-right">
+                                            <div className="flex items-center justify-end gap-1">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    onClick={() => { setSelectedEmployee(emp); setShowDetail(true); }}
+                                                >
+                                                    <Eye className="h-4 w-4" />
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    onClick={() => { setSelectedEmployee(emp); setShowForm(true); }}
+                                                >
+                                                    <Edit className="h-4 w-4" />
+                                                </Button>
+                                                <Button variant="ghost" size="icon" className="text-red-500 hover:bg-red-50">
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* Mobile Card View */}
+                    <div className="md:hidden p-4 space-y-4">
+                        {filteredEmployees.map((emp) => (
+                            <div key={emp.id} className="p-4 rounded-lg border bg-card">
+                                <div className="flex items-start justify-between mb-3">
+                                    <div className="flex items-center gap-3">
+                                        <Avatar className="h-12 w-12">
+                                            <AvatarImage src={emp.avatar} />
+                                            <AvatarFallback>{emp.name.charAt(0)}</AvatarFallback>
+                                        </Avatar>
+                                        <div>
+                                            <p className="font-semibold">{emp.name}</p>
+                                            <Badge variant={
+                                                emp.role === 'manager' ? 'purple' :
+                                                    emp.role === 'sale' ? 'info' : 'secondary'
+                                            } className="mt-1">
+                                                {roleLabels[emp.role]}
+                                            </Badge>
+                                        </div>
+                                    </div>
+                                    <Badge variant={statusLabels[emp.status].variant}>
+                                        {statusLabels[emp.status].label}
+                                    </Badge>
+                                </div>
+
+                                <div className="space-y-2 text-sm mb-3">
+                                    <p className="flex items-center gap-2 text-muted-foreground">
+                                        <Mail className="h-4 w-4" />
+                                        {emp.email}
+                                    </p>
+                                    <p className="flex items-center gap-2 text-muted-foreground">
+                                        <Phone className="h-4 w-4" />
+                                        {emp.phone}
+                                    </p>
+                                </div>
+
+                                <div className="flex items-center justify-between pt-3 border-t">
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Lương</p>
+                                        <p className="font-bold text-primary">{formatCurrency(emp.salary || 0)}</p>
+                                    </div>
+                                    <div className="flex gap-1">
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={() => { setSelectedEmployee(emp); setShowDetail(true); }}
+                                        >
+                                            <Eye className="h-4 w-4" />
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            onClick={() => { setSelectedEmployee(emp); setShowForm(true); }}
+                                        >
+                                            <Edit className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {filteredEmployees.length === 0 && (
+                        <div className="p-8 text-center text-muted-foreground">
+                            Không tìm thấy nhân viên nào
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+
+            {/* Dialogs */}
+            <EmployeeFormDialog
+                open={showForm}
+                onClose={() => { setShowForm(false); setSelectedEmployee(null); }}
+                employee={selectedEmployee}
+            />
+            <EmployeeDetailDialog
+                open={showDetail}
+                onClose={() => { setShowDetail(false); setSelectedEmployee(null); }}
+                employee={selectedEmployee}
+            />
+        </div>
+    );
+}
