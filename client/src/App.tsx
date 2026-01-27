@@ -17,7 +17,7 @@ import { InteractionsPage } from '@/pages/InteractionsPage';
 import { ReportsPage } from '@/pages/ReportsPage';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
-import type { UserRole } from '@/types';
+import type { UserRole, User } from '@/types';
 import { Toaster } from 'sonner';
 
 // Placeholder pages for routes not yet implemented
@@ -101,7 +101,7 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode;
 // Wrapper for ProductsPage with routing
 function ProductsPageWrapper({ initialTab }: { initialTab: 'products' | 'services' | 'packages' | 'vouchers' }) {
   const navigate = useNavigate();
-  
+
   const handleTabChange = (tab: string) => {
     navigate(`/${tab}`);
   };
@@ -159,7 +159,6 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         <Header
           currentUser={user}
           onLogout={handleLogout}
-          onMenuClick={() => setSidebarOpen(true)}
           isMobile={isMobile}
         />
         <main className="flex-1 p-4 md:p-6 lg:p-8 mt-16">

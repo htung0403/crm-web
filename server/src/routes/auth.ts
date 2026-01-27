@@ -47,7 +47,7 @@ router.post('/login', async (req, res, next) => {
                 name: user.name,
             },
             config.jwt.secret,
-            { expiresIn: config.jwt.expiresIn }
+            { expiresIn: config.jwt.expiresIn as jwt.SignOptions['expiresIn'] }
         );
 
         // Cập nhật last_login

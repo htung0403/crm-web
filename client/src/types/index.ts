@@ -7,6 +7,7 @@ export interface User {
     avatar?: string;
     role: UserRole;
     phone?: string;
+    department?: string;
 }
 
 export interface Lead {

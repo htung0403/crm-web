@@ -14,7 +14,7 @@ const roleLabels: Record<UserRole, string> = {
 };
 
 interface HeaderProps {
-    onMenuToggle: () => void;
+    onMenuToggle?: () => void;
     isMobile: boolean;
     currentUser: User;
     onLogout?: () => void;

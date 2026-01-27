@@ -73,7 +73,12 @@ export function useCustomers(): UseCustomersReturn {
             const data = response.data.data;
             setCustomers(data.customers || []);
             if (data.pagination) {
-                setPagination(data.pagination);
+                setPagination({
+                    page: data.pagination.page,
+                    limit: data.pagination.limit,
+                    total: data.pagination.total,
+                    totalPages: data.pagination.totalPages || Math.ceil(data.pagination.total / data.pagination.limit)
+                });
             }
         } catch (err: any) {
             const message = err.response?.data?.message || 'Lỗi khi tải danh sách khách hàng';
