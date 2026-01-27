@@ -72,30 +72,54 @@ export function getItemTypeColor(type: string): string {
 }
 
 // Shared types for dialogs
+export interface PackageServiceAssignment {
+    service_id: string;
+    service_name: string;
+    department?: string;
+    technician_id?: string;
+}
+
 export interface OrderItem {
     type: 'product' | 'service' | 'package';
     item_id: string;
     name: string;
     quantity: number;
     unit_price: number;
+    technician_id?: string; // Assigned technician for service
+    department?: string; // Department of the service
+    package_services?: PackageServiceAssignment[]; // Services in package for technician assignment
 }
 
 export interface CreateOrderData {
     customer_id: string;
-    items: Array<{ type: string; item_id: string; name: string; quantity: number; unit_price: number }>;
+    items: Array<{
+        type: string;
+        item_id: string;
+        name: string;
+        quantity: number;
+        unit_price: number;
+        technician_id?: string;
+    }>;
     notes?: string;
     discount?: number;
 }
 
 export interface UpdateOrderData {
-    items: Array<{ type: string; item_id: string; name: string; quantity: number; unit_price: number }>;
+    items: Array<{
+        type: string;
+        item_id: string;
+        name: string;
+        quantity: number;
+        unit_price: number;
+        technician_id?: string;
+    }>;
     notes?: string;
     discount?: number;
 }
 
 export interface OrderDialogProps {
     products: { id: string; name: string; price: number }[];
-    services: { id: string; name: string; price: number }[];
+    services: { id: string; name: string; price: number; department?: string }[];
     packages: PackageType[];
     vouchers: Voucher[];
 }

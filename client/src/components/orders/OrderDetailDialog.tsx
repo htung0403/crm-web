@@ -1,4 +1,5 @@
-import { Package, Gift, Sparkles, ShoppingBag, CreditCard } from 'lucide-react';
+import { useState } from 'react';
+import { Package, Gift, Sparkles, ShoppingBag, CreditCard, Printer } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -6,6 +7,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { formatCurrency, formatDateTime } from '@/lib/utils';
 import type { Order } from '@/hooks/useOrders';
 import { columns } from './constants';
+import { PrintQRDialog } from './PrintQRDialog';
 
 interface OrderDetailDialogProps {
     order: Order | null;
@@ -22,6 +24,8 @@ export function OrderDetailDialog({
     onEdit,
     onPayment
 }: OrderDetailDialogProps) {
+    const [showPrintDialog, setShowPrintDialog] = useState(false);
+
     if (!order) return null;
 
     const getItemTypeLabel = (type: string) => {
@@ -45,176 +49,190 @@ export function OrderDetailDialog({
     };
 
     return (
-        <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-                <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                        <ShoppingBag className="h-5 w-5 text-primary" />
-                        <span className="font-bold">{order.order_code}</span>
-                        <Badge variant={
-                            order.status === 'completed' ? 'success' :
-                                order.status === 'cancelled' ? 'danger' :
-                                    order.status === 'processing' ? 'warning' :
-                                        order.status === 'confirmed' ? 'purple' : 'info'
-                        }>
-                            {columns.find(c => c.id === order.status)?.title}
-                        </Badge>
-                    </DialogTitle>
-                    <DialogDescription>Chi tiết đơn hàng</DialogDescription>
-                </DialogHeader>
+        <>
+            <Dialog open={open} onOpenChange={onClose}>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <ShoppingBag className="h-5 w-5 text-primary" />
+                            <span className="font-bold">{order.order_code}</span>
+                            <Badge variant={
+                                order.status === 'completed' ? 'success' :
+                                    order.status === 'cancelled' ? 'danger' :
+                                        order.status === 'processing' ? 'warning' :
+                                            order.status === 'confirmed' ? 'purple' : 'info'
+                            }>
+                                {columns.find(c => c.id === order.status)?.title}
+                            </Badge>
+                        </DialogTitle>
+                        <DialogDescription>Chi tiết đơn hàng</DialogDescription>
+                    </DialogHeader>
 
-                <div className="flex-1 overflow-y-auto space-y-4">
-                    {/* Customer Info */}
-                    <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
-                        <Avatar className="h-12 w-12">
-                            <AvatarFallback className="bg-primary text-white">{order.customer?.name?.charAt(0) || 'C'}</AvatarFallback>
-                        </Avatar>
-                        <div className="flex-1">
-                            <p className="font-semibold">{order.customer?.name || 'N/A'}</p>
-                            <p className="text-sm text-muted-foreground">{order.customer?.phone || 'Không có SĐT'}</p>
+                    <div className="flex-1 overflow-y-auto space-y-4">
+                        {/* Customer Info */}
+                        <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+                            <Avatar className="h-12 w-12">
+                                <AvatarFallback className="bg-primary text-white">{order.customer?.name?.charAt(0) || 'C'}</AvatarFallback>
+                            </Avatar>
+                            <div className="flex-1">
+                                <p className="font-semibold">{order.customer?.name || 'N/A'}</p>
+                                <p className="text-sm text-muted-foreground">{order.customer?.phone || 'Không có SĐT'}</p>
+                            </div>
                         </div>
-                    </div>
 
-                    {/* Items Table */}
-                    {order.items && order.items.length > 0 && (
-                        <div className="space-y-2">
-                            <p className="text-sm font-medium text-muted-foreground flex items-center gap-1">
-                                <Package className="h-4 w-4" />
-                                Chi tiết sản phẩm/dịch vụ ({order.items.length})
-                            </p>
-                            <div className="border rounded-lg overflow-hidden">
-                                <table className="w-full text-sm">
-                                    <thead className="bg-muted/50">
-                                        <tr>
-                                            <th className="text-left p-3 font-medium">Loại</th>
-                                            <th className="text-left p-3 font-medium">Tên</th>
-                                            <th className="text-center p-3 font-medium">SL</th>
-                                            <th className="text-right p-3 font-medium">Đơn giá</th>
-                                            <th className="text-right p-3 font-medium">Thành tiền</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y">
-                                        {order.items.map((item, i) => (
-                                            <tr key={i} className="hover:bg-muted/30">
-                                                <td className="p-3">
-                                                    <Badge className={getItemTypeColor(item.item_type)}>
-                                                        {getItemTypeLabel(item.item_type)}
-                                                    </Badge>
-                                                </td>
-                                                <td className="p-3 font-medium">{item.item_name}</td>
-                                                <td className="p-3 text-center">{item.quantity}</td>
-                                                <td className="p-3 text-right text-muted-foreground">
-                                                    {formatCurrency(item.unit_price)}
-                                                </td>
-                                                <td className="p-3 text-right font-semibold">
-                                                    {formatCurrency(item.total_price)}
-                                                </td>
+                        {/* Items Table */}
+                        {order.items && order.items.length > 0 && (
+                            <div className="space-y-2">
+                                <p className="text-sm font-medium text-muted-foreground flex items-center gap-1">
+                                    <Package className="h-4 w-4" />
+                                    Chi tiết sản phẩm/dịch vụ ({order.items.length})
+                                </p>
+                                <div className="border rounded-lg overflow-hidden">
+                                    <table className="w-full text-sm">
+                                        <thead className="bg-muted/50">
+                                            <tr>
+                                                <th className="text-left p-3 font-medium">Loại</th>
+                                                <th className="text-left p-3 font-medium">Tên</th>
+                                                <th className="text-center p-3 font-medium">SL</th>
+                                                <th className="text-right p-3 font-medium">Đơn giá</th>
+                                                <th className="text-right p-3 font-medium">Thành tiền</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Order Summary */}
-                    <div className="p-4 bg-gradient-to-r from-primary/5 to-primary/10 rounded-lg border border-primary/10 space-y-2">
-                        <div className="flex justify-between text-sm">
-                            <span>Tạm tính:</span>
-                            <span className="font-medium">{formatCurrency(order.subtotal)}</span>
-                        </div>
-                        {order.discount > 0 && (
-                            <div className="flex justify-between text-sm text-green-600">
-                                <span className="flex items-center gap-1">
-                                    <Gift className="h-3.5 w-3.5" />
-                                    Giảm giá:
-                                </span>
-                                <span className="font-medium">-{formatCurrency(order.discount)}</span>
+                                        </thead>
+                                        <tbody className="divide-y">
+                                            {order.items.map((item, i) => (
+                                                <tr key={i} className="hover:bg-muted/30">
+                                                    <td className="p-3">
+                                                        <Badge className={getItemTypeColor(item.item_type)}>
+                                                            {getItemTypeLabel(item.item_type)}
+                                                        </Badge>
+                                                    </td>
+                                                    <td className="p-3 font-medium">{item.item_name}</td>
+                                                    <td className="p-3 text-center">{item.quantity}</td>
+                                                    <td className="p-3 text-right text-muted-foreground">
+                                                        {formatCurrency(item.unit_price)}
+                                                    </td>
+                                                    <td className="p-3 text-right font-semibold">
+                                                        {formatCurrency(item.total_price)}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         )}
-                        <div className="flex justify-between text-lg font-bold pt-2 border-t border-primary/20">
-                            <span>Tổng thanh toán:</span>
-                            <span className="text-primary">{formatCurrency(order.total_amount)}</span>
+
+                        {/* Order Summary */}
+                        <div className="p-4 bg-gradient-to-r from-primary/5 to-primary/10 rounded-lg border border-primary/10 space-y-2">
+                            <div className="flex justify-between text-sm">
+                                <span>Tạm tính:</span>
+                                <span className="font-medium">{formatCurrency(order.subtotal)}</span>
+                            </div>
+                            {order.discount > 0 && (
+                                <div className="flex justify-between text-sm text-green-600">
+                                    <span className="flex items-center gap-1">
+                                        <Gift className="h-3.5 w-3.5" />
+                                        Giảm giá:
+                                    </span>
+                                    <span className="font-medium">-{formatCurrency(order.discount)}</span>
+                                </div>
+                            )}
+                            <div className="flex justify-between text-lg font-bold pt-2 border-t border-primary/20">
+                                <span>Tổng thanh toán:</span>
+                                <span className="text-primary">{formatCurrency(order.total_amount)}</span>
+                            </div>
+                            {order.paid_amount !== undefined && order.paid_amount >= 0 && (
+                                <div className="flex justify-between text-sm pt-2 border-t">
+                                    <span>Đã thanh toán:</span>
+                                    <span className={`font-medium ${order.paid_amount >= order.total_amount ? 'text-green-600' : 'text-amber-600'}`}>
+                                        {formatCurrency(order.paid_amount)}
+                                        {order.paid_amount < order.total_amount && (
+                                            <span className="text-xs ml-1 text-muted-foreground">
+                                                (còn {formatCurrency(order.total_amount - order.paid_amount)})
+                                            </span>
+                                        )}
+                                    </span>
+                                </div>
+                            )}
                         </div>
-                        {order.paid_amount !== undefined && order.paid_amount >= 0 && (
-                            <div className="flex justify-between text-sm pt-2 border-t">
-                                <span>Đã thanh toán:</span>
-                                <span className={`font-medium ${order.paid_amount >= order.total_amount ? 'text-green-600' : 'text-amber-600'}`}>
-                                    {formatCurrency(order.paid_amount)}
-                                    {order.paid_amount < order.total_amount && (
-                                        <span className="text-xs ml-1 text-muted-foreground">
-                                            (còn {formatCurrency(order.total_amount - order.paid_amount)})
-                                        </span>
-                                    )}
-                                </span>
+
+                        {/* Details Grid */}
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <p className="text-muted-foreground">Ngày tạo</p>
+                                <p className="font-medium">{formatDateTime(order.created_at)}</p>
+                            </div>
+                            <div>
+                                <p className="text-muted-foreground">Hoàn thành</p>
+                                <p className="font-medium">{order.completed_at ? formatDateTime(order.completed_at) : 'Chưa hoàn thành'}</p>
+                            </div>
+                            <div className="col-span-2">
+                                <p className="text-muted-foreground">Nhân viên phụ trách</p>
+                                <div className="flex items-center gap-2 mt-1">
+                                    <Avatar className="h-6 w-6">
+                                        <AvatarFallback className="text-xs">{order.sales_user?.name?.charAt(0) || 'N'}</AvatarFallback>
+                                    </Avatar>
+                                    <span className="font-medium">{order.sales_user?.name || 'N/A'}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Notes */}
+                        {order.notes && (
+                            <div>
+                                <p className="text-sm text-muted-foreground mb-1">Ghi chú</p>
+                                <p className="text-sm p-3 bg-muted/50 rounded-lg">{order.notes}</p>
                             </div>
                         )}
                     </div>
 
-                    {/* Details Grid */}
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                            <p className="text-muted-foreground">Ngày tạo</p>
-                            <p className="font-medium">{formatDateTime(order.created_at)}</p>
-                        </div>
-                        <div>
-                            <p className="text-muted-foreground">Hoàn thành</p>
-                            <p className="font-medium">{order.completed_at ? formatDateTime(order.completed_at) : 'Chưa hoàn thành'}</p>
-                        </div>
-                        <div className="col-span-2">
-                            <p className="text-muted-foreground">Nhân viên phụ trách</p>
-                            <div className="flex items-center gap-2 mt-1">
-                                <Avatar className="h-6 w-6">
-                                    <AvatarFallback className="text-xs">{order.sales_user?.name?.charAt(0) || 'N'}</AvatarFallback>
-                                </Avatar>
-                                <span className="font-medium">{order.sales_user?.name || 'N/A'}</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Notes */}
-                    {order.notes && (
-                        <div>
-                            <p className="text-sm text-muted-foreground mb-1">Ghi chú</p>
-                            <p className="text-sm p-3 bg-muted/50 rounded-lg">{order.notes}</p>
-                        </div>
-                    )}
-                </div>
-
-                <div className="flex gap-2 pt-4 border-t">
-                    {order.status !== 'completed' && order.status !== 'cancelled' && (
+                    <div className="flex gap-2 pt-4 border-t">
+                        {order.status !== 'completed' && order.status !== 'cancelled' && (
+                            <Button
+                                variant="outline"
+                                className="flex-1"
+                                onClick={() => {
+                                    if (onEdit) {
+                                        onEdit(order);
+                                        onClose();
+                                    }
+                                }}
+                            >
+                                <Sparkles className="h-4 w-4 mr-2" />
+                                Sửa đơn
+                            </Button>
+                        )}
+                        {order.status === 'processing' && onPayment && (
+                            <Button
+                                className="flex-1 bg-green-600 hover:bg-green-700"
+                                onClick={() => {
+                                    onPayment(order);
+                                    onClose();
+                                }}
+                            >
+                                <CreditCard className="h-4 w-4 mr-2" />
+                                Thanh toán
+                            </Button>
+                        )}
                         <Button
                             variant="outline"
                             className="flex-1"
-                            onClick={() => {
-                                if (onEdit) {
-                                    onEdit(order);
-                                    onClose();
-                                }
-                            }}
+                            onClick={() => setShowPrintDialog(true)}
                         >
-                            <Sparkles className="h-4 w-4 mr-2" />
-                            Sửa đơn
+                            <Printer className="h-4 w-4 mr-2" />
+                            In phiếu
                         </Button>
-                    )}
-                    {order.status === 'processing' && onPayment && (
-                        <Button
-                            className="flex-1 bg-green-600 hover:bg-green-700"
-                            onClick={() => {
-                                onPayment(order);
-                                onClose();
-                            }}
-                        >
-                            <CreditCard className="h-4 w-4 mr-2" />
-                            Thanh toán
-                        </Button>
-                    )}
-                    <Button variant="outline" className="flex-1">
-                        <Package className="h-4 w-4 mr-2" />
-                        In phiếu
-                    </Button>
-                </div>
-            </DialogContent>
-        </Dialog>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Print QR Dialog */}
+            <PrintQRDialog
+                order={order}
+                open={showPrintDialog}
+                onClose={() => setShowPrintDialog(false)}
+            />
+        </>
     );
 }
+

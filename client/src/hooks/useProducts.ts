@@ -24,6 +24,7 @@ export interface Service {
     duration?: number;
     description?: string;
     commission_rate: number;
+    department?: string; // Department ID for technician assignment
     status: string;
     created_at: string;
 }

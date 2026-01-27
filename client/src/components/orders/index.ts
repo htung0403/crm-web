@@ -3,6 +3,7 @@ export { OrderCard } from './OrderCard';
 export { CreateOrderDialog } from './CreateOrderDialog';
 export { EditOrderDialog } from './EditOrderDialog';
 export { OrderDetailDialog } from './OrderDetailDialog';
+export { OrderConfirmationDialog } from './OrderConfirmationDialog';
 export { PaymentDialog } from './PaymentDialog';
 export {
     columns,

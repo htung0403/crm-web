@@ -12,6 +12,7 @@ import { useCustomers } from '@/hooks/useCustomers';
 import { useProducts } from '@/hooks/useProducts';
 import { usePackages } from '@/hooks/usePackages';
 import { useVouchers } from '@/hooks/useVouchers';
+import { useUsers } from '@/hooks/useUsers';
 import type { OrderStatus } from '@/types';
 
 // Import extracted components
@@ -20,6 +21,7 @@ import {
     CreateOrderDialog,
     EditOrderDialog,
     OrderDetailDialog,
+    OrderConfirmationDialog,
     PaymentDialog,
     columns
 } from '@/components/orders';
@@ -31,11 +33,13 @@ export function OrdersPage() {
     const { products, services, fetchProducts, fetchServices } = useProducts();
     const { packages, fetchPackages } = usePackages();
     const { vouchers, fetchVouchers } = useVouchers();
+    const { users: technicians, fetchTechnicians } = useUsers();
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
     const [showCreateDialog, setShowCreateDialog] = useState(false);
     const [editingOrder, setEditingOrder] = useState<Order | null>(null);
     const [payingOrder, setPayingOrder] = useState<Order | null>(null);
     const [pendingDrop, setPendingDrop] = useState<{ orderId: string; targetStatus: string } | null>(null);
+    const [newlyCreatedOrder, setNewlyCreatedOrder] = useState<Order | null>(null);
 
     // Fetch data on mount and when navigating back to this page
     useEffect(() => {
@@ -45,7 +49,8 @@ export function OrdersPage() {
         fetchServices({ status: 'active' });
         fetchPackages();
         fetchVouchers();
-    }, [location.pathname, fetchOrders, fetchCustomers, fetchProducts, fetchServices, fetchPackages, fetchVouchers]);
+        fetchTechnicians();
+    }, [location.pathname, fetchOrders, fetchCustomers, fetchProducts, fetchServices, fetchPackages, fetchVouchers, fetchTechnicians]);
 
     // Refetch orders when page becomes visible (e.g., after navigation)
     useEffect(() => {
@@ -97,9 +102,14 @@ export function OrdersPage() {
         discount?: number;
     }) => {
         try {
-            await createOrder(data);
+            const newOrder = await createOrder(data);
             toast.success('Đã tạo đơn hàng mới!');
             await fetchOrders();
+
+            // Show confirmation dialog for the new order
+            if (newOrder) {
+                setNewlyCreatedOrder(newOrder);
+            }
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Lỗi khi tạo đơn hàng';
             toast.error(message);
@@ -266,6 +276,7 @@ export function OrdersPage() {
                     services={services}
                     packages={packages}
                     vouchers={vouchers}
+                    technicians={technicians}
                 />
 
                 {/* Edit Order Dialog */}
@@ -286,6 +297,17 @@ export function OrdersPage() {
                     open={!!payingOrder}
                     onClose={handlePaymentClose}
                     onSuccess={handlePaymentSuccess}
+                />
+
+                {/* Order Confirmation Dialog (after creating new order) */}
+                <OrderConfirmationDialog
+                    open={!!newlyCreatedOrder}
+                    onClose={() => setNewlyCreatedOrder(null)}
+                    order={newlyCreatedOrder}
+                    onConfirm={async () => {
+                        await fetchOrders();
+                        setNewlyCreatedOrder(null);
+                    }}
                 />
             </div>
         </>

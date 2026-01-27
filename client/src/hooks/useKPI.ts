@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { kpiApi } from '@/lib/api';
+import { kpiApi, api } from '@/lib/api';
 
 export interface KPIRecord {
     id: string;
@@ -14,12 +14,77 @@ export interface KPIRecord {
     created_at: string;
 }
 
+export interface KPIMetrics {
+    revenue: { target: number; actual: number };
+    orders: { target: number; actual: number };
+    leads: { target: number; actual: number };
+    conversion: { target: number; actual: number };
+    customerSatisfaction: { target: number; actual: number };
+    avgResponseTime: { target: number; actual: number };
+}
+
+export interface KPIData {
+    employeeId: string;
+    employeeName: string;
+    avatar?: string;
+    role: string;
+    department?: string;
+    metrics: KPIMetrics;
+    commission: number;
+    bonus: number;
+}
+
+export interface KPISummary {
+    totalRevenue: number;
+    totalTarget: number;
+    totalCommission: number;
+    avgAchievement: number;
+    topPerformers: number;
+    totalEmployees: number;
+}
+
 export function useKPI() {
     const [kpis, setKpis] = useState<KPIRecord[]>([]);
+    const [kpiData, setKpiData] = useState<KPIData[]>([]);
     const [leaderboard, setLeaderboard] = useState<KPIRecord[]>([]);
-    const [summary, setSummary] = useState<any>(null);
+    const [summary, setSummary] = useState<KPISummary | null>(null);
+    const [roleLabels, setRoleLabels] = useState<Record<string, string>>({
+        sale: 'Sale',
+        technician: 'Kỹ thuật viên',
+        manager: 'Quản lý',
+        accountant: 'Kế toán',
+        admin: 'Admin'
+    });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    const fetchSummary = useCallback(async (params?: { period?: string; role?: string }) => {
+        setLoading(true);
+        setError(null);
+        try {
+            const queryParams = new URLSearchParams();
+            if (params?.period) queryParams.set('period', params.period);
+            if (params?.role) queryParams.set('role', params.role);
+
+            const url = `/kpi/summary${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
+            const response = await api.get(url);
+
+            const responseData = response?.data ?? response;
+            const data = responseData?.data ?? responseData;
+
+            setKpiData(Array.isArray(data?.kpiData) ? data.kpiData : []);
+            setSummary(data?.summary || null);
+            if (data?.roleLabels) {
+                setRoleLabels(data.roleLabels);
+            }
+        } catch (err: any) {
+            const message = err?.response?.data?.message || err?.message || 'Lỗi khi tải dữ liệu KPI';
+            setError(message);
+            console.error('Error fetching KPI summary:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
 
     const fetchOverview = useCallback(async (params?: { month?: number; year?: number }) => {
         setLoading(true);
@@ -63,10 +128,13 @@ export function useKPI() {
 
     return {
         kpis,
+        kpiData,
         leaderboard,
         summary,
+        roleLabels,
         loading,
         error,
+        fetchSummary,
         fetchOverview,
         fetchLeaderboard,
         fetchUserKPI,

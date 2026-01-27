@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Plus, Search, Edit, Trash2, Eye, Phone, Mail, Shield, Calendar, MoreVertical, UserPlus } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, Search, Edit, Trash2, Eye, Phone, Mail, Shield, Calendar, UserPlus, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,8 +8,10 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { users, roleLabels } from '@/data/mockData';
 import { formatCurrency } from '@/lib/utils';
+import { toast } from 'sonner';
+import { useUsers } from '@/hooks/useUsers';
+import { useDepartments } from '@/hooks/useDepartments';
 import type { User, UserRole } from '@/types';
 
 // Extended employee interface for HR management
@@ -23,19 +25,13 @@ interface Employee extends User {
     bankName?: string;
 }
 
-// Mock employee data
-const mockEmployees: Employee[] = users.map((user, index) => ({
-    ...user,
-    department: user.role === 'sale' ? 'Kinh doanh' :
-        user.role === 'technician' ? 'Kỹ thuật' :
-            user.role === 'accountant' ? 'Kế toán' : 'Quản lý',
-    joinDate: `2024-0${(index % 9) + 1}-15`,
-    status: index === 4 ? 'onleave' : 'active' as const,
-    salary: 15000000 + (index * 2000000),
-    commission: user.role === 'sale' ? 5 : user.role === 'technician' ? 3 : 0,
-    bankAccount: `100${index}456789${index}`,
-    bankName: index % 2 === 0 ? 'Vietcombank' : 'Techcombank'
-}));
+const roleLabels: Record<UserRole, string> = {
+    admin: 'Admin',
+    manager: 'Quản lý',
+    accountant: 'Kế toán',
+    sale: 'Sale',
+    technician: 'Kỹ thuật',
+};
 
 const statusLabels = {
     active: { label: 'Đang làm', variant: 'success' as const },
@@ -44,43 +40,111 @@ const statusLabels = {
 };
 
 const roleOptions: { value: UserRole; label: string }[] = [
+    { value: 'admin', label: 'Admin' },
     { value: 'manager', label: 'Quản lý' },
     { value: 'accountant', label: 'Kế toán' },
     { value: 'sale', label: 'Sale' },
     { value: 'technician', label: 'Kỹ thuật' },
 ];
 
-const departmentOptions = ['Kinh doanh', 'Kỹ thuật', 'Kế toán', 'Quản lý', 'Marketing', 'Hỗ trợ'];
-
 // Employee Form Dialog
 function EmployeeFormDialog({
     open,
     onClose,
-    employee
+    employee,
+    departments,
+    onSubmit
 }: {
     open: boolean;
     onClose: () => void;
     employee?: Employee | null;
+    departments: { id: string; name: string }[];
+    onSubmit: (data: any) => Promise<void>;
 }) {
-    const [name, setName] = useState(employee?.name || '');
-    const [email, setEmail] = useState(employee?.email || '');
-    const [phone, setPhone] = useState(employee?.phone || '');
-    const [role, setRole] = useState<UserRole>(employee?.role || 'sale');
-    const [department, setDepartment] = useState(employee?.department || '');
-    const [salary, setSalary] = useState(employee?.salary || 0);
-    const [commission, setCommission] = useState(employee?.commission || 0);
-    const [bankAccount, setBankAccount] = useState(employee?.bankAccount || '');
-    const [bankName, setBankName] = useState(employee?.bankName || '');
-    const [joinDate, setJoinDate] = useState(employee?.joinDate || new Date().toISOString().split('T')[0]);
+    const [name, setName] = useState('');
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [phone, setPhone] = useState('');
+    const [role, setRole] = useState<UserRole>('sale');
+    const [department, setDepartment] = useState('');
+    const [salary, setSalary] = useState(0);
+    const [commission, setCommission] = useState(0);
+    const [bankAccount, setBankAccount] = useState('');
+    const [bankName, setBankName] = useState('');
+    const [joinDate, setJoinDate] = useState(new Date().toISOString().split('T')[0]);
+    const [submitting, setSubmitting] = useState(false);
 
-    const handleSubmit = () => {
+    const isEditing = !!employee;
+
+    // Reset form when employee changes
+    useEffect(() => {
+        if (employee) {
+            setName(employee.name || '');
+            setEmail(employee.email || '');
+            setPhone(employee.phone || '');
+            setRole(employee.role || 'sale');
+            setDepartment(employee.department || '');
+            setSalary(employee.salary || 0);
+            setCommission(employee.commission || 0);
+            setBankAccount(employee.bankAccount || '');
+            setBankName(employee.bankName || '');
+            setJoinDate(employee.joinDate || new Date().toISOString().split('T')[0]);
+            setPassword(''); // Don't show password for editing
+        } else {
+            setName('');
+            setEmail('');
+            setPassword('');
+            setPhone('');
+            setRole('sale');
+            setDepartment('');
+            setSalary(0);
+            setCommission(0);
+            setBankAccount('');
+            setBankName('');
+            setJoinDate(new Date().toISOString().split('T')[0]);
+        }
+    }, [employee, open]);
+
+    const handleSubmit = async () => {
         if (!name || !email || !phone) {
-            alert('Vui lòng điền đầy đủ thông tin bắt buộc');
+            toast.error('Vui lòng điền đầy đủ thông tin bắt buộc');
             return;
         }
-        console.log('Saving employee:', { name, email, phone, role, department, salary, commission, bankAccount, bankName, joinDate });
-        alert(employee ? 'Đã cập nhật nhân viên!' : 'Đã thêm nhân viên mới!');
-        onClose();
+
+        // Password required for new employees
+        if (!isEditing && (!password || password.length < 6)) {
+            toast.error('Mật khẩu phải có ít nhất 6 ký tự');
+            return;
+        }
+
+        setSubmitting(true);
+        try {
+            const submitData: any = {
+                name,
+                email,
+                phone,
+                role,
+                department: department || undefined,
+                salary,
+                commission,
+                bankAccount,
+                bankName,
+                joinDate,
+                status: employee?.status || 'active'
+            };
+
+            // Only include password for new employees
+            if (!isEditing && password) {
+                submitData.password = password;
+            }
+
+            await onSubmit(submitData);
+            onClose();
+        } catch (error) {
+            console.error('Error saving employee:', error);
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     return (
@@ -103,19 +167,45 @@ function EmployeeFormDialog({
                         </div>
                         <div className="space-y-2">
                             <Label>Email *</Label>
-                            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@company.com" />
+                            <Input
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                placeholder="email@company.com"
+                                disabled={isEditing} // Can't change email for existing users
+                            />
                         </div>
                         <div className="space-y-2">
                             <Label>Số điện thoại *</Label>
                             <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0912345678" />
                         </div>
+                        {!isEditing && (
+                            <div className="col-span-2 space-y-2">
+                                <Label>Mật khẩu * (tối thiểu 6 ký tự)</Label>
+                                <Input
+                                    type="password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    placeholder="Nhập mật khẩu cho tài khoản"
+                                />
+                                <p className="text-xs text-muted-foreground">
+                                    Nhân viên sẽ dùng email và mật khẩu này để đăng nhập
+                                </p>
+                            </div>
+                        )}
                     </div>
 
                     {/* Role & Department */}
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label>Vai trò *</Label>
-                            <Select value={role} onValueChange={(v: UserRole) => setRole(v)}>
+                            <Select value={role} onValueChange={(v: UserRole) => {
+                                setRole(v);
+                                // Clear department if not technician
+                                if (v !== 'technician') {
+                                    setDepartment('');
+                                }
+                            }}>
                                 <SelectTrigger>
                                     <SelectValue />
                                 </SelectTrigger>
@@ -126,19 +216,22 @@ function EmployeeFormDialog({
                                 </SelectContent>
                             </Select>
                         </div>
-                        <div className="space-y-2">
-                            <Label>Phòng ban</Label>
-                            <Select value={department} onValueChange={setDepartment}>
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Chọn phòng ban" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {departmentOptions.map(d => (
-                                        <SelectItem key={d} value={d}>{d}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
+                        {role === 'technician' && (
+                            <div className="space-y-2">
+                                <Label>Phòng ban kỹ thuật *</Label>
+                                <Select value={department || 'none'} onValueChange={(v) => setDepartment(v === 'none' ? '' : v)}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Chọn phòng ban" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="none">Chọn phòng ban</SelectItem>
+                                        {departments.map(d => (
+                                            <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        )}
                     </div>
 
                     {/* Salary & Commission */}
@@ -175,7 +268,9 @@ function EmployeeFormDialog({
 
                 <DialogFooter>
                     <Button variant="outline" onClick={onClose}>Huỷ</Button>
-                    <Button onClick={handleSubmit}>Lưu</Button>
+                    <Button onClick={handleSubmit} disabled={submitting}>
+                        {submitting ? 'Đang lưu...' : 'Lưu'}
+                    </Button>
                 </DialogFooter>
             </DialogContent>
         </Dialog>
@@ -186,13 +281,21 @@ function EmployeeFormDialog({
 function EmployeeDetailDialog({
     open,
     onClose,
-    employee
+    employee,
+    departments
 }: {
     open: boolean;
     onClose: () => void;
     employee: Employee | null;
+    departments: { id: string; name: string }[];
 }) {
     if (!employee) return null;
+
+    const getDepartmentName = (deptId?: string) => {
+        if (!deptId) return 'Chưa phân bổ';
+        const dept = departments.find(d => d.id === deptId);
+        return dept?.name || deptId;
+    };
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
@@ -214,8 +317,8 @@ function EmployeeDetailDialog({
                                 <Badge variant={employee.role === 'manager' ? 'purple' : employee.role === 'sale' ? 'info' : 'secondary'}>
                                     {roleLabels[employee.role]}
                                 </Badge>
-                                <Badge variant={statusLabels[employee.status].variant}>
-                                    {statusLabels[employee.status].label}
+                                <Badge variant={statusLabels[employee.status]?.variant || 'secondary'}>
+                                    {statusLabels[employee.status]?.label || employee.status}
                                 </Badge>
                             </div>
                         </div>
@@ -239,13 +342,13 @@ function EmployeeDetailDialog({
                         </div>
                         <div className="space-y-1">
                             <p className="text-xs text-muted-foreground">Phòng ban</p>
-                            <p className="text-sm font-medium">{employee.department}</p>
+                            <p className="text-sm font-medium">{getDepartmentName(employee.department)}</p>
                         </div>
                         <div className="space-y-1">
                             <p className="text-xs text-muted-foreground">Ngày vào làm</p>
                             <p className="text-sm font-medium flex items-center gap-2">
                                 <Calendar className="h-4 w-4 text-muted-foreground" />
-                                {employee.joinDate}
+                                {employee.joinDate || 'Chưa cập nhật'}
                             </p>
                         </div>
                     </div>
@@ -263,13 +366,15 @@ function EmployeeDetailDialog({
                             </div>
                             <div>
                                 <p className="text-xs text-muted-foreground">% Hoa hồng</p>
-                                <p className="text-lg font-bold">{employee.commission}%</p>
+                                <p className="text-lg font-bold">{employee.commission || 0}%</p>
                             </div>
                         </div>
-                        <div className="pt-2 border-t">
-                            <p className="text-xs text-muted-foreground">Tài khoản ngân hàng</p>
-                            <p className="text-sm font-medium">{employee.bankName} - {employee.bankAccount}</p>
-                        </div>
+                        {(employee.bankName || employee.bankAccount) && (
+                            <div className="pt-2 border-t">
+                                <p className="text-xs text-muted-foreground">Tài khoản ngân hàng</p>
+                                <p className="text-sm font-medium">{employee.bankName || 'N/A'} - {employee.bankAccount || 'N/A'}</p>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -282,6 +387,8 @@ function EmployeeDetailDialog({
 }
 
 export function EmployeesPage() {
+    const { users, loading, fetchUsers, createUser, updateUser, deleteUser } = useUsers();
+    const { departments, fetchDepartments } = useDepartments();
     const [searchTerm, setSearchTerm] = useState('');
     const [roleFilter, setRoleFilter] = useState<string>('all');
     const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -289,7 +396,26 @@ export function EmployeesPage() {
     const [showDetail, setShowDetail] = useState(false);
     const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
 
-    const filteredEmployees = mockEmployees.filter(emp => {
+    // Fetch data on mount
+    useEffect(() => {
+        fetchUsers();
+        fetchDepartments();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Map users to employees
+    const employees: Employee[] = users.map(user => ({
+        ...user,
+        status: (user.status as 'active' | 'inactive' | 'onleave') || 'active',
+        department: user.department,
+        joinDate: user.created_at?.split('T')[0],
+        salary: user.salary || 0,
+        commission: user.commission || 0,
+        bankAccount: user.bankAccount,
+        bankName: user.bankName,
+    }));
+
+    const filteredEmployees = employees.filter(emp => {
         const matchesSearch = emp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             emp.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
             (emp.phone || '').includes(searchTerm);
@@ -299,10 +425,55 @@ export function EmployeesPage() {
     });
 
     // Stats
-    const totalEmployees = mockEmployees.length;
-    const activeEmployees = mockEmployees.filter(e => e.status === 'active').length;
-    const onLeaveEmployees = mockEmployees.filter(e => e.status === 'onleave').length;
-    const totalSalary = mockEmployees.filter(e => e.status === 'active').reduce((sum, e) => sum + (e.salary || 0), 0);
+    const totalEmployees = employees.length;
+    const activeEmployees = employees.filter(e => e.status === 'active').length;
+    const onLeaveEmployees = employees.filter(e => e.status === 'onleave').length;
+    const totalSalary = employees.filter(e => e.status === 'active').reduce((sum, e) => sum + (e.salary || 0), 0);
+
+    const handleCreateEmployee = async (data: Partial<Employee>) => {
+        try {
+            await createUser(data as any);
+            toast.success('Đã thêm nhân viên mới!');
+        } catch (error) {
+            toast.error('Lỗi khi thêm nhân viên');
+            throw error;
+        }
+    };
+
+    const handleUpdateEmployee = async (data: Partial<Employee>) => {
+        if (!selectedEmployee) return;
+        try {
+            await updateUser(selectedEmployee.id, data as any);
+            toast.success('Đã cập nhật nhân viên!');
+        } catch (error) {
+            toast.error('Lỗi khi cập nhật');
+            throw error;
+        }
+    };
+
+    const handleDeleteEmployee = async (id: string) => {
+        if (!confirm('Bạn có chắc muốn xoá nhân viên này?')) return;
+        try {
+            await deleteUser(id);
+            toast.success('Đã xoá nhân viên!');
+        } catch (error) {
+            toast.error('Lỗi khi xoá');
+        }
+    };
+
+    const getDepartmentName = (deptId?: string) => {
+        if (!deptId) return 'Chưa phân bổ';
+        const dept = departments.find(d => d.id === deptId);
+        return dept?.name || deptId;
+    };
+
+    if (loading && employees.length === 0) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6 animate-fade-in">
@@ -426,14 +597,15 @@ export function EmployeesPage() {
                                         </td>
                                         <td className="p-3">
                                             <Badge variant={
-                                                emp.role === 'manager' ? 'purple' :
-                                                    emp.role === 'sale' ? 'info' :
-                                                        emp.role === 'accountant' ? 'warning' : 'secondary'
+                                                emp.role === 'admin' ? 'danger' :
+                                                    emp.role === 'manager' ? 'purple' :
+                                                        emp.role === 'sale' ? 'info' :
+                                                            emp.role === 'accountant' ? 'warning' : 'secondary'
                                             }>
                                                 {roleLabels[emp.role]}
                                             </Badge>
                                         </td>
-                                        <td className="p-3 text-sm">{emp.department}</td>
+                                        <td className="p-3 text-sm">{getDepartmentName(emp.department)}</td>
                                         <td className="p-3 text-right">
                                             <p className="font-semibold">{formatCurrency(emp.salary || 0)}</p>
                                             {(emp.commission || 0) > 0 && (
@@ -441,8 +613,8 @@ export function EmployeesPage() {
                                             )}
                                         </td>
                                         <td className="p-3 text-center">
-                                            <Badge variant={statusLabels[emp.status].variant}>
-                                                {statusLabels[emp.status].label}
+                                            <Badge variant={statusLabels[emp.status]?.variant || 'secondary'}>
+                                                {statusLabels[emp.status]?.label || emp.status}
                                             </Badge>
                                         </td>
                                         <td className="p-3 text-right">
@@ -461,7 +633,12 @@ export function EmployeesPage() {
                                                 >
                                                     <Edit className="h-4 w-4" />
                                                 </Button>
-                                                <Button variant="ghost" size="icon" className="text-red-500 hover:bg-red-50">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="text-red-500 hover:bg-red-50"
+                                                    onClick={() => handleDeleteEmployee(emp.id)}
+                                                >
                                                     <Trash2 className="h-4 w-4" />
                                                 </Button>
                                             </div>
@@ -492,8 +669,8 @@ export function EmployeesPage() {
                                             </Badge>
                                         </div>
                                     </div>
-                                    <Badge variant={statusLabels[emp.status].variant}>
-                                        {statusLabels[emp.status].label}
+                                    <Badge variant={statusLabels[emp.status]?.variant || 'secondary'}>
+                                        {statusLabels[emp.status]?.label || emp.status}
                                     </Badge>
                                 </div>
 
@@ -547,11 +724,14 @@ export function EmployeesPage() {
                 open={showForm}
                 onClose={() => { setShowForm(false); setSelectedEmployee(null); }}
                 employee={selectedEmployee}
+                departments={departments}
+                onSubmit={selectedEmployee ? handleUpdateEmployee : handleCreateEmployee}
             />
             <EmployeeDetailDialog
                 open={showDetail}
                 onClose={() => { setShowDetail(false); setSelectedEmployee(null); }}
                 employee={selectedEmployee}
+                departments={departments}
             />
         </div>
     );

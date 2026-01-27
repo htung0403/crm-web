@@ -17,7 +17,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
         *,
         customer:customers(id, name, phone, email),
         sales_user:users!orders_sales_id_fkey(id, name),
-        items:order_items(id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price)
+        items:order_items(id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id)
       `, { count: 'exact' })
             .order('created_at', { ascending: false })
             .range(offset, offset + Number(limit) - 1);
@@ -119,7 +119,10 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
             throw new ApiError('Lỗi khi tạo đơn hàng: ' + orderError.message, 500);
         }
 
-        // Tạo order items
+        // Generate unique item codes for QR scanning
+        const generateItemCode = () => `IT${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`;
+
+        // Tạo order items (including technician_id and item_code)
         const orderItems = items.map((item: any) => ({
             order_id: order.id,
             product_id: item.type === 'product' ? item.item_id : null,
@@ -129,16 +132,51 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
             quantity: item.quantity,
             unit_price: item.unit_price,
             total_price: item.quantity * item.unit_price,
+            technician_id: item.technician_id || null,
+            item_code: generateItemCode(),
         }));
 
-        const { error: itemsError } = await supabaseAdmin
+        const { data: insertedItems, error: itemsError } = await supabaseAdmin
             .from('order_items')
-            .insert(orderItems);
+            .insert(orderItems)
+            .select();
 
         if (itemsError) {
             // Rollback - xóa order nếu tạo items thất bại
             await supabaseAdmin.from('orders').delete().eq('id', order.id);
             throw new ApiError('Lỗi khi tạo chi tiết đơn hàng', 500);
+        }
+
+        // Tạo technician tasks cho các dịch vụ đã phân công technician
+        const serviceItemsWithTechnician = insertedItems?.filter(
+            (item: any) => item.item_type === 'service' && item.technician_id
+        ) || [];
+
+        if (serviceItemsWithTechnician.length > 0) {
+            const technicianTasks = serviceItemsWithTechnician.map((item: any) => ({
+                task_code: `TK${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 1000)}`,
+                order_id: order.id,
+                order_item_id: item.id,
+                service_id: item.service_id,
+                customer_id: customer_id,
+                technician_id: item.technician_id,
+                service_name: item.item_name,
+                quantity: item.quantity,
+                status: 'assigned',
+                priority: 'normal',
+                assigned_by: req.user!.id,
+                assigned_at: new Date().toISOString(),
+                item_code: item.item_code, // QR code reference
+            }));
+
+            const { error: taskError } = await supabaseAdmin
+                .from('technician_tasks')
+                .insert(technicianTasks);
+
+            if (taskError) {
+                console.error('Error creating technician tasks:', taskError);
+                // Don't fail the order creation, just log the error
+            }
         }
 
         res.status(201).json({

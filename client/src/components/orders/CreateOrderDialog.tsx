@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Plus, Trash, Package, Gift, Search, Sparkles, ShoppingBag, Loader2, User } from 'lucide-react';
+import { Plus, Trash, Package, Gift, Search, Sparkles, ShoppingBag, Loader2, User, Wrench } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -8,9 +8,13 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { formatCurrency } from '@/lib/utils';
-import type { Package as PackageType, Voucher } from '@/types';
+import type { Package as PackageType, Voucher, User as UserType } from '@/types';
 import { getItemTypeLabel, getItemTypeColor, type CreateOrderData, type OrderItem, type CustomerOption } from './constants';
+
+// Simple helper to display department - just return the value for now
+const getDepartmentLabel = (value?: string) => value || '';
 
 interface CreateOrderDialogProps {
     open: boolean;
@@ -18,9 +22,10 @@ interface CreateOrderDialogProps {
     onSubmit: (data: CreateOrderData) => Promise<void>;
     customers: CustomerOption[];
     products: { id: string; name: string; price: number }[];
-    services: { id: string; name: string; price: number }[];
+    services: { id: string; name: string; price: number; department?: string }[];
     packages: PackageType[];
     vouchers: Voucher[];
+    technicians?: UserType[]; // List of technicians for assignment
 }
 
 export function CreateOrderDialog({
@@ -31,7 +36,8 @@ export function CreateOrderDialog({
     products,
     services,
     packages,
-    vouchers
+    vouchers,
+    technicians = []
 }: CreateOrderDialogProps) {
     const [customerId, setCustomerId] = useState('');
     const [customerSearch, setCustomerSearch] = useState('');
@@ -54,6 +60,20 @@ export function CreateOrderDialog({
 
     // Get selected customer info
     const selectedCustomer = customers.find(c => c.id === customerId);
+
+    // Filter technicians by department (role = tech or technician)
+    const availableTechnicians = technicians.filter(t =>
+        t.role === 'technician' || t.role === 'tech' as string
+    );
+
+    // Get technicians for a specific department
+    const getTechniciansForDepartment = (department?: string) => {
+        if (!department) return availableTechnicians;
+        return availableTechnicians.filter(t =>
+            t.department?.toLowerCase().includes(department.toLowerCase()) ||
+            !t.department // Show technicians without department as available
+        );
+    };
 
     // Filter items by search
     const filteredProducts = products.filter(p =>
@@ -88,7 +108,8 @@ export function CreateOrderDialog({
             return;
         }
 
-        let item: { id: string; name: string; price: number } | undefined;
+        let item: { id: string; name: string; price: number; department?: string } | undefined;
+        let packageServices: { service_id: string; service_name: string; department?: string }[] | undefined;
 
         if (type === 'product') {
             item = products.find(i => i.id === itemId);
@@ -96,7 +117,20 @@ export function CreateOrderDialog({
             item = services.find(i => i.id === itemId);
         } else if (type === 'package') {
             const pkg = packages.find(i => i.id === itemId);
-            if (pkg) item = { id: pkg.id, name: pkg.name, price: pkg.price };
+            if (pkg) {
+                item = { id: pkg.id, name: pkg.name, price: pkg.price };
+                // Get services in package with their department info
+                if (pkg.items && pkg.items.length > 0) {
+                    packageServices = pkg.items.map(pkgItem => {
+                        const svc = services.find(s => s.id === pkgItem.service_id);
+                        return {
+                            service_id: pkgItem.service_id,
+                            service_name: svc?.name || pkgItem.service_name || 'Dịch vụ',
+                            department: svc?.department
+                        };
+                    }).filter(s => s.department); // Only include services with department
+                }
+            }
         }
 
         if (!item) return;
@@ -114,7 +148,9 @@ export function CreateOrderDialog({
                 item_id: item!.id,
                 name: item!.name,
                 quantity: 1,
-                unit_price: item!.price
+                unit_price: item!.price,
+                department: type === 'service' ? (item as { department?: string }).department : undefined,
+                package_services: type === 'package' && packageServices && packageServices.length > 0 ? packageServices : undefined
             }]);
         }
 
@@ -134,6 +170,27 @@ export function CreateOrderDialog({
     const handleUpdateQuantity = (index: number, quantity: number) => {
         if (quantity < 1) return;
         setItems(prev => prev.map((item, i) => i === index ? { ...item, quantity } : item));
+    };
+
+    const handleAssignTechnician = (index: number, technicianId: string) => {
+        setItems(prev => prev.map((item, i) =>
+            i === index ? { ...item, technician_id: technicianId || undefined } : item
+        ));
+    };
+
+    // Assign technician to a specific service within a package
+    const handleAssignPackageServiceTechnician = (itemIndex: number, serviceId: string, technicianId: string) => {
+        setItems(prev => prev.map((item, i) => {
+            if (i !== itemIndex || !item.package_services) return item;
+            return {
+                ...item,
+                package_services: item.package_services.map(svc =>
+                    svc.service_id === serviceId
+                        ? { ...svc, technician_id: technicianId || undefined }
+                        : svc
+                )
+            };
+        }));
     };
 
     // Calculate totals
@@ -172,7 +229,14 @@ export function CreateOrderDialog({
         try {
             await onSubmit({
                 customer_id: customerId,
-                items,
+                items: items.map(item => ({
+                    type: item.type,
+                    item_id: item.item_id,
+                    name: item.name,
+                    quantity: item.quantity,
+                    unit_price: item.unit_price,
+                    technician_id: item.technician_id
+                })),
                 notes: notes || undefined,
                 discount: totalDiscount > 0 ? totalDiscount : undefined
             });
@@ -377,6 +441,12 @@ export function CreateOrderDialog({
                                             >
                                                 <span className="font-medium text-sm truncate w-full">{s.name}</span>
                                                 <span className="text-purple-600 font-semibold">{formatCurrency(s.price)}</span>
+                                                {s.department && (
+                                                    <span className="text-xs text-muted-foreground mt-1">
+                                                        <Wrench className="h-3 w-3 inline mr-1" />
+                                                        {getDepartmentLabel(s.department)}
+                                                    </span>
+                                                )}
                                             </button>
                                         ))
                                     )}
@@ -459,53 +529,129 @@ export function CreateOrderDialog({
                                     Xóa tất cả
                                 </Button>
                             </Label>
-                            <div className="border rounded-lg divide-y max-h-52 overflow-y-auto">
+                            <div className="border rounded-lg divide-y max-h-64 overflow-y-auto">
                                 {items.map((item, index) => (
-                                    <div key={index} className="p-3 flex items-center gap-3 hover:bg-muted/30">
-                                        <Badge className={`${getItemTypeColor(item.type)} shrink-0`}>
-                                            {getItemTypeLabel(item.type)}
-                                        </Badge>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="font-medium text-sm truncate">{item.name}</p>
-                                            <p className="text-xs text-muted-foreground">{formatCurrency(item.unit_price)}</p>
-                                        </div>
-                                        <div className="flex items-center gap-1">
+                                    <div key={index} className="p-3 hover:bg-muted/30">
+                                        <div className="flex items-center gap-3">
+                                            <Badge className={`${getItemTypeColor(item.type)} shrink-0`}>
+                                                {getItemTypeLabel(item.type)}
+                                            </Badge>
+                                            <div className="flex-1 min-w-0">
+                                                <p className="font-medium text-sm truncate">{item.name}</p>
+                                                <p className="text-xs text-muted-foreground">{formatCurrency(item.unit_price)}</p>
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                <Button
+                                                    variant="outline"
+                                                    size="icon"
+                                                    className="h-7 w-7"
+                                                    onClick={() => handleUpdateQuantity(index, item.quantity - 1)}
+                                                    disabled={item.quantity <= 1}
+                                                >
+                                                    -
+                                                </Button>
+                                                <Input
+                                                    type="number"
+                                                    min="1"
+                                                    value={item.quantity}
+                                                    onChange={(e) => handleUpdateQuantity(index, Number(e.target.value))}
+                                                    className="w-14 text-center h-7"
+                                                />
+                                                <Button
+                                                    variant="outline"
+                                                    size="icon"
+                                                    className="h-7 w-7"
+                                                    onClick={() => handleUpdateQuantity(index, item.quantity + 1)}
+                                                >
+                                                    +
+                                                </Button>
+                                            </div>
+                                            <div className="w-28 text-right font-semibold shrink-0">
+                                                {formatCurrency(item.quantity * item.unit_price)}
+                                            </div>
                                             <Button
-                                                variant="outline"
+                                                variant="ghost"
                                                 size="icon"
-                                                className="h-7 w-7"
-                                                onClick={() => handleUpdateQuantity(index, item.quantity - 1)}
-                                                disabled={item.quantity <= 1}
+                                                onClick={() => handleRemoveItem(index)}
+                                                className="text-red-500 hover:bg-red-50 shrink-0 h-8 w-8"
                                             >
-                                                -
-                                            </Button>
-                                            <Input
-                                                type="number"
-                                                min="1"
-                                                value={item.quantity}
-                                                onChange={(e) => handleUpdateQuantity(index, Number(e.target.value))}
-                                                className="w-14 text-center h-7"
-                                            />
-                                            <Button
-                                                variant="outline"
-                                                size="icon"
-                                                className="h-7 w-7"
-                                                onClick={() => handleUpdateQuantity(index, item.quantity + 1)}
-                                            >
-                                                +
+                                                <Trash className="h-4 w-4" />
                                             </Button>
                                         </div>
-                                        <div className="w-28 text-right font-semibold shrink-0">
-                                            {formatCurrency(item.quantity * item.unit_price)}
-                                        </div>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            onClick={() => handleRemoveItem(index)}
-                                            className="text-red-500 hover:bg-red-50 shrink-0 h-8 w-8"
-                                        >
-                                            <Trash className="h-4 w-4" />
-                                        </Button>
+
+                                        {/* Technician Assignment for Services */}
+                                        {item.type === 'service' && (
+                                            <div className="mt-2 ml-16 flex items-center gap-2">
+                                                <Wrench className="h-4 w-4 text-muted-foreground" />
+                                                <span className="text-sm text-muted-foreground">KTV:</span>
+                                                {availableTechnicians.length > 0 ? (
+                                                    <Select
+                                                        value={item.technician_id || 'none'}
+                                                        onValueChange={(value) => handleAssignTechnician(index, value === 'none' ? '' : value)}
+                                                    >
+                                                        <SelectTrigger className="h-8 w-48">
+                                                            <SelectValue placeholder="Chọn kỹ thuật viên" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="none">Chưa phân công</SelectItem>
+                                                            {getTechniciansForDepartment(item.department).map(tech => (
+                                                                <SelectItem key={tech.id} value={tech.id}>
+                                                                    {tech.name}
+                                                                    {tech.department && (
+                                                                        <span className="text-xs text-muted-foreground ml-1">
+                                                                            ({tech.department})
+                                                                        </span>
+                                                                    )}
+                                                                </SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                ) : (
+                                                    <span className="text-xs text-muted-foreground italic">Không có KTV</span>
+                                                )}
+                                                {item.department && (
+                                                    <Badge variant="outline" className="text-xs">
+                                                        {getDepartmentLabel(item.department)}
+                                                    </Badge>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {/* Technician Assignment for Package Services */}
+                                        {item.type === 'package' && item.package_services && item.package_services.length > 0 && availableTechnicians.length > 0 && (
+                                            <div className="mt-2 ml-16 space-y-2 border-l-2 border-purple-200 pl-3">
+                                                <span className="text-xs text-muted-foreground font-medium">Phân công KTV cho dịch vụ trong gói:</span>
+                                                {item.package_services.map(svc => (
+                                                    <div key={svc.service_id} className="flex items-center gap-2">
+                                                        <Wrench className="h-3 w-3 text-purple-500" />
+                                                        <span className="text-xs text-foreground w-32 truncate" title={svc.service_name}>
+                                                            {svc.service_name}
+                                                        </span>
+                                                        <Select
+                                                            value={svc.technician_id || 'none'}
+                                                            onValueChange={(value) => handleAssignPackageServiceTechnician(index, svc.service_id, value === 'none' ? '' : value)}
+                                                        >
+                                                            <SelectTrigger className="h-7 w-40 text-xs">
+                                                                <SelectValue placeholder="Chọn KTV" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="none">Chưa phân công</SelectItem>
+                                                                {getTechniciansForDepartment(svc.department).map(tech => (
+                                                                    <SelectItem key={tech.id} value={tech.id}>
+                                                                        {tech.name}
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                        {svc.department && (
+                                                            <Badge variant="outline" className="text-xs">
+                                                                {getDepartmentLabel(svc.department)}
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                 ))}
                             </div>

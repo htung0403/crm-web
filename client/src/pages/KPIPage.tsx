@@ -1,69 +1,14 @@
-import { useState } from 'react';
-import { Target, TrendingUp, TrendingDown, Award, Users, DollarSign, ShoppingCart, Clock, BarChart3, Filter } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Target, TrendingUp, TrendingDown, Award, Users, DollarSign, ShoppingCart, Clock, BarChart3, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { users, roleLabels } from '@/data/mockData';
+import { useKPI, type KPIData } from '@/hooks/useKPI';
 import { formatCurrency } from '@/lib/utils';
 
-// KPI data structure
-interface KPIData {
-    employeeId: string;
-    employeeName: string;
-    avatar?: string;
-    role: string;
-    metrics: {
-        revenue: { target: number; actual: number };
-        orders: { target: number; actual: number };
-        leads: { target: number; actual: number };
-        conversion: { target: number; actual: number }; // percentage
-        customerSatisfaction: { target: number; actual: number }; // percentage
-        avgResponseTime: { target: number; actual: number }; // hours
-    };
-    commission: number;
-    bonus: number;
-}
-
-// Mock KPI data
-const mockKPIData: KPIData[] = users.map((user, index) => ({
-    employeeId: user.id,
-    employeeName: user.name,
-    avatar: user.avatar,
-    role: user.role,
-    metrics: {
-        revenue: {
-            target: 50000000 + (index * 10000000),
-            actual: 45000000 + (index * 12000000) + Math.random() * 10000000
-        },
-        orders: {
-            target: 20 + (index * 5),
-            actual: Math.floor(18 + (index * 6) + Math.random() * 8)
-        },
-        leads: {
-            target: 30 + (index * 10),
-            actual: Math.floor(25 + (index * 12) + Math.random() * 15)
-        },
-        conversion: {
-            target: 30,
-            actual: Math.floor(25 + Math.random() * 15)
-        },
-        customerSatisfaction: {
-            target: 90,
-            actual: Math.floor(85 + Math.random() * 12)
-        },
-        avgResponseTime: {
-            target: 2,
-            actual: parseFloat((1 + Math.random() * 2).toFixed(1))
-        }
-    },
-    commission: Math.floor(1000000 + Math.random() * 5000000),
-    bonus: Math.floor(Math.random() * 2000000)
-}));
-
 // KPI targets by role
-const kpiTargetsByRole = {
+const kpiTargetsByRole: Record<string, { key: string; label: string; icon: any; unit: string }[]> = {
     sale: [
         { key: 'revenue', label: 'Doanh thu', icon: DollarSign, unit: 'đ' },
         { key: 'orders', label: 'Đơn hàng', icon: ShoppingCart, unit: '' },
@@ -82,12 +27,16 @@ const kpiTargetsByRole = {
     ],
     accountant: [
         { key: 'orders', label: 'Hóa đơn xử lý', icon: ShoppingCart, unit: '' },
+    ],
+    admin: [
+        { key: 'revenue', label: 'Tổng doanh thu', icon: DollarSign, unit: 'đ' },
+        { key: 'orders', label: 'Tổng đơn hàng', icon: ShoppingCart, unit: '' },
     ]
 };
 
 function ProgressBar({ value, target, color = 'primary' }: { value: number; target: number; color?: string }) {
-    const percentage = Math.min((value / target) * 100, 100);
-    const isAchieved = value >= target;
+    const percentage = target > 0 ? Math.min((value / target) * 100, 100) : 0;
+    const isAchieved = target > 0 && value >= target;
 
     const colorClasses = {
         primary: isAchieved ? 'bg-emerald-500' : 'bg-primary',
@@ -112,16 +61,18 @@ function ProgressBar({ value, target, color = 'primary' }: { value: number; targ
     );
 }
 
-function KPICard({ data, period }: { data: KPIData; period: string }) {
+function KPICard({ data, roleLabels }: { data: KPIData; roleLabels: Record<string, string> }) {
     const role = data.role as keyof typeof kpiTargetsByRole;
     const metrics = kpiTargetsByRole[role] || kpiTargetsByRole.sale;
 
     // Calculate overall achievement
     const achievements = metrics.map(m => {
         const metric = data.metrics[m.key as keyof typeof data.metrics];
-        return metric.actual / metric.target;
+        return metric && metric.target > 0 ? metric.actual / metric.target : 0;
     });
-    const overallAchievement = (achievements.reduce((a, b) => a + b, 0) / achievements.length) * 100;
+    const overallAchievement = achievements.length > 0
+        ? (achievements.reduce((a, b) => a + b, 0) / achievements.length) * 100
+        : 0;
 
     return (
         <Card className="hover:shadow-md transition-shadow">
@@ -135,7 +86,7 @@ function KPICard({ data, period }: { data: KPIData; period: string }) {
                         <div>
                             <CardTitle className="text-base">{data.employeeName}</CardTitle>
                             <Badge variant={role === 'manager' ? 'purple' : role === 'sale' ? 'info' : 'secondary'} className="mt-1">
-                                {roleLabels[data.role as keyof typeof roleLabels]}
+                                {roleLabels[data.role] || data.role}
                             </Badge>
                         </div>
                     </div>
@@ -150,6 +101,7 @@ function KPICard({ data, period }: { data: KPIData; period: string }) {
             <CardContent className="space-y-4">
                 {metrics.map((metric) => {
                     const m = data.metrics[metric.key as keyof typeof data.metrics];
+                    if (!m) return null;
                     const Icon = metric.icon;
                     return (
                         <div key={metric.key} className="space-y-1">
@@ -184,8 +136,8 @@ function KPICard({ data, period }: { data: KPIData; period: string }) {
     );
 }
 
-function LeaderboardTable({ data }: { data: KPIData[] }) {
-    // Sort by overall achievement
+function LeaderboardTable({ data, roleLabels }: { data: KPIData[]; roleLabels: Record<string, string> }) {
+    // Sort by total revenue
     const sortedData = [...data].sort((a, b) => {
         const aTotal = a.metrics.revenue.actual + a.commission + a.bonus;
         const bTotal = b.metrics.revenue.actual + b.commission + b.bonus;
@@ -214,36 +166,46 @@ function LeaderboardTable({ data }: { data: KPIData[] }) {
                             </tr>
                         </thead>
                         <tbody>
-                            {sortedData.map((emp, index) => {
-                                const achievement = (emp.metrics.revenue.actual / emp.metrics.revenue.target) * 100;
-                                return (
-                                    <tr key={emp.employeeId} className="border-b hover:bg-muted/30 transition-colors">
-                                        <td className="p-3">
-                                            {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : index + 1}
-                                        </td>
-                                        <td className="p-3">
-                                            <div className="flex items-center gap-3">
-                                                <Avatar className="h-8 w-8">
-                                                    <AvatarImage src={emp.avatar} />
-                                                    <AvatarFallback>{emp.employeeName.charAt(0)}</AvatarFallback>
-                                                </Avatar>
-                                                <div>
-                                                    <p className="font-medium">{emp.employeeName}</p>
-                                                    <Badge variant="outline" className="text-xs">{roleLabels[emp.role as keyof typeof roleLabels]}</Badge>
+                            {sortedData.length === 0 ? (
+                                <tr>
+                                    <td colSpan={6} className="p-4 text-center text-muted-foreground">
+                                        Chưa có dữ liệu KPI
+                                    </td>
+                                </tr>
+                            ) : (
+                                sortedData.map((emp, index) => {
+                                    const achievement = emp.metrics.revenue.target > 0
+                                        ? (emp.metrics.revenue.actual / emp.metrics.revenue.target) * 100
+                                        : 0;
+                                    return (
+                                        <tr key={emp.employeeId} className="border-b hover:bg-muted/30 transition-colors">
+                                            <td className="p-3">
+                                                {index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : index + 1}
+                                            </td>
+                                            <td className="p-3">
+                                                <div className="flex items-center gap-3">
+                                                    <Avatar className="h-8 w-8">
+                                                        <AvatarImage src={emp.avatar} />
+                                                        <AvatarFallback>{emp.employeeName.charAt(0)}</AvatarFallback>
+                                                    </Avatar>
+                                                    <div>
+                                                        <p className="font-medium">{emp.employeeName}</p>
+                                                        <Badge variant="outline" className="text-xs">{roleLabels[emp.role] || emp.role}</Badge>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        </td>
-                                        <td className="p-3 text-right font-semibold">{formatCurrency(emp.metrics.revenue.actual)}</td>
-                                        <td className="p-3 text-right">{emp.metrics.orders.actual}</td>
-                                        <td className="p-3 text-right text-emerald-600 font-medium">{formatCurrency(emp.commission)}</td>
-                                        <td className="p-3 text-center">
-                                            <Badge variant={achievement >= 100 ? 'success' : achievement >= 80 ? 'warning' : 'danger'}>
-                                                {achievement.toFixed(0)}%
-                                            </Badge>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
+                                            </td>
+                                            <td className="p-3 text-right font-semibold">{formatCurrency(emp.metrics.revenue.actual)}</td>
+                                            <td className="p-3 text-right">{emp.metrics.orders.actual}</td>
+                                            <td className="p-3 text-right text-emerald-600 font-medium">{formatCurrency(emp.commission)}</td>
+                                            <td className="p-3 text-center">
+                                                <Badge variant={achievement >= 100 ? 'success' : achievement >= 80 ? 'warning' : 'danger'}>
+                                                    {achievement.toFixed(0)}%
+                                                </Badge>
+                                            </td>
+                                        </tr>
+                                    );
+                                })
+                            )}
                         </tbody>
                     </table>
                 </div>
@@ -256,16 +218,26 @@ export function KPIPage() {
     const [period, setPeriod] = useState('month');
     const [roleFilter, setRoleFilter] = useState('all');
 
-    const filteredData = mockKPIData.filter(d =>
-        roleFilter === 'all' || d.role === roleFilter
-    );
+    const { kpiData, summary, roleLabels, loading, error, fetchSummary } = useKPI();
 
-    // Summary stats
-    const totalRevenue = filteredData.reduce((sum, d) => sum + d.metrics.revenue.actual, 0);
-    const totalTarget = filteredData.reduce((sum, d) => sum + d.metrics.revenue.target, 0);
-    const totalCommission = filteredData.reduce((sum, d) => sum + d.commission, 0);
-    const avgAchievement = (totalRevenue / totalTarget) * 100;
-    const topPerformers = filteredData.filter(d => (d.metrics.revenue.actual / d.metrics.revenue.target) >= 1).length;
+    useEffect(() => {
+        fetchSummary({ period, role: roleFilter });
+    }, [fetchSummary, period, roleFilter]);
+
+    // Summary stats from API or calculate from data
+    const totalRevenue = summary?.totalRevenue || 0;
+    const totalTarget = summary?.totalTarget || 0;
+    const totalCommission = summary?.totalCommission || 0;
+    const avgAchievement = summary?.avgAchievement || 0;
+    const topPerformers = summary?.topPerformers || 0;
+
+    if (loading && kpiData.length === 0) {
+        return (
+            <div className="flex items-center justify-center h-64">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-6 animate-fade-in">
@@ -300,6 +272,12 @@ export function KPIPage() {
                     </Select>
                 </div>
             </div>
+
+            {error && (
+                <div className="bg-red-50 text-red-600 p-4 rounded-lg">
+                    {error}
+                </div>
+            )}
 
             {/* Summary Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -351,7 +329,7 @@ export function KPIPage() {
                             <div>
                                 <p className="text-sm text-muted-foreground">Tổng hoa hồng</p>
                                 <p className="text-2xl font-bold text-purple-600">{formatCurrency(totalCommission)}</p>
-                                <p className="text-xs text-muted-foreground">{filteredData.length} nhân viên</p>
+                                <p className="text-xs text-muted-foreground">{kpiData.length} nhân viên</p>
                             </div>
                             <div className="h-12 w-12 rounded-xl bg-purple-500/20 flex items-center justify-center">
                                 <Award className="h-6 w-6 text-purple-600" />
@@ -365,8 +343,10 @@ export function KPIPage() {
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-sm text-muted-foreground">Đạt mục tiêu</p>
-                                <p className="text-2xl font-bold text-amber-600">{topPerformers}/{filteredData.length}</p>
-                                <p className="text-xs text-muted-foreground">{((topPerformers / filteredData.length) * 100).toFixed(0)}% nhân viên</p>
+                                <p className="text-2xl font-bold text-amber-600">{topPerformers}/{kpiData.length}</p>
+                                <p className="text-xs text-muted-foreground">
+                                    {kpiData.length > 0 ? ((topPerformers / kpiData.length) * 100).toFixed(0) : 0}% nhân viên
+                                </p>
                             </div>
                             <div className="h-12 w-12 rounded-xl bg-amber-500/20 flex items-center justify-center">
                                 <Users className="h-6 w-6 text-amber-600" />
@@ -377,7 +357,7 @@ export function KPIPage() {
             </div>
 
             {/* Leaderboard */}
-            <LeaderboardTable data={filteredData} />
+            <LeaderboardTable data={kpiData} roleLabels={roleLabels} />
 
             {/* Individual KPI Cards */}
             <div>
@@ -385,11 +365,17 @@ export function KPIPage() {
                     <BarChart3 className="h-5 w-5 text-primary" />
                     Chi tiết KPI từng nhân viên
                 </h2>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredData.map((data) => (
-                        <KPICard key={data.employeeId} data={data} period={period} />
-                    ))}
-                </div>
+                {kpiData.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                        Chưa có dữ liệu KPI cho nhân viên
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {kpiData.map((data) => (
+                            <KPICard key={data.employeeId} data={data} roleLabels={roleLabels} />
+                        ))}
+                    </div>
+                )}
             </div>
         </div>
     );

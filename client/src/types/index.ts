@@ -8,6 +8,13 @@ export interface User {
     role: UserRole;
     phone?: string;
     department?: string;
+    status?: 'active' | 'inactive' | 'onleave';
+    created_at?: string;
+    last_login?: string;
+    salary?: number;
+    commission?: number;
+    bankAccount?: string;
+    bankName?: string;
 }
 
 export interface Lead {

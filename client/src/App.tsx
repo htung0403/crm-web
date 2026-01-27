@@ -15,6 +15,10 @@ import { SalaryPage } from '@/pages/SalaryPage';
 import { CustomersPage } from '@/pages/CustomersPage';
 import { InteractionsPage } from '@/pages/InteractionsPage';
 import { ReportsPage } from '@/pages/ReportsPage';
+import { TechnicianPage } from '@/pages/TechnicianPage';
+import { TaskQRPage } from '@/pages/TaskQRPage';
+import { QRScannerPage } from '@/pages/QRScannerPage';
+import { DepartmentsPage } from '@/pages/DepartmentsPage';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import type { UserRole, User } from '@/types';
@@ -51,6 +55,7 @@ const pagePermissions: Record<string, UserRole[]> = {
   packages: ['admin', 'manager', 'accountant', 'sale', 'technician'],
   vouchers: ['admin', 'manager', 'accountant', 'sale', 'technician'],
   tasks: ['admin', 'manager', 'technician'],
+  departments: ['admin', 'manager'],
   accessories: ['admin', 'manager', 'technician'],
   extension: ['admin', 'manager', 'technician'],
   upgrade: ['admin', 'manager', 'technician'],
@@ -200,6 +205,20 @@ function AppContent() {
       {/* Public Route */}
       <Route path="/login" element={<LoginPage />} />
 
+      {/* QR Code Route - Accessible by technicians */}
+      <Route path="/task/:code" element={
+        <ProtectedRoute allowedRoles={['admin', 'manager', 'technician']}>
+          <TaskQRPage />
+        </ProtectedRoute>
+      } />
+
+      {/* QR Scanner Route */}
+      <Route path="/scan" element={
+        <ProtectedRoute allowedRoles={['admin', 'manager', 'technician']}>
+          <QRScannerPage />
+        </ProtectedRoute>
+      } />
+
       {/* Protected Routes - All wrapped in AppLayout */}
       <Route path="/*" element={
         <AppLayout>
@@ -305,6 +324,18 @@ function AppContent() {
             <Route path="/reports" element={
               <ProtectedRoute allowedRoles={pagePermissions.reports}>
                 <ReportsPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/tasks" element={
+              <ProtectedRoute allowedRoles={pagePermissions.tasks}>
+                <TechnicianPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/departments" element={
+              <ProtectedRoute allowedRoles={pagePermissions.departments}>
+                <DepartmentsPage />
               </ProtectedRoute>
             } />
 

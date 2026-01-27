@@ -21,6 +21,8 @@ import { kpiRouter } from './routes/kpi.js';
 import { salaryRouter } from './routes/salary.js';
 import { reportsRouter } from './routes/reports.js';
 import { interactionsRouter } from './routes/interactions.js';
+import technicianTasksRouter from './routes/technician-tasks.js';
+import departmentsRouter from './routes/departments.js';
 
 dotenv.config();
 
@@ -61,6 +63,8 @@ app.use('/api/kpi', kpiRouter);
 app.use('/api/salary', salaryRouter);
 app.use('/api/reports', reportsRouter);
 app.use('/api/interactions', interactionsRouter);
+app.use('/api/technician-tasks', technicianTasksRouter);
+app.use('/api/departments', departmentsRouter);
 
 // Error handling
 app.use(errorHandler);

@@ -14,7 +14,8 @@ import {
     ChevronDown,
     ChevronRight,
     X,
-    LogOut
+    LogOut,
+    QrCode
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -100,10 +101,12 @@ const menuItems: MenuItem[] = [
         icon: <Wrench className="h-5 w-5" />,
         roles: ['admin', 'manager', 'technician'], // Only Technician and Manager
         children: [
+            { id: 'scan', label: 'Quét mã QR', roles: ['admin', 'manager', 'technician'] },
             { id: 'tasks', label: 'Danh sách công việc', roles: ['admin', 'manager', 'technician'] },
-            { id: 'accessories', label: 'Mua phụ kiện', roles: ['admin', 'manager', 'technician'] },
-            { id: 'extension', label: 'Xin gia hạn', roles: ['admin', 'manager', 'technician'] },
-            { id: 'upgrade', label: 'Nâng dịch vụ', roles: ['admin', 'manager', 'technician'] }
+            { id: 'departments', label: 'Phòng ban', roles: ['admin', 'manager'] },
+            // { id: 'accessories', label: 'Mua phụ kiện', roles: ['admin', 'manager', 'technician'] },
+            // { id: 'extension', label: 'Xin gia hạn', roles: ['admin', 'manager', 'technician'] },
+            // { id: 'upgrade', label: 'Nâng dịch vụ', roles: ['admin', 'manager', 'technician'] }
         ]
     },
     {
