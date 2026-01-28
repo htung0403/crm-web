@@ -99,6 +99,13 @@ export const leadsApi = {
 
     convert: (id: string) =>
         api.post<ApiResponse<{ customer: any }>>(`/leads/${id}/convert`),
+
+    // Activities/History
+    getActivities: (id: string, limit?: number) =>
+        api.get<ApiResponse<{ activities: any[] }>>(`/leads/${id}/activities`, { params: { limit } }),
+
+    addActivity: (id: string, data: { activity_type: string; content?: string; old_status?: string; new_status?: string; metadata?: any }) =>
+        api.post<ApiResponse<{ activity: any }>>(`/leads/${id}/activities`, data),
 };
 
 // Customers API

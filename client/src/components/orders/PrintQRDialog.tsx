@@ -254,7 +254,12 @@ export function PrintQRDialog({ order, open, onClose }: PrintQRDialogProps) {
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+            <DialogContent
+                className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col"
+                style={{ zIndex: 9999 }}
+                onInteractOutside={(e) => e.preventDefault()}
+                onPointerDownOutside={(e) => e.preventDefault()}
+            >
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <QrCode className="h-5 w-5 text-primary" />
@@ -358,13 +363,18 @@ export function PrintQRDialog({ order, open, onClose }: PrintQRDialogProps) {
 
                 {/* Footer Actions */}
                 <div className="flex gap-2 pt-4 border-t">
-                    <Button variant="outline" className="flex-1" onClick={onClose}>
+                    <Button type="button" variant="outline" className="flex-1" onClick={onClose}>
                         <X className="h-4 w-4 mr-2" />
                         Đóng
                     </Button>
                     <Button
+                        type="button"
                         className="flex-1 bg-primary"
-                        onClick={handlePrint}
+                        onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handlePrint();
+                        }}
                     >
                         <Printer className="h-4 w-4 mr-2" />
                         {selectedItems.length > 0

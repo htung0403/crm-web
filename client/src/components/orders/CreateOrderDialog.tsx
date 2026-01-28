@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { toast } from 'sonner';
-import { Plus, Trash, Package, Gift, Search, Sparkles, ShoppingBag, Loader2, User, Wrench } from 'lucide-react';
+import { Plus, Trash, Package, Gift, Search, Sparkles, ShoppingBag, Loader2, User, Wrench, QrCode } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -75,6 +76,13 @@ export function CreateOrderDialog({
         );
     };
 
+    // Generate unique item code for QR
+    const generateItemCode = () => {
+        const timestamp = Date.now().toString(36).toUpperCase();
+        const random = Math.random().toString(36).substring(2, 6).toUpperCase();
+        return `IT${timestamp}${random}`;
+    };
+
     // Filter items by search
     const filteredProducts = products.filter(p =>
         p.name.toLowerCase().includes(itemSearch.toLowerCase())
@@ -146,6 +154,7 @@ export function CreateOrderDialog({
             setItems(prev => [...prev, {
                 type,
                 item_id: item!.id,
+                item_code: generateItemCode(),
                 name: item!.name,
                 quantity: 1,
                 unit_price: item!.price,
@@ -172,23 +181,66 @@ export function CreateOrderDialog({
         setItems(prev => prev.map((item, i) => i === index ? { ...item, quantity } : item));
     };
 
-    const handleAssignTechnician = (index: number, technicianId: string) => {
-        setItems(prev => prev.map((item, i) =>
-            i === index ? { ...item, technician_id: technicianId || undefined } : item
-        ));
+    // Toggle technician selection with commission (multi-select)
+    const handleToggleTechnician = (index: number, technicianId: string, technicianName: string, defaultCommission: number = 0) => {
+        setItems(prev => prev.map((item, i) => {
+            if (i !== index) return item;
+            const currentTechs = item.technicians || [];
+            const exists = currentTechs.find(t => t.technician_id === technicianId);
+            const newTechs = exists
+                ? currentTechs.filter(t => t.technician_id !== technicianId)
+                : [...currentTechs, { technician_id: technicianId, technician_name: technicianName, commission_rate: defaultCommission }];
+            return { ...item, technicians: newTechs.length > 0 ? newTechs : undefined };
+        }));
     };
 
-    // Assign technician to a specific service within a package
-    const handleAssignPackageServiceTechnician = (itemIndex: number, serviceId: string, technicianId: string) => {
+    // Update commission rate for a specific technician
+    const handleUpdateTechnicianCommission = (index: number, technicianId: string, commissionRate: number) => {
+        setItems(prev => prev.map((item, i) => {
+            if (i !== index || !item.technicians) return item;
+            return {
+                ...item,
+                technicians: item.technicians.map(t =>
+                    t.technician_id === technicianId ? { ...t, commission_rate: commissionRate } : t
+                )
+            };
+        }));
+    };
+
+    // Toggle technician for a specific service within a package
+    const handleTogglePackageServiceTechnician = (itemIndex: number, serviceId: string, technicianId: string, technicianName: string, defaultCommission: number = 0) => {
         setItems(prev => prev.map((item, i) => {
             if (i !== itemIndex || !item.package_services) return item;
             return {
                 ...item,
-                package_services: item.package_services.map(svc =>
-                    svc.service_id === serviceId
-                        ? { ...svc, technician_id: technicianId || undefined }
-                        : svc
-                )
+                package_services: item.package_services.map(svc => {
+                    if (svc.service_id !== serviceId) return svc;
+                    const currentTechs = svc.technicians || [];
+                    const exists = currentTechs.find(t => t.technician_id === technicianId);
+                    const newTechs = exists
+                        ? currentTechs.filter(t => t.technician_id !== technicianId)
+                        : [...currentTechs, { technician_id: technicianId, technician_name: technicianName, commission_rate: defaultCommission }];
+                    return { ...svc, technicians: newTechs.length > 0 ? newTechs : undefined };
+                })
+            };
+        }));
+    };
+
+    // Update commission rate for technician in package service
+    const handleUpdatePackageServiceTechnicianCommission = (itemIndex: number, serviceId: string, technicianId: string, commissionRate: number) => {
+        setItems(prev => prev.map((item, i) => {
+            if (i !== itemIndex || !item.package_services) return item;
+            return {
+                ...item,
+                package_services: item.package_services.map(svc => {
+                    if (svc.service_id !== serviceId || !svc.technicians) return svc;
+                    return {
+                        ...svc,
+                        technicians: svc.technicians.map(t =>
+                            t.technician_id === technicianId ? { ...t, commission_rate: commissionRate } : t
+                        )
+                    };
+                })
             };
         }));
     };
@@ -235,7 +287,7 @@ export function CreateOrderDialog({
                     name: item.name,
                     quantity: item.quantity,
                     unit_price: item.unit_price,
-                    technician_id: item.technician_id
+                    technicians: item.technicians
                 })),
                 notes: notes || undefined,
                 discount: totalDiscount > 0 ? totalDiscount : undefined
@@ -533,6 +585,17 @@ export function CreateOrderDialog({
                                 {items.map((item, index) => (
                                     <div key={index} className="p-3 hover:bg-muted/30">
                                         <div className="flex items-center gap-3">
+                                            <div className="shrink-0 p-1 bg-white border rounded-lg">
+                                                {item.item_code ? (
+                                                    <QRCodeSVG
+                                                        value={`${window.location.origin}/item/${item.type}/${item.item_id}`}
+                                                        size={40}
+                                                        level="M"
+                                                    />
+                                                ) : (
+                                                    <QrCode className="h-10 w-10 text-muted-foreground" />
+                                                )}
+                                            </div>
                                             <Badge className={`${getItemTypeColor(item.type)} shrink-0`}>
                                                 {getItemTypeLabel(item.type)}
                                             </Badge>
@@ -581,72 +644,109 @@ export function CreateOrderDialog({
 
                                         {/* Technician Assignment for Services */}
                                         {item.type === 'service' && (
-                                            <div className="mt-2 ml-16 flex items-center gap-2">
-                                                <Wrench className="h-4 w-4 text-muted-foreground" />
-                                                <span className="text-sm text-muted-foreground">KTV:</span>
+                                            <div className="mt-2 ml-16">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <Wrench className="h-4 w-4 text-muted-foreground" />
+                                                    <span className="text-sm text-muted-foreground">KTV:</span>
+                                                    {item.department && (
+                                                        <Badge variant="outline" className="text-xs">
+                                                            {getDepartmentLabel(item.department)}
+                                                        </Badge>
+                                                    )}
+                                                </div>
                                                 {availableTechnicians.length > 0 ? (
-                                                    <Select
-                                                        value={item.technician_id || 'none'}
-                                                        onValueChange={(value) => handleAssignTechnician(index, value === 'none' ? '' : value)}
-                                                    >
-                                                        <SelectTrigger className="h-8 w-48">
-                                                            <SelectValue placeholder="Chọn kỹ thuật viên" />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="none">Chưa phân công</SelectItem>
+                                                    <div className="space-y-2 ml-6">
+                                                        {/* Technician selection checkboxes */}
+                                                        <div className="flex flex-wrap gap-3">
                                                             {getTechniciansForDepartment(item.department).map(tech => (
-                                                                <SelectItem key={tech.id} value={tech.id}>
-                                                                    {tech.name}
-                                                                    {tech.department && (
-                                                                        <span className="text-xs text-muted-foreground ml-1">
-                                                                            ({tech.department})
-                                                                        </span>
-                                                                    )}
-                                                                </SelectItem>
+                                                                <label key={tech.id} className="flex items-center gap-1.5 cursor-pointer">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={item.technicians?.some(t => t.technician_id === tech.id) || false}
+                                                                        onChange={() => handleToggleTechnician(index, tech.id, tech.name, 0)}
+                                                                        className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                                                    />
+                                                                    <span className="text-sm">{tech.name}</span>
+                                                                </label>
                                                             ))}
-                                                        </SelectContent>
-                                                    </Select>
+                                                        </div>
+                                                        {/* Commission inputs for selected technicians */}
+                                                        {item.technicians && item.technicians.length > 0 && (
+                                                            <div className="mt-2 space-y-1 border-l-2 border-primary/30 pl-3">
+                                                                {item.technicians.map(t => (
+                                                                    <div key={t.technician_id} className="flex items-center gap-2">
+                                                                        <span className="text-xs text-muted-foreground w-28 truncate">{t.technician_name}</span>
+                                                                        <span className="text-xs text-muted-foreground">Hoa hồng:</span>
+                                                                        <input
+                                                                            type="number"
+                                                                            min="0"
+                                                                            max="100"
+                                                                            value={t.commission_rate}
+                                                                            onChange={(e) => handleUpdateTechnicianCommission(index, t.technician_id, Number(e.target.value))}
+                                                                            className="w-16 h-6 text-xs px-2 border rounded text-center"
+                                                                        />
+                                                                        <span className="text-xs text-muted-foreground">%</span>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
                                                 ) : (
-                                                    <span className="text-xs text-muted-foreground italic">Không có KTV</span>
-                                                )}
-                                                {item.department && (
-                                                    <Badge variant="outline" className="text-xs">
-                                                        {getDepartmentLabel(item.department)}
-                                                    </Badge>
+                                                    <span className="text-xs text-muted-foreground italic ml-6">Không có KTV</span>
                                                 )}
                                             </div>
                                         )}
 
                                         {/* Technician Assignment for Package Services */}
                                         {item.type === 'package' && item.package_services && item.package_services.length > 0 && availableTechnicians.length > 0 && (
-                                            <div className="mt-2 ml-16 space-y-2 border-l-2 border-purple-200 pl-3">
+                                            <div className="mt-2 ml-16 space-y-3 border-l-2 border-purple-200 pl-3">
                                                 <span className="text-xs text-muted-foreground font-medium">Phân công KTV cho dịch vụ trong gói:</span>
                                                 {item.package_services.map(svc => (
-                                                    <div key={svc.service_id} className="flex items-center gap-2">
-                                                        <Wrench className="h-3 w-3 text-purple-500" />
-                                                        <span className="text-xs text-foreground w-32 truncate" title={svc.service_name}>
-                                                            {svc.service_name}
-                                                        </span>
-                                                        <Select
-                                                            value={svc.technician_id || 'none'}
-                                                            onValueChange={(value) => handleAssignPackageServiceTechnician(index, svc.service_id, value === 'none' ? '' : value)}
-                                                        >
-                                                            <SelectTrigger className="h-7 w-40 text-xs">
-                                                                <SelectValue placeholder="Chọn KTV" />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="none">Chưa phân công</SelectItem>
-                                                                {getTechniciansForDepartment(svc.department).map(tech => (
-                                                                    <SelectItem key={tech.id} value={tech.id}>
-                                                                        {tech.name}
-                                                                    </SelectItem>
+                                                    <div key={svc.service_id} className="space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <Wrench className="h-3 w-3 text-purple-500" />
+                                                            <span className="text-xs font-medium text-foreground" title={svc.service_name}>
+                                                                {svc.service_name}
+                                                            </span>
+                                                            {svc.department && (
+                                                                <Badge variant="outline" className="text-xs">
+                                                                    {getDepartmentLabel(svc.department)}
+                                                                </Badge>
+                                                            )}
+                                                        </div>
+                                                        {/* Technician checkboxes */}
+                                                        <div className="flex flex-wrap gap-2 ml-5">
+                                                            {getTechniciansForDepartment(svc.department).map(tech => (
+                                                                <label key={tech.id} className="flex items-center gap-1.5 cursor-pointer">
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={svc.technicians?.some(t => t.technician_id === tech.id) || false}
+                                                                        onChange={() => handleTogglePackageServiceTechnician(index, svc.service_id, tech.id, tech.name, 0)}
+                                                                        className="w-3.5 h-3.5 rounded border-gray-300 text-primary focus:ring-primary"
+                                                                    />
+                                                                    <span className="text-xs">{tech.name}</span>
+                                                                </label>
+                                                            ))}
+                                                        </div>
+                                                        {/* Commission inputs for selected technicians */}
+                                                        {svc.technicians && svc.technicians.length > 0 && (
+                                                            <div className="ml-5 space-y-1 border-l-2 border-purple-200 pl-2">
+                                                                {svc.technicians.map(t => (
+                                                                    <div key={t.technician_id} className="flex items-center gap-2">
+                                                                        <span className="text-xs text-muted-foreground w-24 truncate">{t.technician_name}</span>
+                                                                        <span className="text-xs text-muted-foreground">Hoa hồng:</span>
+                                                                        <input
+                                                                            type="number"
+                                                                            min="0"
+                                                                            max="100"
+                                                                            value={t.commission_rate}
+                                                                            onChange={(e) => handleUpdatePackageServiceTechnicianCommission(index, svc.service_id, t.technician_id, Number(e.target.value))}
+                                                                            className="w-14 h-5 text-xs px-1 border rounded text-center"
+                                                                        />
+                                                                        <span className="text-xs text-muted-foreground">%</span>
+                                                                    </div>
                                                                 ))}
-                                                            </SelectContent>
-                                                        </Select>
-                                                        {svc.department && (
-                                                            <Badge variant="outline" className="text-xs">
-                                                                {getDepartmentLabel(svc.department)}
-                                                            </Badge>
+                                                            </div>
                                                         )}
                                                     </div>
                                                 ))}

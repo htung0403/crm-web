@@ -8,11 +8,45 @@ export interface Lead {
     email?: string;
     company?: string;
     address?: string;
-    source: string;
+
+    // Channel & Source
+    source?: string;           // Legacy field
+    channel?: string;          // New: facebook, zalo, website, referral, etc.
+    lead_id?: string;          // External lead ID
+    lead_type?: string;        // individual, company, etc.
+
+    // Status & Pipeline
     status: string;
-    assigned_to?: string;
+    pipeline_stage?: string;
+    followup_step?: number;
+    round_index?: number;
+
+    // Assignment
+    assigned_to?: string;      // Legacy UUID field
     assigned_user?: { id: string; name: string; email: string };
-    notes?: string;
+    sale_token?: string;       // New: Token/ID of assigned salesperson
+    owner_sale?: string;       // New: Token/ID of lead owner
+
+    // FB Messenger Integration
+    fb_thread_id?: string;
+    link_message?: string;
+
+    // Last Message Info
+    last_message_mid?: string;
+    last_message_text?: string;
+    last_message_time?: string;
+    last_actor?: string;       // 'lead' or 'sale'
+
+    // Timing & SLA
+    appointment_time?: string;
+    t_due?: string;
+    t_last_inbound?: string;
+    t_last_outbound?: string;
+    sla_state?: string;        // 'ok', 'warning', 'overdue'
+
+    // Notes & Metadata
+    notes?: string;            // Legacy
+    note?: string;             // New
     last_contact?: string;
     created_at: string;
     updated_at?: string;

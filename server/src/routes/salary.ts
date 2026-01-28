@@ -135,7 +135,7 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
         const endDate = new Date(year, month, 0).toISOString().split('T')[0];
 
-        // Try to get commissions (table may not exist)
+        // Try to get commissions from commissions table (legacy)
         let totalCommission = 0;
         try {
             const { data: commissions } = await supabaseAdmin
@@ -149,6 +149,61 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
         } catch (e) {
             console.log('Commissions table may not exist, using 0');
         }
+
+        // Calculate commission from completed orders where technician is assigned
+        let orderCommission = 0;
+        try {
+            // Get completed orders in the period
+            const { data: orders } = await supabaseAdmin
+                .from('orders')
+                .select('id, items')
+                .in('status', ['completed', 'delivered'])
+                .gte('created_at', startDate)
+                .lte('created_at', endDate + 'T23:59:59');
+
+            if (orders && orders.length > 0) {
+                for (const order of orders) {
+                    if (!order.items) continue;
+
+                    // Parse items if it's a string
+                    const items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
+
+                    for (const item of items) {
+                        // Check if this technician is assigned to this item
+                        if (item.technicians && Array.isArray(item.technicians)) {
+                            const techAssignment = item.technicians.find((t: any) => t.technician_id === user_id);
+                            if (techAssignment && techAssignment.commission_rate > 0) {
+                                // Calculate commission: service_price * commission_rate%
+                                const servicePrice = (item.unit_price || 0) * (item.quantity || 1);
+                                const commission = Math.floor(servicePrice * techAssignment.commission_rate / 100);
+                                orderCommission += commission;
+                            }
+                        }
+
+                        // Also check package_services for packages
+                        if (item.type === 'package' && item.package_services && Array.isArray(item.package_services)) {
+                            for (const svc of item.package_services) {
+                                if (svc.technicians && Array.isArray(svc.technicians)) {
+                                    const techAssignment = svc.technicians.find((t: any) => t.technician_id === user_id);
+                                    if (techAssignment && techAssignment.commission_rate > 0) {
+                                        // For package services, use an estimated price per service
+                                        // You may need to look up actual service price
+                                        const estimatedServicePrice = (item.unit_price || 0) / (item.package_services.length || 1);
+                                        const commission = Math.floor(estimatedServicePrice * techAssignment.commission_rate / 100);
+                                        orderCommission += commission;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.log('Error calculating order commission:', e);
+        }
+
+        // Total commission = legacy commissions + order commissions
+        totalCommission += orderCommission;
 
         // Try to get timesheets (table may not exist)
         let totalHours = 176; // Default 22 days * 8 hours

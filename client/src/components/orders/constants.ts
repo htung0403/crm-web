@@ -72,20 +72,27 @@ export function getItemTypeColor(type: string): string {
 }
 
 // Shared types for dialogs
+export interface TechnicianAssignment {
+    technician_id: string;
+    technician_name?: string;
+    commission_rate: number; // Percentage 0-100
+}
+
 export interface PackageServiceAssignment {
     service_id: string;
     service_name: string;
     department?: string;
-    technician_id?: string;
+    technicians?: TechnicianAssignment[]; // Multiple technicians with commission
 }
 
 export interface OrderItem {
     type: 'product' | 'service' | 'package';
     item_id: string;
+    item_code?: string; // Temporary unique code for QR generation
     name: string;
     quantity: number;
     unit_price: number;
-    technician_id?: string; // Assigned technician for service
+    technicians?: TechnicianAssignment[]; // Multiple technicians with commission
     department?: string; // Department of the service
     package_services?: PackageServiceAssignment[]; // Services in package for technician assignment
 }
@@ -98,7 +105,7 @@ export interface CreateOrderData {
         name: string;
         quantity: number;
         unit_price: number;
-        technician_id?: string;
+        technicians?: TechnicianAssignment[];
     }>;
     notes?: string;
     discount?: number;
@@ -111,7 +118,7 @@ export interface UpdateOrderData {
         name: string;
         quantity: number;
         unit_price: number;
-        technician_id?: string;
+        technicians?: TechnicianAssignment[];
     }>;
     notes?: string;
     discount?: number;

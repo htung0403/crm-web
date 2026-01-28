@@ -19,6 +19,7 @@ import { TechnicianPage } from '@/pages/TechnicianPage';
 import { TaskQRPage } from '@/pages/TaskQRPage';
 import { QRScannerPage } from '@/pages/QRScannerPage';
 import { DepartmentsPage } from '@/pages/DepartmentsPage';
+import { ProductDetailPage } from '@/pages/ProductDetailPage';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import type { UserRole, User } from '@/types';
@@ -216,6 +217,13 @@ function AppContent() {
       <Route path="/scan" element={
         <ProtectedRoute allowedRoles={['admin', 'manager', 'technician']}>
           <QRScannerPage />
+        </ProtectedRoute>
+      } />
+
+      {/* Product/Service/Package Detail Route - Accessible via QR scan */}
+      <Route path="/item/:type/:id" element={
+        <ProtectedRoute allowedRoles={['admin', 'manager', 'technician', 'sale', 'accountant']}>
+          <ProductDetailPage />
         </ProtectedRoute>
       } />
 

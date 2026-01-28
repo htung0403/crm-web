@@ -236,4 +236,68 @@ router.post('/:id/convert', authenticate, requireSale, async (req: Authenticated
     }
 });
 
+// Get lead activities/history
+router.get('/:id/activities', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { limit = 50 } = req.query;
+
+        const { data: activities, error } = await supabaseAdmin
+            .from('lead_activities')
+            .select('*')
+            .eq('lead_id', id)
+            .order('created_at', { ascending: false })
+            .limit(Number(limit));
+
+        if (error) {
+            throw new ApiError('Lỗi khi lấy lịch sử hoạt động', 500);
+        }
+
+        res.json({
+            status: 'success',
+            data: { activities },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Add activity/note to lead
+router.post('/:id/activities', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { activity_type, content, old_status, new_status, metadata } = req.body;
+
+        if (!activity_type) {
+            throw new ApiError('Loại hoạt động là bắt buộc', 400);
+        }
+
+        const { data: activity, error } = await supabaseAdmin
+            .from('lead_activities')
+            .insert({
+                lead_id: id,
+                activity_type,
+                content,
+                old_status,
+                new_status,
+                metadata: metadata || {},
+                created_by: req.user!.id,
+                created_by_name: req.user!.name,
+            })
+            .select()
+            .single();
+
+        if (error) {
+            throw new ApiError('Lỗi khi thêm hoạt động: ' + error.message, 500);
+        }
+
+        res.status(201).json({
+            status: 'success',
+            data: { activity },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 export { router as leadsRouter };
