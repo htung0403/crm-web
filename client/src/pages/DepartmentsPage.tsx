@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Building2, Users, Wrench, Search, Loader2 } from 'lucide-react';
+import { Plus, Edit, Trash2, Building2, Users, Wrench, Search, Loader2, ChevronRight, Eye, DollarSign } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,14 +10,31 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useDepartments, type Department } from '@/hooks/useDepartments';
 import { useUsers } from '@/hooks/useUsers';
+import { useProducts, type Service } from '@/hooks/useProducts';
+import { formatCurrency } from '@/lib/utils';
+import api from '@/lib/api';
+
+// Service with department commission info
+interface ServiceWithCommission extends Service {
+    commission_sale?: number;
+    commission_tech?: number;
+    is_primary?: boolean;
+}
 
 export function DepartmentsPage() {
     const { departments, loading, fetchDepartments, createDepartment, updateDepartment, deleteDepartment } = useDepartments();
     const { users, fetchUsers } = useUsers();
+    const { services, fetchServices } = useProducts();
     const [search, setSearch] = useState('');
     const [showDialog, setShowDialog] = useState(false);
     const [editingDepartment, setEditingDepartment] = useState<Department | null>(null);
     const [submitting, setSubmitting] = useState(false);
+
+    // State for services dialog
+    const [showServicesDialog, setShowServicesDialog] = useState(false);
+    const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
+    const [departmentServices, setDepartmentServices] = useState<ServiceWithCommission[]>([]);
+    const [loadingServices, setLoadingServices] = useState(false);
 
     // Form state
     const [name, setName] = useState('');
@@ -28,7 +45,8 @@ export function DepartmentsPage() {
     useEffect(() => {
         fetchDepartments();
         fetchUsers();
-    }, [fetchDepartments, fetchUsers]);
+        fetchServices();
+    }, [fetchDepartments, fetchUsers, fetchServices]);
 
     // Reset form when dialog opens/closes
     useEffect(() => {
@@ -92,6 +110,43 @@ export function DepartmentsPage() {
         } catch (err) {
             const message = err instanceof Error ? err.message : 'Không thể xóa phòng ban';
             toast.error(message);
+        }
+    };
+
+    // Get services count for a department (using old field for count display)
+    const getServicesForDepartment = (deptId: string, deptName: string, deptCode: string): Service[] => {
+        return services.filter(s =>
+            s.department === deptId ||
+            s.department === deptName ||
+            s.department === deptCode
+        );
+    };
+
+    // Handle click on department to view services - fetch from new API
+    const handleViewServices = async (dept: Department) => {
+        setSelectedDepartment(dept);
+        setShowServicesDialog(true);
+        setLoadingServices(true);
+
+        try {
+            // Try to fetch from new API first
+            const response = await api.get(`/services/by-department/${dept.id}`);
+            const data = response.data?.services || [];
+            // Map the response to include service details with commission
+            const servicesWithCommission: ServiceWithCommission[] = data.map((item: any) => ({
+                ...item.service,
+                commission_sale: item.commission_sale,
+                commission_tech: item.commission_tech,
+                is_primary: item.is_primary,
+            }));
+            setDepartmentServices(servicesWithCommission);
+        } catch (error) {
+            // Fallback to old filter method
+            console.warn('Fallback to old filter method:', error);
+            const fallbackServices = getServicesForDepartment(dept.id, dept.name, dept.code);
+            setDepartmentServices(fallbackServices);
+        } finally {
+            setLoadingServices(false);
         }
     };
 
@@ -202,7 +257,29 @@ export function DepartmentsPage() {
                                         </div>
                                     )}
 
+                                    {/* Services count and view button */}
+                                    <div
+                                        className="flex items-center justify-between p-2 bg-muted/50 rounded-lg mb-3 cursor-pointer hover:bg-muted transition-colors"
+                                        onClick={() => handleViewServices(dept)}
+                                    >
+                                        <div className="flex items-center gap-2 text-sm">
+                                            <Wrench className="h-4 w-4 text-primary" />
+                                            <span>
+                                                <strong>{getServicesForDepartment(dept.id, dept.name, dept.code).length}</strong> dịch vụ
+                                            </span>
+                                        </div>
+                                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                                    </div>
+
                                     <div className="flex items-center gap-2 pt-3 border-t">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => handleViewServices(dept)}
+                                        >
+                                            <Eye className="h-4 w-4 mr-1" />
+                                            Xem
+                                        </Button>
                                         <Button
                                             variant="outline"
                                             size="sm"
@@ -309,6 +386,83 @@ export function DepartmentsPage() {
                                 ) : (
                                     'Lưu'
                                 )}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                {/* Services Dialog */}
+                <Dialog open={showServicesDialog} onOpenChange={(open) => { setShowServicesDialog(open); if (!open) setSelectedDepartment(null); }}>
+                    <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2">
+                                <Wrench className="h-5 w-5 text-primary" />
+                                Dịch vụ của {selectedDepartment?.name}
+                            </DialogTitle>
+                            <DialogDescription>
+                                Danh sách các dịch vụ thuộc phòng ban này
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="flex-1 overflow-y-auto py-4">
+                            {loadingServices ? (
+                                <div className="text-center py-12 text-muted-foreground">
+                                    <Loader2 className="h-8 w-8 mx-auto mb-4 animate-spin" />
+                                    <p>Đang tải danh sách dịch vụ...</p>
+                                </div>
+                            ) : departmentServices.length === 0 ? (
+                                <div className="text-center py-12 text-muted-foreground">
+                                    <Wrench className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                                    <p>Chưa có dịch vụ nào được gán cho phòng ban này</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    {departmentServices.map((service) => (
+                                        <div
+                                            key={service.id}
+                                            className="flex items-center justify-between p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                                        >
+                                            <div className="flex-1">
+                                                <div className="flex items-center gap-2">
+                                                    <h4 className="font-medium">{service.name}</h4>
+                                                    {service.is_primary && (
+                                                        <Badge variant="default" className="text-xs">Chính</Badge>
+                                                    )}
+                                                    <Badge variant={service.status === 'active' ? 'success' : 'secondary'} className="text-xs">
+                                                        {service.status === 'active' ? 'Hoạt động' : 'Tạm dừng'}
+                                                    </Badge>
+                                                </div>
+                                                <p className="text-xs text-muted-foreground font-mono">{service.code}</p>
+                                                {service.description && (
+                                                    <p className="text-sm text-muted-foreground mt-1 line-clamp-1">
+                                                        {service.description}
+                                                    </p>
+                                                )}
+                                                {/* Commission info */}
+                                                <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
+                                                    <span>HH Sale: <strong className="text-foreground">{service.commission_sale || 0}%</strong></span>
+                                                    <span>HH KTV: <strong className="text-foreground">{service.commission_tech || 0}%</strong></span>
+                                                </div>
+                                            </div>
+                                            <div className="text-right ml-4">
+                                                <div className="flex items-center gap-1 text-lg font-semibold text-primary">
+                                                    {formatCurrency(service.price)}
+                                                </div>
+                                                {service.duration && (
+                                                    <p className="text-xs text-muted-foreground">
+                                                        ~{service.duration} phút
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setShowServicesDialog(false)}>
+                                Đóng
                             </Button>
                         </DialogFooter>
                     </DialogContent>

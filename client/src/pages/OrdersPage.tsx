@@ -13,6 +13,7 @@ import { useProducts } from '@/hooks/useProducts';
 import { usePackages } from '@/hooks/usePackages';
 import { useVouchers } from '@/hooks/useVouchers';
 import { useUsers } from '@/hooks/useUsers';
+import { useDepartments } from '@/hooks/useDepartments';
 import type { OrderStatus } from '@/types';
 
 // Import extracted components
@@ -34,6 +35,7 @@ export function OrdersPage() {
     const { packages, fetchPackages } = usePackages();
     const { vouchers, fetchVouchers } = useVouchers();
     const { users: technicians, fetchTechnicians } = useUsers();
+    const { departments, fetchDepartments } = useDepartments();
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
     const [showCreateDialog, setShowCreateDialog] = useState(false);
     const [editingOrder, setEditingOrder] = useState<Order | null>(null);
@@ -50,7 +52,8 @@ export function OrdersPage() {
         fetchPackages();
         fetchVouchers();
         fetchTechnicians();
-    }, [location.pathname, fetchOrders, fetchCustomers, fetchProducts, fetchServices, fetchPackages, fetchVouchers, fetchTechnicians]);
+        fetchDepartments();
+    }, [location.pathname, fetchOrders, fetchCustomers, fetchProducts, fetchServices, fetchPackages, fetchVouchers, fetchTechnicians, fetchDepartments]);
 
     // Refetch orders when page becomes visible (e.g., after navigation)
     useEffect(() => {
@@ -277,6 +280,7 @@ export function OrdersPage() {
                     packages={packages}
                     vouchers={vouchers}
                     technicians={technicians}
+                    departments={departments}
                 />
 
                 {/* Edit Order Dialog */}

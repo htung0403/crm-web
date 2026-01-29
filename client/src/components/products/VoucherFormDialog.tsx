@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { toast } from 'sonner';
 import type { APIVoucher } from './types';
 import { formatNumber, parseNumber } from './utils';
+import { ImageUpload } from './ImageUpload';
 
 interface VoucherFormDialogProps {
     open: boolean;
@@ -29,6 +30,7 @@ export function VoucherFormDialog({ open, onClose, voucher, onSubmit }: VoucherF
     const [quantityDisplay, setQuantityDisplay] = useState('0');
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
+    const [image, setImage] = useState<string | null>(null);
     const [submitting, setSubmitting] = useState(false);
 
     // Reset form when voucher changes
@@ -46,6 +48,7 @@ export function VoucherFormDialog({ open, onClose, voucher, onSubmit }: VoucherF
             setQuantityDisplay(formatNumber(voucher.quantity || 0));
             setStartDate(voucher.start_date || '');
             setEndDate(voucher.end_date || '');
+            setImage(voucher.image || null);
         } else {
             setName('');
             setType('percentage');
@@ -59,6 +62,7 @@ export function VoucherFormDialog({ open, onClose, voucher, onSubmit }: VoucherF
             setQuantityDisplay('0');
             setStartDate('');
             setEndDate('');
+            setImage(null);
         }
     }, [voucher, open]);
 
@@ -110,6 +114,7 @@ export function VoucherFormDialog({ open, onClose, voucher, onSubmit }: VoucherF
                 min_order_value: minOrderValue || undefined,
                 max_discount: maxDiscount || undefined,
                 quantity,
+                image: image || undefined,
                 start_date: startDate,
                 end_date: endDate
             });
@@ -133,6 +138,16 @@ export function VoucherFormDialog({ open, onClose, voucher, onSubmit }: VoucherF
                 </DialogHeader>
 
                 <div className="space-y-4 py-4">
+                    {/* Image Upload */}
+                    <div className="space-y-2">
+                        <Label>Hình ảnh voucher</Label>
+                        <ImageUpload
+                            value={image}
+                            onChange={setImage}
+                            folder="vouchers"
+                        />
+                    </div>
+
                     <div className="space-y-2">
                         <Label>Mã voucher</Label>
                         <Input value={voucher?.code || 'VC...'} disabled className="bg-muted" />

@@ -1,4 +1,4 @@
-import { Edit, Trash2 } from 'lucide-react';
+import { Edit, Trash2, Gift } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency } from '@/lib/utils';
@@ -16,10 +16,13 @@ export function PackagesTable({ packages, onEdit, onDelete }: PackagesTableProps
             <table className="w-full">
                 <thead className="bg-muted/50 border-b">
                     <tr>
+                        <th className="p-3 text-left text-sm font-medium text-muted-foreground">Hình ảnh</th>
                         <th className="p-3 text-left text-sm font-medium text-muted-foreground">Mã</th>
                         <th className="p-3 text-left text-sm font-medium text-muted-foreground">Tên gói</th>
                         <th className="p-3 text-center text-sm font-medium text-muted-foreground">Số mục</th>
                         <th className="p-3 text-right text-sm font-medium text-muted-foreground">Giá bán</th>
+                        <th className="p-3 text-center text-sm font-medium text-muted-foreground">HH Sale</th>
+                        <th className="p-3 text-center text-sm font-medium text-muted-foreground">HH KTV</th>
                         <th className="p-3 text-center text-sm font-medium text-muted-foreground">Trạng thái</th>
                         <th className="p-3 text-right text-sm font-medium text-muted-foreground">Thao tác</th>
                     </tr>
@@ -27,13 +30,26 @@ export function PackagesTable({ packages, onEdit, onDelete }: PackagesTableProps
                 <tbody>
                     {packages.length === 0 ? (
                         <tr>
-                            <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                            <td colSpan={9} className="p-8 text-center text-muted-foreground">
                                 Không tìm thấy gói dịch vụ nào
                             </td>
                         </tr>
                     ) : (
                         packages.map((pkg) => (
                             <tr key={pkg.id} className="border-b hover:bg-muted/30 transition-colors">
+                                <td className="p-3">
+                                    {pkg.image ? (
+                                        <img
+                                            src={pkg.image}
+                                            alt={pkg.name}
+                                            className="w-12 h-12 rounded-lg object-cover border shadow-sm"
+                                        />
+                                    ) : (
+                                        <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center">
+                                            <Gift className="h-5 w-5 text-muted-foreground" />
+                                        </div>
+                                    )}
+                                </td>
                                 <td className="p-3 font-mono text-sm">{pkg.code}</td>
                                 <td className="p-3">
                                     <p className="font-medium">{pkg.name}</p>
@@ -43,6 +59,12 @@ export function PackagesTable({ packages, onEdit, onDelete }: PackagesTableProps
                                     <Badge variant="outline">{pkg.items?.length || 0} mục</Badge>
                                 </td>
                                 <td className="p-3 text-right font-semibold text-primary">{formatCurrency(pkg.price)}</td>
+                                <td className="p-3 text-center text-sm">
+                                    {pkg.commission_sale || 0}%
+                                </td>
+                                <td className="p-3 text-center text-sm">
+                                    {pkg.commission_tech || 0}%
+                                </td>
                                 <td className="p-3 text-center">
                                     <Badge variant={pkg.status === 'active' ? 'success' : 'secondary'}>
                                         {pkg.status === 'active' ? 'Hoạt động' : 'Ngưng'}
@@ -66,3 +88,4 @@ export function PackagesTable({ packages, onEdit, onDelete }: PackagesTableProps
         </div>
     );
 }
+

@@ -118,7 +118,17 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
 router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { name, phone, email, source, company, address, notes, status, assigned_to } = req.body;
+        const { name, phone, email, source, company, address, notes, status, assigned_to, pipeline_stage } = req.body;
+
+        // Get current lead to check for status change
+        const { data: currentLead } = await supabaseAdmin
+            .from('leads')
+            .select('status, pipeline_stage')
+            .eq('id', id)
+            .single();
+
+        const oldStatus = currentLead?.status || currentLead?.pipeline_stage;
+        const newStatus = status || pipeline_stage;
 
         const updateData: Record<string, any> = {
             updated_at: new Date().toISOString(),
@@ -132,6 +142,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         if (address !== undefined) updateData.address = address;
         if (notes !== undefined) updateData.notes = notes;
         if (status) updateData.status = status;
+        if (pipeline_stage) updateData.pipeline_stage = pipeline_stage;
         if (assigned_to) updateData.assigned_to = assigned_to;
 
         const { data: lead, error } = await supabaseAdmin
@@ -143,6 +154,17 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 
         if (error) {
             throw new ApiError('Lỗi khi cập nhật lead', 500);
+        }
+
+        // Log status change activity if status changed
+        if (newStatus && oldStatus !== newStatus) {
+            await supabaseAdmin.from('lead_activities').insert({
+                lead_id: id,
+                activity_type: 'status_change',
+                old_status: oldStatus,
+                new_status: newStatus,
+                created_by: req.user?.id,
+            });
         }
 
         res.json({
@@ -193,27 +215,58 @@ router.post('/:id/convert', authenticate, requireSale, async (req: Authenticated
             throw new ApiError('Không tìm thấy lead', 404);
         }
 
-        // Tạo customer mới từ lead
-        const { data: customer, error: customerError } = await supabaseAdmin
-            .from('customers')
-            .insert({
-                name: lead.name,
-                phone: lead.phone,
-                email: lead.email,
-                company: lead.company,
-                address: lead.address,
-                source: lead.source,
-                type: lead.company ? 'company' : 'individual',
-                status: 'active',
-                assigned_to: lead.assigned_to,
-                created_by: req.user!.id,
-                lead_id: lead.id,
-            })
-            .select()
-            .single();
+        // Kiểm tra nếu lead đã được convert
+        if (lead.customer_id) {
+            // Lead đã được convert, chỉ trả về customer hiện tại
+            const { data: existingCustomer } = await supabaseAdmin
+                .from('customers')
+                .select('*')
+                .eq('id', lead.customer_id)
+                .single();
 
-        if (customerError) {
-            throw new ApiError('Lỗi khi tạo khách hàng', 500);
+            return res.json({
+                status: 'success',
+                data: { customer: existingCustomer },
+                message: 'Lead đã được chuyển đổi trước đó',
+            });
+        }
+
+        // Kiểm tra customer đã tồn tại với số điện thoại này chưa
+        const { data: existingByPhone } = await supabaseAdmin
+            .from('customers')
+            .select('*')
+            .eq('phone', lead.phone)
+            .maybeSingle();
+
+        let customer;
+
+        if (existingByPhone) {
+            // Đã có customer với số điện thoại này, chỉ link lead vào
+            customer = existingByPhone;
+        } else {
+            // Tạo customer mới từ lead
+            const { data: newCustomer, error: customerError } = await supabaseAdmin
+                .from('customers')
+                .insert({
+                    name: lead.name,
+                    phone: lead.phone,
+                    email: lead.email,
+                    company: lead.company,
+                    address: lead.address,
+                    source: lead.source,
+                    type: lead.company ? 'company' : 'individual',
+                    status: 'active',
+                    assigned_to: lead.assigned_to,
+                    created_by: req.user!.id,
+                    lead_id: lead.id,
+                })
+                .select()
+                .single();
+
+            if (customerError) {
+                throw new ApiError('Lỗi khi tạo khách hàng', 500);
+            }
+            customer = newCustomer;
         }
 
         // Cập nhật trạng thái lead
@@ -229,7 +282,9 @@ router.post('/:id/convert', authenticate, requireSale, async (req: Authenticated
         res.json({
             status: 'success',
             data: { customer },
-            message: 'Đã chuyển đổi lead thành khách hàng',
+            message: existingByPhone
+                ? 'Đã liên kết lead với khách hàng hiện có'
+                : 'Đã chuyển đổi lead thành khách hàng',
         });
     } catch (error) {
         next(error);
@@ -244,7 +299,10 @@ router.get('/:id/activities', authenticate, async (req: AuthenticatedRequest, re
 
         const { data: activities, error } = await supabaseAdmin
             .from('lead_activities')
-            .select('*')
+            .select(`
+                *,
+                created_by_user:users!lead_activities_created_by_fkey(name)
+            `)
             .eq('lead_id', id)
             .order('created_at', { ascending: false })
             .limit(Number(limit));
@@ -253,9 +311,15 @@ router.get('/:id/activities', authenticate, async (req: AuthenticatedRequest, re
             throw new ApiError('Lỗi khi lấy lịch sử hoạt động', 500);
         }
 
+        // Map to add created_by_name
+        const activitiesWithNames = activities?.map(activity => ({
+            ...activity,
+            created_by_name: activity.created_by_user?.name || null,
+        }));
+
         res.json({
             status: 'success',
-            data: { activities },
+            data: { activities: activitiesWithNames },
         });
     } catch (error) {
         next(error);

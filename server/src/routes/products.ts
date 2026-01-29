@@ -99,6 +99,9 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
                 unit: unit || 'cái',
                 description,
                 stock: stock || 0,
+                image: req.body.image || null,
+                commission_sale: req.body.commission_sale || 0,
+                commission_tech: req.body.commission_tech || 0,
                 status: 'active',
                 created_by: req.user!.id,
             })
@@ -132,7 +135,7 @@ router.put('/:id', authenticate, requireManager, async (req: AuthenticatedReques
             .single();
 
         if (error) {
-            throw new ApiError('Lỗi khi cập nhật sản phẩm', 500);
+            throw new ApiError('Lỗi khi cập nhật sản phẩm: ' + error.message, 500);
         }
 
         res.json({

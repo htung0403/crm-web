@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Plus, Search, Edit, Trash2, Eye, Phone, Mail, Shield, Calendar, UserPlus, Loader2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Search, Edit, Trash2, Eye, Phone, Mail, Shield, Calendar, UserPlus, Loader2, ShoppingCart, FileText, ExternalLink } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,11 +9,15 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatCurrency } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useUsers } from '@/hooks/useUsers';
 import { useDepartments } from '@/hooks/useDepartments';
+import api from '@/lib/api';
 import type { User, UserRole } from '@/types';
+import { OrderDetailDialog } from '@/components/orders/OrderDetailDialog';
+import type { Order } from '@/hooks/useOrders';
 
 // Extended employee interface for HR management
 interface Employee extends User {
@@ -83,7 +88,19 @@ function EmployeeFormDialog({
             setEmail(employee.email || '');
             setPhone(employee.phone || '');
             setRole(employee.role || 'sale');
-            setDepartment(employee.department || '');
+            // Keep existing department for technicians, auto-set for others
+            if (employee.role === 'technician') {
+                setDepartment(employee.department || '');
+            } else {
+                // Auto-set department based on role for non-technicians
+                const roleDepartmentMap: Record<string, string> = {
+                    admin: 'Admin',
+                    manager: 'Quản lý',
+                    accountant: 'Kế toán',
+                    sale: 'Sale',
+                };
+                setDepartment(roleDepartmentMap[employee.role] || employee.department || '');
+            }
             setSalary(employee.salary || 0);
             setCommission(employee.commission || 0);
             setBankAccount(employee.bankAccount || '');
@@ -96,7 +113,7 @@ function EmployeeFormDialog({
             setPassword('');
             setPhone('');
             setRole('sale');
-            setDepartment('');
+            setDepartment('Sale'); // Default department for sale role
             setSalary(0);
             setCommission(0);
             setBankAccount('');
@@ -201,9 +218,17 @@ function EmployeeFormDialog({
                             <Label>Vai trò *</Label>
                             <Select value={role} onValueChange={(v: UserRole) => {
                                 setRole(v);
-                                // Clear department if not technician
-                                if (v !== 'technician') {
-                                    setDepartment('');
+                                // Auto-set department based on role
+                                if (v === 'admin') {
+                                    setDepartment('Admin');
+                                } else if (v === 'manager') {
+                                    setDepartment('Quản lý');
+                                } else if (v === 'accountant') {
+                                    setDepartment('Kế toán');
+                                } else if (v === 'sale') {
+                                    setDepartment('Sale');
+                                } else if (v === 'technician') {
+                                    setDepartment(''); // Technician can choose department
                                 }
                             }}>
                                 <SelectTrigger>
@@ -216,7 +241,7 @@ function EmployeeFormDialog({
                                 </SelectContent>
                             </Select>
                         </div>
-                        {role === 'technician' && (
+                        {role === 'technician' ? (
                             <div className="space-y-2">
                                 <Label>Phòng ban kỹ thuật *</Label>
                                 <Select value={department || 'none'} onValueChange={(v) => setDepartment(v === 'none' ? '' : v)}>
@@ -230,6 +255,12 @@ function EmployeeFormDialog({
                                         ))}
                                     </SelectContent>
                                 </Select>
+                            </div>
+                        ) : (
+                            <div className="space-y-2">
+                                <Label>Phòng ban</Label>
+                                <Input value={department} disabled className="bg-muted" />
+                                <p className="text-xs text-muted-foreground">Tự động theo vai trò</p>
                             </div>
                         )}
                     </div>
@@ -277,6 +308,27 @@ function EmployeeFormDialog({
     );
 }
 
+// Order interface for employee orders
+interface EmployeeOrder {
+    id: string;
+    order_code: string;
+    status: string;
+    total_amount: number;
+    created_at: string;
+    customer?: {
+        name: string;
+        phone?: string;
+    };
+}
+
+const orderStatusLabels: Record<string, { label: string; variant: 'default' | 'secondary' | 'success' | 'destructive' | 'warning' | 'outline' }> = {
+    pending: { label: 'Chờ xử lý', variant: 'secondary' },
+    confirmed: { label: 'Đã xác nhận', variant: 'default' },
+    processing: { label: 'Đang thực hiện', variant: 'warning' },
+    completed: { label: 'Hoàn thành', variant: 'success' },
+    cancelled: { label: 'Đã hủy', variant: 'destructive' },
+};
+
 // Employee Detail Dialog
 function EmployeeDetailDialog({
     open,
@@ -289,6 +341,58 @@ function EmployeeDetailDialog({
     employee: Employee | null;
     departments: { id: string; name: string }[];
 }) {
+    const [activeTab, setActiveTab] = useState('info');
+    const [orders, setOrders] = useState<EmployeeOrder[]>([]);
+    const [loadingOrders, setLoadingOrders] = useState(false);
+    const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+    const [showOrderDetail, setShowOrderDetail] = useState(false);
+
+    // Fetch orders when employee changes or tab switches to orders
+    useEffect(() => {
+        if (open && employee && activeTab === 'orders') {
+            fetchEmployeeOrders();
+        }
+    }, [open, employee, activeTab]);
+
+    // Reset tab when dialog closes
+    useEffect(() => {
+        if (!open) {
+            setActiveTab('info');
+            setOrders([]);
+        }
+    }, [open]);
+
+    const fetchEmployeeOrders = async () => {
+        if (!employee) return;
+
+        setLoadingOrders(true);
+        try {
+            // Use different query param based on employee role
+            const queryParam = employee.role === 'technician'
+                ? `technician_id=${employee.id}`
+                : `sale_id=${employee.id}`;
+
+            const response = await api.get(`/orders?${queryParam}`);
+            // Handle various response formats
+            let ordersData = [];
+            if (Array.isArray(response.data)) {
+                ordersData = response.data;
+            } else if (response.data?.data?.orders && Array.isArray(response.data.data.orders)) {
+                ordersData = response.data.data.orders;
+            } else if (response.data?.orders && Array.isArray(response.data.orders)) {
+                ordersData = response.data.orders;
+            } else if (response.data?.data && Array.isArray(response.data.data)) {
+                ordersData = response.data.data;
+            }
+            setOrders(ordersData);
+        } catch (error) {
+            console.error('Error fetching employee orders:', error);
+            setOrders([]);
+        } finally {
+            setLoadingOrders(false);
+        }
+    };
+
     if (!employee) return null;
 
     const getDepartmentName = (deptId?: string) => {
@@ -298,95 +402,176 @@ function EmployeeDetailDialog({
     };
 
     return (
-        <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-md">
-                <DialogHeader>
-                    <DialogTitle>Chi tiết nhân viên</DialogTitle>
-                </DialogHeader>
+        <>
+            <Dialog open={open} onOpenChange={onClose}>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+                    <DialogHeader>
+                        <DialogTitle>Chi tiết nhân viên</DialogTitle>
+                    </DialogHeader>
 
-                <div className="space-y-6">
-                    {/* Header */}
-                    <div className="flex items-center gap-4">
-                        <Avatar className="h-16 w-16">
-                            <AvatarImage src={employee.avatar} />
-                            <AvatarFallback className="text-xl">{employee.name.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                            <h3 className="text-xl font-bold">{employee.name}</h3>
-                            <div className="flex items-center gap-2 mt-1">
-                                <Badge variant={employee.role === 'manager' ? 'purple' : employee.role === 'sale' ? 'info' : 'secondary'}>
-                                    {roleLabels[employee.role]}
-                                </Badge>
-                                <Badge variant={statusLabels[employee.status]?.variant || 'secondary'}>
-                                    {statusLabels[employee.status]?.label || employee.status}
-                                </Badge>
-                            </div>
-                        </div>
-                    </div>
+                    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
+                        <TabsList className="grid w-full grid-cols-2">
+                            <TabsTrigger value="info" className="gap-2">
+                                <FileText className="h-4 w-4" />
+                                Thông tin
+                            </TabsTrigger>
+                            <TabsTrigger value="orders" className="gap-2">
+                                <ShoppingCart className="h-4 w-4" />
+                                Đơn hàng ({orders.length})
+                            </TabsTrigger>
+                        </TabsList>
 
-                    {/* Info Grid */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                            <p className="text-xs text-muted-foreground">Email</p>
-                            <p className="text-sm font-medium flex items-center gap-2">
-                                <Mail className="h-4 w-4 text-muted-foreground" />
-                                {employee.email}
-                            </p>
-                        </div>
-                        <div className="space-y-1">
-                            <p className="text-xs text-muted-foreground">Điện thoại</p>
-                            <p className="text-sm font-medium flex items-center gap-2">
-                                <Phone className="h-4 w-4 text-muted-foreground" />
-                                {employee.phone}
-                            </p>
-                        </div>
-                        <div className="space-y-1">
-                            <p className="text-xs text-muted-foreground">Phòng ban</p>
-                            <p className="text-sm font-medium">{getDepartmentName(employee.department)}</p>
-                        </div>
-                        <div className="space-y-1">
-                            <p className="text-xs text-muted-foreground">Ngày vào làm</p>
-                            <p className="text-sm font-medium flex items-center gap-2">
-                                <Calendar className="h-4 w-4 text-muted-foreground" />
-                                {employee.joinDate || 'Chưa cập nhật'}
-                            </p>
-                        </div>
-                    </div>
+                        {/* Info Tab */}
+                        <TabsContent value="info" className="flex-1 overflow-y-auto mt-4">
+                            <div className="space-y-6">
+                                {/* Header */}
+                                <div className="flex items-center gap-4">
+                                    <Avatar className="h-16 w-16">
+                                        <AvatarImage src={employee.avatar} />
+                                        <AvatarFallback className="text-xl">{employee.name.charAt(0)}</AvatarFallback>
+                                    </Avatar>
+                                    <div>
+                                        <h3 className="text-xl font-bold">{employee.name}</h3>
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <Badge variant={employee.role === 'manager' ? 'purple' : employee.role === 'sale' ? 'info' : 'secondary'}>
+                                                {roleLabels[employee.role]}
+                                            </Badge>
+                                            <Badge variant={statusLabels[employee.status]?.variant || 'secondary'}>
+                                                {statusLabels[employee.status]?.label || employee.status}
+                                            </Badge>
+                                        </div>
+                                    </div>
+                                </div>
 
-                    {/* Salary Info */}
-                    <div className="p-4 rounded-lg bg-muted/50 space-y-3">
-                        <h4 className="font-semibold flex items-center gap-2">
-                            <Shield className="h-4 w-4 text-primary" />
-                            Thông tin lương
-                        </h4>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <p className="text-xs text-muted-foreground">Lương cơ bản</p>
-                                <p className="text-lg font-bold text-primary">{formatCurrency(employee.salary || 0)}</p>
-                            </div>
-                            <div>
-                                <p className="text-xs text-muted-foreground">% Hoa hồng</p>
-                                <p className="text-lg font-bold">{employee.commission || 0}%</p>
-                            </div>
-                        </div>
-                        {(employee.bankName || employee.bankAccount) && (
-                            <div className="pt-2 border-t">
-                                <p className="text-xs text-muted-foreground">Tài khoản ngân hàng</p>
-                                <p className="text-sm font-medium">{employee.bankName || 'N/A'} - {employee.bankAccount || 'N/A'}</p>
-                            </div>
-                        )}
-                    </div>
-                </div>
+                                {/* Info Grid */}
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-1">
+                                        <p className="text-xs text-muted-foreground">Email</p>
+                                        <p className="text-sm font-medium flex items-center gap-2">
+                                            <Mail className="h-4 w-4 text-muted-foreground" />
+                                            {employee.email}
+                                        </p>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-xs text-muted-foreground">Điện thoại</p>
+                                        <p className="text-sm font-medium flex items-center gap-2">
+                                            <Phone className="h-4 w-4 text-muted-foreground" />
+                                            {employee.phone}
+                                        </p>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-xs text-muted-foreground">Phòng ban</p>
+                                        <p className="text-sm font-medium">{getDepartmentName(employee.department)}</p>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-xs text-muted-foreground">Ngày vào làm</p>
+                                        <p className="text-sm font-medium flex items-center gap-2">
+                                            <Calendar className="h-4 w-4 text-muted-foreground" />
+                                            {employee.joinDate || 'Chưa cập nhật'}
+                                        </p>
+                                    </div>
+                                </div>
 
-                <DialogFooter>
-                    <Button variant="outline" onClick={onClose}>Đóng</Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+                                {/* Salary Info */}
+                                <div className="p-4 rounded-lg bg-muted/50 space-y-3">
+                                    <h4 className="font-semibold flex items-center gap-2">
+                                        <Shield className="h-4 w-4 text-primary" />
+                                        Thông tin lương
+                                    </h4>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <p className="text-xs text-muted-foreground">Lương cơ bản</p>
+                                            <p className="text-lg font-bold text-primary">{formatCurrency(employee.salary || 0)}</p>
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-muted-foreground">% Hoa hồng</p>
+                                            <p className="text-lg font-bold">{employee.commission || 0}%</p>
+                                        </div>
+                                    </div>
+                                    {(employee.bankName || employee.bankAccount) && (
+                                        <div className="pt-2 border-t">
+                                            <p className="text-xs text-muted-foreground">Tài khoản ngân hàng</p>
+                                            <p className="text-sm font-medium">{employee.bankName || 'N/A'} - {employee.bankAccount || 'N/A'}</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </TabsContent>
+
+                        {/* Orders Tab */}
+                        <TabsContent value="orders" className="flex-1 overflow-y-auto mt-4">
+                            {loadingOrders ? (
+                                <div className="flex items-center justify-center py-12">
+                                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                </div>
+                            ) : orders.length === 0 ? (
+                                <div className="text-center py-12 text-muted-foreground">
+                                    <ShoppingCart className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                                    <p>Nhân viên chưa có đơn hàng nào</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-3">
+                                    {orders.map((order) => {
+                                        const statusInfo = orderStatusLabels[order.status] || { label: order.status, variant: 'secondary' as const };
+                                        return (
+                                            <div
+                                                key={order.id}
+                                                className="p-4 border rounded-lg hover:bg-muted/30 transition-colors cursor-pointer"
+                                                onClick={() => {
+                                                    setSelectedOrder(order as unknown as Order);
+                                                    setShowOrderDetail(true);
+                                                }}
+                                            >
+                                                <div className="flex items-start justify-between">
+                                                    <div>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-semibold font-mono">{order.order_code}</span>
+                                                            <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                                                        </div>
+                                                        {order.customer && (
+                                                            <p className="text-sm text-muted-foreground mt-1">
+                                                                KH: {order.customer.name}
+                                                                {order.customer.phone && ` - ${order.customer.phone}`}
+                                                            </p>
+                                                        )}
+                                                        <p className="text-xs text-muted-foreground mt-1">
+                                                            {new Date(order.created_at).toLocaleDateString('vi-VN')}
+                                                        </p>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="font-bold text-primary">{formatCurrency(order.total_amount)}</p>
+                                                        <p className="text-xs text-muted-foreground mt-1">Click để xem chi tiết</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </TabsContent>
+                    </Tabs>
+
+                    <DialogFooter className="mt-4">
+                        <Button variant="outline" onClick={onClose}>Đóng</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Order Detail Dialog */}
+            <OrderDetailDialog
+                order={selectedOrder}
+                open={showOrderDetail}
+                onClose={() => {
+                    setShowOrderDetail(false);
+                    setSelectedOrder(null);
+                }}
+            />
+        </>
     );
 }
 
 export function EmployeesPage() {
+    const navigate = useNavigate();
     const { users, loading, fetchUsers, createUser, updateUser, deleteUser } = useUsers();
     const { departments, fetchDepartments } = useDepartments();
     const [searchTerm, setSearchTerm] = useState('');
@@ -622,7 +807,7 @@ export function EmployeesPage() {
                                                 <Button
                                                     variant="ghost"
                                                     size="icon"
-                                                    onClick={() => { setSelectedEmployee(emp); setShowDetail(true); }}
+                                                    onClick={() => navigate(`/employees/${emp.id}`)}
                                                 >
                                                     <Eye className="h-4 w-4" />
                                                 </Button>
@@ -694,7 +879,7 @@ export function EmployeesPage() {
                                         <Button
                                             variant="ghost"
                                             size="icon"
-                                            onClick={() => { setSelectedEmployee(emp); setShowDetail(true); }}
+                                            onClick={() => navigate(`/employees/${emp.id}`)}
                                         >
                                             <Eye className="h-4 w-4" />
                                         </Button>

@@ -11,6 +11,9 @@ export interface Product {
     unit: string;
     description?: string;
     stock: number;
+    image?: string;
+    commission_sale?: number;
+    commission_tech?: number;
     status: string;
     created_at: string;
 }
@@ -23,7 +26,10 @@ export interface Service {
     price: number;
     duration?: number;
     description?: string;
+    image?: string;
     commission_rate: number;
+    commission_sale?: number;
+    commission_tech?: number;
     department?: string; // Department ID for technician assignment
     status: string;
     created_at: string;

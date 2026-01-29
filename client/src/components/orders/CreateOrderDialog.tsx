@@ -14,19 +14,25 @@ import { formatCurrency } from '@/lib/utils';
 import type { Package as PackageType, Voucher, User as UserType } from '@/types';
 import { getItemTypeLabel, getItemTypeColor, type CreateOrderData, type OrderItem, type CustomerOption } from './constants';
 
-// Simple helper to display department - just return the value for now
-const getDepartmentLabel = (value?: string) => value || '';
+// Simple helper to display department - look up name from ID
+const getDepartmentLabel = (deptId: string | undefined, departments: { id: string; name: string }[]) => {
+    if (!deptId) return '';
+    const dept = departments.find(d => d.id === deptId);
+    return dept?.name || '';
+};
 
 interface CreateOrderDialogProps {
     open: boolean;
     onClose: () => void;
     onSubmit: (data: CreateOrderData) => Promise<void>;
     customers: CustomerOption[];
-    products: { id: string; name: string; price: number }[];
-    services: { id: string; name: string; price: number; department?: string }[];
+    products: { id: string; name: string; price: number; image?: string; commission_sale?: number; commission_tech?: number }[];
+    services: { id: string; name: string; price: number; image?: string; department?: string; commission_sale?: number; commission_tech?: number }[];
     packages: PackageType[];
     vouchers: Voucher[];
     technicians?: UserType[]; // List of technicians for assignment
+    departments?: { id: string; name: string }[]; // Departments for lookup
+    initialCustomer?: { id?: string; name: string; phone: string }; // Pre-populated from lead
 }
 
 export function CreateOrderDialog({
@@ -38,7 +44,9 @@ export function CreateOrderDialog({
     services,
     packages,
     vouchers,
-    technicians = []
+    technicians = [],
+    departments = [],
+    initialCustomer
 }: CreateOrderDialogProps) {
     const [customerId, setCustomerId] = useState('');
     const [customerSearch, setCustomerSearch] = useState('');
@@ -49,6 +57,21 @@ export function CreateOrderDialog({
     const [appliedVoucher, setAppliedVoucher] = useState<Voucher | null>(null);
     const [items, setItems] = useState<OrderItem[]>([]);
     const [submitting, setSubmitting] = useState(false);
+
+    // When dialog opens with initialCustomer, find matching customer or show search
+    useEffect(() => {
+        if (open && initialCustomer) {
+            // Try to find customer by phone
+            const matchedCustomer = customers.find(c => c.phone === initialCustomer.phone);
+            if (matchedCustomer) {
+                setCustomerId(matchedCustomer.id);
+                setCustomerSearch('');
+            } else {
+                // Set search to help find the customer
+                setCustomerSearch(initialCustomer.phone || initialCustomer.name);
+            }
+        }
+    }, [open, initialCustomer, customers]);
 
     // Filter only active customers
     const activeCustomers = customers.filter(c => c.status === 'active' || !c.status);
@@ -116,17 +139,23 @@ export function CreateOrderDialog({
             return;
         }
 
-        let item: { id: string; name: string; price: number; department?: string } | undefined;
+        let item: { id: string; name: string; price: number; department?: string; commission_sale?: number; commission_tech?: number } | undefined;
         let packageServices: { service_id: string; service_name: string; department?: string }[] | undefined;
 
         if (type === 'product') {
-            item = products.find(i => i.id === itemId);
+            const prod = products.find(i => i.id === itemId);
+            if (prod) {
+                item = { id: prod.id, name: prod.name, price: prod.price, commission_sale: prod.commission_sale, commission_tech: prod.commission_tech };
+            }
         } else if (type === 'service') {
-            item = services.find(i => i.id === itemId);
+            const svc = services.find(i => i.id === itemId);
+            if (svc) {
+                item = { id: svc.id, name: svc.name, price: svc.price, department: svc.department, commission_sale: svc.commission_sale, commission_tech: svc.commission_tech };
+            }
         } else if (type === 'package') {
             const pkg = packages.find(i => i.id === itemId);
             if (pkg) {
-                item = { id: pkg.id, name: pkg.name, price: pkg.price };
+                item = { id: pkg.id, name: pkg.name, price: pkg.price, commission_sale: pkg.commission_sale, commission_tech: pkg.commission_tech };
                 // Get services in package with their department info
                 if (pkg.items && pkg.items.length > 0) {
                     packageServices = pkg.items.map(pkgItem => {
@@ -158,7 +187,9 @@ export function CreateOrderDialog({
                 name: item!.name,
                 quantity: 1,
                 unit_price: item!.price,
-                department: type === 'service' ? (item as { department?: string }).department : undefined,
+                commission_sale: item!.commission_sale || 0,
+                commission_tech: item!.commission_tech || 0,
+                department: item!.department,
                 package_services: type === 'package' && packageServices && packageServices.length > 0 ? packageServices : undefined
             }]);
         }
@@ -179,6 +210,11 @@ export function CreateOrderDialog({
     const handleUpdateQuantity = (index: number, quantity: number) => {
         if (quantity < 1) return;
         setItems(prev => prev.map((item, i) => i === index ? { ...item, quantity } : item));
+    };
+
+    const handleUpdateCommission = (index: number, field: 'commission_sale' | 'commission_tech', value: number) => {
+        if (value < 0 || value > 100) return;
+        setItems(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
     };
 
     // Toggle technician selection with commission (multi-select)
@@ -466,10 +502,19 @@ export function CreateOrderDialog({
                                                 key={p.id}
                                                 type="button"
                                                 onClick={() => handleAddItem('product', p.id)}
-                                                className="flex flex-col items-start p-3 rounded-lg border hover:border-primary hover:bg-primary/5 transition-colors text-left"
+                                                className="flex items-center gap-2 p-3 rounded-lg border hover:border-primary hover:bg-primary/5 transition-colors text-left"
                                             >
-                                                <span className="font-medium text-sm truncate w-full">{p.name}</span>
-                                                <span className="text-primary font-semibold">{formatCurrency(p.price)}</span>
+                                                {p.image ? (
+                                                    <img src={p.image} alt={p.name} className="w-10 h-10 rounded-lg object-cover border shrink-0" />
+                                                ) : (
+                                                    <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                                                        <ShoppingBag className="h-4 w-4 text-muted-foreground" />
+                                                    </div>
+                                                )}
+                                                <div className="flex-1 min-w-0">
+                                                    <span className="font-medium text-sm truncate block">{p.name}</span>
+                                                    <span className="text-primary font-semibold text-sm">{formatCurrency(p.price)}</span>
+                                                </div>
                                             </button>
                                         ))
                                     )}
@@ -489,16 +534,24 @@ export function CreateOrderDialog({
                                                 key={s.id}
                                                 type="button"
                                                 onClick={() => handleAddItem('service', s.id)}
-                                                className="flex flex-col items-start p-3 rounded-lg border hover:border-purple-500 hover:bg-purple-50 transition-colors text-left"
+                                                className="flex items-center gap-2 p-3 rounded-lg border hover:border-purple-500 hover:bg-purple-50 transition-colors text-left"
                                             >
-                                                <span className="font-medium text-sm truncate w-full">{s.name}</span>
-                                                <span className="text-purple-600 font-semibold">{formatCurrency(s.price)}</span>
-                                                {s.department && (
-                                                    <span className="text-xs text-muted-foreground mt-1">
-                                                        <Wrench className="h-3 w-3 inline mr-1" />
-                                                        {getDepartmentLabel(s.department)}
-                                                    </span>
+                                                {s.image ? (
+                                                    <img src={s.image} alt={s.name} className="w-10 h-10 rounded-lg object-cover border shrink-0" />
+                                                ) : (
+                                                    <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center shrink-0">
+                                                        <Sparkles className="h-4 w-4 text-muted-foreground" />
+                                                    </div>
                                                 )}
+                                                <div className="flex-1 min-w-0">
+                                                    <span className="font-medium text-sm truncate block">{s.name}</span>
+                                                    <span className="text-purple-600 font-semibold text-sm">{formatCurrency(s.price)}</span>
+                                                    {s.department && getDepartmentLabel(s.department, departments) && (
+                                                        <span className="text-xs text-muted-foreground block truncate">
+                                                            {getDepartmentLabel(s.department, departments)}
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </button>
                                         ))
                                     )}
@@ -642,6 +695,35 @@ export function CreateOrderDialog({
                                             </Button>
                                         </div>
 
+                                        {/* Commission Display/Edit */}
+                                        <div className="mt-2 ml-16 flex items-center gap-4 text-sm">
+                                            <span className="text-muted-foreground">Hoa hồng:</span>
+                                            <div className="flex items-center gap-1">
+                                                <span className="text-xs text-muted-foreground">Sale</span>
+                                                <Input
+                                                    type="number"
+                                                    min={0}
+                                                    max={100}
+                                                    value={item.commission_sale || 0}
+                                                    onChange={(e) => handleUpdateCommission(index, 'commission_sale', Number(e.target.value))}
+                                                    className="w-16 h-7 text-center text-xs"
+                                                />
+                                                <span className="text-xs text-muted-foreground">%</span>
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                <span className="text-xs text-muted-foreground">KTV</span>
+                                                <Input
+                                                    type="number"
+                                                    min={0}
+                                                    max={100}
+                                                    value={item.commission_tech || 0}
+                                                    onChange={(e) => handleUpdateCommission(index, 'commission_tech', Number(e.target.value))}
+                                                    className="w-16 h-7 text-center text-xs"
+                                                />
+                                                <span className="text-xs text-muted-foreground">%</span>
+                                            </div>
+                                        </div>
+
                                         {/* Technician Assignment for Services */}
                                         {item.type === 'service' && (
                                             <div className="mt-2 ml-16">
@@ -650,7 +732,7 @@ export function CreateOrderDialog({
                                                     <span className="text-sm text-muted-foreground">KTV:</span>
                                                     {item.department && (
                                                         <Badge variant="outline" className="text-xs">
-                                                            {getDepartmentLabel(item.department)}
+                                                            {getDepartmentLabel(item.department, departments)}
                                                         </Badge>
                                                     )}
                                                 </div>
@@ -673,21 +755,29 @@ export function CreateOrderDialog({
                                                         {/* Commission inputs for selected technicians */}
                                                         {item.technicians && item.technicians.length > 0 && (
                                                             <div className="mt-2 space-y-1 border-l-2 border-primary/30 pl-3">
-                                                                {item.technicians.map(t => (
-                                                                    <div key={t.technician_id} className="flex items-center gap-2">
-                                                                        <span className="text-xs text-muted-foreground w-28 truncate">{t.technician_name}</span>
-                                                                        <span className="text-xs text-muted-foreground">Hoa hồng:</span>
-                                                                        <input
-                                                                            type="number"
-                                                                            min="0"
-                                                                            max="100"
-                                                                            value={t.commission_rate}
-                                                                            onChange={(e) => handleUpdateTechnicianCommission(index, t.technician_id, Number(e.target.value))}
-                                                                            className="w-16 h-6 text-xs px-2 border rounded text-center"
-                                                                        />
-                                                                        <span className="text-xs text-muted-foreground">%</span>
-                                                                    </div>
-                                                                ))}
+                                                                {item.technicians.map(t => {
+                                                                    const commissionAmount = Math.round(item.unit_price * item.quantity * t.commission_rate / 100);
+                                                                    return (
+                                                                        <div key={t.technician_id} className="flex items-center gap-2">
+                                                                            <span className="text-xs text-muted-foreground w-28 truncate">{t.technician_name}</span>
+                                                                            <span className="text-xs text-muted-foreground">Hoa hồng:</span>
+                                                                            <input
+                                                                                type="number"
+                                                                                min="0"
+                                                                                max="100"
+                                                                                value={t.commission_rate || ''}
+                                                                                onChange={(e) => handleUpdateTechnicianCommission(index, t.technician_id, Number(e.target.value) || 0)}
+                                                                                onFocus={(e) => e.target.select()}
+                                                                                placeholder="0"
+                                                                                className="w-16 h-6 text-xs px-2 border rounded text-center"
+                                                                            />
+                                                                            <span className="text-xs text-muted-foreground">%</span>
+                                                                            <span className="text-xs font-medium text-green-600 ml-1">
+                                                                                = {formatCurrency(commissionAmount)}
+                                                                            </span>
+                                                                        </div>
+                                                                    );
+                                                                })}
                                                             </div>
                                                         )}
                                                     </div>
@@ -710,7 +800,7 @@ export function CreateOrderDialog({
                                                             </span>
                                                             {svc.department && (
                                                                 <Badge variant="outline" className="text-xs">
-                                                                    {getDepartmentLabel(svc.department)}
+                                                                    {getDepartmentLabel(svc.department, departments)}
                                                                 </Badge>
                                                             )}
                                                         </div>

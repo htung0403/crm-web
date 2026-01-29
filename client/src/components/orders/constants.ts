@@ -92,6 +92,8 @@ export interface OrderItem {
     name: string;
     quantity: number;
     unit_price: number;
+    commission_sale?: number; // Sales commission percentage
+    commission_tech?: number; // Technician commission percentage
     technicians?: TechnicianAssignment[]; // Multiple technicians with commission
     department?: string; // Department of the service
     package_services?: PackageServiceAssignment[]; // Services in package for technician assignment

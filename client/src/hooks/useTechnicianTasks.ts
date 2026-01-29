@@ -44,6 +44,8 @@ export interface TechnicianTask {
         name: string;
         phone: string;
         avatar: string;
+        department?: string;
+        department_id?: string;
     };
     customer?: {
         name: string;

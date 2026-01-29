@@ -150,60 +150,54 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
             console.log('Commissions table may not exist, using 0');
         }
 
-        // Calculate commission from completed orders where technician is assigned
-        let orderCommission = 0;
+        // Calculate commission from order_items (OPTIMIZED)
+        let salesCommission = 0;
+        let techCommission = 0;
+
         try {
-            // Get completed orders in the period
-            const { data: orders } = await supabaseAdmin
+            // For sales: get commission from orders where user is sales_id
+            const { data: salesOrders } = await supabaseAdmin
                 .from('orders')
-                .select('id, items')
+                .select('id')
+                .eq('sales_id', user_id)
                 .in('status', ['completed', 'delivered'])
                 .gte('created_at', startDate)
                 .lte('created_at', endDate + 'T23:59:59');
 
-            if (orders && orders.length > 0) {
-                for (const order of orders) {
-                    if (!order.items) continue;
+            if (salesOrders && salesOrders.length > 0) {
+                const orderIds = salesOrders.map(o => o.id);
+                const { data: salesItems } = await supabaseAdmin
+                    .from('order_items')
+                    .select('commission_sale_amount')
+                    .in('order_id', orderIds);
 
-                    // Parse items if it's a string
-                    const items = typeof order.items === 'string' ? JSON.parse(order.items) : order.items;
+                salesCommission = salesItems?.reduce((sum, item) =>
+                    sum + (item.commission_sale_amount || 0), 0) || 0;
+            }
 
-                    for (const item of items) {
-                        // Check if this technician is assigned to this item
-                        if (item.technicians && Array.isArray(item.technicians)) {
-                            const techAssignment = item.technicians.find((t: any) => t.technician_id === user_id);
-                            if (techAssignment && techAssignment.commission_rate > 0) {
-                                // Calculate commission: service_price * commission_rate%
-                                const servicePrice = (item.unit_price || 0) * (item.quantity || 1);
-                                const commission = Math.floor(servicePrice * techAssignment.commission_rate / 100);
-                                orderCommission += commission;
-                            }
-                        }
+            // For technician: get commission from order_items where user is technician_id
+            const { data: techItems } = await supabaseAdmin
+                .from('order_items')
+                .select('commission_tech_amount, order:orders!inner(status, created_at)')
+                .eq('technician_id', user_id);
 
-                        // Also check package_services for packages
-                        if (item.type === 'package' && item.package_services && Array.isArray(item.package_services)) {
-                            for (const svc of item.package_services) {
-                                if (svc.technicians && Array.isArray(svc.technicians)) {
-                                    const techAssignment = svc.technicians.find((t: any) => t.technician_id === user_id);
-                                    if (techAssignment && techAssignment.commission_rate > 0) {
-                                        // For package services, use an estimated price per service
-                                        // You may need to look up actual service price
-                                        const estimatedServicePrice = (item.unit_price || 0) / (item.package_services.length || 1);
-                                        const commission = Math.floor(estimatedServicePrice * techAssignment.commission_rate / 100);
-                                        orderCommission += commission;
-                                    }
-                                }
-                            }
-                        }
+            if (techItems) {
+                for (const item of techItems) {
+                    const order = item.order as any;
+                    if (order &&
+                        ['completed', 'delivered'].includes(order.status) &&
+                        order.created_at >= startDate &&
+                        order.created_at <= endDate + 'T23:59:59') {
+                        techCommission += item.commission_tech_amount || 0;
                     }
                 }
             }
         } catch (e) {
-            console.log('Error calculating order commission:', e);
+            console.log('Error calculating commission from order_items:', e);
         }
 
-        // Total commission = legacy commissions + order commissions
-        totalCommission += orderCommission;
+        // Total commission = legacy commissions + sales commission + tech commission
+        totalCommission += salesCommission + techCommission;
 
         // Try to get timesheets (table may not exist)
         let totalHours = 176; // Default 22 days * 8 hours

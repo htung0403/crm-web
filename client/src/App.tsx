@@ -10,6 +10,7 @@ import { InvoicesPage } from '@/pages/InvoicesPage';
 import { FinancePage } from '@/pages/FinancePage';
 import { ProductsPage } from '@/pages/ProductsPage';
 import { EmployeesPage } from '@/pages/EmployeesPage';
+import { EmployeeDetailPage } from '@/pages/EmployeeDetailPage';
 import { KPIPage } from '@/pages/KPIPage';
 import { SalaryPage } from '@/pages/SalaryPage';
 import { CustomersPage } from '@/pages/CustomersPage';
@@ -314,6 +315,12 @@ function AppContent() {
             <Route path="/employees" element={
               <ProtectedRoute allowedRoles={pagePermissions.employees}>
                 <EmployeesPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/employees/:id" element={
+              <ProtectedRoute allowedRoles={pagePermissions.employees}>
+                <EmployeeDetailPage />
               </ProtectedRoute>
             } />
 

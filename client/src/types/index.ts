@@ -72,6 +72,7 @@ export interface Service {
     price: number;
     category: string;
     unit: string;
+    image?: string;
     commission_rate?: number;
 }
 
@@ -88,7 +89,10 @@ export interface Package {
     code: string;
     price: number;
     description?: string;
+    image?: string;
     items?: PackageItem[];
+    commission_sale?: number;
+    commission_tech?: number;
     status?: 'active' | 'inactive';
 }
 
@@ -102,6 +106,7 @@ export interface Voucher {
     max_discount?: number;
     quantity: number;
     used_count?: number;
+    image?: string;
     start_date: string;
     end_date: string;
     status?: 'active' | 'inactive' | 'expired';

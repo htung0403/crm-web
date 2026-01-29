@@ -131,7 +131,8 @@ router.put('/:id', authenticate, requireManager, async (req: AuthenticatedReques
             .single();
 
         if (error) {
-            throw new ApiError('Lỗi khi cập nhật dịch vụ', 500);
+            console.error('Supabase update error:', error);
+            throw new ApiError('Lỗi khi cập nhật dịch vụ: ' + error.message, 500);
         }
 
         res.json({
@@ -203,6 +204,231 @@ router.get('/vouchers/list', authenticate, async (req, res, next) => {
         res.json({
             status: 'success',
             data: { vouchers },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// ============ SERVICE-DEPARTMENT RELATIONSHIPS ============
+
+// Get departments for a service
+router.get('/:id/departments', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+
+        const { data, error } = await supabaseAdmin
+            .from('service_departments')
+            .select(`
+                *,
+                department:departments(id, code, name, status)
+            `)
+            .eq('service_id', id)
+            .order('is_primary', { ascending: false });
+
+        if (error) {
+            throw new ApiError('Lỗi khi lấy danh sách phòng ban của dịch vụ', 500);
+        }
+
+        res.json({
+            status: 'success',
+            data: { departments: data },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Add department to service
+router.post('/:id/departments', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { department_id, commission_sale, commission_tech, is_primary } = req.body;
+
+        if (!department_id) {
+            throw new ApiError('department_id là bắt buộc', 400);
+        }
+
+        // If is_primary, remove primary flag from other departments
+        if (is_primary) {
+            await supabaseAdmin
+                .from('service_departments')
+                .update({ is_primary: false })
+                .eq('service_id', id);
+        }
+
+        const { data, error } = await supabaseAdmin
+            .from('service_departments')
+            .insert({
+                service_id: id,
+                department_id,
+                commission_sale: commission_sale || 0,
+                commission_tech: commission_tech || 0,
+                is_primary: is_primary || false,
+            })
+            .select(`
+                *,
+                department:departments(id, code, name, status)
+            `)
+            .single();
+
+        if (error) {
+            if (error.code === '23505') {
+                throw new ApiError('Phòng ban này đã được thêm cho dịch vụ', 400);
+            }
+            throw new ApiError('Lỗi khi thêm phòng ban: ' + error.message, 500);
+        }
+
+        res.status(201).json({
+            status: 'success',
+            data: { serviceDepartment: data },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Update department commission for service
+router.put('/:id/departments/:deptId', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id, deptId } = req.params;
+        const { commission_sale, commission_tech, is_primary } = req.body;
+
+        // If setting as primary, remove primary flag from others first
+        if (is_primary) {
+            await supabaseAdmin
+                .from('service_departments')
+                .update({ is_primary: false })
+                .eq('service_id', id);
+        }
+
+        const { data, error } = await supabaseAdmin
+            .from('service_departments')
+            .update({
+                commission_sale,
+                commission_tech,
+                is_primary,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('service_id', id)
+            .eq('department_id', deptId)
+            .select(`
+                *,
+                department:departments(id, code, name, status)
+            `)
+            .single();
+
+        if (error) {
+            throw new ApiError('Lỗi khi cập nhật hoa hồng: ' + error.message, 500);
+        }
+
+        res.json({
+            status: 'success',
+            data: { serviceDepartment: data },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Remove department from service
+router.delete('/:id/departments/:deptId', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id, deptId } = req.params;
+
+        const { error } = await supabaseAdmin
+            .from('service_departments')
+            .delete()
+            .eq('service_id', id)
+            .eq('department_id', deptId);
+
+        if (error) {
+            throw new ApiError('Lỗi khi xóa phòng ban: ' + error.message, 500);
+        }
+
+        res.json({
+            status: 'success',
+            message: 'Đã xóa phòng ban khỏi dịch vụ',
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Batch update departments for a service (replace all)
+router.put('/:id/departments', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { departments } = req.body; // Array of { department_id, commission_sale, commission_tech, is_primary }
+
+        if (!Array.isArray(departments)) {
+            throw new ApiError('departments phải là mảng', 400);
+        }
+
+        // Delete existing relationships
+        await supabaseAdmin
+            .from('service_departments')
+            .delete()
+            .eq('service_id', id);
+
+        // Insert new relationships
+        if (departments.length > 0) {
+            const insertData = departments.map((d: any) => ({
+                service_id: id,
+                department_id: d.department_id,
+                commission_sale: d.commission_sale || 0,
+                commission_tech: d.commission_tech || 0,
+                is_primary: d.is_primary || false,
+            }));
+
+            const { data, error } = await supabaseAdmin
+                .from('service_departments')
+                .insert(insertData)
+                .select(`
+                    *,
+                    department:departments(id, code, name, status)
+                `);
+
+            if (error) {
+                throw new ApiError('Lỗi khi cập nhật phòng ban: ' + error.message, 500);
+            }
+
+            return res.json({
+                status: 'success',
+                data: { departments: data },
+            });
+        }
+
+        res.json({
+            status: 'success',
+            data: { departments: [] },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Get services by department
+router.get('/by-department/:deptId', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { deptId } = req.params;
+
+        const { data, error } = await supabaseAdmin
+            .from('service_departments')
+            .select(`
+                *,
+                service:services(*)
+            `)
+            .eq('department_id', deptId)
+            .order('is_primary', { ascending: false });
+
+        if (error) {
+            throw new ApiError('Lỗi khi lấy danh sách dịch vụ của phòng ban', 500);
+        }
+
+        res.json({
+            status: 'success',
+            data: { services: data },
         });
     } catch (error) {
         next(error);

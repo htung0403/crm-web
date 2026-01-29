@@ -8,6 +8,7 @@ export interface OrderItem {
     service_id?: string;
     item_type: string;
     item_name: string;
+    image?: string;
     quantity: number;
     unit_price: number;
     total_price: number;

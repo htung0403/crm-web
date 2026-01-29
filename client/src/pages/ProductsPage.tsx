@@ -26,6 +26,8 @@ import {
     type ServicePackage,
     type APIVoucher,
 } from '@/components/products';
+import { type ServiceDepartment } from '@/components/products/ServiceFormDialog';
+import api from '@/lib/api';
 
 // Main Page Component
 interface ProductsPageProps {
@@ -161,9 +163,13 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
     };
 
     // Service handlers
-    const handleCreateService = async (data: Partial<Service>) => {
+    const handleCreateService = async (data: Partial<Service>, departments?: ServiceDepartment[]) => {
         try {
-            await createService(data);
+            const newService = await createService(data);
+            // Save service-department relationships if departments provided
+            if (departments && departments.length > 0 && newService?.id) {
+                await api.put(`/services/${newService.id}/departments`, { departments });
+            }
             toast.success('Đã tạo dịch vụ mới!');
         } catch (error) {
             const err = error as { response?: { data?: { message?: string } } };
@@ -171,10 +177,14 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
         }
     };
 
-    const handleUpdateService = async (data: Partial<Service>) => {
+    const handleUpdateService = async (data: Partial<Service>, departments?: ServiceDepartment[]) => {
         if (!editingItem?.id) return;
         try {
             await updateService(editingItem.id, data);
+            // Update service-department relationships
+            if (departments) {
+                await api.put(`/services/${editingItem.id}/departments`, { departments });
+            }
             toast.success('Đã cập nhật dịch vụ!');
         } catch (error) {
             const err = error as { response?: { data?: { message?: string } } };

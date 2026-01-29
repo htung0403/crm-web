@@ -124,7 +124,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 
         const { data: user, error } = await supabaseAdmin
             .from('users')
-            .select('id, email, name, role, phone, avatar, department, status, created_at, last_login')
+            .select('id, email, name, role, phone, avatar, department, status, created_at, last_login, salary, commission, bank_account, bank_name')
             .eq('id', id)
             .single();
 

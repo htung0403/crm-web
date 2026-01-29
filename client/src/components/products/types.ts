@@ -4,6 +4,9 @@ import type { Package as APIPackage, Voucher as APIVoucher } from '@/types';
 // Extended types for products
 export interface Product extends APIProduct {
     hasInventory?: boolean;
+    image?: string;
+    commission_sale?: number;
+    commission_tech?: number;
 }
 
 export interface ConsumableMaterial {
@@ -15,16 +18,16 @@ export interface ConsumableMaterial {
 
 export interface Service extends APIService {
     slaDefault?: number;
-    commissionSale?: number;
-    commissionTech?: number;
+    commission_sale?: number;
+    commission_tech?: number;
     consumables?: ConsumableMaterial[];
     department?: string;
 }
 
 export interface ServicePackage extends APIPackage {
     validityDays?: number;
-    commissionSale?: number;
-    commissionTech?: number;
+    commission_sale?: number;
+    commission_tech?: number;
     totalPrice?: number;
     discountedPrice?: number;
 }

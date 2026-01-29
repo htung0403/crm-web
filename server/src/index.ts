@@ -23,6 +23,7 @@ import { reportsRouter } from './routes/reports.js';
 import { interactionsRouter } from './routes/interactions.js';
 import technicianTasksRouter from './routes/technician-tasks.js';
 import departmentsRouter from './routes/departments.js';
+import { commissionsRouter } from './routes/commissions.js';
 
 dotenv.config();
 
@@ -65,6 +66,7 @@ app.use('/api/reports', reportsRouter);
 app.use('/api/interactions', interactionsRouter);
 app.use('/api/technician-tasks', technicianTasksRouter);
 app.use('/api/departments', departmentsRouter);
+app.use('/api/commissions', commissionsRouter);
 
 // Error handling
 app.use(errorHandler);

@@ -1,4 +1,4 @@
-import { Edit, Trash2 } from 'lucide-react';
+import { Edit, Trash2, CreditCard } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency } from '@/lib/utils';
@@ -16,6 +16,7 @@ export function VouchersTable({ vouchers, onEdit, onDelete }: VouchersTableProps
             <table className="w-full">
                 <thead className="bg-muted/50 border-b">
                     <tr>
+                        <th className="p-3 text-left text-sm font-medium text-muted-foreground">Hình ảnh</th>
                         <th className="p-3 text-left text-sm font-medium text-muted-foreground">Mã</th>
                         <th className="p-3 text-left text-sm font-medium text-muted-foreground">Tên voucher</th>
                         <th className="p-3 text-center text-sm font-medium text-muted-foreground">Loại</th>
@@ -29,13 +30,26 @@ export function VouchersTable({ vouchers, onEdit, onDelete }: VouchersTableProps
                 <tbody>
                     {vouchers.length === 0 ? (
                         <tr>
-                            <td colSpan={8} className="p-8 text-center text-muted-foreground">
+                            <td colSpan={9} className="p-8 text-center text-muted-foreground">
                                 Không tìm thấy voucher nào
                             </td>
                         </tr>
                     ) : (
                         vouchers.map((voucher) => (
                             <tr key={voucher.id} className="border-b hover:bg-muted/30 transition-colors">
+                                <td className="p-3">
+                                    {voucher.image ? (
+                                        <img
+                                            src={voucher.image}
+                                            alt={voucher.name}
+                                            className="w-12 h-12 rounded-lg object-cover border shadow-sm"
+                                        />
+                                    ) : (
+                                        <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center">
+                                            <CreditCard className="h-5 w-5 text-muted-foreground" />
+                                        </div>
+                                    )}
+                                </td>
                                 <td className="p-3 font-mono text-sm">{voucher.code}</td>
                                 <td className="p-3 font-medium">{voucher.name}</td>
                                 <td className="p-3 text-center">
@@ -73,3 +87,4 @@ export function VouchersTable({ vouchers, onEdit, onDelete }: VouchersTableProps
         </div>
     );
 }
+

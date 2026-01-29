@@ -1,4 +1,4 @@
-import { Edit, Trash2 } from 'lucide-react';
+import { Edit, Trash2, Package } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency } from '@/lib/utils';
@@ -17,11 +17,14 @@ export function ProductsTable({ products, loading, onEdit, onDelete }: ProductsT
             <table className="w-full">
                 <thead className="bg-muted/50 border-b">
                     <tr>
+                        <th className="p-3 text-left text-sm font-medium text-muted-foreground">Hình ảnh</th>
                         <th className="p-3 text-left text-sm font-medium text-muted-foreground">Mã</th>
                         <th className="p-3 text-left text-sm font-medium text-muted-foreground">Tên sản phẩm</th>
                         <th className="p-3 text-left text-sm font-medium text-muted-foreground">Đơn vị</th>
                         <th className="p-3 text-right text-sm font-medium text-muted-foreground">Giá</th>
                         <th className="p-3 text-center text-sm font-medium text-muted-foreground">Tồn kho</th>
+                        <th className="p-3 text-center text-sm font-medium text-muted-foreground">HH Sale</th>
+                        <th className="p-3 text-center text-sm font-medium text-muted-foreground">HH KTV</th>
                         <th className="p-3 text-center text-sm font-medium text-muted-foreground">Trạng thái</th>
                         <th className="p-3 text-right text-sm font-medium text-muted-foreground">Thao tác</th>
                     </tr>
@@ -29,19 +32,32 @@ export function ProductsTable({ products, loading, onEdit, onDelete }: ProductsT
                 <tbody>
                     {loading && products.length === 0 ? (
                         <tr>
-                            <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                            <td colSpan={10} className="p-8 text-center text-muted-foreground">
                                 Đang tải dữ liệu...
                             </td>
                         </tr>
                     ) : products.length === 0 ? (
                         <tr>
-                            <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                            <td colSpan={10} className="p-8 text-center text-muted-foreground">
                                 Không tìm thấy sản phẩm nào
                             </td>
                         </tr>
                     ) : (
                         products.map((product) => (
                             <tr key={product.id} className="border-b hover:bg-muted/30 transition-colors">
+                                <td className="p-3">
+                                    {product.image ? (
+                                        <img
+                                            src={product.image}
+                                            alt={product.name}
+                                            className="w-12 h-12 rounded-lg object-cover border shadow-sm"
+                                        />
+                                    ) : (
+                                        <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center">
+                                            <Package className="h-5 w-5 text-muted-foreground" />
+                                        </div>
+                                    )}
+                                </td>
                                 <td className="p-3 font-mono text-sm">{product.code}</td>
                                 <td className="p-3 font-medium">{product.name}</td>
                                 <td className="p-3 text-sm">{product.unit}</td>
@@ -50,6 +66,12 @@ export function ProductsTable({ products, loading, onEdit, onDelete }: ProductsT
                                     <Badge variant={product.stock > 10 ? 'success' : product.stock > 0 ? 'warning' : 'danger'}>
                                         {product.stock}
                                     </Badge>
+                                </td>
+                                <td className="p-3 text-center text-sm">
+                                    {product.commission_sale || 0}%
+                                </td>
+                                <td className="p-3 text-center text-sm">
+                                    {product.commission_tech || 0}%
                                 </td>
                                 <td className="p-3 text-center">
                                     <Badge variant={product.status === 'active' ? 'success' : 'secondary'}>
@@ -74,3 +96,4 @@ export function ProductsTable({ products, loading, onEdit, onDelete }: ProductsT
         </div>
     );
 }
+

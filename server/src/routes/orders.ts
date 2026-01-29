@@ -8,8 +8,67 @@ const router = Router();
 // Get all orders
 router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { status, customer_id, search, page = 1, limit = 20 } = req.query;
+        const { status, customer_id, search, sale_id, technician_id, page = 1, limit = 20 } = req.query;
         const offset = (Number(page) - 1) * Number(limit);
+
+        // If technician_id is provided, we need to find orders with items assigned to that technician
+        if (technician_id) {
+            // Get order IDs where the technician is assigned
+            const { data: techOrders, error: techError } = await supabaseAdmin
+                .from('order_items')
+                .select('order_id')
+                .eq('technician_id', technician_id);
+
+            if (techError) {
+                throw new ApiError('Lỗi khi tìm đơn hàng', 500);
+            }
+
+            const orderIds = [...new Set((techOrders || []).map(o => o.order_id))];
+
+            if (orderIds.length === 0) {
+                return res.json({
+                    status: 'success',
+                    data: {
+                        orders: [],
+                        pagination: {
+                            page: Number(page),
+                            limit: Number(limit),
+                            total: 0,
+                            totalPages: 0,
+                        }
+                    },
+                });
+            }
+
+            const { data: orders, error, count } = await supabaseAdmin
+                .from('orders')
+                .select(`
+                    *,
+                    customer:customers(id, name, phone, email),
+                    sales_user:users!orders_sales_id_fkey(id, name),
+                    items:order_items(id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id)
+                `, { count: 'exact' })
+                .in('id', orderIds)
+                .order('created_at', { ascending: false })
+                .range(offset, offset + Number(limit) - 1);
+
+            if (error) {
+                throw new ApiError('Lỗi khi lấy danh sách đơn hàng', 500);
+            }
+
+            return res.json({
+                status: 'success',
+                data: {
+                    orders,
+                    pagination: {
+                        page: Number(page),
+                        limit: Number(limit),
+                        total: count || 0,
+                        totalPages: Math.ceil((count || 0) / Number(limit)),
+                    }
+                },
+            });
+        }
 
         let query = supabaseAdmin
             .from('orders')
@@ -25,6 +84,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
         if (status) query = query.eq('status', status);
         if (customer_id) query = query.eq('customer_id', customer_id);
         if (search) query = query.ilike('order_code', `%${search}%`);
+        if (sale_id) query = query.eq('sales_id', sale_id);
 
         const { data: orders, error, count } = await query;
 
@@ -122,19 +182,33 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
         // Generate unique item codes for QR scanning
         const generateItemCode = () => `IT${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`;
 
-        // Tạo order items (including technician_id and item_code)
-        const orderItems = items.map((item: any) => ({
-            order_id: order.id,
-            product_id: item.type === 'product' ? item.item_id : null,
-            service_id: item.type === 'service' ? item.item_id : null,
-            item_type: item.type,
-            item_name: item.name,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            total_price: item.quantity * item.unit_price,
-            technician_id: item.technician_id || null,
-            item_code: generateItemCode(),
-        }));
+        // Tạo order items (including technician_id, item_code, and commission)
+        const orderItems = items.map((item: any) => {
+            const totalPrice = item.quantity * item.unit_price;
+            // Get commission rates from item (passed from frontend) or default to 0
+            const commissionSaleRate = item.commission_sale || 0;
+            const commissionTechRate = item.commission_tech || 0;
+            // Calculate commission amounts
+            const commissionSaleAmount = Math.floor(totalPrice * commissionSaleRate / 100);
+            const commissionTechAmount = Math.floor(totalPrice * commissionTechRate / 100);
+
+            return {
+                order_id: order.id,
+                product_id: item.type === 'product' ? item.item_id : null,
+                service_id: item.type === 'service' ? item.item_id : null,
+                item_type: item.type,
+                item_name: item.name,
+                quantity: item.quantity,
+                unit_price: item.unit_price,
+                total_price: totalPrice,
+                technician_id: item.technician_id || null,
+                item_code: generateItemCode(),
+                commission_sale_rate: commissionSaleRate,
+                commission_tech_rate: commissionTechRate,
+                commission_sale_amount: commissionSaleAmount,
+                commission_tech_amount: commissionTechAmount,
+            };
+        });
 
         const { data: insertedItems, error: itemsError } = await supabaseAdmin
             .from('order_items')
@@ -238,16 +312,35 @@ router.put('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, 
         // Delete old items and insert new ones
         await supabaseAdmin.from('order_items').delete().eq('order_id', id);
 
-        const orderItems = items.map((item: any) => ({
-            order_id: id,
-            product_id: item.type === 'product' ? item.item_id : null,
-            service_id: item.type === 'service' ? item.item_id : null,
-            item_type: item.type,
-            item_name: item.name,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            total_price: item.quantity * item.unit_price,
-        }));
+        // Generate unique item codes for QR scanning
+        const generateItemCode = () => `IT${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`;
+
+        const orderItems = items.map((item: any) => {
+            const totalPrice = item.quantity * item.unit_price;
+            // Get commission rates from item (passed from frontend) or default to 0
+            const commissionSaleRate = item.commission_sale || 0;
+            const commissionTechRate = item.commission_tech || 0;
+            // Calculate commission amounts
+            const commissionSaleAmount = Math.floor(totalPrice * commissionSaleRate / 100);
+            const commissionTechAmount = Math.floor(totalPrice * commissionTechRate / 100);
+
+            return {
+                order_id: id,
+                product_id: item.type === 'product' ? item.item_id : null,
+                service_id: item.type === 'service' ? item.item_id : null,
+                item_type: item.type,
+                item_name: item.name,
+                quantity: item.quantity,
+                unit_price: item.unit_price,
+                total_price: totalPrice,
+                technician_id: item.technician_id || null,
+                item_code: item.item_code || generateItemCode(),
+                commission_sale_rate: commissionSaleRate,
+                commission_tech_rate: commissionTechRate,
+                commission_sale_amount: commissionSaleAmount,
+                commission_tech_amount: commissionTechAmount,
+            };
+        });
 
         const { error: itemsError } = await supabaseAdmin
             .from('order_items')

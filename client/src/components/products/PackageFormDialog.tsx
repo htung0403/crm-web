@@ -9,6 +9,7 @@ import { formatCurrency } from '@/lib/utils';
 import { toast } from 'sonner';
 import type { ServicePackage, Service } from './types';
 import { formatNumber, parseNumber } from './utils';
+import { ImageUpload } from './ImageUpload';
 
 interface PackageFormDialogProps {
     open: boolean;
@@ -24,6 +25,9 @@ export function PackageFormDialog({ open, onClose, pkg, services, onSubmit }: Pa
     const [items, setItems] = useState<{ service_id: string; quantity: number }[]>([]);
     const [price, setPrice] = useState(0);
     const [priceDisplay, setPriceDisplay] = useState('0');
+    const [commissionSale, setCommissionSale] = useState(0);
+    const [commissionTech, setCommissionTech] = useState(0);
+    const [image, setImage] = useState<string | null>(null);
     const [submitting, setSubmitting] = useState(false);
 
     // Reset form when pkg changes
@@ -34,12 +38,18 @@ export function PackageFormDialog({ open, onClose, pkg, services, onSubmit }: Pa
             setItems(pkg.items || []);
             setPrice(pkg.price || 0);
             setPriceDisplay(formatNumber(pkg.price || 0));
+            setCommissionSale(pkg.commission_sale || 0);
+            setCommissionTech(pkg.commission_tech || 0);
+            setImage(pkg.image || null);
         } else {
             setName('');
             setDescription('');
             setItems([]);
             setPrice(0);
             setPriceDisplay('0');
+            setCommissionSale(0);
+            setCommissionTech(0);
+            setImage(null);
         }
     }, [pkg, open]);
 
@@ -81,6 +91,9 @@ export function PackageFormDialog({ open, onClose, pkg, services, onSubmit }: Pa
                 name,
                 description,
                 price,
+                image: image || undefined,
+                commission_sale: commissionSale,
+                commission_tech: commissionTech,
                 items: items.map(item => ({
                     service_id: item.service_id,
                     quantity: item.quantity
@@ -106,6 +119,16 @@ export function PackageFormDialog({ open, onClose, pkg, services, onSubmit }: Pa
                 </DialogHeader>
 
                 <div className="space-y-4 py-4">
+                    {/* Image Upload */}
+                    <div className="space-y-2">
+                        <Label>Hình ảnh gói dịch vụ</Label>
+                        <ImageUpload
+                            value={image}
+                            onChange={setImage}
+                            folder="packages"
+                        />
+                    </div>
+
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <Label>Mã gói</Label>
@@ -136,6 +159,37 @@ export function PackageFormDialog({ open, onClose, pkg, services, onSubmit }: Pa
                             onChange={(e) => setDescription(e.target.value)}
                             placeholder="Mô tả gói dịch vụ"
                         />
+                    </div>
+
+                    {/* Commission Section */}
+                    <div className="pt-2 border-t">
+                        <Label className="text-sm font-medium text-muted-foreground">Hoa hồng (%)</Label>
+                        <div className="grid grid-cols-2 gap-4 mt-2">
+                            <div className="space-y-2">
+                                <Label className="text-xs">Sale</Label>
+                                <Input
+                                    type="number"
+                                    min={0}
+                                    max={100}
+                                    value={commissionSale}
+                                    onChange={(e) => setCommissionSale(Number(e.target.value))}
+                                    onFocus={(e) => e.target.select()}
+                                    placeholder="0"
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label className="text-xs">Kỹ thuật viên</Label>
+                                <Input
+                                    type="number"
+                                    min={0}
+                                    max={100}
+                                    value={commissionTech}
+                                    onChange={(e) => setCommissionTech(Number(e.target.value))}
+                                    onFocus={(e) => e.target.select()}
+                                    placeholder="0"
+                                />
+                            </div>
+                        </div>
                     </div>
 
                     {/* Package Items */}

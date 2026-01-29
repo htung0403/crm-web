@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Package, Gift, Sparkles, ShoppingBag, CreditCard, Printer } from 'lucide-react';
+import { Package, Gift, Sparkles, ShoppingBag, CreditCard, Printer, Wrench } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -91,6 +91,7 @@ export function OrderDetailDialog({
                                     <table className="w-full text-sm">
                                         <thead className="bg-muted/50">
                                             <tr>
+                                                <th className="text-left p-3 font-medium w-16">Ảnh</th>
                                                 <th className="text-left p-3 font-medium">Loại</th>
                                                 <th className="text-left p-3 font-medium">Tên</th>
                                                 <th className="text-center p-3 font-medium">SL</th>
@@ -101,6 +102,18 @@ export function OrderDetailDialog({
                                         <tbody className="divide-y">
                                             {order.items.map((item, i) => (
                                                 <tr key={i} className="hover:bg-muted/30">
+                                                    <td className="p-3">
+                                                        {item.image ? (
+                                                            <img src={item.image} alt={item.item_name} className="w-10 h-10 rounded-lg object-cover border" />
+                                                        ) : (
+                                                            <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
+                                                                {item.item_type === 'product' ? <ShoppingBag className="h-4 w-4 text-muted-foreground" /> :
+                                                                    item.item_type === 'service' ? <Wrench className="h-4 w-4 text-muted-foreground" /> :
+                                                                        item.item_type === 'package' ? <Gift className="h-4 w-4 text-muted-foreground" /> :
+                                                                            <CreditCard className="h-4 w-4 text-muted-foreground" />}
+                                                            </div>
+                                                        )}
+                                                    </td>
                                                     <td className="p-3">
                                                         <Badge className={getItemTypeColor(item.item_type)}>
                                                             {getItemTypeLabel(item.item_type)}
@@ -224,13 +237,14 @@ export function OrderDetailDialog({
                         </Button>
                     </div>
                 </DialogContent>
-            </Dialog>
+            </Dialog >
 
             {/* Print QR Dialog */}
-            <PrintQRDialog
+            < PrintQRDialog
                 order={order}
                 open={showPrintDialog}
-                onClose={() => setShowPrintDialog(false)}
+                onClose={() => setShowPrintDialog(false)
+                }
             />
         </>
     );

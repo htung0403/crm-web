@@ -1,4 +1,4 @@
-import { Edit, Trash2 } from 'lucide-react';
+import { Edit, Trash2, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency } from '@/lib/utils';
@@ -19,6 +19,7 @@ export function ServicesTable({ services, loading, onEdit, onDelete, departments
             <table className="w-full">
                 <thead className="bg-muted/50 border-b">
                     <tr>
+                        <th className="p-3 text-left text-sm font-medium text-muted-foreground">Hình ảnh</th>
                         <th className="p-3 text-left text-sm font-medium text-muted-foreground">Mã</th>
                         <th className="p-3 text-left text-sm font-medium text-muted-foreground">Tên dịch vụ</th>
                         <th className="p-3 text-right text-sm font-medium text-muted-foreground">Giá</th>
@@ -31,19 +32,32 @@ export function ServicesTable({ services, loading, onEdit, onDelete, departments
                 <tbody>
                     {loading && services.length === 0 ? (
                         <tr>
-                            <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                            <td colSpan={8} className="p-8 text-center text-muted-foreground">
                                 Đang tải dữ liệu...
                             </td>
                         </tr>
                     ) : services.length === 0 ? (
                         <tr>
-                            <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                            <td colSpan={8} className="p-8 text-center text-muted-foreground">
                                 Không tìm thấy dịch vụ nào
                             </td>
                         </tr>
                     ) : (
                         services.map((service) => (
                             <tr key={service.id} className="border-b hover:bg-muted/30 transition-colors">
+                                <td className="p-3">
+                                    {service.image ? (
+                                        <img
+                                            src={service.image}
+                                            alt={service.name}
+                                            className="w-12 h-12 rounded-lg object-cover border shadow-sm"
+                                        />
+                                    ) : (
+                                        <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center">
+                                            <Wrench className="h-5 w-5 text-muted-foreground" />
+                                        </div>
+                                    )}
+                                </td>
                                 <td className="p-3 font-mono text-sm">{service.code}</td>
                                 <td className="p-3 font-medium">{service.name}</td>
                                 <td className="p-3 text-right font-semibold text-primary">{formatCurrency(service.price)}</td>
@@ -78,3 +92,4 @@ export function ServicesTable({ services, loading, onEdit, onDelete, departments
         </div>
     );
 }
+
