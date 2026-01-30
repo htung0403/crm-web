@@ -26,6 +26,9 @@ export interface TechnicianTask {
     assigned_at: string | null;
     created_at: string;
     updated_at: string;
+    type?: 'v1_service' | 'v2_service' | 'workflow_step';
+    is_step?: boolean;
+    step_id?: string;
     // Joined data
     order?: {
         order_code: string;

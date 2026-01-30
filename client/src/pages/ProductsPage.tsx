@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, Search, Package, Wrench, Gift, CreditCard } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -36,6 +37,7 @@ interface ProductsPageProps {
 }
 
 export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsPageProps) {
+    const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState(initialTab);
     const [searchTerm, setSearchTerm] = useState('');
 
@@ -279,7 +281,7 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
     const handleAddClick = () => {
         setEditingItem(null);
         if (activeTab === 'products') setShowProductForm(true);
-        else if (activeTab === 'services') setShowServiceForm(true);
+        else if (activeTab === 'services') navigate('/services/new');
         else if (activeTab === 'packages') setShowPackageForm(true);
         else setShowVoucherForm(true);
     };
@@ -355,7 +357,7 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
                             <ServicesTable
                                 services={filteredServices}
                                 loading={loading}
-                                onEdit={(service) => { setEditingItem(service); setShowServiceForm(true); }}
+                                onEdit={(service) => navigate(`/services/${service.id}/edit`)}
                                 onDelete={handleDeleteService}
                                 departments={departments}
                             />

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
     ArrowLeft, Package, Gift, Sparkles, ShoppingBag, CreditCard, Printer,
     Wrench, Loader2, Calendar, User as UserIcon, FileText, Clock, CheckCircle, XCircle,
-    ArrowRight, Building2, Users, Phone, CircleDot, UserPlus, Timer
+    ArrowRight, Building2, Users, Phone, CircleDot, UserPlus, Timer, Layers
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -21,12 +21,14 @@ import type { User } from '@/types';
 import { useOrders } from '@/hooks/useOrders';
 import { useUsers } from '@/hooks/useUsers';
 import { columns } from '@/components/orders/constants';
+import { WorkflowStepsTimeline } from "@/components/orders/WorkflowStepsTimeline";
 import { PrintQRDialog } from '@/components/orders/PrintQRDialog';
 import { EditOrderDialog } from '@/components/orders/EditOrderDialog';
 import { PaymentDialog } from '@/components/orders/PaymentDialog';
 import { useProducts } from '@/hooks/useProducts';
 import { usePackages } from '@/hooks/usePackages';
 import { useVouchers } from '@/hooks/useVouchers';
+import { useDepartments } from '@/hooks/useDepartments';
 
 export function OrderDetailPage() {
     const { id } = useParams<{ id: string }>();
@@ -36,6 +38,7 @@ export function OrderDetailPage() {
     const { packages, fetchPackages } = usePackages();
     const { vouchers, fetchVouchers } = useVouchers();
     const { users: technicians, fetchTechnicians } = useUsers();
+    const { departments, fetchDepartments } = useDepartments();
 
     const [order, setOrder] = useState<Order | null>(null);
     const [loading, setLoading] = useState(true);
@@ -48,6 +51,10 @@ export function OrderDetailPage() {
     const [selectedItem, setSelectedItem] = useState<OrderItem | null>(null);
     const [selectedTechnicianId, setSelectedTechnicianId] = useState<string>('');
     const [assignLoading, setAssignLoading] = useState(false);
+
+    // Workflow steps for department kanban
+    const [allWorkflowSteps, setAllWorkflowSteps] = useState<any[]>([]);
+    const [stepsLoading, setStepsLoading] = useState(false);
 
     // Reload order data
     const reloadOrder = useCallback(async () => {
@@ -95,6 +102,47 @@ export function OrderDetailPage() {
         fetchVouchers();
         fetchTechnicians();
     }, [id, navigate, fetchProducts, fetchServices, fetchPackages, fetchVouchers, fetchTechnicians]);
+
+    // Fetch departments
+    useEffect(() => {
+        fetchDepartments({ status: 'active' });
+    }, [fetchDepartments]);
+
+    // Fetch all workflow steps for this order's items
+    useEffect(() => {
+        const fetchAllSteps = async () => {
+            if (!order?.items || order.items.length === 0) return;
+
+            setStepsLoading(true);
+            try {
+                const allSteps: any[] = [];
+                for (const item of order.items) {
+                    if (item.item_type === 'service') {
+                        try {
+                            const response = await orderItemsApi.getSteps(item.id);
+                            if (response.data?.data) {
+                                const stepsWithItem = (response.data.data as any[]).map(step => ({
+                                    ...step,
+                                    item_name: item.item_name,
+                                    item_id: item.id
+                                }));
+                                allSteps.push(...stepsWithItem);
+                            }
+                        } catch (e) {
+                            console.error('Error fetching steps for item:', item.id, e);
+                        }
+                    }
+                }
+                setAllWorkflowSteps(allSteps);
+            } catch (error) {
+                console.error('Error fetching workflow steps:', error);
+            } finally {
+                setStepsLoading(false);
+            }
+        };
+
+        fetchAllSteps();
+    }, [order?.items]);
 
     // Auto-refresh when window regains focus (e.g., after completing task in another tab)
     useEffect(() => {
@@ -290,6 +338,10 @@ export function OrderDetailPage() {
                         <TabsTrigger value="workflow" className="gap-2">
                             <CircleDot className="h-4 w-4" />
                             Tiến trình
+                        </TabsTrigger>
+                        <TabsTrigger value="workflow-steps" className="gap-2">
+                            <Layers className="h-4 w-4" />
+                            Quy trình
                         </TabsTrigger>
                     </TabsList>
 
@@ -640,12 +692,32 @@ export function OrderDetailPage() {
                                                                 <p className="text-xs text-muted-foreground">SL: {item.quantity}</p>
                                                             </div>
                                                         </div>
-                                                        {(item as any).technician && (
-                                                            <div className="mt-2 flex items-center gap-1.5">
-                                                                <Avatar className="h-5 w-5">
-                                                                    <AvatarFallback className="text-xs bg-amber-200">{(item as any).technician.name?.charAt(0)}</AvatarFallback>
-                                                                </Avatar>
-                                                                <span className="text-xs truncate">{(item as any).technician.name}</span>
+                                                        {/* Display multiple technicians */}
+                                                        {((item as any).technicians?.length > 0 || (item as any).technician) && (
+                                                            <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                                                                {(item as any).technicians?.length > 0 ? (
+                                                                    <>
+                                                                        <div className="flex -space-x-2">
+                                                                            {(item as any).technicians.slice(0, 3).map((t: any, idx: number) => (
+                                                                                <Avatar key={idx} className="h-5 w-5 border-2 border-white">
+                                                                                    <AvatarFallback className="text-xs bg-amber-200">
+                                                                                        {t.technician?.name?.charAt(0) || '?'}
+                                                                                    </AvatarFallback>
+                                                                                </Avatar>
+                                                                            ))}
+                                                                        </div>
+                                                                        <span className="text-xs truncate">
+                                                                            {(item as any).technicians.map((t: any) => t.technician?.name || 'N/A').join(', ')}
+                                                                        </span>
+                                                                    </>
+                                                                ) : (item as any).technician && (
+                                                                    <>
+                                                                        <Avatar className="h-5 w-5">
+                                                                            <AvatarFallback className="text-xs bg-amber-200">{(item as any).technician.name?.charAt(0)}</AvatarFallback>
+                                                                        </Avatar>
+                                                                        <span className="text-xs truncate">{(item as any).technician.name}</span>
+                                                                    </>
+                                                                )}
                                                             </div>
                                                         )}
                                                         {/* Timer for assigned */}
@@ -689,12 +761,32 @@ export function OrderDetailPage() {
                                                                 <p className="text-xs text-muted-foreground">SL: {item.quantity}</p>
                                                             </div>
                                                         </div>
-                                                        {(item as any).technician && (
-                                                            <div className="mt-2 flex items-center gap-1.5">
-                                                                <Avatar className="h-5 w-5">
-                                                                    <AvatarFallback className="text-xs bg-blue-200">{(item as any).technician.name?.charAt(0)}</AvatarFallback>
-                                                                </Avatar>
-                                                                <span className="text-xs truncate">{(item as any).technician.name}</span>
+                                                        {/* Display multiple technicians */}
+                                                        {((item as any).technicians?.length > 0 || (item as any).technician) && (
+                                                            <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                                                                {(item as any).technicians?.length > 0 ? (
+                                                                    <>
+                                                                        <div className="flex -space-x-2">
+                                                                            {(item as any).technicians.slice(0, 3).map((t: any, idx: number) => (
+                                                                                <Avatar key={idx} className="h-5 w-5 border-2 border-white">
+                                                                                    <AvatarFallback className="text-xs bg-blue-200">
+                                                                                        {t.technician?.name?.charAt(0) || '?'}
+                                                                                    </AvatarFallback>
+                                                                                </Avatar>
+                                                                            ))}
+                                                                        </div>
+                                                                        <span className="text-xs truncate">
+                                                                            {(item as any).technicians.map((t: any) => t.technician?.name || 'N/A').join(', ')}
+                                                                        </span>
+                                                                    </>
+                                                                ) : (item as any).technician && (
+                                                                    <>
+                                                                        <Avatar className="h-5 w-5">
+                                                                            <AvatarFallback className="text-xs bg-blue-200">{(item as any).technician.name?.charAt(0)}</AvatarFallback>
+                                                                        </Avatar>
+                                                                        <span className="text-xs truncate">{(item as any).technician.name}</span>
+                                                                    </>
+                                                                )}
                                                             </div>
                                                         )}
                                                         {/* Timer for in progress */}
@@ -736,12 +828,32 @@ export function OrderDetailPage() {
                                                                 <p className="text-xs text-muted-foreground">SL: {item.quantity}</p>
                                                             </div>
                                                         </div>
-                                                        {item.technician && (
-                                                            <div className="mt-2 flex items-center gap-1.5">
-                                                                <Avatar className="h-5 w-5">
-                                                                    <AvatarFallback className="text-xs bg-green-200">{item.technician.name?.charAt(0)}</AvatarFallback>
-                                                                </Avatar>
-                                                                <span className="text-xs truncate">{item.technician.name}</span>
+                                                        {/* Display multiple technicians */}
+                                                        {((item as any).technicians?.length > 0 || item.technician) && (
+                                                            <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                                                                {(item as any).technicians?.length > 0 ? (
+                                                                    <>
+                                                                        <div className="flex -space-x-2">
+                                                                            {(item as any).technicians.slice(0, 3).map((t: any, idx: number) => (
+                                                                                <Avatar key={idx} className="h-5 w-5 border-2 border-white">
+                                                                                    <AvatarFallback className="text-xs bg-green-200">
+                                                                                        {t.technician?.name?.charAt(0) || '?'}
+                                                                                    </AvatarFallback>
+                                                                                </Avatar>
+                                                                            ))}
+                                                                        </div>
+                                                                        <span className="text-xs truncate">
+                                                                            {(item as any).technicians.map((t: any) => t.technician?.name || 'N/A').join(', ')}
+                                                                        </span>
+                                                                    </>
+                                                                ) : item.technician && (
+                                                                    <>
+                                                                        <Avatar className="h-5 w-5">
+                                                                            <AvatarFallback className="text-xs bg-green-200">{item.technician.name?.charAt(0)}</AvatarFallback>
+                                                                        </Avatar>
+                                                                        <span className="text-xs truncate">{item.technician.name}</span>
+                                                                    </>
+                                                                )}
                                                             </div>
                                                         )}
                                                         {item.completed_at && (
@@ -782,6 +894,212 @@ export function OrderDetailPage() {
                                         ></div>
                                     </div>
                                 </div>
+
+                                {/* Workflow Steps Section - for services with workflows */}
+                                {order.items?.some(item => item.item_type === 'service') && (
+                                    <div className="mt-6 border-t pt-6">
+                                        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                                            <ArrowRight className="h-5 w-5 text-primary" />
+                                            Chi tiết các bước quy trình
+                                        </h3>
+                                        <p className="text-sm text-muted-foreground mb-4">
+                                            Các dịch vụ có quy trình sẽ hiển thị chi tiết từng bước thực hiện tại đây.
+                                        </p>
+                                        <div className="space-y-4">
+                                            {order.items?.filter(item => item.item_type === 'service').map((item, idx) => (
+                                                <div key={idx} className="border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-blue-50">
+                                                    <div className="flex items-center gap-3 mb-3">
+                                                        <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
+                                                            <Wrench className="h-5 w-5 text-purple-600" />
+                                                        </div>
+                                                        <div>
+                                                            <h4 className="font-semibold">{item.item_name}</h4>
+                                                            <p className="text-sm text-muted-foreground">
+                                                                Trạng thái:
+                                                                <Badge className={`ml-2 ${getItemTypeColor(item.item_type)}`}>
+                                                                    {item.status === 'completed' ? 'Hoàn thành' :
+                                                                        item.status === 'in_progress' ? 'Đang thực hiện' : 'Chờ xử lý'}
+                                                                </Badge>
+                                                            </p>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Workflow Steps Timeline for this Item */}
+                                                    <WorkflowStepsTimeline itemId={item.id} />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    </TabsContent>
+
+                    {/* Workflow Steps Tab - Department Kanban */}
+                    <TabsContent value="workflow-steps">
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2">
+                                    <Layers className="h-5 w-5 text-primary" />
+                                    Các bước quy trình theo phòng ban
+                                </CardTitle>
+                                <p className="text-sm text-muted-foreground">
+                                    Theo dõi tiến độ từng bước của quy trình, được phân nhóm theo phòng ban phụ trách
+                                </p>
+                            </CardHeader>
+                            <CardContent>
+                                {stepsLoading ? (
+                                    <div className="flex items-center justify-center py-12">
+                                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                                        <span className="ml-3 text-muted-foreground">Đang tải quy trình...</span>
+                                    </div>
+                                ) : allWorkflowSteps.length === 0 ? (
+                                    <div className="text-center py-12 text-muted-foreground">
+                                        <Layers className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                                        <p>Chưa có bước quy trình nào được thiết lập cho đơn hàng này.</p>
+                                        <p className="text-sm">Các dịch vụ cần được gắn với quy trình trong phần Cài đặt.</p>
+                                    </div>
+                                ) : (
+                                    <div className="overflow-x-auto pb-4">
+                                        <div className="flex gap-4 min-w-max">
+                                            {/* Group steps by department */}
+                                            {(() => {
+                                                // Create a map of department_id -> steps
+                                                const stepsByDept: Record<string, any[]> = {};
+                                                const unassignedSteps: any[] = [];
+
+                                                allWorkflowSteps.forEach(step => {
+                                                    const deptId = step.department?.id;
+                                                    if (deptId) {
+                                                        if (!stepsByDept[deptId]) {
+                                                            stepsByDept[deptId] = [];
+                                                        }
+                                                        stepsByDept[deptId].push(step);
+                                                    } else {
+                                                        unassignedSteps.push(step);
+                                                    }
+                                                });
+
+                                                // Get department names and order columns
+                                                const deptColumns = departments
+                                                    .filter(d => stepsByDept[d.id])
+                                                    .map(d => ({
+                                                        id: d.id,
+                                                        name: d.name,
+                                                        steps: stepsByDept[d.id] || []
+                                                    }));
+
+                                                // Add unassigned column if there are unassigned steps
+                                                if (unassignedSteps.length > 0) {
+                                                    deptColumns.push({
+                                                        id: 'unassigned',
+                                                        name: 'Chưa phân bổ',
+                                                        steps: unassignedSteps
+                                                    });
+                                                }
+
+                                                return deptColumns.map(col => (
+                                                    <div
+                                                        key={col.id}
+                                                        className="w-72 flex-shrink-0 bg-muted/30 rounded-lg p-3"
+                                                    >
+                                                        {/* Column Header */}
+                                                        <div className="flex items-center gap-2 mb-3 pb-2 border-b">
+                                                            <Building2 className="h-4 w-4 text-primary" />
+                                                            <h3 className="font-semibold text-sm truncate flex-1">{col.name}</h3>
+                                                            <Badge variant="secondary">{col.steps.length}</Badge>
+                                                        </div>
+
+                                                        {/* Steps */}
+                                                        <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                                                            {col.steps.map((step: any) => {
+                                                                const isCompleted = step.status === 'completed';
+                                                                const isInProgress = step.status === 'in_progress';
+                                                                const isAssigned = step.status === 'assigned';
+
+                                                                return (
+                                                                    <div
+                                                                        key={step.id}
+                                                                        className={`bg-white rounded-lg p-3 border shadow-sm transition-all ${isInProgress ? 'ring-2 ring-blue-200 border-blue-300' :
+                                                                            isCompleted ? 'border-green-200 bg-green-50/50' :
+                                                                                isAssigned ? 'border-amber-200' : 'border-gray-200'
+                                                                            }`}
+                                                                    >
+                                                                        {/* Step Name */}
+                                                                        <div className="flex items-start justify-between gap-2 mb-2">
+                                                                            <div className="flex-1 min-w-0">
+                                                                                <p className="font-medium text-sm truncate">{step.step_name}</p>
+                                                                                <p className="text-xs text-muted-foreground truncate">
+                                                                                    {step.item_name}
+                                                                                </p>
+                                                                            </div>
+                                                                            {isCompleted ? (
+                                                                                <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
+                                                                            ) : isInProgress ? (
+                                                                                <Clock className="h-4 w-4 text-blue-500 animate-pulse flex-shrink-0" />
+                                                                            ) : null}
+                                                                        </div>
+
+                                                                        {/* Status Badge */}
+                                                                        <Badge
+                                                                            variant={
+                                                                                isCompleted ? 'success' :
+                                                                                    isInProgress ? 'info' :
+                                                                                        isAssigned ? 'warning' : 'outline'
+                                                                            }
+                                                                            className="text-xs"
+                                                                        >
+                                                                            {isCompleted ? 'Hoàn thành' :
+                                                                                isInProgress ? 'Đang xử lý' :
+                                                                                    isAssigned ? 'Đã phân công' : 'Chờ xử lý'}
+                                                                        </Badge>
+
+                                                                        {/* Technician */}
+                                                                        {step.technician && (
+                                                                            <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                                                                                <UserIcon className="h-3 w-3" />
+                                                                                <span className="truncate">{step.technician.name}</span>
+                                                                            </div>
+                                                                        )}
+
+                                                                        {/* Completed time */}
+                                                                        {step.completed_at && (
+                                                                            <div className="mt-1 text-xs text-green-600">
+                                                                                ✓ {new Date(step.completed_at).toLocaleString('vi-VN')}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    </div>
+                                                ));
+                                            })()}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Summary */}
+                                {allWorkflowSteps.length > 0 && (
+                                    <div className="mt-6 p-4 bg-muted/30 rounded-lg">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <span className="text-sm font-medium">Tiến độ quy trình</span>
+                                            <span className="text-sm text-muted-foreground">
+                                                {allWorkflowSteps.filter(s => s.status === 'completed').length} / {allWorkflowSteps.length} bước hoàn thành
+                                            </span>
+                                        </div>
+                                        <div className="h-3 bg-muted rounded-full overflow-hidden">
+                                            <div
+                                                className="h-full bg-gradient-to-r from-green-400 to-green-500 transition-all duration-500"
+                                                style={{
+                                                    width: allWorkflowSteps.length
+                                                        ? `${(allWorkflowSteps.filter(s => s.status === 'completed').length / allWorkflowSteps.length) * 100}%`
+                                                        : '0%'
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
                     </TabsContent>

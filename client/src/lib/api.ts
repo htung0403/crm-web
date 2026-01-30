@@ -137,6 +137,10 @@ export const ordersApi = {
     create: (data: any) =>
         api.post<ApiResponse<{ order: any }>>('/orders', data),
 
+    // V2: Create order with customer products (shoes, bags, etc.)
+    createV2: (data: { customer_id: string; products: any[]; notes?: string; discount?: number; status?: 'pending' | 'confirmed' }) =>
+        api.post<ApiResponse<{ order: any; products: any[] }>>('/orders/v2', data),
+
     update: (id: string, data: any) =>
         api.put<ApiResponse<{ order: any }>>(`/orders/${id}`, data),
 
@@ -145,6 +149,33 @@ export const ordersApi = {
 
     delete: (id: string) =>
         api.delete<ApiResponse<null>>(`/orders/${id}`),
+};
+
+// Order Products API (Customer's products: shoes, bags, etc.)
+export const orderProductsApi = {
+    // Get product by QR code
+    getByCode: (code: string) =>
+        api.get<ApiResponse<any>>(`/order-products/code/${code}`),
+
+    // Get product by ID
+    getById: (id: string) =>
+        api.get<ApiResponse<any>>(`/order-products/${id}`),
+
+    // Update product status
+    updateStatus: (id: string, status: string) =>
+        api.patch<ApiResponse<any>>(`/order-products/${id}/status`, { status }),
+
+    // Assign technician to a service
+    assignService: (serviceId: string, technician_id: string) =>
+        api.patch<ApiResponse<any>>(`/order-products/services/${serviceId}/assign`, { technician_id }),
+
+    // Start a service
+    startService: (serviceId: string) =>
+        api.patch<ApiResponse<any>>(`/order-products/services/${serviceId}/start`),
+
+    // Complete a service
+    completeService: (serviceId: string, notes?: string) =>
+        api.patch<ApiResponse<{ allServicesCompleted: boolean }>>(`/order-products/services/${serviceId}/complete`, { notes }),
 };
 
 // Order Items API
@@ -160,6 +191,22 @@ export const orderItemsApi = {
 
     complete: (id: string, notes?: string) =>
         api.patch<ApiResponse<{ allItemsCompleted: boolean }>>(`/order-items/${id}/complete`, { notes }),
+
+    // Order Item Steps (Workflow Steps)
+    getSteps: (orderItemId: string) =>
+        api.get<ApiResponse<any[]>>(`/order-items/${orderItemId}/steps`),
+
+    assignStep: (stepId: string, technician_id: string) =>
+        api.patch<ApiResponse<any>>(`/order-items/steps/${stepId}/assign`, { technician_id }),
+
+    startStep: (stepId: string) =>
+        api.patch<ApiResponse<any>>(`/order-items/steps/${stepId}/start`),
+
+    completeStep: (stepId: string, notes?: string) =>
+        api.patch<ApiResponse<{ allStepsCompleted: boolean }>>(`/order-items/steps/${stepId}/complete`, { notes }),
+
+    skipStep: (stepId: string, notes?: string) =>
+        api.patch<ApiResponse<any>>(`/order-items/steps/${stepId}/skip`, { notes }),
 };
 
 // Invoices API

@@ -1,86 +1,118 @@
-import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-    ArrowLeft, Plus, Trash, Package, Gift, Search, Sparkles, ShoppingBag,
-    Loader2, User, Wrench, QrCode, CheckCircle
+    ArrowLeft, ArrowRight, Plus, Trash2, Camera, Package, Sparkles,
+    Loader2, User, Search, CheckCircle, ShoppingBag, QrCode, Image as ImageIcon,
+    Tag, Palette, Layers, FileText, Check, Wrench, UserCheck, X, UserPlus
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { formatCurrency } from '@/lib/utils';
 import { useCustomers } from '@/hooks/useCustomers';
 import { useProducts } from '@/hooks/useProducts';
 import { usePackages } from '@/hooks/usePackages';
-import { useVouchers } from '@/hooks/useVouchers';
 import { useUsers } from '@/hooks/useUsers';
-import { useDepartments } from '@/hooks/useDepartments';
-import { useOrders } from '@/hooks/useOrders';
-import type { Package as PackageType, Voucher } from '@/types';
-import { getItemTypeLabel, getItemTypeColor, type OrderItem } from '@/components/orders/constants';
-import { OrderConfirmationDialog } from '@/components/orders/OrderConfirmationDialog';
+import { ordersApi } from '@/lib/api';
+import { CreateCustomerDialog } from '@/components/customers/CreateCustomerDialog';
 
-// Simple helper to display department - look up name from ID
-const getDepartmentLabel = (deptId: string | undefined, departments: { id: string; name: string }[]) => {
-    if (!deptId) return '';
-    const dept = departments.find(d => d.id === deptId);
-    return dept?.name || '';
-};
+// Product types for cleaning services
+const PRODUCT_TYPES = [
+    { value: 'giày', label: 'Giày' },
+    { value: 'túi', label: 'Túi xách' },
+    { value: 'ví', label: 'Ví' },
+    { value: 'thắt lưng', label: 'Thắt lưng' },
+    { value: 'dép', label: 'Dép' },
+    { value: 'mũ', label: 'Mũ/Nón' },
+    { value: 'khác', label: 'Khác' },
+];
+
+// Common brands
+const COMMON_BRANDS = [
+    'Nike', 'Adidas', 'Gucci', 'Louis Vuitton', 'Chanel', 'Hermes',
+    'Prada', 'Dior', 'Balenciaga', 'Converse', 'Vans', 'Khác'
+];
+
+interface CustomerProduct {
+    id: string;
+    name: string;
+    type: string;
+    brand: string;
+    color: string;
+    size: string;
+    material: string;
+    condition_before: string;
+    images: string[];
+    notes: string;
+    services: Array<{
+        id: string;
+        type: 'service' | 'package';
+        name: string;
+        price: number;
+        technicians: Array<{
+            id: string;
+            name: string;
+            commission: number; // phần trăm hoa hồng
+        }>;
+    }>;
+}
+
+const generateTempId = () => `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
 export function CreateOrderPage() {
     const navigate = useNavigate();
-    const [searchParams] = useSearchParams();
-    const initialCustomerPhone = searchParams.get('phone');
-    const initialCustomerName = searchParams.get('name');
 
-    // Hooks for data
-    const { customers, fetchCustomers } = useCustomers();
-    const { products, services, fetchProducts, fetchServices } = useProducts();
+    // Steps: 1 = Customer, 2 = Products, 3 = Services, 4 = Review
+    const [step, setStep] = useState(1);
+
+    // Data hooks
+    const { customers, fetchCustomers, createCustomer } = useCustomers();
+    const { services, fetchServices } = useProducts();
     const { packages, fetchPackages } = usePackages();
-    const { vouchers, fetchVouchers } = useVouchers();
     const { users: technicians, fetchTechnicians } = useUsers();
-    const { departments, fetchDepartments } = useDepartments();
-    const { createOrder } = useOrders();
 
     // Form state
     const [customerId, setCustomerId] = useState('');
     const [customerSearch, setCustomerSearch] = useState('');
+    const [products, setProducts] = useState<CustomerProduct[]>([]);
+    const [currentProductIndex, setCurrentProductIndex] = useState<number | null>(null);
     const [notes, setNotes] = useState('');
-    const [manualDiscount, setManualDiscount] = useState(0);
-    const [itemSearch, setItemSearch] = useState('');
-    const [activeTab, setActiveTab] = useState('product');
-    const [appliedVoucher, setAppliedVoucher] = useState<Voucher | null>(null);
-    const [items, setItems] = useState<OrderItem[]>([]);
-    const [submitting, setSubmitting] = useState(false);
+    const [discount, setDiscount] = useState(0);
     const [loading, setLoading] = useState(true);
-    // Technician dialog state
-    const [techDialogOpen, setTechDialogOpen] = useState(false);
-    const [techDialogItemIndex, setTechDialogItemIndex] = useState<number | null>(null);
-    const [techDialogServiceId, setTechDialogServiceId] = useState<string | null>(null); // for package services
-    const [techDialogCommissions, setTechDialogCommissions] = useState<Record<string, number>>({}); // track commission by tech id
-    // Confirmation dialog state
-    const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
     const [createdOrder, setCreatedOrder] = useState<any>(null);
 
-    // Fetch all required data
+    // Confirmation dialog state
+    const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+
+    // Technician selection dialog state
+    const [techDialogOpen, setTechDialogOpen] = useState(false);
+    const [pendingService, setPendingService] = useState<{
+        productIndex: number;
+        service: { id: string; type: 'service' | 'package'; name: string; price: number };
+    } | null>(null);
+
+    // Create customer dialog state
+    const [showCreateCustomerDialog, setShowCreateCustomerDialog] = useState(false);
+
+    // Fetch data
     useEffect(() => {
         const fetchData = async () => {
             setLoading(true);
             try {
                 await Promise.all([
                     fetchCustomers({ status: 'active' }),
-                    fetchProducts({ status: 'active' }),
                     fetchServices({ status: 'active' }),
                     fetchPackages(),
-                    fetchVouchers(),
-                    fetchTechnicians(),
-                    fetchDepartments()
+                    fetchTechnicians()
                 ]);
             } catch {
                 toast.error('Lỗi khi tải dữ liệu');
@@ -89,212 +121,164 @@ export function CreateOrderPage() {
             }
         };
         fetchData();
-    }, [fetchCustomers, fetchProducts, fetchServices, fetchPackages, fetchVouchers, fetchTechnicians, fetchDepartments]);
-
-    // Handle initial customer from URL params
-    useEffect(() => {
-        if (initialCustomerPhone && customers.length > 0) {
-            const matchedCustomer = customers.find(c => c.phone === initialCustomerPhone);
-            if (matchedCustomer) {
-                setCustomerId(matchedCustomer.id);
-                setCustomerSearch('');
-            } else {
-                setCustomerSearch(initialCustomerPhone || initialCustomerName || '');
-            }
-        }
-    }, [initialCustomerPhone, initialCustomerName, customers]);
-
-    // Filter only active customers
-    const activeCustomers = customers.filter(c => c.status === 'active' || !c.status);
-
-    // Filter customers by search
-    const filteredCustomers = activeCustomers.filter(c =>
-        c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
-        c.phone.includes(customerSearch)
-    );
-
-    // Get selected customer info
-    const selectedCustomer = customers.find(c => c.id === customerId);
+    }, [fetchCustomers, fetchServices, fetchPackages, fetchTechnicians]);
 
     // Filter technicians by role
     const availableTechnicians = technicians.filter(t =>
         t.role === 'technician' || t.role === 'tech' as string
     );
 
-    // Get technicians for a specific department
-    const getTechniciansForDepartment = (department?: string) => {
-        if (!department) return availableTechnicians;
-        return availableTechnicians.filter(t =>
-            t.department?.toLowerCase().includes(department.toLowerCase()) ||
-            !t.department
-        );
+    // Helpers
+    const activeCustomers = customers.filter(c => c.status === 'active' || !c.status);
+    const filteredCustomers = activeCustomers.filter(c =>
+        c.name.toLowerCase().includes(customerSearch.toLowerCase()) ||
+        c.phone.includes(customerSearch)
+    );
+    const selectedCustomer = customers.find(c => c.id === customerId);
+    const activePackages = packages.filter(p => p.status === 'active');
+
+    // Handle create new customer
+    const handleCreateCustomer = async (data: Parameters<typeof createCustomer>[0]) => {
+        try {
+            const newCustomer = await createCustomer(data);
+            toast.success('Đã thêm khách hàng mới!');
+            setShowCreateCustomerDialog(false);
+            // Auto-select the newly created customer
+            setCustomerId(newCustomer.id);
+            await fetchCustomers({ status: 'active' });
+            return newCustomer;
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Lỗi khi tạo khách hàng';
+            toast.error(message);
+            throw error;
+        }
     };
 
-    // Generate unique item code for QR
-    const generateItemCode = () => {
-        const timestamp = Date.now().toString(36).toUpperCase();
-        const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-        return `IT${timestamp}${random}`;
+    // Add new product
+    const handleAddProduct = () => {
+        const newProduct: CustomerProduct = {
+            id: generateTempId(),
+            name: '',
+            type: 'giày',
+            brand: '',
+            color: '',
+            size: '',
+            material: '',
+            condition_before: '',
+            images: [],
+            notes: '',
+            services: []
+        };
+        setProducts(prev => [...prev, newProduct]);
+        setCurrentProductIndex(products.length);
     };
 
-    // Filter items by search
-    const filteredProducts = products.filter(p =>
-        p.name.toLowerCase().includes(itemSearch.toLowerCase())
-    );
-    const filteredServices = services.filter(s =>
-        s.name.toLowerCase().includes(itemSearch.toLowerCase())
-    );
-    const filteredPackages = packages.filter(p =>
-        p.name.toLowerCase().includes(itemSearch.toLowerCase()) &&
-        p.status === 'active'
-    );
-    const filteredVouchers = vouchers.filter(v =>
-        (v.name.toLowerCase().includes(itemSearch.toLowerCase()) ||
-            v.code.toLowerCase().includes(itemSearch.toLowerCase())) &&
-        v.status === 'active'
-    );
+    // Update product
+    const handleUpdateProduct = (index: number, field: keyof CustomerProduct, value: any) => {
+        setProducts(prev => prev.map((p, i) => i === index ? { ...p, [field]: value } : p));
+    };
 
-    const handleAddItem = (type: 'product' | 'service' | 'package' | 'voucher', itemId: string) => {
-        if (type === 'voucher') {
-            const voucher = vouchers.find(i => i.id === itemId);
-            if (voucher) {
-                if (appliedVoucher?.id === voucher.id) {
-                    toast.info('Voucher này đã được áp dụng');
-                    return;
-                }
-                setAppliedVoucher(voucher);
-                toast.success(`Đã áp dụng voucher: ${voucher.name}`);
-            }
+    // Remove product
+    const handleRemoveProduct = (index: number) => {
+        setProducts(prev => prev.filter((_, i) => i !== index));
+        if (currentProductIndex === index) {
+            setCurrentProductIndex(null);
+        } else if (currentProductIndex !== null && currentProductIndex > index) {
+            setCurrentProductIndex(currentProductIndex - 1);
+        }
+    };
+
+    // Add service to product (opens technician dialog first)
+    const handleServiceClick = (productIndex: number, service: { id: string; type: 'service' | 'package'; name: string; price: number }) => {
+        // Check if service already exists
+        const product = products[productIndex];
+        const exists = product?.services.find(s => s.id === service.id && s.type === service.type);
+        if (exists) {
+            toast.info('Dịch vụ này đã được thêm');
             return;
         }
-
-        let item: { id: string; name: string; price: number; department?: string; commission_sale?: number; commission_tech?: number } | undefined;
-        let packageServices: { service_id: string; service_name: string; department?: string }[] | undefined;
-
-        if (type === 'product') {
-            const prod = products.find(i => i.id === itemId);
-            if (prod) {
-                item = { id: prod.id, name: prod.name, price: prod.price, commission_sale: prod.commission_sale, commission_tech: prod.commission_tech };
-            }
-        } else if (type === 'service') {
-            const svc = services.find(i => i.id === itemId);
-            if (svc) {
-                item = { id: svc.id, name: svc.name, price: svc.price, department: svc.department, commission_sale: svc.commission_sale, commission_tech: svc.commission_tech };
-            }
-        } else if (type === 'package') {
-            const pkg = packages.find(i => i.id === itemId);
-            if (pkg) {
-                item = { id: pkg.id, name: pkg.name, price: pkg.price, commission_sale: pkg.commission_sale, commission_tech: pkg.commission_tech };
-                if (pkg.items && pkg.items.length > 0) {
-                    packageServices = pkg.items.map(pkgItem => {
-                        const svc = services.find(s => s.id === pkgItem.service_id);
-                        return {
-                            service_id: pkgItem.service_id,
-                            service_name: svc?.name || pkgItem.service_name || 'Dịch vụ',
-                            department: svc?.department
-                        };
-                    }).filter(s => s.department);
-                }
-            }
-        }
-
-        if (!item) return;
-
-        const existingIndex = items.findIndex(i => i.item_id === itemId && i.type === type);
-        if (existingIndex >= 0) {
-            setItems(prev => prev.map((item, i) =>
-                i === existingIndex ? { ...item, quantity: item.quantity + 1 } : item
-            ));
-        } else {
-            setItems(prev => [...prev, {
-                type,
-                item_id: item!.id,
-                item_code: generateItemCode(),
-                name: item!.name,
-                quantity: 1,
-                unit_price: item!.price,
-                commission_sale: item!.commission_sale || 0,
-                commission_tech: item!.commission_tech || 0,
-                department: item!.department,
-                package_services: type === 'package' && packageServices && packageServices.length > 0 ? packageServices : undefined
-            }]);
-        }
-
-        setItemSearch('');
+        // Open dialog to select technician
+        setPendingService({ productIndex, service });
+        setTechDialogOpen(true);
     };
 
-    const handleRemoveVoucher = () => {
-        setAppliedVoucher(null);
-        toast.info('Đã gỡ voucher');
-    };
+    // Confirm adding service with technicians
+    const handleConfirmAddService = (selectedTechnicians: Array<{ id: string; name: string; commission: number }> = []) => {
+        if (!pendingService) return;
 
-    const handleRemoveItem = (index: number) => {
-        setItems(prev => prev.filter((_, i) => i !== index));
-    };
+        const { productIndex, service } = pendingService;
 
-    const handleUpdateQuantity = (index: number, quantity: number) => {
-        if (quantity < 1) return;
-        setItems(prev => prev.map((item, i) => i === index ? { ...item, quantity } : item));
-    };
-
-    const handleUpdateCommission = (index: number, field: 'commission_sale' | 'commission_tech', value: number) => {
-        if (value < 0 || value > 100) return;
-        setItems(prev => prev.map((item, i) => i === index ? { ...item, [field]: value } : item));
-    };
-
-    const handleToggleTechnician = (index: number, technicianId: string, technicianName: string, defaultCommission: number = 0) => {
-        setItems(prev => prev.map((item, i) => {
-            if (i !== index) return item;
-            const currentTechs = item.technicians || [];
-            const exists = currentTechs.find(t => t.technician_id === technicianId);
-            const newTechs = exists
-                ? currentTechs.filter(t => t.technician_id !== technicianId)
-                : [...currentTechs, { technician_id: technicianId, technician_name: technicianName, commission_rate: defaultCommission }];
-            return { ...item, technicians: newTechs.length > 0 ? newTechs : undefined };
-        }));
-    };
-
-    const handleUpdateTechnicianCommission = (index: number, technicianId: string, commissionRate: number) => {
-        setItems(prev => prev.map((item, i) => {
-            if (i !== index || !item.technicians) return item;
+        setProducts(prev => prev.map((p, i) => {
+            if (i !== productIndex) return p;
             return {
-                ...item,
-                technicians: item.technicians.map(t =>
-                    t.technician_id === technicianId ? { ...t, commission_rate: commissionRate } : t
-                )
+                ...p,
+                services: [...p.services, {
+                    ...service,
+                    technicians: selectedTechnicians
+                }]
             };
         }));
+
+        setTechDialogOpen(false);
+        setPendingService(null);
+        const techNames = selectedTechnicians.map(t => t.name).join(', ');
+        toast.success(`Đã thêm ${service.name}${techNames ? ` - KTV: ${techNames}` : ''}`);
     };
 
-    const handleTogglePackageServiceTechnician = (itemIndex: number, serviceId: string, technicianId: string, technicianName: string, defaultCommission: number = 0) => {
-        setItems(prev => prev.map((item, i) => {
-            if (i !== itemIndex || !item.package_services) return item;
+    // Add technician to a service
+    const handleAddTechnicianToService = (productIndex: number, serviceIndex: number, technicianId: string, commission: number = 0) => {
+        const technician = availableTechnicians.find(t => t.id === technicianId);
+        if (!technician) return;
+
+        setProducts(prev => prev.map((p, i) => {
+            if (i !== productIndex) return p;
             return {
-                ...item,
-                package_services: item.package_services.map(svc => {
-                    if (svc.service_id !== serviceId) return svc;
-                    const currentTechs = svc.technicians || [];
-                    const exists = currentTechs.find(t => t.technician_id === technicianId);
-                    const newTechs = exists
-                        ? currentTechs.filter(t => t.technician_id !== technicianId)
-                        : [...currentTechs, { technician_id: technicianId, technician_name: technicianName, commission_rate: defaultCommission }];
-                    return { ...svc, technicians: newTechs.length > 0 ? newTechs : undefined };
+                ...p,
+                services: p.services.map((s, si) => {
+                    if (si !== serviceIndex) return s;
+                    // Check if already added
+                    if (s.technicians.some(t => t.id === technicianId)) {
+                        toast.error('KTV đã được thêm');
+                        return s;
+                    }
+                    return {
+                        ...s,
+                        technicians: [...s.technicians, { id: technician.id, name: technician.name, commission }]
+                    };
                 })
             };
         }));
     };
 
-    const handleUpdatePackageServiceTechnicianCommission = (itemIndex: number, serviceId: string, technicianId: string, commissionRate: number) => {
-        setItems(prev => prev.map((item, i) => {
-            if (i !== itemIndex || !item.package_services) return item;
+    // Remove technician from service
+    const handleRemoveTechnicianFromService = (productIndex: number, serviceIndex: number, technicianId: string) => {
+        setProducts(prev => prev.map((p, i) => {
+            if (i !== productIndex) return p;
             return {
-                ...item,
-                package_services: item.package_services.map(svc => {
-                    if (svc.service_id !== serviceId || !svc.technicians) return svc;
+                ...p,
+                services: p.services.map((s, si) => {
+                    if (si !== serviceIndex) return s;
                     return {
-                        ...svc,
-                        technicians: svc.technicians.map(t =>
-                            t.technician_id === technicianId ? { ...t, commission_rate: commissionRate } : t
+                        ...s,
+                        technicians: s.technicians.filter(t => t.id !== technicianId)
+                    };
+                })
+            };
+        }));
+    };
+
+    // Update technician commission
+    const handleUpdateTechnicianCommission = (productIndex: number, serviceIndex: number, technicianId: string, commission: number) => {
+        setProducts(prev => prev.map((p, i) => {
+            if (i !== productIndex) return p;
+            return {
+                ...p,
+                services: p.services.map((s, si) => {
+                    if (si !== serviceIndex) return s;
+                    return {
+                        ...s,
+                        technicians: s.technicians.map(t =>
+                            t.id === technicianId ? { ...t, commission } : t
                         )
                     };
                 })
@@ -302,89 +286,179 @@ export function CreateOrderPage() {
         }));
     };
 
+    // Remove service from product
+    const handleRemoveService = (productIndex: number, serviceIndex: number) => {
+        setProducts(prev => prev.map((p, i) => {
+            if (i !== productIndex) return p;
+            return { ...p, services: p.services.filter((_, si) => si !== serviceIndex) };
+        }));
+    };
+
     // Calculate totals
-    const subtotal = items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);
+    const subtotal = products.reduce((sum, p) =>
+        sum + p.services.reduce((ssum, s) => ssum + s.price, 0), 0
+    );
+    const total = Math.max(0, subtotal - discount);
 
-    const voucherDiscount = appliedVoucher
-        ? (appliedVoucher.type === 'percentage'
-            ? Math.min(
-                (subtotal * appliedVoucher.value) / 100,
-                appliedVoucher.max_discount || Infinity
-            )
-            : appliedVoucher.value)
-        : 0;
+    // Order Sidebar Component
+    const OrderSidebar = () => (
+        <div className="space-y-4 sticky top-4">
+            {/* Customer Info */}
+            {selectedCustomer && (
+                <Card className="bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20">
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                            <User className="h-4 w-4" />
+                            Khách hàng
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                        <div className="flex items-center gap-3">
+                            <Avatar className="h-12 w-12">
+                                <AvatarFallback className="bg-primary text-white">
+                                    {selectedCustomer.name.charAt(0)}
+                                </AvatarFallback>
+                            </Avatar>
+                            <div>
+                                <p className="font-semibold">{selectedCustomer.name}</p>
+                                <p className="text-sm text-muted-foreground">{selectedCustomer.phone}</p>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
 
-    const voucherValid = !appliedVoucher || subtotal >= (appliedVoucher.min_order_value || 0);
-    const effectiveVoucherDiscount = voucherValid ? voucherDiscount : 0;
-    const totalDiscount = effectiveVoucherDiscount + manualDiscount;
-    const total = Math.max(0, subtotal - totalDiscount);
+            {/* Order Summary */}
+            {products.length > 0 && (
+                <Card>
+                    <CardHeader className="pb-2">
+                        <CardTitle className="text-sm flex items-center gap-2">
+                            <ShoppingBag className="h-4 w-4" />
+                            Tóm tắt đơn hàng
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                        {/* Products list */}
+                        <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
+                            {products.map((product, idx) => (
+                                <div key={product.id} className="text-sm border-b pb-2 last:border-0">
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-medium truncate flex-1">
+                                            {product.name || `Sản phẩm ${idx + 1}`}
+                                        </span>
+                                        <Badge variant="outline" className="text-xs shrink-0">
+                                            {PRODUCT_TYPES.find(t => t.value === product.type)?.label || 'Khác'}
+                                        </Badge>
+                                    </div>
+                                    {product.services.length > 0 && (
+                                        <div className="ml-2 mt-1 space-y-1">
+                                            {product.services.map((s, si) => (
+                                                <div key={si} className="flex justify-between text-xs text-muted-foreground">
+                                                    <span className="truncate">{s.name}</span>
+                                                    <span className="text-green-600 font-medium">{formatCurrency(s.price)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
 
-    const handleSubmit = async () => {
-        if (!customerId || items.length === 0) {
-            toast.error('Vui lòng chọn khách hàng và thêm ít nhất một sản phẩm/dịch vụ');
+                        {/* Totals */}
+                        <div className="pt-2 border-t space-y-1">
+                            <div className="flex justify-between text-sm">
+                                <span className="text-muted-foreground">Số sản phẩm</span>
+                                <span className="font-medium">{products.length}</span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                                <span className="text-muted-foreground">Tạm tính</span>
+                                <span className="font-medium">{formatCurrency(subtotal)}</span>
+                            </div>
+                            {discount > 0 && (
+                                <div className="flex justify-between text-sm text-red-600">
+                                    <span>Giảm giá</span>
+                                    <span>-{formatCurrency(discount)}</span>
+                                </div>
+                            )}
+                            <div className="flex justify-between text-base font-bold pt-1 border-t">
+                                <span>Tổng cộng</span>
+                                <span className="text-primary">{formatCurrency(total)}</span>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+        </div>
+    );
+
+    // Submit order
+    const handleSubmit = async (status: 'pending' | 'confirmed' = 'pending') => {
+        if (!customerId) {
+            toast.error('Vui lòng chọn khách hàng');
             return;
         }
-
-        if (appliedVoucher && !voucherValid) {
-            toast.error(`Đơn hàng phải đạt tối thiểu ${formatCurrency(appliedVoucher.min_order_value || 0)} để áp dụng voucher`);
+        if (products.length === 0) {
+            toast.error('Vui lòng thêm ít nhất một sản phẩm');
+            return;
+        }
+        if (products.some(p => p.services.length === 0)) {
+            toast.error('Mỗi sản phẩm cần có ít nhất một dịch vụ');
+            return;
+        }
+        if (products.some(p => !p.name.trim())) {
+            toast.error('Vui lòng nhập tên cho tất cả sản phẩm');
             return;
         }
 
         setSubmitting(true);
+        setConfirmDialogOpen(false);
         try {
-            const order = await createOrder({
+            const response = await ordersApi.createV2({
                 customer_id: customerId,
-                items: items.map(item => ({
-                    type: item.type,
-                    item_id: item.item_id,
-                    name: item.name,
-                    quantity: item.quantity,
-                    unit_price: item.unit_price,
-                    technicians: item.technicians
+                status: status,
+                products: products.map(p => ({
+                    name: p.name,
+                    type: p.type,
+                    brand: p.brand,
+                    color: p.color,
+                    size: p.size,
+                    material: p.material,
+                    condition_before: p.condition_before,
+                    images: p.images,
+                    notes: p.notes,
+                    services: p.services.map(s => ({
+                        id: s.id,
+                        type: s.type,
+                        name: s.name,
+                        price: s.price,
+                        technicians: s.technicians.map(t => ({
+                            technician_id: t.id,
+                            commission: t.commission
+                        }))
+                    }))
                 })),
                 notes: notes || undefined,
-                discount: totalDiscount > 0 ? totalDiscount : undefined
+                discount: discount > 0 ? discount : undefined
             });
 
-            // Store created order and show confirmation dialog
-            setCreatedOrder({
-                ...order,
-                customer: selectedCustomer,
-                items: items.map(item => ({
-                    id: item.item_id,
-                    item_name: item.name,
-                    quantity: item.quantity,
-                    unit_price: item.unit_price,
-                    total_price: item.quantity * item.unit_price,
-                    item_type: item.type
-                })),
-                total_amount: total
-            });
-            setShowConfirmDialog(true);
+            setCreatedOrder(response.data.data);
+            setStep(5); // Success step
             toast.success('Đã tạo đơn hàng thành công!');
-        } catch {
-            toast.error('Lỗi khi tạo đơn hàng');
+        } catch (error: any) {
+            toast.error(error.response?.data?.message || 'Lỗi khi tạo đơn hàng');
         } finally {
             setSubmitting(false);
         }
     };
 
-    // Handle dialog close - navigate to order detail
-    const handleConfirmDialogClose = () => {
-        setShowConfirmDialog(false);
-        if (createdOrder?.id) {
-            navigate(`/orders/${createdOrder.id}`);
-        } else {
-            navigate('/orders');
-        }
-    };
-
-    // Handle after confirm - navigate to order detail
-    const handleOrderConfirmed = () => {
-        if (createdOrder?.id) {
-            navigate(`/orders/${createdOrder.id}`);
-        } else {
-            navigate('/orders');
+    // Navigation
+    const canGoNext = () => {
+        switch (step) {
+            case 1: return !!customerId;
+            case 2: return products.length > 0 && products.every(p => p.name.trim());
+            case 3: return products.every(p => p.services.length > 0);
+            case 4: return true;
+            default: return false;
         }
     };
 
@@ -400,7 +474,7 @@ export function CreateOrderPage() {
     }
 
     return (
-        <div className="space-y-6 animate-fade-in">
+        <div className="space-y-4 animate-fade-in w-full">
             {/* Header */}
             <div className="flex items-center gap-4">
                 <Button variant="ghost" size="icon" onClick={() => navigate('/orders')}>
@@ -411,751 +485,883 @@ export function CreateOrderPage() {
                         <ShoppingBag className="h-6 w-6 text-primary" />
                         Tạo đơn hàng mới
                     </h1>
-                    <p className="text-muted-foreground">Chọn khách hàng và thêm sản phẩm/dịch vụ vào đơn hàng</p>
+                    <p className="text-muted-foreground">Nhận sản phẩm khách và chọn dịch vụ</p>
                 </div>
             </div>
 
-            {/* Main Content - 2 Column Layout */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Left Column - Customer & Items Selection (2/3 width) */}
-                <div className="lg:col-span-2 space-y-6">
-                    {/* Customer Selection */}
-                    <Card>
-                        <CardHeader className="pb-3">
-                            <CardTitle className="text-base flex items-center gap-2">
-                                <User className="h-4 w-4 text-primary" />
-                                Khách hàng <span className="text-red-500">*</span>
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            {selectedCustomer ? (
-                                <div className="flex items-center gap-3 p-3 bg-primary/5 rounded-lg border border-primary/20">
-                                    <Avatar className="h-12 w-12">
-                                        <AvatarFallback className="bg-primary text-white text-lg">
-                                            {selectedCustomer.name.charAt(0)}
-                                        </AvatarFallback>
-                                    </Avatar>
-                                    <div className="flex-1">
-                                        <p className="font-semibold text-lg">{selectedCustomer.name}</p>
-                                        <p className="text-sm text-muted-foreground">{selectedCustomer.phone}</p>
-                                    </div>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => setCustomerId('')}
-                                    >
-                                        Đổi khách
-                                    </Button>
+            {/* Progress Steps */}
+            {step < 5 && (
+                <div className="flex items-center justify-between">
+                    {[
+                        { num: 1, label: 'Khách hàng', icon: User },
+                        { num: 2, label: 'Sản phẩm', icon: Package },
+                        { num: 3, label: 'Dịch vụ', icon: Sparkles },
+                        { num: 4, label: 'Xác nhận', icon: CheckCircle }
+                    ].map((s, i) => (
+                        <div key={s.num} className="flex items-center flex-1">
+                            <div className={`flex items-center gap-2 ${step >= s.num ? 'text-primary' : 'text-muted-foreground'}`}>
+                                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${step > s.num ? 'bg-primary text-white' :
+                                    step === s.num ? 'bg-primary/10 border-2 border-primary' :
+                                        'bg-muted'
+                                    }`}>
+                                    {step > s.num ? <Check className="h-5 w-5" /> : <s.icon className="h-5 w-5" />}
                                 </div>
-                            ) : (
-                                <div className="space-y-3">
-                                    <div className="relative">
-                                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <span className="hidden md:inline font-medium">{s.label}</span>
+                            </div>
+                            {i < 3 && (
+                                <div className={`flex-1 h-1 mx-2 rounded ${step > s.num ? 'bg-primary' : 'bg-muted'}`} />
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Step 1: Customer Selection */}
+            {step === 1 && (
+                <Card>
+                    <CardHeader>
+                        <div className="flex items-center justify-between">
+                            <CardTitle className="flex items-center gap-2">
+                                <User className="h-5 w-5 text-primary" />
+                                Chọn khách hàng
+                            </CardTitle>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setShowCreateCustomerDialog(true)}
+                                className="gap-2"
+                            >
+                                <UserPlus className="h-4 w-4" />
+                                Thêm khách hàng
+                            </Button>
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        {selectedCustomer ? (
+                            <div className="flex items-center gap-4 p-4 bg-primary/5 rounded-xl border border-primary/20">
+                                <Avatar className="h-16 w-16">
+                                    <AvatarFallback className="bg-primary text-white text-xl">
+                                        {selectedCustomer.name.charAt(0)}
+                                    </AvatarFallback>
+                                </Avatar>
+                                <div className="flex-1">
+                                    <p className="font-semibold text-xl">{selectedCustomer.name}</p>
+                                    <p className="text-muted-foreground">{selectedCustomer.phone}</p>
+                                </div>
+                                <Button variant="outline" onClick={() => setCustomerId('')}>
+                                    Đổi khách
+                                </Button>
+                            </div>
+                        ) : (
+                            <div className="space-y-4">
+                                <div className="flex gap-2">
+                                    <div className="relative flex-1">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                                         <Input
-                                            placeholder="Tìm kiếm theo tên hoặc số điện thoại..."
+                                            placeholder="Tìm theo tên hoặc số điện thoại..."
                                             value={customerSearch}
                                             onChange={(e) => setCustomerSearch(e.target.value)}
-                                            className="pl-9"
+                                            className="pl-10"
                                         />
                                     </div>
-                                    <div className="max-h-60 overflow-y-auto border rounded-lg">
-                                        {filteredCustomers.length === 0 ? (
-                                            <p className="text-sm text-muted-foreground text-center py-8">
+                                </div>
+                                <div className="max-h-[60vh] overflow-y-auto border rounded-lg divide-y">
+                                    {filteredCustomers.length === 0 ? (
+                                        <div className="text-center py-8">
+                                            <p className="text-muted-foreground mb-4">
                                                 Không tìm thấy khách hàng
                                             </p>
-                                        ) : (
-                                            <div className="divide-y">
-                                                {filteredCustomers.slice(0, 15).map(c => (
-                                                    <button
-                                                        key={c.id}
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setCustomerId(c.id);
-                                                            setCustomerSearch('');
-                                                        }}
-                                                        className="w-full flex items-center gap-3 p-3 hover:bg-muted/50 transition-colors text-left"
+                                            <Button
+                                                variant="outline"
+                                                onClick={() => setShowCreateCustomerDialog(true)}
+                                                className="gap-2"
+                                            >
+                                                <UserPlus className="h-4 w-4" />
+                                                Thêm khách hàng mới
+                                            </Button>
+                                        </div>
+                                    ) : (
+                                        filteredCustomers.slice(0, 20).map(c => (
+                                            <button
+                                                key={c.id}
+                                                onClick={() => {
+                                                    setCustomerId(c.id);
+                                                    setCustomerSearch('');
+                                                }}
+                                                className="w-full flex items-center gap-3 p-4 hover:bg-muted/50 transition-colors"
+                                            >
+                                                <Avatar>
+                                                    <AvatarFallback className="bg-primary/10 text-primary">
+                                                        {c.name.charAt(0)}
+                                                    </AvatarFallback>
+                                                </Avatar>
+                                                <div className="text-left">
+                                                    <p className="font-medium">{c.name}</p>
+                                                    <p className="text-sm text-muted-foreground">{c.phone}</p>
+                                                </div>
+                                            </button>
+                                        ))
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
+            )}
+
+            {/* Step 2: Add Products */}
+            {step === 2 && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="lg:col-span-2 space-y-4">
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-lg font-semibold">Sản phẩm khách hàng ({products.length})</h2>
+                            <Button onClick={handleAddProduct} className="gap-2">
+                                <Plus className="h-4 w-4" />
+                                Thêm sản phẩm
+                            </Button>
+                        </div>
+
+                        {products.length === 0 ? (
+                            <Card className="border-dashed">
+                                <CardContent className="py-8 text-center">
+                                    <Package className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
+                                    <h3 className="text-lg font-medium mb-2">Chưa có sản phẩm nào</h3>
+                                    <p className="text-muted-foreground mb-4">
+                                        Thêm sản phẩm khách hàng mang đến (giày, túi, ví...)
+                                    </p>
+                                    <Button onClick={handleAddProduct} className="gap-2">
+                                        <Plus className="h-4 w-4" />
+                                        Thêm sản phẩm đầu tiên
+                                    </Button>
+                                </CardContent>
+                            </Card>
+                        ) : (
+                            <div className="space-y-4">
+                                {products.map((product, index) => (
+                                    <Card key={product.id} className={currentProductIndex === index ? 'ring-2 ring-primary' : ''}>
+                                        <CardHeader className="pb-3">
+                                            <div className="flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <Badge variant="outline" className="shrink-0">
+                                                        {PRODUCT_TYPES.find(t => t.value === product.type)?.label || 'Khác'}
+                                                    </Badge>
+                                                    <CardTitle className="text-base">
+                                                        {product.name || `Sản phẩm ${index + 1}`}
+                                                    </CardTitle>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => setCurrentProductIndex(currentProductIndex === index ? null : index)}
                                                     >
-                                                        <Avatar className="h-10 w-10">
-                                                            <AvatarFallback className="text-sm bg-primary/10 text-primary">
-                                                                {c.name.charAt(0)}
-                                                            </AvatarFallback>
-                                                        </Avatar>
-                                                        <div className="flex-1 min-w-0">
-                                                            <p className="font-medium truncate">{c.name}</p>
-                                                            <p className="text-sm text-muted-foreground">{c.phone}</p>
-                                                        </div>
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-                        </CardContent>
-                    </Card>
-
-                    {/* Add Items with Tabs */}
-                    <Card>
-                        <CardHeader className="pb-3">
-                            <CardTitle className="text-base flex items-center gap-2">
-                                <Plus className="h-4 w-4 text-primary" />
-                                Thêm vào đơn hàng
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <Tabs value={activeTab} onValueChange={setActiveTab}>
-                                <TabsList className="grid grid-cols-4 w-full">
-                                    <TabsTrigger value="product" className="gap-1">
-                                        <ShoppingBag className="h-3.5 w-3.5" />
-                                        <span className="hidden sm:inline">Sản phẩm</span>
-                                        <span className="sm:hidden">SP</span>
-                                        <Badge variant="secondary" className="ml-1 h-5 px-1.5">
-                                            {products.length}
-                                        </Badge>
-                                    </TabsTrigger>
-                                    <TabsTrigger value="service" className="gap-1">
-                                        <Sparkles className="h-3.5 w-3.5" />
-                                        <span className="hidden sm:inline">Dịch vụ</span>
-                                        <span className="sm:hidden">DV</span>
-                                        <Badge variant="secondary" className="ml-1 h-5 px-1.5">
-                                            {services.length}
-                                        </Badge>
-                                    </TabsTrigger>
-                                    <TabsTrigger value="package" className="gap-1">
-                                        <Package className="h-3.5 w-3.5" />
-                                        <span className="hidden sm:inline">Gói DV</span>
-                                        <span className="sm:hidden">Gói</span>
-                                        <Badge variant="secondary" className="ml-1 h-5 px-1.5">
-                                            {packages.filter(p => p.status === 'active').length}
-                                        </Badge>
-                                    </TabsTrigger>
-                                    <TabsTrigger value="voucher" className="gap-1">
-                                        <Gift className="h-3.5 w-3.5" />
-                                        <span className="hidden sm:inline">Voucher</span>
-                                        <span className="sm:hidden">VC</span>
-                                        <Badge variant="secondary" className="ml-1 h-5 px-1.5">
-                                            {vouchers.filter(v => v.status === 'active').length}
-                                        </Badge>
-                                    </TabsTrigger>
-                                </TabsList>
-
-                                {/* Search */}
-                                <div className="relative mt-4">
-                                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                                    <Input
-                                        placeholder={`Tìm kiếm ${activeTab === 'product' ? 'sản phẩm' : activeTab === 'service' ? 'dịch vụ' : activeTab === 'package' ? 'gói dịch vụ' : 'voucher'}...`}
-                                        value={itemSearch}
-                                        onChange={(e) => setItemSearch(e.target.value)}
-                                        className="pl-9"
-                                    />
-                                </div>
-
-                                {/* Product Tab */}
-                                <TabsContent value="product" className="mt-3">
-                                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-64 overflow-y-auto p-1">
-                                        {filteredProducts.length === 0 ? (
-                                            <p className="col-span-full text-sm text-muted-foreground text-center py-8">
-                                                Không tìm thấy sản phẩm
-                                            </p>
-                                        ) : (
-                                            filteredProducts.map(p => (
-                                                <button
-                                                    key={p.id}
-                                                    type="button"
-                                                    onClick={() => handleAddItem('product', p.id)}
-                                                    className="flex flex-col items-start p-3 rounded-lg border hover:border-primary hover:bg-primary/5 transition-colors text-left"
-                                                >
-                                                    <div className="w-full aspect-square rounded-lg bg-muted flex items-center justify-center mb-2">
-                                                        {p.image ? (
-                                                            <img src={p.image} alt={p.name} className="w-full h-full rounded-lg object-cover" />
-                                                        ) : (
-                                                            <ShoppingBag className="h-8 w-8 text-muted-foreground" />
-                                                        )}
-                                                    </div>
-                                                    <span className="font-medium text-sm truncate w-full">{p.name}</span>
-                                                    <span className="text-primary font-semibold text-sm">{formatCurrency(p.price)}</span>
-                                                </button>
-                                            ))
-                                        )}
-                                    </div>
-                                </TabsContent>
-
-                                {/* Service Tab */}
-                                <TabsContent value="service" className="mt-3">
-                                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-64 overflow-y-auto p-1">
-                                        {filteredServices.length === 0 ? (
-                                            <p className="col-span-full text-sm text-muted-foreground text-center py-8">
-                                                Không tìm thấy dịch vụ
-                                            </p>
-                                        ) : (
-                                            filteredServices.map(s => (
-                                                <button
-                                                    key={s.id}
-                                                    type="button"
-                                                    onClick={() => handleAddItem('service', s.id)}
-                                                    className="flex flex-col items-start p-3 rounded-lg border hover:border-purple-500 hover:bg-purple-50 transition-colors text-left"
-                                                >
-                                                    <div className="w-full aspect-square rounded-lg bg-muted flex items-center justify-center mb-2">
-                                                        {s.image ? (
-                                                            <img src={s.image} alt={s.name} className="w-full h-full rounded-lg object-cover" />
-                                                        ) : (
-                                                            <Sparkles className="h-8 w-8 text-muted-foreground" />
-                                                        )}
-                                                    </div>
-                                                    <span className="font-medium text-sm truncate w-full">{s.name}</span>
-                                                    <span className="text-purple-600 font-semibold text-sm">{formatCurrency(s.price)}</span>
-                                                    {s.department && getDepartmentLabel(s.department, departments) && (
-                                                        <span className="text-xs text-muted-foreground truncate w-full">
-                                                            {getDepartmentLabel(s.department, departments)}
-                                                        </span>
-                                                    )}
-                                                </button>
-                                            ))
-                                        )}
-                                    </div>
-                                </TabsContent>
-
-                                {/* Package Tab */}
-                                <TabsContent value="package" className="mt-3">
-                                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-64 overflow-y-auto p-1">
-                                        {filteredPackages.length === 0 ? (
-                                            <p className="col-span-full text-sm text-muted-foreground text-center py-8">
-                                                Không có gói dịch vụ nào
-                                            </p>
-                                        ) : (
-                                            filteredPackages.map(pkg => (
-                                                <button
-                                                    key={pkg.id}
-                                                    type="button"
-                                                    onClick={() => handleAddItem('package', pkg.id)}
-                                                    className="flex flex-col items-start p-3 rounded-lg border hover:border-emerald-500 hover:bg-emerald-50 transition-colors text-left"
-                                                >
-                                                    <div className="flex items-center gap-1 mb-2">
-                                                        <Package className="h-4 w-4 text-emerald-600" />
-                                                        <span className="font-medium text-sm truncate">{pkg.name}</span>
-                                                    </div>
-                                                    <span className="text-emerald-600 font-semibold">{formatCurrency(pkg.price)}</span>
-                                                    {pkg.items && pkg.items.length > 0 && (
-                                                        <span className="text-xs text-muted-foreground mt-1">
-                                                            {pkg.items.length} dịch vụ
-                                                        </span>
-                                                    )}
-                                                </button>
-                                            ))
-                                        )}
-                                    </div>
-                                </TabsContent>
-
-                                {/* Voucher Tab */}
-                                <TabsContent value="voucher" className="mt-3">
-                                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-64 overflow-y-auto p-1">
-                                        {filteredVouchers.length === 0 ? (
-                                            <p className="col-span-full text-sm text-muted-foreground text-center py-8">
-                                                Không có voucher nào
-                                            </p>
-                                        ) : (
-                                            filteredVouchers.map(v => (
-                                                <button
-                                                    key={v.id}
-                                                    type="button"
-                                                    onClick={() => handleAddItem('voucher', v.id)}
-                                                    className="flex flex-col items-start p-3 rounded-lg border hover:border-amber-500 hover:bg-amber-50 transition-colors text-left"
-                                                >
-                                                    <div className="flex items-center gap-1 mb-1">
-                                                        <Gift className="h-4 w-4 text-amber-600" />
-                                                        <span className="font-medium text-sm truncate">{v.name}</span>
-                                                    </div>
-                                                    <Badge variant="outline" className="text-xs">{v.code}</Badge>
-                                                    <span className="text-amber-600 font-semibold mt-1">
-                                                        {v.type === 'percentage' ? `Giảm ${v.value}%` : formatCurrency(v.value)}
-                                                    </span>
-                                                </button>
-                                            ))
-                                        )}
-                                    </div>
-                                </TabsContent>
-                            </Tabs>
-                        </CardContent>
-                    </Card>
-                </div>
-
-                {/* Right Column - Selected Items + Summary (1/3 width) */}
-                <div className="lg:col-span-1">
-                    <div className="lg:sticky lg:top-24 space-y-4">
-                        {/* Selected Items List */}
-                        {items.length > 0 && (
-                            <Card>
-                                <CardHeader className="pb-3">
-                                    <CardTitle className="text-base flex items-center justify-between">
-                                        <span className="flex items-center gap-2">
-                                            <CheckCircle className="h-4 w-4 text-primary" />
-                                            Danh sách đã chọn ({items.length})
-                                        </span>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            className="text-xs text-red-500 hover:text-red-600 h-7"
-                                            onClick={() => setItems([])}
-                                        >
-                                            Xóa tất cả
-                                        </Button>
-                                    </CardTitle>
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="divide-y max-h-[350px] overflow-y-auto">
-                                        {items.map((item, index) => (
-                                            <div key={index} className="py-4 first:pt-0 last:pb-0">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="shrink-0 p-1 bg-white border rounded-lg">
-                                                        {item.item_code ? (
-                                                            <QRCodeSVG
-                                                                value={`${window.location.origin}/item/${item.type}/${item.item_id}`}
-                                                                size={48}
-                                                                level="M"
-                                                            />
-                                                        ) : (
-                                                            <QrCode className="h-12 w-12 text-muted-foreground" />
-                                                        )}
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="flex items-center gap-2 mb-1">
-                                                            <Badge className={`${getItemTypeColor(item.type)} shrink-0`}>
-                                                                {getItemTypeLabel(item.type)}
-                                                            </Badge>
-                                                            <p className="font-medium truncate">{item.name}</p>
-                                                        </div>
-                                                        <p className="text-sm text-muted-foreground">{formatCurrency(item.unit_price)}</p>
-
-                                                        {/* Quantity controls */}
-                                                        <div className="flex items-center gap-2 mt-2">
-                                                            <Button
-                                                                variant="outline"
-                                                                size="icon"
-                                                                className="h-8 w-8"
-                                                                onClick={() => handleUpdateQuantity(index, item.quantity - 1)}
-                                                                disabled={item.quantity <= 1}
-                                                            >
-                                                                -
-                                                            </Button>
-                                                            <Input
-                                                                type="number"
-                                                                min="1"
-                                                                value={item.quantity}
-                                                                onChange={(e) => handleUpdateQuantity(index, Number(e.target.value))}
-                                                                className="w-16 text-center h-8"
-                                                            />
-                                                            <Button
-                                                                variant="outline"
-                                                                size="icon"
-                                                                className="h-8 w-8"
-                                                                onClick={() => handleUpdateQuantity(index, item.quantity + 1)}
-                                                            >
-                                                                +
-                                                            </Button>
-                                                            <span className="font-semibold ml-auto">
-                                                                {formatCurrency(item.quantity * item.unit_price)}
-                                                            </span>
-                                                        </div>
-
-                                                        {/* Commission inputs */}
-                                                        <div className="mt-3 flex items-center gap-4 text-sm">
-                                                            <span className="text-muted-foreground">Hoa hồng:</span>
-                                                            <div className="flex items-center gap-1">
-                                                                <span className="text-xs text-muted-foreground">Sale</span>
-                                                                <Input
-                                                                    type="number"
-                                                                    min={0}
-                                                                    max={100}
-                                                                    value={item.commission_sale || 0}
-                                                                    onChange={(e) => handleUpdateCommission(index, 'commission_sale', Number(e.target.value))}
-                                                                    className="w-16 h-7 text-center text-xs"
-                                                                />
-                                                                <span className="text-xs text-muted-foreground">%</span>
-                                                            </div>
-                                                            <div className="flex items-center gap-1">
-                                                                <span className="text-xs text-muted-foreground">KTV</span>
-                                                                <Input
-                                                                    type="number"
-                                                                    min={0}
-                                                                    max={100}
-                                                                    value={item.commission_tech || 0}
-                                                                    onChange={(e) => handleUpdateCommission(index, 'commission_tech', Number(e.target.value))}
-                                                                    className="w-16 h-7 text-center text-xs"
-                                                                />
-                                                                <span className="text-xs text-muted-foreground">%</span>
-                                                            </div>
-                                                        </div>
-
-                                                        {/* Technician Assignment for Services */}
-                                                        {item.type === 'service' && (
-                                                            <div className="mt-3">
-                                                                <div className="flex items-center gap-2">
-                                                                    <Wrench className="h-4 w-4 text-muted-foreground" />
-                                                                    <span className="text-sm text-muted-foreground">KTV:</span>
-                                                                    {item.department && (
-                                                                        <Badge variant="outline" className="text-xs">
-                                                                            {getDepartmentLabel(item.department, departments)}
-                                                                        </Badge>
-                                                                    )}
-                                                                    <Button
-                                                                        variant="outline"
-                                                                        size="sm"
-                                                                        className="h-7 px-2 ml-auto"
-                                                                        onClick={() => {
-                                                                            setTechDialogItemIndex(index);
-                                                                            setTechDialogServiceId(null);
-                                                                            setTechDialogOpen(true);
-                                                                        }}
-                                                                    >
-                                                                        <Plus className="h-3.5 w-3.5 mr-1" />
-                                                                        Thêm KTV
-                                                                    </Button>
-                                                                </div>
-                                                                {/* Display assigned technicians */}
-                                                                {item.technicians && item.technicians.length > 0 && (
-                                                                    <div className="mt-2 space-y-1 ml-6">
-                                                                        {item.technicians.map(t => {
-                                                                            const commissionAmount = Math.round(item.unit_price * item.quantity * t.commission_rate / 100);
-                                                                            return (
-                                                                                <div key={t.technician_id} className="flex items-center gap-2 bg-muted/50 rounded-lg px-2 py-1.5">
-                                                                                    <span className="text-sm font-medium flex-1 truncate">{t.technician_name}</span>
-                                                                                    <span className="text-xs text-muted-foreground">HH:</span>
-                                                                                    <input
-                                                                                        type="number"
-                                                                                        min="0"
-                                                                                        max="100"
-                                                                                        value={t.commission_rate || ''}
-                                                                                        onChange={(e) => handleUpdateTechnicianCommission(index, t.technician_id, Number(e.target.value) || 0)}
-                                                                                        onFocus={(e) => e.target.select()}
-                                                                                        placeholder="0"
-                                                                                        className="w-14 h-6 text-xs px-2 border rounded text-center"
-                                                                                    />
-                                                                                    <span className="text-xs text-muted-foreground">%</span>
-                                                                                    <span className="text-xs font-medium text-green-600">
-                                                                                        = {formatCurrency(commissionAmount)}
-                                                                                    </span>
-                                                                                    <Button
-                                                                                        variant="ghost"
-                                                                                        size="icon"
-                                                                                        className="h-6 w-6 text-red-500 hover:bg-red-100"
-                                                                                        onClick={() => handleToggleTechnician(index, t.technician_id, t.technician_name || '', 0)}
-                                                                                    >
-                                                                                        <Trash className="h-3.5 w-3.5" />
-                                                                                    </Button>
-                                                                                </div>
-                                                                            );
-                                                                        })}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        )}
-
-                                                        {/* Technician Assignment for Package Services */}
-                                                        {item.type === 'package' && item.package_services && item.package_services.length > 0 && availableTechnicians.length > 0 && (
-                                                            <div className="mt-3 space-y-3 border-l-2 border-purple-200 pl-3">
-                                                                <span className="text-xs text-muted-foreground font-medium">Phân công KTV cho dịch vụ trong gói:</span>
-                                                                {item.package_services.map(svc => (
-                                                                    <div key={svc.service_id} className="space-y-2">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <Wrench className="h-3 w-3 text-purple-500" />
-                                                                            <span className="text-xs font-medium text-foreground" title={svc.service_name}>
-                                                                                {svc.service_name}
-                                                                            </span>
-                                                                            {svc.department && (
-                                                                                <Badge variant="outline" className="text-xs">
-                                                                                    {getDepartmentLabel(svc.department, departments)}
-                                                                                </Badge>
-                                                                            )}
-                                                                        </div>
-                                                                        <div className="flex flex-wrap gap-2 ml-5">
-                                                                            {getTechniciansForDepartment(svc.department).map(tech => (
-                                                                                <label key={tech.id} className="flex items-center gap-1.5 cursor-pointer">
-                                                                                    <input
-                                                                                        type="checkbox"
-                                                                                        checked={svc.technicians?.some(t => t.technician_id === tech.id) || false}
-                                                                                        onChange={() => handleTogglePackageServiceTechnician(index, svc.service_id, tech.id, tech.name, 0)}
-                                                                                        className="w-3.5 h-3.5 rounded border-gray-300 text-primary focus:ring-primary"
-                                                                                    />
-                                                                                    <span className="text-xs">{tech.name}</span>
-                                                                                </label>
-                                                                            ))}
-                                                                        </div>
-                                                                        {svc.technicians && svc.technicians.length > 0 && (
-                                                                            <div className="ml-5 space-y-1 border-l-2 border-purple-200 pl-2">
-                                                                                {svc.technicians.map(t => (
-                                                                                    <div key={t.technician_id} className="flex items-center gap-2">
-                                                                                        <span className="text-xs text-muted-foreground w-24 truncate">{t.technician_name}</span>
-                                                                                        <span className="text-xs text-muted-foreground">Hoa hồng:</span>
-                                                                                        <input
-                                                                                            type="number"
-                                                                                            min="0"
-                                                                                            max="100"
-                                                                                            value={t.commission_rate}
-                                                                                            onChange={(e) => handleUpdatePackageServiceTechnicianCommission(index, svc.service_id, t.technician_id, Number(e.target.value))}
-                                                                                            className="w-14 h-5 text-xs px-1 border rounded text-center"
-                                                                                        />
-                                                                                        <span className="text-xs text-muted-foreground">%</span>
-                                                                                    </div>
-                                                                                ))}
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-                                                        )}
-                                                    </div>
+                                                        {currentProductIndex === index ? 'Thu gọn' : 'Sửa'}
+                                                    </Button>
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
-                                                        onClick={() => handleRemoveItem(index)}
-                                                        className="text-red-500 hover:bg-red-50 shrink-0 h-9 w-9"
+                                                        className="text-red-500 hover:text-red-600"
+                                                        onClick={() => handleRemoveProduct(index)}
                                                     >
-                                                        <Trash className="h-4 w-4" />
+                                                        <Trash2 className="h-4 w-4" />
                                                     </Button>
                                                 </div>
                                             </div>
-                                        ))}
-                                    </div>
-                                </CardContent>
-                            </Card>
+                                        </CardHeader>
+
+                                        {currentProductIndex === index && (
+                                            <CardContent className="space-y-4 border-t pt-4">
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    <div className="space-y-2">
+                                                        <Label>Tên sản phẩm *</Label>
+                                                        <Input
+                                                            placeholder="VD: Giày Nike Air Max đen"
+                                                            value={product.name}
+                                                            onChange={(e) => handleUpdateProduct(index, 'name', e.target.value)}
+                                                        />
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        <Label>Loại sản phẩm</Label>
+                                                        <Select
+                                                            value={product.type}
+                                                            onValueChange={(v) => handleUpdateProduct(index, 'type', v)}
+                                                        >
+                                                            <SelectTrigger>
+                                                                <SelectValue />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {PRODUCT_TYPES.map(t => (
+                                                                    <SelectItem key={t.value} value={t.value}>
+                                                                        {t.label}
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        <Label>Hãng/Thương hiệu</Label>
+                                                        <Select
+                                                            value={product.brand}
+                                                            onValueChange={(v) => handleUpdateProduct(index, 'brand', v)}
+                                                        >
+                                                            <SelectTrigger>
+                                                                <SelectValue placeholder="Chọn hoặc nhập" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {COMMON_BRANDS.map(b => (
+                                                                    <SelectItem key={b} value={b}>{b}</SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        <Label>Màu sắc</Label>
+                                                        <Input
+                                                            placeholder="VD: Đen, trắng, xanh navy"
+                                                            value={product.color}
+                                                            onChange={(e) => handleUpdateProduct(index, 'color', e.target.value)}
+                                                        />
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        <Label>Size</Label>
+                                                        <Input
+                                                            placeholder="VD: 42, M, 25cm"
+                                                            value={product.size}
+                                                            onChange={(e) => handleUpdateProduct(index, 'size', e.target.value)}
+                                                        />
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        <Label>Chất liệu</Label>
+                                                        <Input
+                                                            placeholder="VD: Da thật, vải canvas"
+                                                            value={product.material}
+                                                            onChange={(e) => handleUpdateProduct(index, 'material', e.target.value)}
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                <div className="space-y-2">
+                                                    <Label>Tình trạng ban đầu</Label>
+                                                    <Textarea
+                                                        placeholder="Mô tả tình trạng sản phẩm khi nhận: vết bẩn, trầy xước, phai màu..."
+                                                        value={product.condition_before}
+                                                        onChange={(e) => handleUpdateProduct(index, 'condition_before', e.target.value)}
+                                                        rows={2}
+                                                    />
+                                                </div>
+
+                                                <div className="space-y-2">
+                                                    <Label>Ghi chú</Label>
+                                                    <Textarea
+                                                        placeholder="Ghi chú thêm về sản phẩm này..."
+                                                        value={product.notes}
+                                                        onChange={(e) => handleUpdateProduct(index, 'notes', e.target.value)}
+                                                        rows={2}
+                                                    />
+                                                </div>
+                                            </CardContent>
+                                        )}
+
+                                        {/* Show brief info when collapsed */}
+                                        {currentProductIndex !== index && product.name && (
+                                            <CardContent className="pt-0">
+                                                <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
+                                                    {product.brand && <Badge variant="outline">{product.brand}</Badge>}
+                                                    {product.color && <Badge variant="outline">{product.color}</Badge>}
+                                                    {product.size && <Badge variant="outline">Size {product.size}</Badge>}
+                                                    {product.services.length > 0 && (
+                                                        <Badge className="bg-green-100 text-green-700">
+                                                            {product.services.length} dịch vụ
+                                                        </Badge>
+                                                    )}
+                                                </div>
+                                            </CardContent>
+                                        )}
+                                    </Card>
+                                ))}
+                            </div>
                         )}
-                        {/* Applied Voucher */}
-                        {appliedVoucher && (
-                            <Card className={voucherValid ? 'border-amber-200 bg-amber-50' : 'border-red-200 bg-red-50'}>
-                                <CardContent className="p-4">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-2">
-                                            <Gift className={`h-5 w-5 ${voucherValid ? 'text-amber-600' : 'text-red-600'}`} />
-                                            <div>
-                                                <span className={`font-medium ${voucherValid ? 'text-amber-700' : 'text-red-700'}`}>
-                                                    {appliedVoucher.name}
-                                                </span>
-                                                <Badge variant="outline" className="ml-2 text-xs">
-                                                    {appliedVoucher.code}
-                                                </Badge>
-                                            </div>
-                                        </div>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-7 w-7 text-red-500 hover:bg-red-100"
-                                            onClick={handleRemoveVoucher}
-                                        >
-                                            <Trash className="h-4 w-4" />
-                                        </Button>
-                                    </div>
-                                    <p className={`text-sm font-semibold mt-1 ${voucherValid ? 'text-amber-700' : 'text-red-700'}`}>
-                                        {appliedVoucher.type === 'percentage'
-                                            ? `-${appliedVoucher.value}%`
-                                            : `-${formatCurrency(appliedVoucher.value)}`}
-                                    </p>
-                                    {!voucherValid && appliedVoucher.min_order_value && (
-                                        <p className="text-xs text-red-600 mt-1">
-                                            Đơn hàng tối thiểu {formatCurrency(appliedVoucher.min_order_value)} để áp dụng
-                                        </p>
-                                    )}
-                                </CardContent>
-                            </Card>
-                        )}
+                    </div>
 
-                        {/* Order Summary */}
-                        <Card>
-                            <CardHeader className="pb-3">
-                                <CardTitle className="text-base">Tổng đơn hàng</CardTitle>
-                            </CardHeader>
-                            <CardContent className="space-y-3">
-                                <div className="flex justify-between text-sm">
-                                    <span>Tạm tính ({items.length} sản phẩm):</span>
-                                    <span className="font-semibold">{formatCurrency(subtotal)}</span>
-                                </div>
-
-                                {appliedVoucher && voucherValid && effectiveVoucherDiscount > 0 && (
-                                    <div className="flex justify-between text-sm text-amber-600">
-                                        <span className="flex items-center gap-1">
-                                            <Gift className="h-3.5 w-3.5" />
-                                            Voucher:
-                                        </span>
-                                        <span className="font-semibold">-{formatCurrency(effectiveVoucherDiscount)}</span>
-                                    </div>
-                                )}
-
-                                <div className="flex justify-between items-center">
-                                    <Label className="text-sm">Giảm giá thêm:</Label>
-                                    <Input
-                                        type="number"
-                                        min="0"
-                                        max={subtotal - effectiveVoucherDiscount}
-                                        value={manualDiscount}
-                                        onChange={(e) => setManualDiscount(Math.min(subtotal - effectiveVoucherDiscount, Number(e.target.value)))}
-                                        className="w-32 text-right h-8"
-                                    />
-                                </div>
-
-                                {totalDiscount > 0 && (
-                                    <div className="flex justify-between text-sm text-green-600">
-                                        <span>Tổng giảm:</span>
-                                        <span className="font-semibold">-{formatCurrency(totalDiscount)}</span>
-                                    </div>
-                                )}
-
-                                <div className="flex justify-between text-lg font-bold pt-3 border-t">
-                                    <span>Tổng thanh toán:</span>
-                                    <span className="text-primary text-xl">{formatCurrency(total)}</span>
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        {/* Notes */}
-                        <Card>
-                            <CardHeader className="pb-3">
-                                <CardTitle className="text-base">Ghi chú</CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <textarea
-                                    className="w-full min-h-20 px-3 py-2 text-sm rounded-lg border focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                                    value={notes}
-                                    onChange={(e) => setNotes(e.target.value)}
-                                    placeholder="Ghi chú thêm về đơn hàng..."
-                                />
-                            </CardContent>
-                        </Card>
-
-                        {/* Action Buttons */}
-                        <div className="flex gap-3">
-                            <Button variant="outline" className="flex-1" onClick={() => navigate('/orders')} disabled={submitting}>
-                                Hủy
-                            </Button>
-                            <Button
-                                className="flex-1"
-                                onClick={handleSubmit}
-                                disabled={submitting || !customerId || items.length === 0}
-                            >
-                                {submitting ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        Đang tạo...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Plus className="h-4 w-4 mr-2" />
-                                        Tạo đơn hàng
-                                    </>
-                                )}
-                            </Button>
-                        </div>
+                    {/* Sidebar */}
+                    <div className="hidden lg:block">
+                        <OrderSidebar />
                     </div>
                 </div>
-            </div>
+            )}
+
+            {/* Step 3: Add Services */}
+            {step === 3 && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="lg:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Products List */}
+                        <div className="space-y-4">
+                            <h2 className="text-lg font-semibold">Sản phẩm ({products.length})</h2>
+                            {products.map((product, index) => (
+                                <Card
+                                    key={product.id}
+                                    className={`cursor-pointer transition-all ${currentProductIndex === index ? 'ring-2 ring-primary' : 'hover:border-primary/50'
+                                        }`}
+                                    onClick={() => setCurrentProductIndex(index)}
+                                >
+                                    <CardContent className="p-4">
+                                        <div className="flex items-start gap-3">
+                                            <Badge variant="outline" className="shrink-0">
+                                                {PRODUCT_TYPES.find(t => t.value === product.type)?.label || 'Khác'}
+                                            </Badge>
+                                            <div className="flex-1">
+                                                <p className="font-medium">{product.name}</p>
+                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                    {product.brand && <Badge variant="outline" className="text-xs">{product.brand}</Badge>}
+                                                    {product.color && <Badge variant="outline" className="text-xs">{product.color}</Badge>}
+                                                </div>
+                                                {product.services.length > 0 && (
+                                                    <div className="mt-2 space-y-1">
+                                                        {product.services.map((s, si) => (
+                                                            <div key={si} className="flex items-center justify-between text-sm">
+                                                                <span className="text-muted-foreground">{s.name}</span>
+                                                                <span className="font-medium text-green-600">{formatCurrency(s.price)}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            {product.services.length > 0 ? (
+                                                <CheckCircle className="h-5 w-5 text-green-500" />
+                                            ) : (
+                                                <Badge variant="destructive" className="text-xs">Chưa có DV</Badge>
+                                            )}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+                            ))}
+                        </div>
+
+                        {/* Services Selection */}
+                        <div className="space-y-4">
+                            <h2 className="text-lg font-semibold">
+                                {currentProductIndex !== null
+                                    ? `Dịch vụ cho: ${products[currentProductIndex]?.name || 'Sản phẩm'}`
+                                    : 'Chọn sản phẩm để thêm dịch vụ'
+                                }
+                            </h2>
+
+                            {currentProductIndex !== null && (
+                                <>
+                                    {/* Selected services */}
+                                    {products[currentProductIndex]?.services.length > 0 && (
+                                        <Card className="bg-green-50 border-green-200">
+                                            <CardContent className="p-4">
+                                                <p className="text-sm font-medium text-green-700 mb-2">Đã chọn:</p>
+                                                <div className="space-y-3">
+                                                    {products[currentProductIndex].services.map((s, si) => (
+                                                        <div key={si} className="bg-white p-3 rounded border space-y-2">
+                                                            <div className="flex items-center justify-between">
+                                                                <div className="flex-1">
+                                                                    <p className="font-medium text-sm">{s.name}</p>
+                                                                    <p className="text-xs text-green-600 font-medium">{formatCurrency(s.price)}</p>
+                                                                </div>
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    className="h-8 w-8 text-red-500 hover:text-red-600"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        handleRemoveService(currentProductIndex, si);
+                                                                    }}
+                                                                >
+                                                                    <Trash2 className="h-4 w-4" />
+                                                                </Button>
+                                                            </div>
+
+                                                            {/* Technicians list */}
+                                                            <div className="space-y-1">
+                                                                {s.technicians.map((tech, ti) => (
+                                                                    <div key={ti} className="flex items-center gap-2 bg-blue-50 p-2 rounded text-sm">
+                                                                        <span className="flex-1 font-medium">{tech.name}</span>
+                                                                        <div className="flex items-center gap-1">
+                                                                            <Input
+                                                                                type="number"
+                                                                                value={tech.commission}
+                                                                                onChange={(e) => handleUpdateTechnicianCommission(
+                                                                                    currentProductIndex, si, tech.id, Number(e.target.value)
+                                                                                )}
+                                                                                onFocus={(e) => e.target.select()}
+                                                                                className="w-14 h-7 text-xs text-center"
+                                                                                min={0}
+                                                                                max={100}
+                                                                            />
+                                                                            <span className="text-xs text-muted-foreground">%</span>
+                                                                            <span className="text-xs font-medium text-green-600 ml-1">
+                                                                                = {formatCurrency(s.price * tech.commission / 100)}
+                                                                            </span>
+                                                                        </div>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            className="h-6 w-6 text-red-500"
+                                                                            onClick={() => handleRemoveTechnicianFromService(currentProductIndex, si, tech.id)}
+                                                                        >
+                                                                            <X className="h-3 w-3" />
+                                                                        </Button>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+
+                                                            {/* Add technician */}
+                                                            <Select
+                                                                value=""
+                                                                onValueChange={(v) => handleAddTechnicianToService(currentProductIndex, si, v, 0)}
+                                                            >
+                                                                <SelectTrigger className="h-8 text-xs">
+                                                                    <SelectValue placeholder="+ Thêm KTV" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {availableTechnicians
+                                                                        .filter(tech => !s.technicians.some(t => t.id === tech.id))
+                                                                        .map(tech => (
+                                                                            <SelectItem key={tech.id} value={tech.id}>
+                                                                                {tech.name}
+                                                                            </SelectItem>
+                                                                        ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+                                    )}
+
+                                    {/* Services list */}
+                                    <Card>
+                                        <CardHeader className="pb-2">
+                                            <CardTitle className="text-sm flex items-center gap-2">
+                                                <Sparkles className="h-4 w-4" />
+                                                Dịch vụ đơn lẻ
+                                            </CardTitle>
+                                        </CardHeader>
+                                        <CardContent>
+                                            <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
+                                                {services.map(s => (
+                                                    <button
+                                                        key={s.id}
+                                                        onClick={() => handleServiceClick(currentProductIndex, {
+                                                            id: s.id,
+                                                            type: 'service',
+                                                            name: s.name,
+                                                            price: s.price
+                                                        })}
+                                                        className="p-3 text-left border rounded-lg hover:border-purple-500 hover:bg-purple-50 transition-colors"
+                                                    >
+                                                        <p className="font-medium text-sm truncate">{s.name}</p>
+                                                        <p className="text-purple-600 font-semibold text-sm">{formatCurrency(s.price)}</p>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </CardContent>
+                                    </Card>
+
+                                    {/* Packages list */}
+                                    {activePackages.length > 0 && (
+                                        <Card>
+                                            <CardHeader className="pb-2">
+                                                <CardTitle className="text-sm flex items-center gap-2">
+                                                    <Package className="h-4 w-4" />
+                                                    Gói dịch vụ
+                                                </CardTitle>
+                                            </CardHeader>
+                                            <CardContent>
+                                                <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
+                                                    {activePackages.map(pkg => (
+                                                        <button
+                                                            key={pkg.id}
+                                                            onClick={() => handleServiceClick(currentProductIndex, {
+                                                                id: pkg.id,
+                                                                type: 'package',
+                                                                name: pkg.name,
+                                                                price: pkg.price
+                                                            })}
+                                                            className="p-3 text-left border rounded-lg hover:border-emerald-500 hover:bg-emerald-50 transition-colors"
+                                                        >
+                                                            <p className="font-medium text-sm truncate">{pkg.name}</p>
+                                                            <p className="text-emerald-600 font-semibold text-sm">{formatCurrency(pkg.price)}</p>
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Sidebar */}
+                    <div className="hidden lg:block">
+                        <OrderSidebar />
+                    </div>
+                </div>
+            )}
+
+            {/* Step 4: Review */}
+            {step === 4 && (
+                <div className="space-y-6">
+                    {/* Customer */}
+                    <Card>
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-sm text-muted-foreground">Khách hàng</CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                            <div className="flex items-center gap-3">
+                                <Avatar className="h-12 w-12">
+                                    <AvatarFallback className="bg-primary text-white">
+                                        {selectedCustomer?.name.charAt(0)}
+                                    </AvatarFallback>
+                                </Avatar>
+                                <div>
+                                    <p className="font-semibold">{selectedCustomer?.name}</p>
+                                    <p className="text-muted-foreground">{selectedCustomer?.phone}</p>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Products Summary */}
+                    <Card>
+                        <CardHeader className="pb-2">
+                            <CardTitle className="text-sm text-muted-foreground">
+                                Sản phẩm & Dịch vụ ({products.length} sản phẩm)
+                            </CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            {products.map((product, index) => (
+                                <div key={product.id} className="border rounded-lg p-4">
+                                    <div className="flex items-start gap-3 mb-3">
+                                        <Badge variant="outline" className="shrink-0">
+                                            {PRODUCT_TYPES.find(t => t.value === product.type)?.label || 'Khác'}
+                                        </Badge>
+                                        <div>
+                                            <p className="font-semibold">{product.name}</p>
+                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                {product.brand && <Badge variant="outline" className="text-xs">{product.brand}</Badge>}
+                                                {product.color && <Badge variant="outline" className="text-xs">{product.color}</Badge>}
+                                                {product.size && <Badge variant="outline" className="text-xs">Size {product.size}</Badge>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="pl-10 space-y-2">
+                                        {product.services.map((s, si) => (
+                                            <div key={si} className="flex justify-between items-start text-sm bg-muted/30 p-2 rounded">
+                                                <div className="flex-1">
+                                                    <span className="font-medium">{s.name}</span>
+                                                    {s.technicians.length > 0 && (
+                                                        <div className="flex flex-wrap gap-1 mt-1">
+                                                            {s.technicians.map((tech, ti) => (
+                                                                <span key={ti} className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                                                                    {tech.name}: {tech.commission}% = {formatCurrency(s.price * tech.commission / 100)}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <span className="font-semibold text-green-600">{formatCurrency(s.price)}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </CardContent>
+                    </Card>
+
+                    {/* Notes & Discount */}
+                    <Card>
+                        <CardContent className="p-4 space-y-4">
+                            <div className="space-y-2">
+                                <Label>Ghi chú đơn hàng</Label>
+                                <Textarea
+                                    placeholder="Ghi chú thêm..."
+                                    value={notes}
+                                    onChange={(e) => setNotes(e.target.value)}
+                                    rows={2}
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label>Giảm giá</Label>
+                                <Input
+                                    type="number"
+                                    placeholder="0"
+                                    value={discount || ''}
+                                    onChange={(e) => setDiscount(Number(e.target.value) || 0)}
+                                />
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Total */}
+                    <Card className="bg-gradient-to-r from-primary/10 to-purple-100">
+                        <CardContent className="p-4">
+                            <div className="space-y-2">
+                                <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Tạm tính</span>
+                                    <span>{formatCurrency(subtotal)}</span>
+                                </div>
+                                {discount > 0 && (
+                                    <div className="flex justify-between text-red-600">
+                                        <span>Giảm giá</span>
+                                        <span>-{formatCurrency(discount)}</span>
+                                    </div>
+                                )}
+                                <div className="flex justify-between text-xl font-bold pt-2 border-t">
+                                    <span>Tổng cộng</span>
+                                    <span className="text-primary">{formatCurrency(total)}</span>
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
+            )}
+
+            {/* Step 5: Success */}
+            {step === 5 && createdOrder && (
+                <Card className="text-center py-12">
+                    <CardContent>
+                        <CheckCircle className="h-20 w-20 text-green-500 mx-auto mb-6" />
+                        <h2 className="text-2xl font-bold mb-2">Tạo đơn hàng thành công!</h2>
+                        <p className="text-muted-foreground mb-6">
+                            Mã đơn: <span className="font-mono font-bold">{createdOrder.order?.order_code}</span>
+                        </p>
+
+                        {/* QR Codes */}
+                        {createdOrder.products && createdOrder.products.length > 0 && (
+                            <div className="mb-8">
+                                <h3 className="font-semibold mb-4">Mã QR sản phẩm</h3>
+                                <div className="flex flex-wrap justify-center gap-4">
+                                    {createdOrder.products.map((p: any, index: number) => (
+                                        <div key={index} className="p-4 border rounded-lg bg-white">
+                                            <QRCodeSVG
+                                                value={`${window.location.origin}/product/${p.product_code || p.qr_code}`}
+                                                size={120}
+                                                level="M"
+                                            />
+                                            <p className="text-xs font-mono mt-2">{p.product_code || p.qr_code}</p>
+                                            <p className="text-sm text-muted-foreground">{p.name}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="flex gap-4 justify-center flex-wrap">
+                            <Button
+                                variant="outline"
+                                onClick={() => {
+                                    const printWindow = window.open('', '_blank');
+                                    if (printWindow) {
+                                        const qrHtml = createdOrder.products?.map((p: any) => `
+                                            <div style="display: inline-block; padding: 20px; margin: 10px; border: 1px solid #ccc; border-radius: 8px; text-align: center;">
+                                                <canvas id="qr-${p.product_code || p.qr_code}"></canvas>
+                                                <p style="font-family: monospace; font-size: 14px; margin-top: 10px;">${p.product_code || p.qr_code}</p>
+                                                <p style="font-size: 12px; color: #666;">${p.name || ''}</p>
+                                            </div>
+                                        `).join('') || '';
+
+                                        printWindow.document.write(`
+                                            <html>
+                                                <head>
+                                                    <title>In mã QR - ${createdOrder.order?.order_code}</title>
+                                                    <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+                                                    <style>
+                                                        body { font-family: Arial, sans-serif; padding: 20px; text-align: center; }
+                                                        h2 { margin-bottom: 20px; }
+                                                        .qr-container { display: flex; flex-wrap: wrap; justify-content: center; gap: 20px; }
+                                                        @media print { button { display: none; } }
+                                                    </style>
+                                                </head>
+                                                <body>
+                                                    <h2>Mã QR sản phẩm - Đơn hàng ${createdOrder.order?.order_code}</h2>
+                                                    <div class="qr-container">${qrHtml}</div>
+                                                    <script>
+                                                        ${createdOrder.products?.map((p: any) => `
+                                                            QRCode.toCanvas(document.getElementById('qr-${p.product_code || p.qr_code}'), 
+                                                                '${window.location.origin}/product/${p.product_code || p.qr_code}', 
+                                                                { width: 150 }, function(err) { if(err) console.error(err); });
+                                                        `).join('') || ''}
+                                                        setTimeout(() => window.print(), 500);
+                                                    </script>
+                                                </body>
+                                            </html>
+                                        `);
+                                        printWindow.document.close();
+                                    }
+                                }}
+                            >
+                                <QrCode className="h-4 w-4 mr-2" />
+                                In mã QR
+                            </Button>
+                            <Button onClick={() => navigate(`/orders/${createdOrder.order?.id}`)}>
+                                Xem chi tiết đơn
+                            </Button>
+                            <Button variant="outline" onClick={() => navigate('/orders')}>
+                                Về danh sách đơn
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
+            {/* Navigation Buttons */}
+            {step < 5 && (
+                <div className="flex justify-between pt-4 border-t">
+                    <Button
+                        variant="outline"
+                        onClick={() => setStep(s => Math.max(1, s - 1))}
+                        disabled={step === 1}
+                    >
+                        <ArrowLeft className="h-4 w-4 mr-2" />
+                        Quay lại
+                    </Button>
+
+                    {step < 4 ? (
+                        <Button
+                            onClick={() => setStep(s => s + 1)}
+                            disabled={!canGoNext()}
+                        >
+                            Tiếp tục
+                            <ArrowRight className="h-4 w-4 ml-2" />
+                        </Button>
+                    ) : (
+                        <Button
+                            onClick={() => setConfirmDialogOpen(true)}
+                            disabled={submitting}
+                            className="bg-green-600 hover:bg-green-700"
+                        >
+                            {submitting ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Đang tạo...
+                                </>
+                            ) : (
+                                <>
+                                    <CheckCircle className="h-4 w-4 mr-2" />
+                                    Tạo đơn hàng
+                                </>
+                            )}
+                        </Button>
+                    )}
+                </div>
+            )}
+
+            {/* Confirmation Dialog */}
+            <Dialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Xác nhận tạo đơn hàng</DialogTitle>
+                    </DialogHeader>
+                    <div className="py-4">
+                        <p>Bạn muốn tạo đơn hàng này với trạng thái nào?</p>
+                        <p className="text-sm text-muted-foreground mt-2">
+                            - <strong>Lưu nháp:</strong> Đơn hàng sẽ được lưu vào danh sách "Đơn nháp", bạn có thể chỉnh sửa sau.<br />
+                            - <strong>Xác nhận:</strong> Đơn hàng sẽ được chuyển sang trạng thái "Đã xác nhận" để xử lý ngay.
+                        </p>
+                    </div>
+                    <DialogFooter className="gap-2 sm:gap-0">
+                        <Button
+                            variant="outline"
+                            onClick={() => handleSubmit('pending')}
+                            disabled={submitting}
+                        >
+                            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Lưu nháp'}
+                        </Button>
+                        <Button
+                            onClick={() => handleSubmit('confirmed')}
+                            disabled={submitting}
+                            className="bg-green-600 hover:bg-green-700"
+                        >
+                            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Xác nhận ngay'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* Technician Selection Dialog */}
-            <Dialog open={techDialogOpen} onOpenChange={(open) => {
-                setTechDialogOpen(open);
-                if (!open) setTechDialogCommissions({});
-            }}>
-                <DialogContent className="sm:max-w-md">
+            <Dialog open={techDialogOpen} onOpenChange={setTechDialogOpen}>
+                <DialogContent className="max-w-md">
                     <DialogHeader>
                         <DialogTitle className="flex items-center gap-2">
                             <Wrench className="h-5 w-5 text-primary" />
                             Chọn kỹ thuật viên
                         </DialogTitle>
                     </DialogHeader>
-                    <div className="space-y-3 max-h-80 overflow-y-auto">
-                        {(() => {
-                            // Get the current item to determine department filter
-                            const currentItem = techDialogItemIndex !== null ? items[techDialogItemIndex] : null;
-                            const filteredTechs = currentItem
-                                ? getTechniciansForDepartment(currentItem.department)
-                                : availableTechnicians;
+                    <div className="space-y-4">
+                        <p className="text-sm text-muted-foreground">
+                            Dịch vụ: <span className="font-medium text-foreground">{pendingService?.service.name}</span>
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                            Giá: <span className="font-medium text-green-600">{formatCurrency(pendingService?.service.price || 0)}</span>
+                        </p>
 
-                            // Filter out already assigned technicians
-                            const assignedIds = currentItem?.technicians?.map(t => t.technician_id) || [];
-                            const availableToAdd = filteredTechs.filter(tech => !assignedIds.includes(tech.id));
-
-                            if (availableToAdd.length === 0) {
-                                return (
-                                    <p className="text-sm text-muted-foreground text-center py-8">
-                                        {assignedIds.length > 0
-                                            ? 'Tất cả KTV đã được phân công'
-                                            : 'Không có KTV khả dụng'}
-                                    </p>
-                                );
-                            }
-
-                            return availableToAdd.map(tech => (
-                                <div
-                                    key={tech.id}
-                                    className="p-3 rounded-lg border hover:border-primary/50 transition-colors"
-                                >
-                                    <div className="flex items-center gap-3 mb-2">
-                                        <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                                            <User className="h-5 w-5 text-primary" />
+                        <div className="space-y-2 max-h-64 overflow-y-auto">
+                            {availableTechnicians.length === 0 ? (
+                                <p className="text-center text-muted-foreground py-4">
+                                    Không có kỹ thuật viên nào
+                                </p>
+                            ) : (
+                                availableTechnicians.map(tech => (
+                                    <button
+                                        key={tech.id}
+                                        onClick={() => handleConfirmAddService([{ id: tech.id, name: tech.name, commission: 0 }])}
+                                        className="w-full flex items-center gap-3 p-3 border rounded-lg hover:border-primary hover:bg-primary/5 transition-colors group"
+                                    >
+                                        <Avatar className="h-10 w-10">
+                                            {tech.avatar ? (
+                                                <AvatarImage src={tech.avatar} alt={tech.name} />
+                                            ) : null}
+                                            <AvatarFallback className="bg-blue-100 text-blue-700">
+                                                {tech.name.charAt(0)}
+                                            </AvatarFallback>
+                                        </Avatar>
+                                        <div className="text-left flex-1">
+                                            <p className="font-medium">{tech.name}</p>
+                                            <p className="text-xs text-muted-foreground">{tech.phone}</p>
                                         </div>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="font-medium truncate">{tech.name}</p>
-                                            {tech.department && (
-                                                <p className="text-xs text-muted-foreground">
-                                                    {getDepartmentLabel(tech.department, departments)}
-                                                </p>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div className="flex items-center gap-2 mt-2">
-                                        <span className="text-sm text-muted-foreground">Hoa hồng:</span>
-                                        <Input
-                                            type="number"
-                                            min={0}
-                                            max={100}
-                                            value={techDialogCommissions[tech.id] ?? ''}
-                                            onChange={(e) => setTechDialogCommissions(prev => ({
-                                                ...prev,
-                                                [tech.id]: Number(e.target.value) || 0
-                                            }))}
-                                            onFocus={(e) => e.target.select()}
-                                            placeholder="0"
-                                            className="w-20 h-8 text-center"
-                                        />
-                                        <span className="text-sm text-muted-foreground">%</span>
-                                        <Button
-                                            size="sm"
-                                            className="ml-auto h-8"
-                                            onClick={() => {
-                                                if (techDialogItemIndex !== null) {
-                                                    const commission = techDialogCommissions[tech.id] || 0;
-                                                    if (techDialogServiceId) {
-                                                        handleTogglePackageServiceTechnician(
-                                                            techDialogItemIndex,
-                                                            techDialogServiceId,
-                                                            tech.id,
-                                                            tech.name,
-                                                            commission
-                                                        );
-                                                    } else {
-                                                        handleToggleTechnician(techDialogItemIndex, tech.id, tech.name, commission);
-                                                    }
-                                                }
-                                                setTechDialogOpen(false);
-                                                setTechDialogCommissions({});
-                                            }}
-                                        >
-                                            <Plus className="h-4 w-4 mr-1" />
-                                            Thêm
-                                        </Button>
-                                    </div>
-                                </div>
-                            ));
-                        })()}
+                                        <UserCheck className="h-5 w-5 text-primary opacity-0 group-hover:opacity-100" />
+                                    </button>
+                                ))
+                            )}
+                        </div>
                     </div>
+                    <DialogFooter className="flex gap-2">
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                setTechDialogOpen(false);
+                                setPendingService(null);
+                            }}
+                        >
+                            Hủy
+                        </Button>
+                        <Button
+                            variant="secondary"
+                            onClick={() => handleConfirmAddService()}
+                        >
+                            Thêm không chọn KTV
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
 
-            {/* Order Confirmation Dialog */}
-            <OrderConfirmationDialog
-                open={showConfirmDialog}
-                onClose={handleConfirmDialogClose}
-                order={createdOrder}
-                onConfirm={handleOrderConfirmed}
+            {/* Create Customer Dialog */}
+            <CreateCustomerDialog
+                open={showCreateCustomerDialog}
+                onClose={() => setShowCreateCustomerDialog(false)}
+                onSubmit={handleCreateCustomer}
             />
         </div>
     );
 }
-

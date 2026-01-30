@@ -7,7 +7,6 @@ import { DashboardPage } from '@/pages/DashboardPage';
 import { LeadsPage } from '@/pages/LeadsPage';
 import { LeadDetailPage } from '@/pages/LeadDetailPage';
 import { OrdersPage } from '@/pages/OrdersPage';
-import { CreateOrderPage } from '@/pages/CreateOrderPage';
 import { OrderDetailPage } from '@/pages/OrderDetailPage';
 import { InvoicesPage } from '@/pages/InvoicesPage';
 import { FinancePage } from '@/pages/FinancePage';
@@ -25,6 +24,11 @@ import { TaskQRPage } from '@/pages/TaskQRPage';
 import { QRScannerPage } from '@/pages/QRScannerPage';
 import { DepartmentsPage } from '@/pages/DepartmentsPage';
 import { ProductDetailPage } from '@/pages/ProductDetailPage';
+import { WorkflowsPage } from '@/pages/WorkflowsPage';
+import { CreateWorkflowPage } from '@/pages/CreateWorkflowPage';
+import { CreateServicePage } from '@/pages/CreateServicePage';
+import { ProductQRPage } from '@/pages/ProductQRPage';
+import { CreateOrderPage } from '@/pages/CreateOrderPage';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import type { UserRole, User } from '@/types';
@@ -62,6 +66,7 @@ const pagePermissions: Record<string, UserRole[]> = {
   vouchers: ['admin', 'manager', 'accountant', 'sale', 'technician'],
   tasks: ['admin', 'manager', 'technician'],
   departments: ['admin', 'manager'],
+  workflows: ['admin', 'manager'],
   accessories: ['admin', 'manager', 'technician'],
   extension: ['admin', 'manager', 'technician'],
   upgrade: ['admin', 'manager', 'technician'],
@@ -215,6 +220,13 @@ function AppContent() {
       <Route path="/task/:code" element={
         <ProtectedRoute allowedRoles={['admin', 'manager', 'technician']}>
           <TaskQRPage />
+        </ProtectedRoute>
+      } />
+
+      {/* Product QR Code Route - For customer products */}
+      <Route path="/product/:code" element={
+        <ProtectedRoute allowedRoles={['admin', 'manager', 'technician', 'sale']}>
+          <ProductQRPage />
         </ProtectedRoute>
       } />
 
@@ -379,6 +391,36 @@ function AppContent() {
             <Route path="/departments" element={
               <ProtectedRoute allowedRoles={pagePermissions.departments}>
                 <DepartmentsPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/workflows" element={
+              <ProtectedRoute allowedRoles={pagePermissions.workflows}>
+                <WorkflowsPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/workflows/new" element={
+              <ProtectedRoute allowedRoles={pagePermissions.workflows}>
+                <CreateWorkflowPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/workflows/:id/edit" element={
+              <ProtectedRoute allowedRoles={pagePermissions.workflows}>
+                <CreateWorkflowPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/services/new" element={
+              <ProtectedRoute allowedRoles={pagePermissions.products}>
+                <CreateServicePage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/services/:id/edit" element={
+              <ProtectedRoute allowedRoles={pagePermissions.products}>
+                <CreateServicePage />
               </ProtectedRoute>
             } />
 

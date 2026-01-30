@@ -171,7 +171,7 @@ router.patch('/:id/status', authenticate, requireAccountant, async (req: Authent
                 .single();
 
             if (order) {
-                // Tạo bản ghi hoa hồng (5% mặc định)
+                // Tạo bản ghi hoa hồng cho nhân viên sales (5% mặc định)
                 const commissionRate = 0.05;
                 const commissionAmount = order.total_amount * commissionRate;
 
@@ -180,11 +180,75 @@ router.patch('/:id/status', authenticate, requireAccountant, async (req: Authent
                     .insert({
                         user_id: order.sales_id,
                         invoice_id: invoice.id,
+                        commission_type: 'product',
                         amount: commissionAmount,
-                        rate: commissionRate * 100,
-                        status: 'pending',
+                        percentage: commissionRate * 100,
+                        base_amount: order.total_amount,
+                        status: 'pending'
                     });
             }
+
+            // ===== TECHNICIAN COMMISSION RECORDING =====
+            console.log('[Invoice Paid] Recording technician commissions for order:', invoice.order_id);
+
+            // Get all V2 products and their services for this order
+            const { data: orderProducts, error: opError } = await supabaseAdmin
+                .from('order_products')
+                .select(`
+                    id,
+                    order_product_services (
+                        id,
+                        item_name,
+                        unit_price,
+                        technicians:order_product_service_technicians (
+                            technician_id,
+                            commission
+                        )
+                    )
+                `)
+                .eq('order_id', invoice.order_id);
+
+            console.log('[Invoice Paid] Order products found:', orderProducts?.length || 0, opError ? `Error: ${opError.message}` : '');
+
+            if (orderProducts) {
+                for (const product of orderProducts) {
+                    const services = product.order_product_services || [];
+                    console.log(`[Invoice Paid] Product ${product.id} has ${services.length} services`);
+
+                    for (const service of services as any[]) {
+                        const technicians = service.technicians || [];
+                        const servicePrice = service.unit_price || 0;
+                        console.log(`[Invoice Paid] Service ${service.id} (${service.item_name}) - price: ${servicePrice}, technicians: ${technicians.length}`);
+
+                        for (const tech of technicians) {
+                            console.log(`[Invoice Paid] Technician ${tech.technician_id} - commission: ${tech.commission}%`);
+
+                            if (tech.commission && tech.commission > 0) {
+                                const techCommission = (servicePrice * tech.commission) / 100;
+
+                                const { error: insertError } = await supabaseAdmin
+                                    .from('commissions')
+                                    .insert({
+                                        user_id: tech.technician_id,
+                                        invoice_id: invoice.id,
+                                        commission_type: 'service',
+                                        amount: techCommission,
+                                        percentage: tech.commission,
+                                        base_amount: servicePrice,
+                                        status: 'pending'
+                                    });
+
+                                if (insertError) {
+                                    console.error(`[Invoice Paid] Error inserting commission:`, insertError.message);
+                                } else {
+                                    console.log(`[Invoice Paid] Created commission: ${tech.technician_id} - ${techCommission} VND (${tech.commission}%)`);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // ===== END TECHNICIAN COMMISSION =====
         }
 
         res.json({

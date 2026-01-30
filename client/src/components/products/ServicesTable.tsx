@@ -1,9 +1,10 @@
-import { Edit, Trash2, Wrench } from 'lucide-react';
+import { Edit, Trash2, Wrench, GitBranch } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency } from '@/lib/utils';
 import type { Service } from './types';
 import { getDepartmentLabel, type DepartmentOption } from './ServiceFormDialog';
+import { useWorkflows } from '@/hooks/useWorkflows';
 
 interface ServicesTableProps {
     services: Service[];
@@ -14,6 +15,13 @@ interface ServicesTableProps {
 }
 
 export function ServicesTable({ services, loading, onEdit, onDelete, departments = [] }: ServicesTableProps) {
+    const { workflows } = useWorkflows();
+
+    const getWorkflowName = (workflowId?: string) => {
+        if (!workflowId) return null;
+        return workflows.find(w => w.id === workflowId)?.name || null;
+    };
+
     return (
         <div className="overflow-x-auto">
             <table className="w-full">
@@ -24,6 +32,7 @@ export function ServicesTable({ services, loading, onEdit, onDelete, departments
                         <th className="p-3 text-left text-sm font-medium text-muted-foreground">Tên dịch vụ</th>
                         <th className="p-3 text-right text-sm font-medium text-muted-foreground">Giá</th>
                         <th className="p-3 text-center text-sm font-medium text-muted-foreground">Thời lượng</th>
+                        <th className="p-3 text-center text-sm font-medium text-muted-foreground">Quy trình</th>
                         <th className="p-3 text-center text-sm font-medium text-muted-foreground">Phòng ban</th>
                         <th className="p-3 text-center text-sm font-medium text-muted-foreground">Hoa hồng</th>
                         <th className="p-3 text-right text-sm font-medium text-muted-foreground">Thao tác</th>
@@ -32,13 +41,13 @@ export function ServicesTable({ services, loading, onEdit, onDelete, departments
                 <tbody>
                     {loading && services.length === 0 ? (
                         <tr>
-                            <td colSpan={8} className="p-8 text-center text-muted-foreground">
+                            <td colSpan={9} className="p-8 text-center text-muted-foreground">
                                 Đang tải dữ liệu...
                             </td>
                         </tr>
                     ) : services.length === 0 ? (
                         <tr>
-                            <td colSpan={8} className="p-8 text-center text-muted-foreground">
+                            <td colSpan={9} className="p-8 text-center text-muted-foreground">
                                 Không tìm thấy dịch vụ nào
                             </td>
                         </tr>
@@ -61,7 +70,17 @@ export function ServicesTable({ services, loading, onEdit, onDelete, departments
                                 <td className="p-3 font-mono text-sm">{service.code}</td>
                                 <td className="p-3 font-medium">{service.name}</td>
                                 <td className="p-3 text-right font-semibold text-primary">{formatCurrency(service.price)}</td>
-                                <td className="p-3 text-center">{service.duration || 0}h</td>
+                                <td className="p-3 text-center">{service.duration || 0} phút</td>
+                                <td className="p-3 text-center">
+                                    {getWorkflowName(service.workflow_id) ? (
+                                        <Badge variant="secondary" className="text-xs gap-1">
+                                            <GitBranch className="h-3 w-3" />
+                                            {getWorkflowName(service.workflow_id)}
+                                        </Badge>
+                                    ) : (
+                                        <span className="text-muted-foreground text-xs">-</span>
+                                    )}
+                                </td>
                                 <td className="p-3 text-center">
                                     {service.department ? (
                                         <Badge variant="outline" className="text-xs">
@@ -92,4 +111,3 @@ export function ServicesTable({ services, loading, onEdit, onDelete, departments
         </div>
     );
 }
-

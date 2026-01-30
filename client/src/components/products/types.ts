@@ -22,6 +22,7 @@ export interface Service extends APIService {
     commission_tech?: number;
     consumables?: ConsumableMaterial[];
     department?: string;
+    workflow_id?: string;
 }
 
 export interface ServicePackage extends APIPackage {

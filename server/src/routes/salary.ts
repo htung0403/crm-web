@@ -135,17 +135,18 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
         const endDate = new Date(year, month, 0).toISOString().split('T')[0];
 
-        // Try to get commissions from commissions table (legacy)
+        // Get commissions from commissions table (includes V2 technician commissions)
         let totalCommission = 0;
         try {
             const { data: commissions } = await supabaseAdmin
                 .from('commissions')
                 .select('amount')
                 .eq('user_id', user_id)
-                .eq('status', 'approved')
+                .in('status', ['pending', 'approved']) // Include pending V2 commissions
                 .gte('created_at', startDate)
-                .lte('created_at', endDate);
+                .lte('created_at', endDate + 'T23:59:59');
             totalCommission = commissions?.reduce((sum, c) => sum + (c.amount || 0), 0) || 0;
+            console.log(`[Salary] User ${user_id} - Commissions from table: ${totalCommission}`);
         } catch (e) {
             console.log('Commissions table may not exist, using 0');
         }

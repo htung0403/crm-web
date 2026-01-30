@@ -10,7 +10,7 @@ export interface KanbanColumn {
 }
 
 export const columns: KanbanColumn[] = [
-    { id: 'pending', title: 'Mới tạo', color: 'text-blue-600', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
+    { id: 'pending', title: 'Đơn nháp', color: 'text-blue-600', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
     { id: 'confirmed', title: 'Đã xác nhận', color: 'text-purple-600', bgColor: 'bg-purple-50', borderColor: 'border-purple-200' },
     { id: 'processing', title: 'Đang thực hiện', color: 'text-amber-600', bgColor: 'bg-amber-50', borderColor: 'border-amber-200' },
     { id: 'completed', title: 'Hoàn thành', color: 'text-emerald-600', bgColor: 'bg-emerald-50', borderColor: 'border-emerald-200' },

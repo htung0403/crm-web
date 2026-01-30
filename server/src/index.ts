@@ -26,6 +26,8 @@ import departmentsRouter from './routes/departments.js';
 import { commissionsRouter } from './routes/commissions.js';
 import orderItemsRouter from './routes/order-items.js';
 import notificationsRouter from './routes/notifications.js';
+import workflowsRouter from './routes/workflows.js';
+import orderProductsRouter from './routes/order-products.js';
 
 dotenv.config();
 
@@ -71,6 +73,8 @@ app.use('/api/departments', departmentsRouter);
 app.use('/api/commissions', commissionsRouter);
 app.use('/api/order-items', orderItemsRouter);
 app.use('/api/notifications', notificationsRouter);
+app.use('/api/workflows', workflowsRouter);
+app.use('/api/order-products', orderProductsRouter);
 
 // Error handling
 app.use(errorHandler);

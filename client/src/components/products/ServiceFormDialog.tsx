@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Wrench, Plus, Trash2, Building2 } from 'lucide-react';
+import { Wrench, Plus, Trash2, Building2, GitBranch } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import type { Service } from './types';
 import { formatNumber, parseNumber } from './utils';
 import { ImageUpload } from './ImageUpload';
+import { useWorkflows, type Workflow } from '@/hooks/useWorkflows';
 
 // Department type from database
 export interface DepartmentOption {
@@ -53,9 +54,12 @@ export function ServiceFormDialog({
     const [priceDisplay, setPriceDisplay] = useState('0');
     const [duration, setDuration] = useState(24);
     const [submitting, setSubmitting] = useState(false);
+    const [workflowId, setWorkflowId] = useState<string | null>(null);
 
     const [selectedDepartments, setSelectedDepartments] = useState<ServiceDepartment[]>([]);
     const [image, setImage] = useState<string | null>(null);
+
+    const { workflows } = useWorkflows();
 
     // Memoize serviceDepartments to prevent infinite loop
     const serviceDepartmentsJson = JSON.stringify(serviceDepartments);
@@ -68,6 +72,7 @@ export function ServiceFormDialog({
             setPriceDisplay(formatNumber(service.price || 0));
             setDuration(service.duration || 24);
             setImage(service.image || null);
+            setWorkflowId(service.workflow_id || null);
             // Load existing service-department relationships
             const parsedDepts = JSON.parse(serviceDepartmentsJson) as ServiceDepartment[];
             if (parsedDepts.length > 0) {
@@ -90,6 +95,7 @@ export function ServiceFormDialog({
             setDuration(24);
             setSelectedDepartments([]);
             setImage(null);
+            setWorkflowId(null);
         }
     }, [service, serviceDepartmentsJson, open]);
 
@@ -161,7 +167,8 @@ export function ServiceFormDialog({
                 price,
                 duration,
                 image: image || undefined,
-                status: 'active'
+                status: 'active',
+                workflow_id: workflowId || undefined,
             }, validDepts);
             onClose();
         } catch (error) {
@@ -223,9 +230,51 @@ export function ServiceFormDialog({
                             />
                         </div>
                         <div className="space-y-2">
-                            <Label>Thời lượng (giờ)</Label>
+                            <Label>Thời lượng (phút)</Label>
                             <Input type="number" value={duration} onChange={(e) => setDuration(Number(e.target.value))} />
                         </div>
+                    </div>
+
+                    {/* Workflow Selection */}
+                    <div className="space-y-2">
+                        <Label className="flex items-center gap-2">
+                            <GitBranch className="h-4 w-4" />
+                            Quy trình áp dụng
+                        </Label>
+                        <Select
+                            value={workflowId || 'none'}
+                            onValueChange={(v) => {
+                                const newWorkflowId = v === 'none' ? null : v;
+                                setWorkflowId(newWorkflowId);
+
+                                // Auto-fill duration from workflow
+                                if (newWorkflowId) {
+                                    const workflow = workflows.find(w => w.id === newWorkflowId);
+                                    if (workflow && workflow.steps.length > 0) {
+                                        const totalMinutes = workflow.steps.reduce((sum, s) => sum + s.estimated_duration, 0);
+                                        setDuration(totalMinutes);
+                                    }
+                                }
+                            }}
+                        >
+                            <SelectTrigger>
+                                <SelectValue placeholder="Chọn quy trình" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="none">Không áp dụng quy trình</SelectItem>
+                                {workflows.filter(w => w.status === 'active').map(workflow => {
+                                    const totalMinutes = workflow.steps.reduce((sum, s) => sum + s.estimated_duration, 0);
+                                    return (
+                                        <SelectItem key={workflow.id} value={workflow.id}>
+                                            {workflow.name} ({workflow.steps.length} bước, {totalMinutes} phút)
+                                        </SelectItem>
+                                    );
+                                })}
+                            </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                            Quy trình định nghĩa các bước công việc cần thực hiện cho dịch vụ này
+                        </p>
                     </div>
 
                     {/* Multi-Department Section */}

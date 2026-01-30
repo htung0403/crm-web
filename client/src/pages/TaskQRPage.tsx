@@ -70,6 +70,16 @@ interface TaskData {
         phone: string;
         avatar?: string;
     };
+    technicians?: Array<{
+        technician_id: string;
+        technician?: {
+            id: string;
+            name: string;
+            avatar?: string;
+            phone?: string;
+        };
+        commission?: number;
+    }>;
     customer?: {
         name: string;
         phone: string;
@@ -298,8 +308,9 @@ export function TaskQRPage() {
         return Math.floor((Date.now() - startTime.getTime()) / 60000);
     }, [startTime]);
 
-    // Check if current user is the assigned technician
-    const isAssignedTechnician = task?.technician?.id === user?.id;
+    // Check if current user is the assigned technician (check both single and multiple technicians)
+    const isAssignedTechnician = task?.technician?.id === user?.id ||
+        (task?.technicians?.some(t => t.technician?.id === user?.id || t.technician_id === user?.id) ?? false);
     const canStartTask = task?.status === 'assigned' && isAssignedTechnician;
     const canCompleteTask = task?.status === 'in_progress' && isAssignedTechnician;
     const isInProgress = task?.status === 'in_progress';
@@ -477,26 +488,57 @@ export function TaskQRPage() {
                                 </div>
                             )}
 
-                            {/* Technician Info */}
-                            {task.technician && (
+                            {/* Technician Info - Support multiple technicians */}
+                            {(task.technicians && task.technicians.length > 0 || task.technician) && (
                                 <div className="space-y-2">
                                     <h4 className="font-semibold text-sm text-muted-foreground uppercase">Kỹ thuật viên phụ trách</h4>
-                                    <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-                                        <Avatar className="h-10 w-10">
-                                            <AvatarImage src={task.technician.avatar} />
-                                            <AvatarFallback>{task.technician.name?.charAt(0)}</AvatarFallback>
-                                        </Avatar>
-                                        <div>
-                                            <p className="font-medium">{task.technician.name}</p>
-                                            {task.technician.phone && (
-                                                <a href={`tel:${task.technician.phone}`} className="text-sm text-primary hover:underline">
-                                                    {task.technician.phone}
-                                                </a>
-                                            )}
-                                        </div>
-                                        {isAssignedTechnician && (
-                                            <Badge className="ml-auto bg-green-100 text-green-700">Bạn</Badge>
-                                        )}
+                                    <div className="space-y-2">
+                                        {/* Display multiple technicians from junction table */}
+                                        {task.technicians && task.technicians.length > 0 ? (
+                                            task.technicians.map((t, idx) => {
+                                                const tech = t.technician;
+                                                if (!tech) return null;
+                                                const isCurrentUser = tech.id === user?.id;
+                                                return (
+                                                    <div key={t.technician_id || idx} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+                                                        <Avatar className="h-10 w-10">
+                                                            <AvatarImage src={tech.avatar} />
+                                                            <AvatarFallback>{tech.name?.charAt(0)}</AvatarFallback>
+                                                        </Avatar>
+                                                        <div>
+                                                            <p className="font-medium">{tech.name}</p>
+                                                            {tech.phone && (
+                                                                <a href={`tel:${tech.phone}`} className="text-sm text-primary hover:underline">
+                                                                    {tech.phone}
+                                                                </a>
+                                                            )}
+                                                        </div>
+                                                        {isCurrentUser && (
+                                                            <Badge className="ml-auto bg-green-100 text-green-700">Bạn</Badge>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })
+                                        ) : task.technician ? (
+                                            // Fallback to single technician
+                                            <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
+                                                <Avatar className="h-10 w-10">
+                                                    <AvatarImage src={task.technician.avatar} />
+                                                    <AvatarFallback>{task.technician.name?.charAt(0)}</AvatarFallback>
+                                                </Avatar>
+                                                <div>
+                                                    <p className="font-medium">{task.technician.name}</p>
+                                                    {task.technician.phone && (
+                                                        <a href={`tel:${task.technician.phone}`} className="text-sm text-primary hover:underline">
+                                                            {task.technician.phone}
+                                                        </a>
+                                                    )}
+                                                </div>
+                                                {isAssignedTechnician && (
+                                                    <Badge className="ml-auto bg-green-100 text-green-700">Bạn</Badge>
+                                                )}
+                                            </div>
+                                        ) : null}
                                     </div>
                                 </div>
                             )}

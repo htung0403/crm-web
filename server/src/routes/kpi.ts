@@ -61,11 +61,18 @@ router.get('/summary', authenticate, requireManager, async (req: AuthenticatedRe
             .select('id, total_amount, status, sales_id, created_at')
             .gte('created_at', startDate.toISOString());
 
-        // Get order items with technician assignments (for technician commission)
+        // Get order items with technician assignments (for technician commission - V1)
         const { data: orderItems } = await supabaseAdmin
             .from('order_items')
             .select('id, order_id, technician_id, total_price, commission_tech_amount, status')
             .not('technician_id', 'is', null);
+
+        // Get commissions from commissions table (V2 - includes technician service commissions)
+        const { data: commissionsData } = await supabaseAdmin
+            .from('commissions')
+            .select('user_id, amount, commission_type')
+            .in('status', ['pending', 'approved'])
+            .gte('created_at', startDate.toISOString());
 
         // Get leads within the period
         const { data: leads } = await supabaseAdmin
@@ -93,13 +100,20 @@ router.get('/summary', authenticate, requireManager, async (req: AuthenticatedRe
             let completedOrdersCount = 0;
 
             if (user.role === 'technician') {
-                // Technician: get commission from order_items they were assigned to
+                // Technician: get commission from order_items (V1) they were assigned to
                 const techItems = (orderItems || []).filter(
                     item => item.technician_id === user.id && completedOrderIds.includes(item.order_id)
                 );
                 completedOrdersCount = techItems.length;
-                commissionAmount = techItems.reduce((sum, item) => sum + (item.commission_tech_amount || 0), 0);
+                const v1Commission = techItems.reduce((sum, item) => sum + (item.commission_tech_amount || 0), 0);
                 revenue = techItems.reduce((sum, item) => sum + (item.total_price || 0), 0);
+
+                // Also add V2 commissions from commissions table
+                const v2Commission = (commissionsData || [])
+                    .filter(c => c.user_id === user.id && c.commission_type === 'service')
+                    .reduce((sum, c) => sum + (c.amount || 0), 0);
+
+                commissionAmount = v1Commission + v2Commission;
             } else {
                 // Sale/Manager: get revenue from orders they created
                 const userOrders = (orders || []).filter(o => o.sales_id === user.id);
@@ -107,9 +121,16 @@ router.get('/summary', authenticate, requireManager, async (req: AuthenticatedRe
                 completedOrdersCount = completedOrders.length;
                 revenue = completedOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
 
-                // Calculate commission based on revenue
+                // Get commission from commissions table (product type for sales)
+                const v2SalesCommission = (commissionsData || [])
+                    .filter(c => c.user_id === user.id && c.commission_type === 'product')
+                    .reduce((sum, c) => sum + (c.amount || 0), 0);
+
+                // Calculate commission based on revenue (fallback)
                 const commissionRate = user.commission || 5;
-                commissionAmount = revenue * (commissionRate / 100);
+                const calculatedCommission = revenue * (commissionRate / 100);
+
+                commissionAmount = v2SalesCommission > 0 ? v2SalesCommission : calculatedCommission;
             }
 
             const userLeads = (leads || []).filter(l => l.assigned_to === user.id);

@@ -31,6 +31,7 @@ export interface Service {
     commission_sale?: number;
     commission_tech?: number;
     department?: string; // Department ID for technician assignment
+    workflow_id?: string; // Linked workflow for this service
     status: string;
     created_at: string;
 }

@@ -1,5 +1,5 @@
 import { Router, Response, NextFunction } from 'express';
-import { supabase } from '../config/supabase.js';
+import { supabase, supabaseAdmin } from '../config/supabase.js';
 import { AuthenticatedRequest, authenticate } from '../middleware/auth.js';
 
 const router = Router();
@@ -113,7 +113,7 @@ router.get('/my-tasks', authenticate, async (req: AuthenticatedRequest, res: Res
             console.log('technician_tasks table not available');
         }
 
-        // Also get order_items assigned to this technician
+        // Also get order_items assigned to this technician (V1)
         const { data: orderItems, error: itemsError } = await supabase
             .from('order_items')
             .select(`
@@ -124,15 +124,119 @@ router.get('/my-tasks', authenticate, async (req: AuthenticatedRequest, res: Res
             .eq('technician_id', userId)
             .not('item_code', 'is', null);
 
+        // Get order_product_services assigned to this technician (V2) - check both old column and new junction table
+        const { data: v2Services, error: v2Error } = await supabaseAdmin
+            .from('order_product_services')
+            .select(`
+                *,
+                order_products(
+                    id, 
+                    product_code,
+                    orders(id, order_code, status, customer:customers(*))
+                )
+            `)
+            .eq('technician_id', userId);
+
+        // Also get V2 services from junction table (new multi-technician assignments)
+        const { data: v2JunctionServices } = await supabaseAdmin
+            .from('order_product_service_technicians')
+            .select(`
+                *,
+                order_product_services(
+                    *,
+                    order_products(
+                        id, 
+                        product_code,
+                        orders(id, order_code, status, customer:customers(*))
+                    )
+                )
+            `)
+            .eq('technician_id', userId);
+
+        // Combine V2 services (avoid duplicates)
+        const v2ServiceIds = new Set((v2Services || []).map(s => s.id));
+        const additionalV2Services = (v2JunctionServices || [])
+            .filter(j => j.order_product_services && !v2ServiceIds.has(j.order_product_services.id))
+            .map(j => ({
+                ...j.order_product_services,
+                junction_status: j.status, // Use junction status if needed
+                junction_commission: j.commission
+            }));
+        const allV2Services = [...(v2Services || []), ...additionalV2Services];
+
+        // Get workflow steps assigned to this technician
+        const { data: workflowSteps, error: stepsError } = await supabaseAdmin
+            .from('order_item_steps')
+            .select(`
+                *,
+                order_product_services(
+                    item_name,
+                    order_products(
+                        id,
+                        product_code,
+                        orders(id, order_code, status, customer:customers(*))
+                    )
+                ),
+                order_items(
+                    item_name,
+                    orders(id, order_code, status, customer:customers(*))
+                )
+            `)
+            .eq('technician_id', userId);
+
         if (itemsError) {
-            return res.json(tasks);
+            console.error('Error fetching order items:', itemsError);
         }
 
         const taskItemCodes = new Set(tasks.map(t => t.item_code).filter(Boolean));
-        const additionalItems = (orderItems || [])
-            .filter(item => item.item_code && !taskItemCodes.has(item.item_code))
-            .map(item => {
-                // Map order_items status to task status
+        const allTasks = [...tasks];
+
+        // Process V1 Items
+        if (orderItems) {
+            const v1Items = orderItems
+                .filter(item => item.item_code && !taskItemCodes.has(item.item_code))
+                .map(item => {
+                    let taskStatus = 'assigned';
+                    if (item.status === 'in_progress') taskStatus = 'in_progress';
+                    else if (item.status === 'completed') taskStatus = 'completed';
+                    else if (item.status === 'cancelled') taskStatus = 'cancelled';
+                    else if (item.status === 'pending') taskStatus = 'assigned';
+
+                    return {
+                        id: item.id,
+                        task_code: 'V1-' + item.item_code,
+                        item_code: item.item_code,
+                        order_id: item.order?.id,
+                        order_item_id: item.id,
+                        service_id: item.service_id,
+                        technician_id: userId,
+                        service_name: item.item_name,
+                        quantity: item.quantity,
+                        status: taskStatus,
+                        priority: 'normal',
+                        scheduled_date: null,
+                        scheduled_time: null,
+                        started_at: item.started_at || null,
+                        completed_at: item.completed_at || null,
+                        assigned_at: item.created_at,
+                        created_at: item.created_at,
+                        updated_at: item.updated_at,
+                        order: item.order ? {
+                            order_code: item.order.order_code,
+                            customer: item.order.customer
+                        } : undefined,
+                        service: item.service,
+                        customer: item.order?.customer,
+                        is_virtual: true,
+                        type: 'v1_service'
+                    };
+                });
+            allTasks.push(...v1Items);
+        }
+
+        // Process V2 Services (including junction table assignments)
+        if (allV2Services.length > 0) {
+            const v2Items = allV2Services.map(item => {
                 let taskStatus = 'assigned';
                 if (item.status === 'in_progress') taskStatus = 'in_progress';
                 else if (item.status === 'completed') taskStatus = 'completed';
@@ -141,39 +245,89 @@ router.get('/my-tasks', authenticate, async (req: AuthenticatedRequest, res: Res
 
                 return {
                     id: item.id,
-                    task_code: 'PENDING-' + item.id.substring(0, 8),
-                    item_code: item.item_code,
-                    order_id: item.order?.id,
-                    order_item_id: item.id,
+                    task_code: 'V2-' + (item.order_products?.product_code || item.id.substring(0, 6)),
+                    item_code: item.order_products?.product_code,
+                    order_id: item.order_products?.orders?.id,
                     service_id: item.service_id,
                     technician_id: userId,
                     service_name: item.item_name,
-                    quantity: item.quantity,
+                    quantity: 1,
                     status: taskStatus,
                     priority: 'normal',
                     scheduled_date: null,
                     scheduled_time: null,
                     started_at: item.started_at || null,
                     completed_at: item.completed_at || null,
-                    duration_minutes: null,
-                    notes: null,
-                    customer_feedback: null,
-                    rating: null,
-                    assigned_by: null,
-                    assigned_at: item.created_at,
+                    assigned_at: item.assigned_at || item.created_at,
                     created_at: item.created_at,
-                    updated_at: item.updated_at,
-                    order: item.order ? {
-                        order_code: item.order.order_code,
-                        customer: item.order.customer
+                    updated_at: item.updated_at || item.created_at,
+                    order: item.order_products?.orders ? {
+                        order_code: item.order_products.orders.order_code,
+                        customer: item.order_products.orders.customer
                     } : undefined,
-                    service: item.service,
-                    customer: item.order?.customer,
-                    is_virtual: true
+                    customer: item.order_products?.orders?.customer,
+                    is_virtual: true,
+                    type: 'v2_service'
                 };
             });
+            allTasks.push(...v2Items);
+        }
 
-        const allTasks = [...tasks, ...additionalItems];
+        // Process Workflow Steps
+        if (workflowSteps) {
+            const stepItems = workflowSteps.map(step => {
+                let taskStatus = 'assigned';
+                if (step.status === 'in_progress') taskStatus = 'in_progress';
+                else if (step.status === 'completed') taskStatus = 'completed';
+                else if (step.status === 'skipped') taskStatus = 'cancelled';
+                else if (step.status === 'pending') taskStatus = 'assigned';
+
+                // Determine parent service name and order info
+                let serviceName = step.step_name;
+                let parentServiceName = '';
+                let orderInfo = null;
+                let customerInfo = null;
+
+                if (step.order_product_services) {
+                    parentServiceName = step.order_product_services.item_name;
+                    orderInfo = step.order_product_services.order_products?.orders;
+                    customerInfo = orderInfo?.customer;
+                } else if (step.order_items) {
+                    parentServiceName = step.order_items.item_name;
+                    orderInfo = step.order_items.orders;
+                    customerInfo = orderInfo?.customer;
+                }
+
+                return {
+                    id: step.id,
+                    task_code: 'STEP-' + step.step_order, // Simple display code
+                    item_code: null,
+                    order_id: orderInfo?.id,
+                    technician_id: userId,
+                    service_name: `${step.step_name} (${parentServiceName})`,
+                    quantity: 1,
+                    status: taskStatus,
+                    priority: 'normal',
+                    scheduled_date: null,
+                    scheduled_time: null,
+                    started_at: step.started_at || null,
+                    completed_at: step.completed_at || null,
+                    assigned_at: step.created_at,
+                    created_at: step.created_at,
+                    updated_at: step.created_at,
+                    order: orderInfo ? {
+                        order_code: orderInfo.order_code,
+                        customer: customerInfo
+                    } : undefined,
+                    customer: customerInfo,
+                    is_virtual: true,
+                    type: 'workflow_step',
+                    is_step: true,
+                    step_id: step.id
+                };
+            });
+            allTasks.push(...stepItems);
+        }
 
         res.json(allTasks);
     } catch (error) {
@@ -280,8 +434,90 @@ router.get('/by-code/:itemCode', async (req: AuthenticatedRequest, res: Response
             .eq('item_code', itemCode)
             .single();
 
-        if (itemError) {
-            return res.status(404).json({ message: 'Không tìm thấy mã QR này' });
+        // If V1 item not found, try V2 product (order_products)
+        if (itemError || !orderItem) {
+            const { data: v2Product, error: v2Error } = await supabaseAdmin
+                .from('order_products')
+                .select(`
+                    id,
+                    name,
+                    product_code,
+                    orders (id, order_code, status, customer:customers(*)),
+                    order_product_services (
+                        id,
+                        item_name,
+                        status,
+                        technician_id,
+                        unit_price,
+                        started_at,
+                        completed_at,
+                        users (id, name, phone, avatar),
+                        technicians:order_product_service_technicians (
+                            id,
+                            technician_id,
+                            commission,
+                            status,
+                            assigned_at,
+                            technician:users!order_product_service_technicians_technician_id_fkey(id, name, phone, avatar)
+                        )
+                    )
+                `)
+                .eq('product_code', itemCode)
+                .single();
+
+            if (v2Error || !v2Product) {
+                return res.status(404).json({ message: 'Không tìm thấy mã QR này' });
+            }
+
+            // If found, we need to decide what to return.
+            // A product might have multiple services.
+            // For now, return the first service or generic product info.
+
+            // Prefer services assigned to current user if possible?
+            // But this is public scan? Or technician scan? "AuthenticatedRequest".
+            // If technician, prioritize their task.
+
+            const userId = req.user?.id;
+
+            // Check both old single technician and new junction table
+            let targetService = v2Product.order_product_services?.find((s: any) =>
+                s.technician_id === userId ||
+                s.technicians?.some((t: any) => t.technician_id === userId)
+            );
+
+            // If no service assigned to me, take the first one?
+            if (!targetService && v2Product.order_product_services?.length > 0) {
+                targetService = v2Product.order_product_services[0];
+            }
+
+            // Get technicians array from junction table, fallback to single technician
+            let technicians: any[] = targetService?.technicians || [];
+            if (technicians.length === 0 && targetService?.technician_id && targetService?.users) {
+                technicians = [{
+                    technician_id: targetService.technician_id,
+                    technician: targetService.users
+                }] as any;
+            }
+
+            return res.json({
+                id: targetService?.id || v2Product.id, // Use service ID if available, else product ID
+                type: 'v2_service', // Or 'v2_product' if no service?
+                item_code: v2Product.product_code,
+                service_name: targetService ? targetService.item_name : v2Product.name,
+                quantity: 1,
+                unit_price: targetService?.unit_price || 0,
+                total_price: targetService?.unit_price || 0,
+                item_type: 'service',
+                status: targetService?.status || (targetService?.technician_id ? 'assigned' : 'not_assigned'),
+                started_at: targetService?.started_at,
+                completed_at: targetService?.completed_at,
+                order: v2Product.orders,
+                service: null, // V2 doesn't link to services table directly in response structure same as V1?
+                technician: targetService?.users, // Single technician for backward compatibility
+                technicians: technicians, // Multiple technicians from junction table
+                customer: (v2Product.orders as any)?.customer,
+                order_product_id: v2Product.id // Extra info
+            });
         }
 
         return res.json({
@@ -519,7 +755,73 @@ router.put('/:id/start', async (req: AuthenticatedRequest, res: Response, next: 
             return res.json(data);
         }
 
-        // If not found in technician_tasks, try order_items (virtual task)
+        // If not found in technician_tasks, try order_item_steps (Workflow Step)
+        const { data: step } = await supabaseAdmin
+            .from('order_item_steps')
+            .select('id, status')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (step) {
+            const { data: updatedStep, error: stepError } = await supabaseAdmin
+                .from('order_item_steps')
+                .update({
+                    status: 'in_progress',
+                    started_at: new Date().toISOString()
+                })
+                .eq('id', id)
+                .select('*, order_items:order_items(id, orders:orders(id, order_code)), order_product_services:order_product_services(id, order_products(id, orders(id, order_code)))')
+                .single();
+
+            if (stepError) throw stepError;
+
+            return res.json({
+                ...updatedStep,
+                type: 'workflow_step',
+                is_virtual: true
+            });
+        }
+
+        // Check if it is a V2 service (order_product_services)
+        const { data: v2Service } = await supabaseAdmin
+            .from('order_product_services')
+            .select('id')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (v2Service) {
+            const { data: updatedService, error: serviceError } = await supabaseAdmin
+                .from('order_product_services')
+                .update({
+                    status: 'in_progress',
+                    started_at: new Date().toISOString()
+                })
+                .eq('id', id)
+                .select('*, order_products(id, orders(id, order_code))')
+                .single();
+
+            if (serviceError) throw serviceError;
+            // Update order status potentially?
+            if (updatedService.order_products?.orders?.id) {
+                await supabaseAdmin
+                    .from('orders')
+                    .update({
+                        status: 'processing',
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', updatedService.order_products.orders.id)
+                    .eq('status', 'confirmed');
+            }
+
+            return res.json({
+                ...updatedService,
+                type: 'v2_service',
+                is_virtual: true
+            });
+        }
+
+
+        // If not found in steps or V2, try order_items (V1 virtual task)
         const { data: orderItem, error: itemError } = await supabase
             .from('order_items')
             .select('id, order_id')
@@ -645,6 +947,75 @@ router.put('/:id/complete', async (req: AuthenticatedRequest, res: Response, nex
             }
 
             return res.json(data);
+        }
+
+        // Try order_item_steps (Workflow Step)
+        const { data: step } = await supabaseAdmin
+            .from('order_item_steps')
+            .select('id, started_at')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (step) {
+            let actualDuration = duration_minutes;
+            if (!actualDuration && step.started_at) {
+                const startTime = new Date(step.started_at);
+                const endTime = new Date();
+                actualDuration = Math.round((endTime.getTime() - startTime.getTime()) / 60000);
+            }
+
+            const { data: updatedStep, error: stepError } = await supabaseAdmin
+                .from('order_item_steps')
+                .update({
+                    status: 'completed',
+                    completed_at: new Date().toISOString(),
+                    duration_minutes: actualDuration
+                })
+                .eq('id', id)
+                .select()
+                .single();
+
+            if (stepError) throw stepError;
+
+            return res.json({
+                ...updatedStep,
+                type: 'workflow_step',
+                is_virtual: true
+            });
+        }
+
+        // Try V2 service
+        const { data: v2Service } = await supabaseAdmin
+            .from('order_product_services')
+            .select('id, started_at, order_product_id, unit_price')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (v2Service) {
+            let actualDuration = duration_minutes;
+            if (!actualDuration && v2Service.started_at) {
+                const startTime = new Date(v2Service.started_at);
+                const endTime = new Date();
+                actualDuration = Math.round((endTime.getTime() - startTime.getTime()) / 60000);
+            }
+
+            const { data: updatedService, error: serviceError } = await supabaseAdmin
+                .from('order_product_services')
+                .update({
+                    status: 'completed',
+                    completed_at: new Date().toISOString()
+                })
+                .eq('id', id)
+                .select()
+                .single();
+
+            if (serviceError) throw serviceError;
+
+            return res.json({
+                ...updatedService,
+                type: 'v2_service',
+                is_virtual: true
+            });
         }
 
         // If not found in technician_tasks, try order_items (virtual task)

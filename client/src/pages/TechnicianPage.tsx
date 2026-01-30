@@ -291,9 +291,21 @@ function KanbanTaskCard({ task, onStart, onComplete }: KanbanTaskCardProps) {
                             {priority.label}
                         </span>
                     </div>
-                    <p className="text-xs text-muted-foreground font-mono mt-1">
-                        {task.task_code || task.item_code}
-                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                        <p className="text-xs text-muted-foreground font-mono">
+                            {task.task_code || task.item_code}
+                        </p>
+                        {task.type === 'workflow_step' && (
+                            <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 bg-purple-50 text-purple-700 border-purple-200">
+                                Quy trình
+                            </Badge>
+                        )}
+                        {task.type === 'v2_service' && (
+                            <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 bg-blue-50 text-blue-700 border-blue-200">
+                                Dịch vụ
+                            </Badge>
+                        )}
+                    </div>
                 </div>
 
                 {/* Customer Info */}
