@@ -1,9 +1,14 @@
-import { Bell, Settings, Search, Menu, LogOut } from 'lucide-react';
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Bell, Settings, Search, Menu, LogOut, Clock, User, CheckCheck, X, Package } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import type { User, UserRole } from '@/types';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import type { User as UserType, UserRole } from '@/types';
+import { useLeadNotifications } from '@/hooks/useLeadNotifications';
+import { useOrderNotifications } from '@/hooks/useOrderNotifications';
 
 const roleLabels: Record<UserRole, string> = {
     admin: 'Quản trị viên',
@@ -13,14 +18,51 @@ const roleLabels: Record<UserRole, string> = {
     technician: 'Kỹ thuật viên',
 };
 
+const getMilestoneColor = (hours: number): string => {
+    if (hours <= 1) return 'bg-yellow-100 text-yellow-700';
+    if (hours <= 3) return 'bg-orange-100 text-orange-700';
+    if (hours <= 7) return 'bg-red-100 text-red-700';
+    return 'bg-red-200 text-red-800';
+};
+
 interface HeaderProps {
     onMenuToggle?: () => void;
     isMobile: boolean;
-    currentUser: User;
+    currentUser: UserType;
     onLogout?: () => void;
 }
 
 export function Header({ onMenuToggle, isMobile, currentUser, onLogout }: HeaderProps) {
+    const navigate = useNavigate();
+    const [showNotifications, setShowNotifications] = useState(false);
+    const [notificationTab, setNotificationTab] = useState<'leads' | 'orders'>('leads');
+    const { notifications: leadNotifications, unreadCount: leadUnreadCount, markAsRead: markLeadAsRead, markAllAsRead: markAllLeadsAsRead, loading: leadLoading } = useLeadNotifications();
+    const { notifications: orderNotifications, unreadCount: orderUnreadCount, markAsRead: markOrderAsRead, markAllAsRead: markAllOrdersAsRead, loading: orderLoading } = useOrderNotifications();
+
+    const totalUnreadCount = leadUnreadCount + orderUnreadCount;
+
+    const handleLeadNotificationClick = (leadId: string, notificationId: string) => {
+        markLeadAsRead(notificationId);
+        setShowNotifications(false);
+        navigate(`/leads/${leadId}`);
+    };
+
+    const handleOrderNotificationClick = (orderId: string, notificationId: string) => {
+        markOrderAsRead(notificationId);
+        setShowNotifications(false);
+        navigate(`/orders/${orderId}`);
+    };
+
+    const formatTimeAgo = (dateStr: string): string => {
+        const diff = Date.now() - new Date(dateStr).getTime();
+        const hours = Math.floor(diff / (1000 * 60 * 60));
+        const days = Math.floor(hours / 24);
+
+        if (days > 0) return `${days} ngày trước`;
+        if (hours > 0) return `${hours} giờ trước`;
+        return 'Vừa xong';
+    };
+
     return (
         <header className="fixed top-0 left-0 right-0 z-40 h-16 border-b bg-white/95 backdrop-blur-sm">
             <div className="flex h-full items-center justify-between px-4 lg:px-6">
@@ -48,12 +90,150 @@ export function Header({ onMenuToggle, isMobile, currentUser, onLogout }: Header
                 {/* Right section - Notifications & User */}
                 <div className="flex items-center gap-2">
                     {/* Notifications */}
-                    <Button variant="ghost" size="icon" className="relative">
-                        <Bell className="h-5 w-5" />
-                        <Badge className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-[10px]">
-                            3
-                        </Badge>
-                    </Button>
+                    <div className="relative">
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="relative"
+                            onClick={() => setShowNotifications(!showNotifications)}
+                        >
+                            <Bell className="h-5 w-5" />
+                            {totalUnreadCount > 0 && (
+                                <Badge className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 text-[10px] animate-pulse">
+                                    {totalUnreadCount > 9 ? '9+' : totalUnreadCount}
+                                </Badge>
+                            )}
+                        </Button>
+
+                        {/* Notification Dropdown */}
+                        {showNotifications && (
+                            <>
+                                {/* Backdrop */}
+                                <div
+                                    className="fixed inset-0 z-40"
+                                    onClick={() => setShowNotifications(false)}
+                                />
+
+                                {/* Dropdown */}
+                                <Card className="absolute right-0 top-12 w-80 sm:w-96 z-50 shadow-lg border max-h-[70vh] overflow-hidden">
+                                    <CardHeader className="pb-2 border-b">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex gap-2">
+                                                <Button
+                                                    variant={notificationTab === 'leads' ? 'default' : 'ghost'}
+                                                    size="sm"
+                                                    className="h-7 text-xs"
+                                                    onClick={() => setNotificationTab('leads')}
+                                                >
+                                                    <Clock className="h-3 w-3 mr-1" />
+                                                    Lead {leadUnreadCount > 0 && `(${leadUnreadCount})`}
+                                                </Button>
+                                                <Button
+                                                    variant={notificationTab === 'orders' ? 'default' : 'ghost'}
+                                                    size="sm"
+                                                    className="h-7 text-xs"
+                                                    onClick={() => setNotificationTab('orders')}
+                                                >
+                                                    <Package className="h-3 w-3 mr-1" />
+                                                    Đơn hàng {orderUnreadCount > 0 && `(${orderUnreadCount})`}
+                                                </Button>
+                                            </div>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-7 w-7"
+                                                onClick={() => setShowNotifications(false)}
+                                            >
+                                                <X className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    </CardHeader>
+                                    <CardContent className="p-0 max-h-[50vh] overflow-y-auto">
+                                        {/* Lead Notifications Tab */}
+                                        {notificationTab === 'leads' && (
+                                            <>
+                                                {leadLoading ? (
+                                                    <div className="flex items-center justify-center py-8">
+                                                        <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent" />
+                                                    </div>
+                                                ) : leadNotifications.length === 0 ? (
+                                                    <div className="flex flex-col items-center justify-center py-8 text-center px-4">
+                                                        <Clock className="h-10 w-10 text-muted-foreground/50 mb-2" />
+                                                        <p className="text-sm text-muted-foreground">Không có thông báo Lead</p>
+                                                    </div>
+                                                ) : (
+                                                    <div className="divide-y">
+                                                        {leadNotifications.slice(0, 10).map((notification) => (
+                                                            <div
+                                                                key={notification.id}
+                                                                className={`p-3 hover:bg-muted/50 cursor-pointer transition-colors ${!notification.isRead ? 'bg-blue-50/50' : ''}`}
+                                                                onClick={() => handleLeadNotificationClick(notification.leadId, notification.id)}
+                                                            >
+                                                                <div className="flex gap-3">
+                                                                    <div className={`h-9 w-9 rounded-full flex items-center justify-center shrink-0 ${getMilestoneColor(notification.milestoneHours)}`}>
+                                                                        <Clock className="h-4 w-4" />
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <p className="text-sm font-medium truncate">{notification.leadName}</p>
+                                                                        <p className="text-xs text-muted-foreground truncate">{notification.leadPhone}</p>
+                                                                        <p className="text-xs text-muted-foreground mt-1">
+                                                                            Tạo {formatTimeAgo(notification.createdAt)}
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+
+                                        {/* Order Notifications Tab */}
+                                        {notificationTab === 'orders' && (
+                                            <>
+                                                {orderLoading ? (
+                                                    <div className="flex items-center justify-center py-8">
+                                                        <div className="animate-spin rounded-full h-6 w-6 border-2 border-primary border-t-transparent" />
+                                                    </div>
+                                                ) : orderNotifications.length === 0 ? (
+                                                    <div className="flex flex-col items-center justify-center py-8 text-center px-4">
+                                                        <Package className="h-10 w-10 text-muted-foreground/50 mb-2" />
+                                                        <p className="text-sm text-muted-foreground">Không có thông báo đơn hàng</p>
+                                                    </div>
+                                                ) : (
+                                                    <div className="divide-y">
+                                                        {orderNotifications.slice(0, 10).map((notification) => (
+                                                            <div
+                                                                key={notification.id}
+                                                                className={`p-3 hover:bg-muted/50 cursor-pointer transition-colors ${!notification.is_read ? 'bg-green-50/50' : ''}`}
+                                                                onClick={() => handleOrderNotificationClick(notification.data?.order_id || '', notification.id)}
+                                                            >
+                                                                <div className="flex gap-3">
+                                                                    <div className="h-9 w-9 rounded-full flex items-center justify-center shrink-0 bg-green-100 text-green-700">
+                                                                        <CheckCheck className="h-4 w-4" />
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <p className="text-sm font-medium">{notification.title}</p>
+                                                                        <p className="text-xs text-muted-foreground line-clamp-2">{notification.message}</p>
+                                                                        <p className="text-xs text-muted-foreground mt-1">
+                                                                            {formatTimeAgo(notification.created_at)}
+                                                                        </p>
+                                                                    </div>
+                                                                    {!notification.is_read && (
+                                                                        <div className="h-2 w-2 rounded-full bg-green-500 shrink-0" />
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            </>
+                        )}
+                    </div>
 
                     {/* Settings */}
                     <Button variant="ghost" size="icon" className="hidden sm:flex">

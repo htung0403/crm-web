@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
     Plus, Search, Edit, Trash2, Eye, Phone, Mail, MapPin,
     Building2, User, ShoppingCart, DollarSign,
@@ -833,6 +834,7 @@ function CustomerDetailDialog({
 }
 
 export function CustomersPage() {
+    const navigate = useNavigate();
     const { customers, loading, error, fetchCustomers, createCustomer, updateCustomer, deleteCustomer } = useCustomers();
     const { employees, fetchEmployees } = useEmployees();
     const { createInteraction, fetchInteractions } = useInteractions();
@@ -841,7 +843,6 @@ export function CustomersPage() {
     const [typeFilter, setTypeFilter] = useState('all');
     const [statusFilter, setStatusFilter] = useState('all');
     const [showForm, setShowForm] = useState(false);
-    const [showDetail, setShowDetail] = useState(false);
     const [showContactDialog, setShowContactDialog] = useState(false);
     const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
 
@@ -903,18 +904,12 @@ export function CustomersPage() {
             await createInteraction(data);
             toast.success('Đã tạo tương tác mới!');
             setShowContactDialog(false);
-            setShowDetail(false);
             await fetchInteractions();
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Lỗi khi tạo tương tác';
             toast.error(message);
             throw error;
         }
-    };
-
-    const handleContactClick = () => {
-        setShowDetail(false);
-        setShowContactDialog(true);
     };
 
     // Stats
@@ -1099,7 +1094,7 @@ export function CustomersPage() {
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
-                                                        onClick={() => { setSelectedCustomer(customer); setShowDetail(true); }}
+                                                        onClick={() => navigate(`/customers/${customer.id}`)}
                                                     >
                                                         <Eye className="h-4 w-4" />
                                                     </Button>
@@ -1167,7 +1162,7 @@ export function CustomersPage() {
                                             <Button
                                                 variant="ghost"
                                                 size="icon"
-                                                onClick={() => { setSelectedCustomer(customer); setShowDetail(true); }}
+                                                onClick={() => navigate(`/customers/${customer.id}`)}
                                             >
                                                 <Eye className="h-4 w-4" />
                                             </Button>
@@ -1199,12 +1194,6 @@ export function CustomersPage() {
                     customer={selectedCustomer}
                     onSubmit={selectedCustomer ? handleUpdateCustomer : handleCreateCustomer}
                     employees={employees}
-                />
-                <CustomerDetailDialog
-                    open={showDetail}
-                    onClose={() => { setShowDetail(false); setSelectedCustomer(null); }}
-                    customer={selectedCustomer}
-                    onContactClick={handleContactClick}
                 />
                 <InteractionFormDialog
                     open={showContactDialog}

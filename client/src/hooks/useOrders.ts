@@ -12,6 +12,14 @@ export interface OrderItem {
     quantity: number;
     unit_price: number;
     total_price: number;
+    status?: 'pending' | 'assigned' | 'in_progress' | 'completed' | 'cancelled';
+    technician_id?: string;
+    technician?: { id: string; name: string; avatar?: string };
+    started_at?: string;
+    completed_at?: string;
+    // Nested objects from API join
+    product?: { id: string; name: string; image?: string; price?: number };
+    service?: { id: string; name: string; image?: string; price?: number };
 }
 
 export interface Order {

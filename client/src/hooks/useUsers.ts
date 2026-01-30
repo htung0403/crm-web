@@ -72,7 +72,8 @@ export function useUsers(): UseUsersReturn {
         setLoading(true);
         setError(null);
         try {
-            const response = await api.get('/users?role=technician');
+            // Use dedicated technicians endpoint (accessible by all authenticated users)
+            const response = await api.get('/users/technicians');
 
             // Handle API response format
             const responseData = response?.data ?? response;

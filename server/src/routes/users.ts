@@ -6,6 +6,29 @@ import { authenticate, AuthenticatedRequest, requireManager } from '../middlewar
 
 const router = Router();
 
+// Get technicians list (cho tất cả user đã đăng nhập - dùng để phân công)
+router.get('/technicians', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { data: technicians, error } = await supabaseAdmin
+            .from('users')
+            .select('id, name, avatar, phone, department, status, role')
+            .eq('role', 'technician')
+            .eq('status', 'active')
+            .order('name', { ascending: true });
+
+        if (error) {
+            throw new ApiError('Lỗi khi lấy danh sách kỹ thuật viên', 500);
+        }
+
+        res.json({
+            status: 'success',
+            data: { users: technicians || [] },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 // Get all users (chỉ manager)
 router.get('/', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {

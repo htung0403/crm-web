@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { DragDropContext, Droppable, type DropResult } from '@hello-pangea/dnd';
 import { Plus, Loader2 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
@@ -16,12 +16,9 @@ import { useUsers } from '@/hooks/useUsers';
 import { useDepartments } from '@/hooks/useDepartments';
 import type { OrderStatus } from '@/types';
 
-// Import extracted components
 import {
     OrderCard,
-    CreateOrderDialog,
     EditOrderDialog,
-    OrderDetailDialog,
     OrderConfirmationDialog,
     PaymentDialog,
     columns
@@ -29,6 +26,7 @@ import {
 
 export function OrdersPage() {
     const location = useLocation();
+    const navigate = useNavigate();
     const { orders, loading, error, fetchOrders, updateOrderStatus, updateOrder, createOrder } = useOrders();
     const { customers, fetchCustomers } = useCustomers();
     const { products, services, fetchProducts, fetchServices } = useProducts();
@@ -36,8 +34,6 @@ export function OrdersPage() {
     const { vouchers, fetchVouchers } = useVouchers();
     const { users: technicians, fetchTechnicians } = useUsers();
     const { departments, fetchDepartments } = useDepartments();
-    const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-    const [showCreateDialog, setShowCreateDialog] = useState(false);
     const [editingOrder, setEditingOrder] = useState<Order | null>(null);
     const [payingOrder, setPayingOrder] = useState<Order | null>(null);
     const [pendingDrop, setPendingDrop] = useState<{ orderId: string; targetStatus: string } | null>(null);
@@ -179,7 +175,7 @@ export function OrdersPage() {
                         <h1 className="text-2xl font-bold text-foreground">Quản lý đơn hàng</h1>
                         <p className="text-muted-foreground">Theo dõi và xử lý đơn hàng theo trạng thái</p>
                     </div>
-                    <Button onClick={() => setShowCreateDialog(true)}>
+                    <Button onClick={() => navigate('/orders/new')}>
                         <Plus className="h-4 w-4 mr-2" />
                         Tạo đơn hàng
                     </Button>
@@ -237,7 +233,7 @@ export function OrdersPage() {
                                                             key={order.id}
                                                             order={order}
                                                             index={index}
-                                                            onClick={() => setSelectedOrder(order)}
+                                                            onClick={() => navigate(`/orders/${order.id}`)}
                                                         />
                                                     ))}
                                                     {provided.placeholder}
@@ -256,32 +252,6 @@ export function OrdersPage() {
                         ))}
                     </div>
                 </DragDropContext>
-
-                {/* Order Detail Dialog */}
-                <OrderDetailDialog
-                    order={selectedOrder}
-                    open={!!selectedOrder}
-                    onClose={() => setSelectedOrder(null)}
-                    onEdit={(order) => setEditingOrder(order)}
-                    onPayment={(order) => {
-                        setSelectedOrder(null);
-                        setPayingOrder(order);
-                    }}
-                />
-
-                {/* Create Order Dialog */}
-                <CreateOrderDialog
-                    open={showCreateDialog}
-                    onClose={() => setShowCreateDialog(false)}
-                    onSubmit={handleCreateOrder}
-                    customers={customers}
-                    products={products}
-                    services={services}
-                    packages={packages}
-                    vouchers={vouchers}
-                    technicians={technicians}
-                    departments={departments}
-                />
 
                 {/* Edit Order Dialog */}
                 <EditOrderDialog

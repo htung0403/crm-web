@@ -7,7 +7,8 @@ import {
     User,
     Package,
     CalendarCheck,
-    Loader2
+    Loader2,
+    Clock
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -89,7 +90,7 @@ export function OrderConfirmationDialog({
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-md">
+            <DialogContent className="w-[calc(100vw-2rem)] sm:w-[580px] max-w-none p-6">
                 <DialogHeader>
                     <div className="flex items-center justify-center mb-4">
                         <div className="p-4 rounded-full bg-green-100">
@@ -119,16 +120,16 @@ export function OrderConfirmationDialog({
 
                     {/* Customer Info */}
                     {order.customer && (
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2 text-muted-foreground">
+                        <div className="flex items-center justify-between gap-4">
+                            <div className="flex items-center gap-2 text-muted-foreground shrink-0">
                                 <User className="h-4 w-4" />
                                 <span>Khách hàng</span>
                             </div>
-                            <div className="text-right">
-                                <p className="font-medium">{order.customer.name}</p>
-                                <p className="text-sm text-muted-foreground flex items-center gap-1">
-                                    <Phone className="h-3 w-3" />
-                                    {order.customer.phone}
+                            <div className="text-right min-w-0">
+                                <p className="font-medium truncate">{order.customer.name}</p>
+                                <p className="text-sm text-muted-foreground flex items-center gap-1 justify-end">
+                                    <Phone className="h-3 w-3 shrink-0" />
+                                    <span className="truncate">{order.customer.phone}</span>
                                 </p>
                             </div>
                         </div>
@@ -142,9 +143,9 @@ export function OrderConfirmationDialog({
                             </p>
                             <div className="max-h-32 overflow-y-auto space-y-1">
                                 {order.items.slice(0, 3).map((item, idx) => (
-                                    <div key={idx} className="flex justify-between text-sm">
-                                        <span className="truncate flex-1">{item.item_name} x{item.quantity}</span>
-                                        <span className="font-medium ml-2">{formatCurrency(item.total_price)}</span>
+                                    <div key={idx} className="flex justify-between text-sm gap-2">
+                                        <span className="truncate min-w-0 flex-1">{item.item_name} x{item.quantity}</span>
+                                        <span className="font-medium shrink-0">{formatCurrency(item.total_price)}</span>
                                     </div>
                                 ))}
                                 {order.items.length > 3 && (
@@ -165,46 +166,49 @@ export function OrderConfirmationDialog({
                     </div>
                 </div>
 
-                <DialogFooter className="flex-col sm:flex-row gap-2">
-                    {/* Cancel Order Button */}
-                    <Button
-                        variant="outline"
-                        onClick={handleCancel}
-                        disabled={confirming || cancelling}
-                        className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                    >
-                        {cancelling ? (
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                            <XCircle className="h-4 w-4 mr-2" />
-                        )}
-                        Hủy đơn
-                    </Button>
-
-                    {/* Print Button */}
-                    {onPrint && (
+                <DialogFooter className="flex flex-col gap-3 pt-4 border-t">
+                    {/* Action buttons row */}
+                    <div className="flex flex-col sm:flex-row gap-2 w-full">
+                        {/* Cancel Order Button */}
                         <Button
                             variant="outline"
-                            onClick={onPrint}
+                            onClick={handleCancel}
                             disabled={confirming || cancelling}
+                            className="text-red-600 hover:bg-red-50 hover:text-red-700 flex-1"
                         >
-                            <Printer className="h-4 w-4 mr-2" />
-                            In phiếu
+                            {cancelling ? (
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            ) : (
+                                <XCircle className="h-4 w-4 mr-2" />
+                            )}
+                            Hủy đơn
                         </Button>
-                    )}
 
-                    {/* Confirm Button */}
+                        {/* Skip for now button */}
+                        <Button
+                            variant="outline"
+                            onClick={onClose}
+                            disabled={confirming || cancelling}
+                            className="flex-1"
+                        >
+                            <Clock className="h-4 w-4 mr-2" />
+                            Để sau
+                        </Button>
+                    </div>
+
+                    {/* Confirm Button - Full width */}
                     <Button
                         onClick={handleConfirm}
                         disabled={confirming || cancelling}
-                        className="bg-green-600 hover:bg-green-700"
+                        className="w-full bg-green-600 hover:bg-green-700 text-white"
+                        size="lg"
                     >
                         {confirming ? (
                             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                         ) : (
                             <CalendarCheck className="h-4 w-4 mr-2" />
                         )}
-                        Xác nhận đơn
+                        Xác nhận đơn hàng
                     </Button>
                 </DialogFooter>
             </DialogContent>

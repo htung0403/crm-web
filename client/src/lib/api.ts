@@ -147,6 +147,21 @@ export const ordersApi = {
         api.delete<ApiResponse<null>>(`/orders/${id}`),
 };
 
+// Order Items API
+export const orderItemsApi = {
+    getById: (id: string) =>
+        api.get<ApiResponse<any>>(`/order-items/${id}`),
+
+    assignTechnician: (id: string, technician_id: string) =>
+        api.patch<ApiResponse<any>>(`/order-items/${id}/assign`, { technician_id }),
+
+    start: (id: string) =>
+        api.patch<ApiResponse<any>>(`/order-items/${id}/start`),
+
+    complete: (id: string, notes?: string) =>
+        api.patch<ApiResponse<{ allItemsCompleted: boolean }>>(`/order-items/${id}/complete`, { notes }),
+};
+
 // Invoices API
 export const invoicesApi = {
     getAll: (params?: { status?: string; customer_id?: string; page?: number; limit?: number }) =>
@@ -308,7 +323,7 @@ export const reportsApi = {
 
 // Interactions API
 export const interactionsApi = {
-    getAll: (params?: { customer_id?: string; lead_id?: string; type?: string; result?: string; page?: number; limit?: number }) =>
+    getAll: (params?: { customer_id?: string; lead_id?: string; type?: string; result?: string; created_by?: string; page?: number; limit?: number }) =>
         api.get<PaginatedResponse<{ interactions: any[] }>>('/interactions', { params }),
 
     getById: (id: string) =>

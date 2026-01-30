@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
     ArrowLeft, Phone, Mail, Calendar, ShoppingCart,
     DollarSign, TrendingUp, Loader2, ExternalLink, Briefcase,
-    Award, Target, Clock, CreditCard, User
+    Award, Target, Clock, CreditCard, User, MessageCircle, FileText, Video
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,8 @@ import type { UserRole } from '@/types';
 import { OrderDetailDialog } from '@/components/orders/OrderDetailDialog';
 import type { Order } from '@/hooks/useOrders';
 import { useDepartments } from '@/hooks/useDepartments';
+import { interactionsApi } from '@/lib/api';
+import type { Interaction } from '@/hooks/useInteractions';
 
 interface Employee {
     id: string;
@@ -109,6 +111,10 @@ export function EmployeeDetailPage() {
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
     const [showOrderDetail, setShowOrderDetail] = useState(false);
 
+    // Interactions history
+    const [interactions, setInteractions] = useState<Interaction[]>([]);
+    const [loadingInteractions, setLoadingInteractions] = useState(false);
+
     // Active tab
     const [activeTab, setActiveTab] = useState('overview');
 
@@ -136,6 +142,7 @@ export function EmployeeDetailPage() {
         if (employee && employee.id) {
             if (period !== 'custom' || (fromDate && toDate)) {
                 fetchEmployeeOrders();
+                fetchEmployeeInteractions();
             }
         }
     }, [employee, period, fromDate, toDate]);
@@ -225,6 +232,22 @@ export function EmployeeDetailPage() {
             setOrders([]);
         } finally {
             setLoadingOrders(false);
+        }
+    };
+
+    const fetchEmployeeInteractions = async () => {
+        if (!employee) return;
+
+        setLoadingInteractions(true);
+        try {
+            const response = await interactionsApi.getAll({ created_by: employee.id, limit: 100 });
+            const data = response.data?.data?.interactions || [];
+            setInteractions(data);
+        } catch (error) {
+            console.error('Error fetching employee interactions:', error);
+            setInteractions([]);
+        } finally {
+            setLoadingInteractions(false);
         }
     };
 
@@ -476,7 +499,7 @@ export function EmployeeDetailPage() {
 
             {/* Tabs Content */}
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="w-full sm:w-auto grid grid-cols-2 sm:inline-flex">
+                <TabsList className="w-full sm:w-auto grid grid-cols-3 sm:inline-flex">
                     <TabsTrigger value="overview" className="gap-2">
                         <User className="h-4 w-4" />
                         <span>Thông tin</span>
@@ -484,6 +507,10 @@ export function EmployeeDetailPage() {
                     <TabsTrigger value="orders" className="gap-2">
                         <ShoppingCart className="h-4 w-4" />
                         <span>Đơn hàng ({orders.length})</span>
+                    </TabsTrigger>
+                    <TabsTrigger value="history" className="gap-2">
+                        <MessageCircle className="h-4 w-4" />
+                        <span>Liên hệ ({interactions.length})</span>
                     </TabsTrigger>
                 </TabsList>
 
@@ -640,6 +667,94 @@ export function EmployeeDetailPage() {
                                                         <ExternalLink className="h-3 w-3" />
                                                         Chi tiết
                                                     </p>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* History Tab - Interaction History */}
+                <TabsContent value="history" className="mt-4">
+                    <Card>
+                        <CardContent className="p-4">
+                            {loadingInteractions ? (
+                                <div className="flex items-center justify-center py-12">
+                                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                </div>
+                            ) : interactions.length === 0 ? (
+                                <div className="text-center py-12 text-muted-foreground">
+                                    <MessageCircle className="h-12 w-12 mx-auto mb-4 opacity-30" />
+                                    <p className="font-medium">Chưa có lịch sử liên hệ</p>
+                                    <p className="text-sm mt-1">Nhân viên chưa tạo bản ghi tương tác nào</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    {interactions.map((interaction) => {
+                                        const typeIcons: Record<string, React.ReactNode> = {
+                                            call: <Phone className="h-4 w-4" />,
+                                            email: <Mail className="h-4 w-4" />,
+                                            meeting: <Video className="h-4 w-4" />,
+                                            message: <MessageCircle className="h-4 w-4" />,
+                                            note: <FileText className="h-4 w-4" />,
+                                        };
+                                        const typeColors: Record<string, string> = {
+                                            call: 'bg-blue-100 text-blue-600',
+                                            email: 'bg-amber-100 text-amber-600',
+                                            meeting: 'bg-purple-100 text-purple-600',
+                                            message: 'bg-emerald-100 text-emerald-600',
+                                            note: 'bg-gray-100 text-gray-600',
+                                        };
+                                        const typeLabels: Record<string, string> = {
+                                            call: 'Cuộc gọi',
+                                            email: 'Email',
+                                            meeting: 'Cuộc họp',
+                                            message: 'Tin nhắn',
+                                            note: 'Ghi chú',
+                                        };
+                                        const target = interaction.customer || interaction.lead;
+                                        const targetType = interaction.customer ? 'Khách hàng' : 'Lead';
+
+                                        return (
+                                            <div
+                                                key={interaction.id}
+                                                className="flex gap-4 p-4 rounded-lg border hover:bg-muted/50 transition-colors"
+                                            >
+                                                <div className={`h-10 w-10 rounded-full flex items-center justify-center shrink-0 ${typeColors[interaction.type] || 'bg-gray-100 text-gray-600'}`}>
+                                                    {typeIcons[interaction.type] || <MessageCircle className="h-4 w-4" />}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2 flex-wrap mb-1">
+                                                        <Badge variant="outline" className="text-xs">
+                                                            {typeLabels[interaction.type] || interaction.type}
+                                                        </Badge>
+                                                        {target && (
+                                                            <span className="text-xs text-muted-foreground">
+                                                                {targetType}: <span className="font-medium text-foreground">{target.name}</span>
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    <p className="font-medium truncate">{interaction.subject}</p>
+                                                    {interaction.content && (
+                                                        <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                                                            {interaction.content}
+                                                        </p>
+                                                    )}
+                                                    <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                                                        <Clock className="h-3 w-3" />
+                                                        <span>
+                                                            {new Date(interaction.created_at).toLocaleString('vi-VN')}
+                                                        </span>
+                                                        {interaction.duration && (
+                                                            <>
+                                                                <span>•</span>
+                                                                <span>{interaction.duration} phút</span>
+                                                            </>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
                                         );

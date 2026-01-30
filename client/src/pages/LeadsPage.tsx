@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { DragDropContext } from '@hello-pangea/dnd';
 import type { DropResult } from '@hello-pangea/dnd';
 import { Search, Plus, Loader2, Phone, Users, TrendingUp, UserPlus } from 'lucide-react';
@@ -20,16 +21,15 @@ import { usePackages } from '@/hooks/usePackages';
 import { useVouchers } from '@/hooks/useVouchers';
 import { useOrders } from '@/hooks/useOrders';
 
-// Import refactored lead components
 import {
     CreateLeadDialog,
-    LeadDetailDialog,
     KanbanColumn,
     kanbanColumns,
 } from '@/components/leads';
 import type { CreateLeadFormData } from '@/components/leads';
 
 export function LeadsPage() {
+    const navigate = useNavigate();
     const { leads, loading, error, fetchLeads, createLead, updateLead, convertLead } = useLeads();
     const { employees, fetchEmployees } = useEmployees();
     const { users: technicians, fetchTechnicians } = useUsers();
@@ -44,7 +44,6 @@ export function LeadsPage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedSource, setSelectedSource] = useState<string>('all');
     const [selectedEmployee, setSelectedEmployee] = useState<string>('all');
-    const [detailLead, setDetailLead] = useState<Lead | null>(null);
     const [showCreateDialog, setShowCreateDialog] = useState(false);
 
     // State for CreateOrderDialog
@@ -323,7 +322,7 @@ export function LeadsPage() {
                                     key={column.id}
                                     column={column}
                                     leads={leadsByStatus[column.id] || []}
-                                    onCardClick={setDetailLead}
+                                    onCardClick={(lead) => navigate(`/leads/${lead.id}`)}
                                 />
                             ))}
                         </div>
@@ -338,17 +337,7 @@ export function LeadsPage() {
                     employees={employees}
                 />
 
-                {/* Lead Detail Dialog */}
-                <LeadDetailDialog
-                    lead={detailLead}
-                    open={!!detailLead}
-                    onClose={() => setDetailLead(null)}
-                    onUpdate={async (id, data) => {
-                        await updateLead(id, data);
-                        await fetchLeads();
-                    }}
-                    onConvert={handleConvert}
-                />
+
 
                 {/* Create Order Dialog - shown when lead is moved to 'chot_don' */}
                 <CreateOrderDialog

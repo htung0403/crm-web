@@ -249,12 +249,18 @@ export function TaskQRPage() {
     };
 
     const handleStartTask = async () => {
-        if (!task || task.type !== 'task') return;
+        if (!task) return;
 
         setActionLoading(true);
         try {
             const response = await api.put(`/technician-tasks/${task.id}/start`);
-            setTask({ ...response.data, type: 'task' });
+            // Update local state with new status
+            setTask(prev => prev ? {
+                ...prev,
+                ...response.data,
+                status: 'in_progress',
+                started_at: response.data.started_at || new Date().toISOString()
+            } : null);
             setStartTime(new Date());
             toast.success('Đã bắt đầu thực hiện công việc');
         } catch (err: any) {
@@ -265,12 +271,18 @@ export function TaskQRPage() {
     };
 
     const handleCompleteTask = async (data: { notes?: string; duration_minutes?: number }) => {
-        if (!task || task.type !== 'task') return;
+        if (!task) return;
 
         setActionLoading(true);
         try {
             const response = await api.put(`/technician-tasks/${task.id}/complete`, data);
-            setTask({ ...response.data, type: 'task' });
+            // Update local state with completed status
+            setTask(prev => prev ? {
+                ...prev,
+                ...response.data,
+                status: 'completed',
+                completed_at: response.data.completed_at || new Date().toISOString()
+            } : null);
             setShowCompleteDialog(false);
             toast.success('Đã hoàn thành công việc');
         } catch (err: any) {
@@ -288,8 +300,8 @@ export function TaskQRPage() {
 
     // Check if current user is the assigned technician
     const isAssignedTechnician = task?.technician?.id === user?.id;
-    const canStartTask = task?.type === 'task' && task?.status === 'assigned' && isAssignedTechnician;
-    const canCompleteTask = task?.type === 'task' && task?.status === 'in_progress' && isAssignedTechnician;
+    const canStartTask = task?.status === 'assigned' && isAssignedTechnician;
+    const canCompleteTask = task?.status === 'in_progress' && isAssignedTechnician;
     const isInProgress = task?.status === 'in_progress';
 
     if (loading) {
@@ -538,7 +550,7 @@ export function TaskQRPage() {
                     </Card>
 
                     {/* Action Buttons */}
-                    {task.type === 'task' && isAssignedTechnician && (
+                    {isAssignedTechnician && (
                         <Card>
                             <CardContent className="p-4">
                                 <div className="flex gap-3">
@@ -581,8 +593,8 @@ export function TaskQRPage() {
                         </Card>
                     )}
 
-                    {/* Not assigned message */}
-                    {task.type === 'order_item' && (
+                    {/* Not assigned message - Show only when not assigned */}
+                    {(task.status === 'not_assigned' || task.status === 'pending') && !task.technician && (
                         <Card className="border-yellow-200 bg-yellow-50">
                             <CardContent className="p-4 text-center">
                                 <Clock className="h-8 w-8 text-yellow-600 mx-auto mb-2" />
@@ -593,7 +605,7 @@ export function TaskQRPage() {
                     )}
 
                     {/* Not the assigned technician */}
-                    {task.type === 'task' && !isAssignedTechnician && task.technician && (
+                    {!isAssignedTechnician && task.technician && task.status !== 'completed' && (
                         <Card className="border-blue-200 bg-blue-50">
                             <CardContent className="p-4 text-center">
                                 <User className="h-8 w-8 text-blue-600 mx-auto mb-2" />

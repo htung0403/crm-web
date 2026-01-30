@@ -58,8 +58,14 @@ router.get('/summary', authenticate, requireManager, async (req: AuthenticatedRe
         // Get orders within the period
         const { data: orders } = await supabaseAdmin
             .from('orders')
-            .select('id, total_amount, status, assigned_to, created_at')
+            .select('id, total_amount, status, sales_id, created_at')
             .gte('created_at', startDate.toISOString());
+
+        // Get order items with technician assignments (for technician commission)
+        const { data: orderItems } = await supabaseAdmin
+            .from('order_items')
+            .select('id, order_id, technician_id, total_price, commission_tech_amount, status')
+            .not('technician_id', 'is', null);
 
         // Get leads within the period
         const { data: leads } = await supabaseAdmin
@@ -75,20 +81,40 @@ router.get('/summary', authenticate, requireManager, async (req: AuthenticatedRe
             accountant: { orders: 50, revenue: 0, leads: 0, conversion: 0 }
         };
 
+        // Get completed order IDs
+        const completedOrderIds = (orders || [])
+            .filter(o => o.status === 'completed')
+            .map(o => o.id);
+
         // Calculate KPI for each user
         const kpiData = (users || []).map(user => {
-            const userOrders = (orders || []).filter(o => o.assigned_to === user.id);
+            let revenue = 0;
+            let commissionAmount = 0;
+            let completedOrdersCount = 0;
+
+            if (user.role === 'technician') {
+                // Technician: get commission from order_items they were assigned to
+                const techItems = (orderItems || []).filter(
+                    item => item.technician_id === user.id && completedOrderIds.includes(item.order_id)
+                );
+                completedOrdersCount = techItems.length;
+                commissionAmount = techItems.reduce((sum, item) => sum + (item.commission_tech_amount || 0), 0);
+                revenue = techItems.reduce((sum, item) => sum + (item.total_price || 0), 0);
+            } else {
+                // Sale/Manager: get revenue from orders they created
+                const userOrders = (orders || []).filter(o => o.sales_id === user.id);
+                const completedOrders = userOrders.filter(o => o.status === 'completed');
+                completedOrdersCount = completedOrders.length;
+                revenue = completedOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
+
+                // Calculate commission based on revenue
+                const commissionRate = user.commission || 5;
+                commissionAmount = revenue * (commissionRate / 100);
+            }
+
             const userLeads = (leads || []).filter(l => l.assigned_to === user.id);
-
-            const completedOrders = userOrders.filter(o => o.status === 'completed');
-            const revenue = completedOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
-
             const closedLeads = userLeads.filter(l => l.status === 'closed' || l.status === 'converted');
             const conversionRate = userLeads.length > 0 ? (closedLeads.length / userLeads.length) * 100 : 0;
-
-            // Calculate commission based on revenue
-            const commissionRate = user.commission || 5;
-            const commissionAmount = revenue * (commissionRate / 100);
 
             const roleTargets = targets[user.role] || targets.sale;
 
@@ -105,7 +131,7 @@ router.get('/summary', authenticate, requireManager, async (req: AuthenticatedRe
                     },
                     orders: {
                         target: roleTargets.orders || 0,
-                        actual: completedOrders.length
+                        actual: completedOrdersCount
                     },
                     leads: {
                         target: roleTargets.leads || 0,

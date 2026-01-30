@@ -5,7 +5,10 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { LoginPage } from '@/pages/LoginPage';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { LeadsPage } from '@/pages/LeadsPage';
+import { LeadDetailPage } from '@/pages/LeadDetailPage';
 import { OrdersPage } from '@/pages/OrdersPage';
+import { CreateOrderPage } from '@/pages/CreateOrderPage';
+import { OrderDetailPage } from '@/pages/OrderDetailPage';
 import { InvoicesPage } from '@/pages/InvoicesPage';
 import { FinancePage } from '@/pages/FinancePage';
 import { ProductsPage } from '@/pages/ProductsPage';
@@ -14,6 +17,7 @@ import { EmployeeDetailPage } from '@/pages/EmployeeDetailPage';
 import { KPIPage } from '@/pages/KPIPage';
 import { SalaryPage } from '@/pages/SalaryPage';
 import { CustomersPage } from '@/pages/CustomersPage';
+import { CustomerDetailPage } from '@/pages/CustomerDetailPage';
 import { InteractionsPage } from '@/pages/InteractionsPage';
 import { ReportsPage } from '@/pages/ReportsPage';
 import { TechnicianPage } from '@/pages/TechnicianPage';
@@ -246,9 +250,21 @@ function AppContent() {
               </ProtectedRoute>
             } />
 
+            <Route path="/leads/:id" element={
+              <ProtectedRoute allowedRoles={pagePermissions.leads}>
+                <LeadDetailPage />
+              </ProtectedRoute>
+            } />
+
             <Route path="/customers" element={
               <ProtectedRoute allowedRoles={pagePermissions.customers}>
                 <CustomersPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/customers/:id" element={
+              <ProtectedRoute allowedRoles={pagePermissions.customers}>
+                <CustomerDetailPage />
               </ProtectedRoute>
             } />
 
@@ -261,6 +277,18 @@ function AppContent() {
             <Route path="/orders" element={
               <ProtectedRoute allowedRoles={pagePermissions.orders}>
                 <OrdersPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/orders/new" element={
+              <ProtectedRoute allowedRoles={pagePermissions.orders}>
+                <CreateOrderPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/orders/:id" element={
+              <ProtectedRoute allowedRoles={pagePermissions.orders}>
+                <OrderDetailPage />
               </ProtectedRoute>
             } />
 

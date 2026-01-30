@@ -175,22 +175,24 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
                     sum + (item.commission_sale_amount || 0), 0) || 0;
             }
 
-            // For technician: get commission from order_items where user is technician_id
-            const { data: techItems } = await supabaseAdmin
-                .from('order_items')
-                .select('commission_tech_amount, order:orders!inner(status, created_at)')
-                .eq('technician_id', user_id);
+            // For technician: get commission from completed order_items where user is technician_id
+            const { data: completedOrders } = await supabaseAdmin
+                .from('orders')
+                .select('id')
+                .in('status', ['completed', 'delivered'])
+                .gte('created_at', startDate)
+                .lte('created_at', endDate + 'T23:59:59');
 
-            if (techItems) {
-                for (const item of techItems) {
-                    const order = item.order as any;
-                    if (order &&
-                        ['completed', 'delivered'].includes(order.status) &&
-                        order.created_at >= startDate &&
-                        order.created_at <= endDate + 'T23:59:59') {
-                        techCommission += item.commission_tech_amount || 0;
-                    }
-                }
+            if (completedOrders && completedOrders.length > 0) {
+                const completedOrderIds = completedOrders.map(o => o.id);
+                const { data: techItems } = await supabaseAdmin
+                    .from('order_items')
+                    .select('commission_tech_amount')
+                    .eq('technician_id', user_id)
+                    .in('order_id', completedOrderIds);
+
+                techCommission = techItems?.reduce((sum, item) =>
+                    sum + (item.commission_tech_amount || 0), 0) || 0;
             }
         } catch (e) {
             console.log('Error calculating commission from order_items:', e);

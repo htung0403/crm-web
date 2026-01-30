@@ -131,38 +131,47 @@ router.get('/my-tasks', authenticate, async (req: AuthenticatedRequest, res: Res
         const taskItemCodes = new Set(tasks.map(t => t.item_code).filter(Boolean));
         const additionalItems = (orderItems || [])
             .filter(item => item.item_code && !taskItemCodes.has(item.item_code))
-            .map(item => ({
-                id: item.id,
-                task_code: 'PENDING-' + item.id.substring(0, 8),
-                item_code: item.item_code,
-                order_id: item.order?.id,
-                order_item_id: item.id,
-                service_id: item.service_id,
-                technician_id: userId,
-                service_name: item.item_name,
-                quantity: item.quantity,
-                status: 'assigned',
-                priority: 'normal',
-                scheduled_date: null,
-                scheduled_time: null,
-                started_at: null,
-                completed_at: null,
-                duration_minutes: null,
-                notes: null,
-                customer_feedback: null,
-                rating: null,
-                assigned_by: null,
-                assigned_at: item.created_at,
-                created_at: item.created_at,
-                updated_at: item.updated_at,
-                order: item.order ? {
-                    order_code: item.order.order_code,
-                    customer: item.order.customer
-                } : undefined,
-                service: item.service,
-                customer: item.order?.customer,
-                is_virtual: true
-            }));
+            .map(item => {
+                // Map order_items status to task status
+                let taskStatus = 'assigned';
+                if (item.status === 'in_progress') taskStatus = 'in_progress';
+                else if (item.status === 'completed') taskStatus = 'completed';
+                else if (item.status === 'cancelled') taskStatus = 'cancelled';
+                else if (item.status === 'pending') taskStatus = 'assigned';
+
+                return {
+                    id: item.id,
+                    task_code: 'PENDING-' + item.id.substring(0, 8),
+                    item_code: item.item_code,
+                    order_id: item.order?.id,
+                    order_item_id: item.id,
+                    service_id: item.service_id,
+                    technician_id: userId,
+                    service_name: item.item_name,
+                    quantity: item.quantity,
+                    status: taskStatus,
+                    priority: 'normal',
+                    scheduled_date: null,
+                    scheduled_time: null,
+                    started_at: item.started_at || null,
+                    completed_at: item.completed_at || null,
+                    duration_minutes: null,
+                    notes: null,
+                    customer_feedback: null,
+                    rating: null,
+                    assigned_by: null,
+                    assigned_at: item.created_at,
+                    created_at: item.created_at,
+                    updated_at: item.updated_at,
+                    order: item.order ? {
+                        order_code: item.order.order_code,
+                        customer: item.order.customer
+                    } : undefined,
+                    service: item.service,
+                    customer: item.order?.customer,
+                    is_virtual: true
+                };
+            });
 
         const allTasks = [...tasks, ...additionalItems];
 
@@ -185,7 +194,8 @@ router.get('/stats/summary', authenticate, async (req: AuthenticatedRequest, res
             });
         }
 
-        let tasksQuery = supabase.from('technician_tasks').select('status, duration_minutes, rating');
+        // Get technician_tasks
+        let tasksQuery = supabase.from('technician_tasks').select('status, duration_minutes, rating, item_code');
 
         if (isTechnician && userId) {
             tasksQuery = tasksQuery.eq('technician_id', userId);
@@ -194,13 +204,36 @@ router.get('/stats/summary', authenticate, async (req: AuthenticatedRequest, res
         const { data: tasks, error } = await tasksQuery;
         if (error) throw error;
 
+        // Also get order_items assigned to this technician
+        let orderItemsStats = { pending: 0, in_progress: 0, completed: 0, cancelled: 0 };
+        if (isTechnician && userId) {
+            const taskItemCodes = new Set((tasks || []).map(t => t.item_code).filter(Boolean));
+
+            const { data: orderItems } = await supabase
+                .from('order_items')
+                .select('status, item_code')
+                .eq('technician_id', userId)
+                .not('item_code', 'is', null);
+
+            // Count items not in technician_tasks
+            (orderItems || []).forEach(item => {
+                if (item.item_code && !taskItemCodes.has(item.item_code)) {
+                    if (item.status === 'pending') orderItemsStats.pending++;
+                    else if (item.status === 'in_progress') orderItemsStats.in_progress++;
+                    else if (item.status === 'completed') orderItemsStats.completed++;
+                    else if (item.status === 'cancelled') orderItemsStats.cancelled++;
+                    else orderItemsStats.pending++; // default to pending/assigned
+                }
+            });
+        }
+
         const stats = {
-            total: tasks?.length || 0,
-            pending: tasks?.filter(t => t.status === 'pending').length || 0,
-            assigned: tasks?.filter(t => t.status === 'assigned').length || 0,
-            in_progress: tasks?.filter(t => t.status === 'in_progress').length || 0,
-            completed: tasks?.filter(t => t.status === 'completed').length || 0,
-            cancelled: tasks?.filter(t => t.status === 'cancelled').length || 0,
+            total: (tasks?.length || 0) + orderItemsStats.pending + orderItemsStats.in_progress + orderItemsStats.completed + orderItemsStats.cancelled,
+            pending: (tasks?.filter(t => t.status === 'pending').length || 0) + orderItemsStats.pending,
+            assigned: (tasks?.filter(t => t.status === 'assigned').length || 0) + orderItemsStats.pending,
+            in_progress: (tasks?.filter(t => t.status === 'in_progress').length || 0) + orderItemsStats.in_progress,
+            completed: (tasks?.filter(t => t.status === 'completed').length || 0) + orderItemsStats.completed,
+            cancelled: (tasks?.filter(t => t.status === 'cancelled').length || 0) + orderItemsStats.cancelled,
             total_duration: tasks?.reduce((sum, t) => sum + (t.duration_minutes || 0), 0) || 0,
             avg_rating: (() => {
                 const rated = tasks?.filter(t => t.rating !== null) || [];
@@ -437,37 +470,95 @@ router.put('/:id/start', async (req: AuthenticatedRequest, res: Response, next: 
     try {
         const { id } = req.params;
 
-        const { data: taskInfo } = await supabase
+        // First try to find in technician_tasks
+        const { data: taskInfo, error: taskError } = await supabase
             .from('technician_tasks')
-            .select('order_id')
+            .select('id, order_id')
             .eq('id', id)
-            .single();
+            .maybeSingle();
 
-        const { data, error } = await supabase
-            .from('technician_tasks')
+        if (taskInfo) {
+            // Update technician_tasks
+            const { data, error } = await supabase
+                .from('technician_tasks')
+                .update({
+                    status: 'in_progress',
+                    started_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', id)
+                .select('*, order_item_id')
+                .single();
+
+            if (error) throw error;
+
+            // Also update the corresponding order_item status
+            if (data.order_item_id) {
+                await supabase
+                    .from('order_items')
+                    .update({
+                        status: 'in_progress',
+                        started_at: new Date().toISOString()
+                    })
+                    .eq('id', data.order_item_id);
+                console.log('Updated order_item status to in_progress:', data.order_item_id);
+            }
+
+            // Also update order status
+            if (taskInfo.order_id) {
+                await supabase
+                    .from('orders')
+                    .update({
+                        status: 'processing',
+                        updated_at: new Date().toISOString()
+                    })
+                    .eq('id', taskInfo.order_id)
+                    .eq('status', 'confirmed');
+            }
+
+            return res.json(data);
+        }
+
+        // If not found in technician_tasks, try order_items (virtual task)
+        const { data: orderItem, error: itemError } = await supabase
+            .from('order_items')
+            .select('id, order_id')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (!orderItem) {
+            return res.status(404).json({ message: 'Không tìm thấy công việc' });
+        }
+
+        // Update order_item status
+        const { data: updatedItem, error: updateError } = await supabase
+            .from('order_items')
             .update({
                 status: 'in_progress',
-                started_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
+                started_at: new Date().toISOString()
             })
             .eq('id', id)
             .select()
             .single();
 
-        if (error) throw error;
+        if (updateError) throw updateError;
 
-        if (taskInfo?.order_id) {
+        // Update order status to processing
+        if (orderItem.order_id) {
             await supabase
                 .from('orders')
                 .update({
                     status: 'processing',
                     updated_at: new Date().toISOString()
                 })
-                .eq('id', taskInfo.order_id)
+                .eq('id', orderItem.order_id)
                 .eq('status', 'confirmed');
         }
 
-        res.json(data);
+        res.json({
+            ...updatedItem,
+            is_virtual: true
+        });
     } catch (error) {
         next(error);
     }
@@ -479,35 +570,153 @@ router.put('/:id/complete', async (req: AuthenticatedRequest, res: Response, nex
         const { id } = req.params;
         const { notes, duration_minutes } = req.body;
 
+        // First try to find in technician_tasks
         const { data: task } = await supabase
             .from('technician_tasks')
-            .select('started_at')
+            .select('id, started_at')
             .eq('id', id)
-            .single();
+            .maybeSingle();
+
+        if (task) {
+            let actualDuration = duration_minutes;
+            if (!actualDuration && task.started_at) {
+                const startTime = new Date(task.started_at);
+                const endTime = new Date();
+                actualDuration = Math.round((endTime.getTime() - startTime.getTime()) / 60000);
+            }
+
+            const { data, error } = await supabase
+                .from('technician_tasks')
+                .update({
+                    status: 'completed',
+                    completed_at: new Date().toISOString(),
+                    duration_minutes: actualDuration,
+                    notes,
+                    updated_at: new Date().toISOString()
+                })
+                .eq('id', id)
+                .select('*, order_id, order_item_id')
+                .single();
+
+            if (error) throw error;
+
+            // Also update the corresponding order_item status
+            if (data.order_item_id) {
+                await supabase
+                    .from('order_items')
+                    .update({
+                        status: 'completed',
+                        completed_at: new Date().toISOString()
+                    })
+                    .eq('id', data.order_item_id);
+                console.log('Updated order_item status to completed:', data.order_item_id);
+            }
+
+            // Check if all tasks of this order are completed
+            if (data.order_id) {
+                const { data: allTasks } = await supabase
+                    .from('technician_tasks')
+                    .select('id, status')
+                    .eq('order_id', data.order_id);
+
+                const allCompleted = allTasks?.every(t => t.status === 'completed');
+
+                if (allCompleted && allTasks && allTasks.length > 0) {
+                    // Get order details with sale info
+                    const { data: order } = await supabase
+                        .from('orders')
+                        .select('id, order_code, created_by, customer:customers(name)')
+                        .eq('id', data.order_id)
+                        .single();
+
+                    if (order?.created_by) {
+                        const customerName = (order.customer as any)?.name || 'khách hàng';
+                        await supabase.from('notifications').insert({
+                            user_id: order.created_by,
+                            type: 'order_completed',
+                            title: 'Tất cả dịch vụ đã hoàn thành',
+                            message: `Đơn hàng ${order.order_code} của ${customerName} đã hoàn thành. Vui lòng liên hệ khách hàng để thanh toán.`,
+                            data: { order_id: order.id, order_code: order.order_code },
+                            is_read: false
+                        });
+                        console.log('Sent completion notification to sale:', order.created_by);
+                    }
+                }
+            }
+
+            return res.json(data);
+        }
+
+        // If not found in technician_tasks, try order_items (virtual task)
+        const { data: orderItem } = await supabase
+            .from('order_items')
+            .select('id, started_at')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (!orderItem) {
+            return res.status(404).json({ message: 'Không tìm thấy công việc' });
+        }
 
         let actualDuration = duration_minutes;
-        if (!actualDuration && task?.started_at) {
-            const startTime = new Date(task.started_at);
+        if (!actualDuration && orderItem.started_at) {
+            const startTime = new Date(orderItem.started_at);
             const endTime = new Date();
             actualDuration = Math.round((endTime.getTime() - startTime.getTime()) / 60000);
         }
 
-        const { data, error } = await supabase
-            .from('technician_tasks')
+        const { data: updatedItem, error: updateError } = await supabase
+            .from('order_items')
             .update({
                 status: 'completed',
-                completed_at: new Date().toISOString(),
-                duration_minutes: actualDuration,
-                notes,
-                updated_at: new Date().toISOString()
+                completed_at: new Date().toISOString()
             })
             .eq('id', id)
-            .select()
+            .select('*, order_id')
             .single();
 
-        if (error) throw error;
+        if (updateError) throw updateError;
 
-        res.json(data);
+        // Check if all service items of this order are completed
+        if (updatedItem.order_id) {
+            const { data: orderItems } = await supabase
+                .from('order_items')
+                .select('id, status, item_type')
+                .eq('order_id', updatedItem.order_id)
+                .eq('item_type', 'service');
+
+            const allServicesCompleted = orderItems?.every(item => item.status === 'completed');
+
+            if (allServicesCompleted && orderItems && orderItems.length > 0) {
+                // Get order details with sale info
+                const { data: order } = await supabase
+                    .from('orders')
+                    .select('id, order_code, created_by, customer:customers(name)')
+                    .eq('id', updatedItem.order_id)
+                    .single();
+
+                if (order?.created_by) {
+                    // Send notification to sale
+                    const customerName = (order.customer as any)?.name || 'khách hàng';
+                    await supabase.from('notifications').insert({
+                        user_id: order.created_by,
+                        type: 'order_completed',
+                        title: 'Tất cả dịch vụ đã hoàn thành',
+                        message: `Đơn hàng ${order.order_code} của ${customerName} đã hoàn thành. Vui lòng liên hệ khách hàng để thanh toán.`,
+                        data: { order_id: order.id, order_code: order.order_code },
+                        is_read: false
+                    });
+
+                    console.log('Sent completion notification to sale:', order.created_by);
+                }
+            }
+        }
+
+        res.json({
+            ...updatedItem,
+            duration_minutes: actualDuration,
+            is_virtual: true
+        });
     } catch (error) {
         next(error);
     }

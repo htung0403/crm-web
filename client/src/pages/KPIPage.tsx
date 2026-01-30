@@ -359,24 +359,110 @@ export function KPIPage() {
             {/* Leaderboard */}
             <LeaderboardTable data={kpiData} roleLabels={roleLabels} />
 
-            {/* Individual KPI Cards */}
-            <div>
-                <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                    <BarChart3 className="h-5 w-5 text-primary" />
-                    Chi tiết KPI từng nhân viên
-                </h2>
-                {kpiData.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">
-                        Chưa có dữ liệu KPI cho nhân viên
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {kpiData.map((data) => (
-                            <KPICard key={data.employeeId} data={data} roleLabels={roleLabels} />
-                        ))}
-                    </div>
-                )}
-            </div>
+            {/* Individual KPI Details Table */}
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <BarChart3 className="h-5 w-5 text-primary" />
+                        Chi tiết KPI từng nhân viên
+                    </CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                    {kpiData.length === 0 ? (
+                        <div className="text-center py-8 text-muted-foreground">
+                            Chưa có dữ liệu KPI cho nhân viên
+                        </div>
+                    ) : (
+                        <div className="overflow-x-auto">
+                            <table className="w-full">
+                                <thead className="bg-muted/50 border-y">
+                                    <tr>
+                                        <th className="p-3 text-left text-sm font-medium text-muted-foreground">Nhân viên</th>
+                                        <th className="p-3 text-right text-sm font-medium text-muted-foreground">Doanh thu</th>
+                                        <th className="p-3 text-right text-sm font-medium text-muted-foreground">Mục tiêu DT</th>
+                                        <th className="p-3 text-right text-sm font-medium text-muted-foreground">Đơn hàng</th>
+                                        <th className="p-3 text-right text-sm font-medium text-muted-foreground">Leads</th>
+                                        <th className="p-3 text-right text-sm font-medium text-muted-foreground">Chuyển đổi</th>
+                                        <th className="p-3 text-right text-sm font-medium text-muted-foreground">Hoa hồng</th>
+                                        <th className="p-3 text-right text-sm font-medium text-muted-foreground">Thưởng</th>
+                                        <th className="p-3 text-center text-sm font-medium text-muted-foreground">Thành tích</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {kpiData.map((emp) => {
+                                        const revenueAchievement = emp.metrics.revenue?.target > 0
+                                            ? (emp.metrics.revenue.actual / emp.metrics.revenue.target) * 100
+                                            : 0;
+                                        const ordersAchievement = emp.metrics.orders?.target > 0
+                                            ? (emp.metrics.orders.actual / emp.metrics.orders.target) * 100
+                                            : 0;
+                                        const avgAchievement = (revenueAchievement + ordersAchievement) / 2;
+
+                                        return (
+                                            <tr key={emp.employeeId} className="border-b hover:bg-muted/30 transition-colors">
+                                                <td className="p-3">
+                                                    <div className="flex items-center gap-3">
+                                                        <Avatar className="h-8 w-8">
+                                                            <AvatarImage src={emp.avatar} />
+                                                            <AvatarFallback>{emp.employeeName.charAt(0)}</AvatarFallback>
+                                                        </Avatar>
+                                                        <div>
+                                                            <p className="font-medium">{emp.employeeName}</p>
+                                                            <Badge
+                                                                variant={emp.role === 'manager' ? 'purple' : emp.role === 'sale' ? 'info' : 'secondary'}
+                                                                className="text-xs"
+                                                            >
+                                                                {roleLabels[emp.role] || emp.role}
+                                                            </Badge>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td className="p-3 text-right">
+                                                    <div className="font-semibold">{formatCurrency(emp.metrics.revenue?.actual || 0)}</div>
+                                                    <div className="text-xs text-muted-foreground">
+                                                        {emp.metrics.revenue?.target > 0
+                                                            ? `${revenueAchievement.toFixed(0)}%`
+                                                            : '-'}
+                                                    </div>
+                                                </td>
+                                                <td className="p-3 text-right text-muted-foreground">
+                                                    {formatCurrency(emp.metrics.revenue?.target || 0)}
+                                                </td>
+                                                <td className="p-3 text-right">
+                                                    <div className="font-medium">{emp.metrics.orders?.actual || 0}</div>
+                                                    <div className="text-xs text-muted-foreground">
+                                                        / {emp.metrics.orders?.target || 0}
+                                                    </div>
+                                                </td>
+                                                <td className="p-3 text-right">
+                                                    <div className="font-medium">{emp.metrics.leads?.actual || 0}</div>
+                                                    <div className="text-xs text-muted-foreground">
+                                                        / {emp.metrics.leads?.target || 0}
+                                                    </div>
+                                                </td>
+                                                <td className="p-3 text-right">
+                                                    {emp.metrics.conversion?.actual || 0}%
+                                                </td>
+                                                <td className="p-3 text-right text-emerald-600 font-medium">
+                                                    {formatCurrency(emp.commission)}
+                                                </td>
+                                                <td className="p-3 text-right text-purple-600 font-medium">
+                                                    {formatCurrency(emp.bonus)}
+                                                </td>
+                                                <td className="p-3 text-center">
+                                                    <Badge variant={avgAchievement >= 100 ? 'success' : avgAchievement >= 80 ? 'warning' : 'danger'}>
+                                                        {avgAchievement.toFixed(0)}%
+                                                    </Badge>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
         </div>
     );
 }

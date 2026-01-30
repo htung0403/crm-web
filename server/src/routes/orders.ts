@@ -192,6 +192,12 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
             const commissionSaleAmount = Math.floor(totalPrice * commissionSaleRate / 100);
             const commissionTechAmount = Math.floor(totalPrice * commissionTechRate / 100);
 
+            // Determine status based on technician assignment
+            // Support both technician_id (single) and technicians (array) formats
+            const technicianId = item.technician_id ||
+                (item.technicians && item.technicians.length > 0 ? item.technicians[0].technician_id : null);
+            const hasTechnician = !!technicianId;
+
             return {
                 order_id: order.id,
                 product_id: item.type === 'product' ? item.item_id : null,
@@ -201,12 +207,15 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                 quantity: item.quantity,
                 unit_price: item.unit_price,
                 total_price: totalPrice,
-                technician_id: item.technician_id || null,
+                technician_id: technicianId,
                 item_code: generateItemCode(),
                 commission_sale_rate: commissionSaleRate,
                 commission_tech_rate: commissionTechRate,
                 commission_sale_amount: commissionSaleAmount,
                 commission_tech_amount: commissionTechAmount,
+                // Set status based on technician assignment
+                status: hasTechnician ? 'assigned' : 'pending',
+                assigned_at: hasTechnician ? new Date().toISOString() : null,
             };
         });
 
@@ -222,9 +231,13 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
         }
 
         // Tạo technician tasks cho các dịch vụ đã phân công technician
+        console.log('Inserted items:', JSON.stringify(insertedItems, null, 2));
+
         const serviceItemsWithTechnician = insertedItems?.filter(
             (item: any) => item.item_type === 'service' && item.technician_id
         ) || [];
+
+        console.log('Service items with technician:', serviceItemsWithTechnician.length);
 
         if (serviceItemsWithTechnician.length > 0) {
             const technicianTasks = serviceItemsWithTechnician.map((item: any) => ({
@@ -243,6 +256,8 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                 item_code: item.item_code, // QR code reference
             }));
 
+            console.log('Creating technician tasks:', JSON.stringify(technicianTasks, null, 2));
+
             const { error: taskError } = await supabaseAdmin
                 .from('technician_tasks')
                 .insert(technicianTasks);
@@ -250,6 +265,8 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
             if (taskError) {
                 console.error('Error creating technician tasks:', taskError);
                 // Don't fail the order creation, just log the error
+            } else {
+                console.log('Technician tasks created successfully');
             }
         }
 

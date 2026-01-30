@@ -33,6 +33,7 @@ export function useInteractions() {
     const fetchInteractions = useCallback(async (params?: {
         customer_id?: string;
         lead_id?: string;
+        created_by?: string;
         type?: string;
         result?: string;
         page?: number;
