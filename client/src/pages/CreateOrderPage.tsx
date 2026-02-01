@@ -1014,36 +1014,40 @@ export function CreateOrderPage() {
 
                                                                             {/* Assigned technicians */}
                                                                             {s.technicians && s.technicians.length > 0 ? (
-                                                                                <div className="space-y-1 mb-1">
+                                                                                <div className="space-y-2 mb-2">
                                                                                     {s.technicians.map((tech, ti) => (
-                                                                                        <div key={ti} className="flex items-center gap-1 bg-white p-1.5 rounded border text-xs">
-                                                                                            <Avatar className="h-5 w-5 flex-shrink-0">
-                                                                                                <AvatarFallback className="bg-blue-100 text-blue-700 text-[10px]">
-                                                                                                    {tech.name.charAt(0)}
-                                                                                                </AvatarFallback>
-                                                                                            </Avatar>
-                                                                                            <span className="font-medium flex-1 min-w-0 truncate">{tech.name}</span>
-                                                                                            <Input
-                                                                                                type="number"
-                                                                                                min="0"
-                                                                                                max="100"
-                                                                                                value={tech.commission || 0}
-                                                                                                onChange={(e) => handleUpdateTechnicianCommission(index, si, tech.id, Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
-                                                                                                onFocus={(e) => e.target.select()}
-                                                                                                className="w-12 h-6 text-xs text-center p-0"
-                                                                                            />
-                                                                                            <span className="text-[10px]">%=</span>
-                                                                                            <span className="font-semibold text-emerald-600 w-16 text-right">
-                                                                                                {formatCurrency(s.price * (tech.commission || 0) / 100)}
-                                                                                            </span>
-                                                                                            <Button
-                                                                                                variant="ghost"
-                                                                                                size="icon"
-                                                                                                className="h-5 w-5 text-red-400 hover:text-red-600 flex-shrink-0"
-                                                                                                onClick={() => handleRemoveTechnicianFromService(index, si, tech.id)}
-                                                                                            >
-                                                                                                <X className="h-3 w-3" />
-                                                                                            </Button>
+                                                                                        <div key={ti} className="flex flex-wrap items-center gap-2 bg-white p-2 rounded-lg border text-xs">
+                                                                                            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                                                                                <Avatar className="h-6 w-6 flex-shrink-0">
+                                                                                                    <AvatarFallback className="bg-blue-100 text-blue-700 text-[10px]">
+                                                                                                        {tech.name.charAt(0)}
+                                                                                                    </AvatarFallback>
+                                                                                                </Avatar>
+                                                                                                <span className="font-medium truncate">{tech.name}</span>
+                                                                                            </div>
+                                                                                            <div className="flex items-center gap-1.5">
+                                                                                                <Input
+                                                                                                    type="number"
+                                                                                                    min="0"
+                                                                                                    max="100"
+                                                                                                    value={tech.commission || 0}
+                                                                                                    onChange={(e) => handleUpdateTechnicianCommission(index, si, tech.id, Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
+                                                                                                    onFocus={(e) => e.target.select()}
+                                                                                                    className="w-14 h-7 text-xs text-center p-1"
+                                                                                                />
+                                                                                                <span className="text-[10px]">%=</span>
+                                                                                                <span className="font-semibold text-emerald-600 min-w-[55px] text-right text-xs">
+                                                                                                    {formatCurrency(s.price * (tech.commission || 0) / 100)}
+                                                                                                </span>
+                                                                                                <Button
+                                                                                                    variant="ghost"
+                                                                                                    size="icon"
+                                                                                                    className="h-7 w-7 text-red-400 hover:text-red-600 flex-shrink-0 touch-manipulation"
+                                                                                                    onClick={() => handleRemoveTechnicianFromService(index, si, tech.id)}
+                                                                                                >
+                                                                                                    <X className="h-3.5 w-3.5" />
+                                                                                                </Button>
+                                                                                            </div>
                                                                                         </div>
                                                                                     ))}
                                                                                 </div>
@@ -1176,23 +1180,23 @@ export function CreateOrderPage() {
                                                 {product.services.length > 0 && (
                                                     <div className="mt-3 space-y-2">
                                                         {product.services.map((s, si) => (
-                                                            <div key={si} className="flex justify-between items-start bg-white p-3 rounded-lg border">
-                                                                <div className="flex-1">
+                                                            <div key={si} className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 bg-white p-3 rounded-lg border">
+                                                                <div className="flex-1 min-w-0">
                                                                     <div className="flex items-center gap-2">
-                                                                        <Sparkles className="h-4 w-4 text-purple-500" />
-                                                                        <span className="font-medium">{s.name}</span>
+                                                                        <Sparkles className="h-4 w-4 text-purple-500 flex-shrink-0" />
+                                                                        <span className="font-medium truncate">{s.name}</span>
                                                                     </div>
                                                                     {s.technicians.length > 0 && (
-                                                                        <div className="flex flex-wrap gap-1 mt-2 ml-6">
+                                                                        <div className="flex flex-wrap gap-1.5 mt-2">
                                                                             {s.technicians.map((tech, ti) => (
-                                                                                <span key={ti} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full">
+                                                                                <span key={ti} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full whitespace-nowrap">
                                                                                     KTV: {tech.name} ({tech.commission}%)
                                                                                 </span>
                                                                             ))}
                                                                         </div>
                                                                     )}
                                                                 </div>
-                                                                <span className="font-bold text-green-600 text-lg">{formatCurrency(s.price)}</span>
+                                                                <span className="font-bold text-green-600 text-base sm:text-lg flex-shrink-0">{formatCurrency(s.price)}</span>
                                                             </div>
                                                         ))}
                                                     </div>

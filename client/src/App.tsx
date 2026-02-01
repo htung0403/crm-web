@@ -176,6 +176,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           currentUser={user}
           onLogout={handleLogout}
           isMobile={isMobile}
+          onMenuToggle={() => setSidebarOpen(true)}
         />
         <main className="flex-1 p-4 md:p-6 lg:p-8 mt-16">
           {children}

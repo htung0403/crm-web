@@ -261,8 +261,13 @@ export function Header({ onMenuToggle, isMobile, currentUser, onLogout }: Header
 
                     {/* Mobile menu toggle */}
                     {isMobile && (
-                        <Button variant="ghost" size="icon" onClick={onMenuToggle} className="ml-2">
-                            <Menu className="h-5 w-5" />
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={onMenuToggle}
+                            className="ml-2 relative z-10 min-h-[44px] min-w-[44px] touch-manipulation"
+                        >
+                            <Menu className="h-6 w-6" />
                         </Button>
                     )}
                 </div>
