@@ -171,7 +171,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       />
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col min-h-screen lg:ml-64 overflow-x-hidden">
+      <div className="flex-1 flex flex-col min-h-screen lg:ml-64">
         <Header
           currentUser={user}
           onLogout={handleLogout}

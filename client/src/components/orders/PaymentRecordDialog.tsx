@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Loader2, Upload, X, CreditCard, Banknote, Smartphone } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Loader2, Upload, X, CreditCard, Banknote, Smartphone, ImagePlus, CheckCircle2, Camera } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/dialog';
 import { ordersApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
+import { uploadFile } from '@/lib/supabase';
 
 interface PaymentRecordDialogProps {
     open: boolean;
@@ -53,6 +54,8 @@ export function PaymentRecordDialog({
     const [imageUrl, setImageUrl] = useState('');
     const [notes, setNotes] = useState('');
     const [loading, setLoading] = useState(false);
+    const [uploading, setUploading] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Format input currency
     const formatInputCurrency = (value: number): string => {
@@ -63,6 +66,49 @@ export function PaymentRecordDialog({
     const parseInputCurrency = (value: string): number => {
         const cleaned = value.replace(/[^\d]/g, '');
         return parseInt(cleaned) || 0;
+    };
+
+    const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+
+        // Validate file type
+        if (!file.type.startsWith('image/')) {
+            toast.error('Vui lòng chọn file ảnh');
+            return;
+        }
+
+        // Validate file size (max 5MB)
+        if (file.size > 5 * 1024 * 1024) {
+            toast.error('Kích thước ảnh không được vượt quá 5MB');
+            return;
+        }
+
+        setUploading(true);
+        try {
+            const { url, error } = await uploadFile('payment-proofs', `orders/${orderId}`, file);
+
+            if (error) {
+                throw error;
+            }
+
+            if (url) {
+                setImageUrl(url);
+                toast.success('Tải ảnh lên thành công');
+            }
+        } catch (error: any) {
+            toast.error('Lỗi khi tải ảnh lên: ' + (error.message || 'Vui lòng thử lại'));
+        } finally {
+            setUploading(false);
+            // Reset input
+            if (fileInputRef.current) {
+                fileInputRef.current.value = '';
+            }
+        }
+    };
+
+    const handleRemoveImage = () => {
+        setImageUrl('');
     };
 
     const handleSubmit = async () => {
@@ -190,8 +236,8 @@ export function PaymentRecordDialog({
                                         type="button"
                                         onClick={() => setPaymentMethod(method.value)}
                                         className={`flex flex-col items-center gap-1 p-3 rounded-lg border-2 transition-all ${paymentMethod === method.value
-                                                ? 'border-primary bg-primary/5'
-                                                : 'border-muted hover:border-muted-foreground/30'
+                                            ? 'border-primary bg-primary/5'
+                                            : 'border-muted hover:border-muted-foreground/30'
                                             }`}
                                     >
                                         <Icon className={`h-5 w-5 ${paymentMethod === method.value ? 'text-primary' : 'text-muted-foreground'}`} />
@@ -204,37 +250,111 @@ export function PaymentRecordDialog({
                         </div>
                     </div>
 
-                    {/* Image URL (for QR code or receipt) */}
+                    {/* Payment Verification - Image Upload */}
                     <div className="space-y-2">
-                        <Label>Ảnh chứng từ (QR, biên lai...)</Label>
-                        <div className="flex gap-2">
-                            <Input
-                                placeholder="URL ảnh hoặc upload..."
-                                value={imageUrl}
-                                onChange={(e) => setImageUrl(e.target.value)}
-                                className="flex-1"
-                            />
-                            <Button variant="outline" size="icon" disabled>
-                                <Upload className="h-4 w-4" />
-                            </Button>
-                        </div>
-                        {imageUrl && (
-                            <div className="relative inline-block">
-                                <img
-                                    src={imageUrl}
-                                    alt="Receipt"
-                                    className="h-20 w-20 object-cover rounded-lg border"
-                                    onError={(e) => {
-                                        (e.target as HTMLImageElement).style.display = 'none';
-                                    }}
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() => setImageUrl('')}
-                                    className="absolute -top-2 -right-2 h-5 w-5 rounded-full bg-red-500 text-white flex items-center justify-center"
-                                >
-                                    <X className="h-3 w-3" />
-                                </button>
+                        <Label>Xác minh thanh toán</Label>
+                        {/* Hidden file input for gallery */}
+                        <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleFileUpload}
+                            ref={fileInputRef}
+                            className="hidden"
+                        />
+                        {/* Hidden file input for camera */}
+                        <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            onChange={handleFileUpload}
+                            id="cameraInput"
+                            className="hidden"
+                        />
+
+                        {!imageUrl ? (
+                            <div className={`border-2 border-dashed rounded-lg p-6 text-center transition-all ${uploading ? 'opacity-50' : ''}`}>
+                                {uploading ? (
+                                    <div className="flex flex-col items-center gap-2">
+                                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                                        <p className="text-sm text-muted-foreground">Đang tải ảnh lên...</p>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col items-center gap-2">
+                                        <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
+                                            <ImagePlus className="h-6 w-6 text-muted-foreground" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-medium">Tải ảnh chứng từ</p>
+                                            <p className="text-xs text-muted-foreground">QR code, biên lai, ảnh chuyển khoản...</p>
+                                        </div>
+                                        <div className="flex gap-2 mt-2">
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => fileInputRef.current?.click()}
+                                                disabled={uploading}
+                                            >
+                                                <Upload className="h-4 w-4 mr-2" />
+                                                Chọn ảnh
+                                            </Button>
+                                            {/* Camera button - only visible on mobile */}
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => document.getElementById('cameraInput')?.click()}
+                                                disabled={uploading}
+                                                className="md:hidden text-blue-600 border-blue-200 hover:bg-blue-50"
+                                            >
+                                                <Camera className="h-4 w-4 mr-2" />
+                                                Chụp ảnh
+                                            </Button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        ) : (
+                            <div className="relative">
+                                <div className="border rounded-lg p-3 bg-green-50/50 border-green-200">
+                                    <div className="flex items-start gap-3">
+                                        <img
+                                            src={imageUrl}
+                                            alt="Payment proof"
+                                            className="h-24 w-24 object-cover rounded-lg border shadow-sm"
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 text-green-600 mb-1">
+                                                <CheckCircle2 className="h-4 w-4" />
+                                                <span className="text-sm font-medium">Đã tải lên</span>
+                                            </div>
+                                            <p className="text-xs text-muted-foreground mb-2">
+                                                Ảnh xác minh thanh toán đã được lưu
+                                            </p>
+                                            <div className="flex gap-2">
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => fileInputRef.current?.click()}
+                                                    disabled={uploading}
+                                                >
+                                                    Đổi ảnh
+                                                </Button>
+                                                <Button
+                                                    type="button"
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    onClick={handleRemoveImage}
+                                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                >
+                                                    <X className="h-4 w-4 mr-1" />
+                                                    Xóa
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -253,12 +373,12 @@ export function PaymentRecordDialog({
                 </div>
 
                 <DialogFooter>
-                    <Button variant="outline" onClick={handleClose} disabled={loading}>
+                    <Button variant="outline" onClick={handleClose} disabled={loading || uploading}>
                         Hủy
                     </Button>
                     <Button
                         onClick={handleSubmit}
-                        disabled={loading || !content.trim() || amount <= 0}
+                        disabled={loading || uploading || !content.trim() || amount <= 0}
                         className="bg-green-600 hover:bg-green-700"
                     >
                         {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
