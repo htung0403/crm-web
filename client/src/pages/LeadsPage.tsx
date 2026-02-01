@@ -124,14 +124,16 @@ export function LeadsPage() {
             const statusLabel = kanbanColumns.find(c => c.id === newPipelineStage)?.label || newPipelineStage;
             toast.success(`Đã chuyển "${leadToUpdate.name}" sang "${statusLabel}"`);
 
-            // If pipeline_stage is 'chot_don' (Chốt đơn), open CreateOrderDialog
+            // If pipeline_stage is 'chot_don' (Chốt đơn), navigate to create order page
             if (newPipelineStage === 'chot_don') {
-                // Convert lead to customer first
-                await convertLead(draggableId);
-                // Refresh customers list to include the new customer
-                await fetchCustomers();
-                setLeadForOrder(leadToUpdate);
-                setShowOrderDialog(true);
+                // Navigate to create order page with lead info
+                const params = new URLSearchParams({
+                    lead_id: leadToUpdate.id,
+                    lead_name: leadToUpdate.name,
+                    lead_phone: leadToUpdate.phone,
+                    lead_email: leadToUpdate.email || '',
+                });
+                navigate(`/orders/new?${params.toString()}`);
             }
 
             await fetchLeads(); // Refresh data
@@ -177,7 +179,7 @@ export function LeadsPage() {
     return (
         <>
             <Toaster position="top-right" richColors />
-            <div className="space-y-5 animate-fade-in" style={{ contain: 'inline-size' }}>
+            <div className="space-y-5 animate-fade-in max-w-screen-2xl mx-auto" style={{ contain: 'inline-size' }}>
                 {/* Page Header + Stats + Filters Container - Contained width */}
                 <div className="space-y-5">
                     {/* Page Header */}

@@ -31,8 +31,20 @@ export interface Order {
     sales_user?: { id: string; name: string };
     subtotal: number;
     discount: number;
+    discount_type?: 'amount' | 'percent';
+    discount_value?: number;
+    surcharges?: Array<{
+        type: string;
+        label: string;
+        value: number;
+        is_percent: boolean;
+        amount: number;
+    }>;
+    surcharges_amount?: number;
     total_amount: number;
     paid_amount?: number;
+    remaining_debt?: number;
+    payment_status?: 'unpaid' | 'partial' | 'paid';
     status: string;
     notes?: string;
     items?: OrderItem[];

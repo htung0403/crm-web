@@ -28,6 +28,7 @@ import orderItemsRouter from './routes/order-items.js';
 import notificationsRouter from './routes/notifications.js';
 import workflowsRouter from './routes/workflows.js';
 import orderProductsRouter from './routes/order-products.js';
+import { transactionsRouter } from './routes/transactions.js';
 
 dotenv.config();
 
@@ -75,6 +76,7 @@ app.use('/api/order-items', orderItemsRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/workflows', workflowsRouter);
 app.use('/api/order-products', orderProductsRouter);
+app.use('/api/transactions', transactionsRouter);
 
 // Error handling
 app.use(errorHandler);

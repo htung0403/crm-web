@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { Plus, Search, Filter, Edit, Trash2, Check, X, Upload, FileText } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState, useEffect, useCallback } from 'react';
+import { Plus, Search, Edit, Trash2, Check, X, Upload, FileText, Loader2, RefreshCw, Eye, ExternalLink } from 'lucide-react';
+import { toast } from 'sonner';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -9,12 +10,35 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { transactions, incomeCategories, expenseCategories, users } from '@/data/mockData';
+import { transactionsApi } from '@/lib/api';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import type { Transaction, TransactionType, TransactionStatus, User } from '@/types';
+import type { User } from '@/types';
 
 interface FinancePageProps {
     currentUser: User;
+}
+
+type TransactionType = 'income' | 'expense';
+type TransactionStatus = 'pending' | 'approved' | 'cancelled';
+
+interface Transaction {
+    id: string;
+    code: string;
+    type: TransactionType;
+    category: string;
+    amount: number;
+    payment_method: 'cash' | 'transfer' | 'card';
+    notes?: string;
+    image_url?: string;
+    date: string;
+    status: TransactionStatus;
+    order_id?: string;
+    order_code?: string;
+    created_by: string;
+    created_by_user?: { id: string; name: string; avatar?: string };
+    approved_by?: string;
+    approved_by_user?: { id: string; name: string };
+    created_at: string;
 }
 
 const statusLabels: Record<TransactionStatus, { label: string; variant: 'warning' | 'success' | 'danger' }> = {
@@ -29,38 +53,65 @@ const paymentMethodLabels = {
     card: 'Thẻ'
 };
 
+const incomeCategories = [
+    'Thanh toán đơn hàng',
+    'Đặt cọc',
+    'Thu khác',
+];
+
+const expenseCategories = [
+    'Lương nhân viên',
+    'Tiền điện',
+    'Tiền nước',
+    'Tiền thuê mặt bằng',
+    'Mua vật tư',
+    'Chi phí vận hành',
+    'Chi khác',
+];
+
 interface TransactionFormProps {
     type: TransactionType;
     onClose: () => void;
-    onSubmit: (data: Partial<Transaction>) => void;
+    onSubmit: (data: any) => Promise<void>;
+    loading: boolean;
 }
 
-function TransactionForm({ type, onClose, onSubmit }: TransactionFormProps) {
+function TransactionForm({ type, onClose, onSubmit, loading }: TransactionFormProps) {
     const [category, setCategory] = useState('');
     const [amount, setAmount] = useState<number>(0);
     const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'card'>('cash');
     const [notes, setNotes] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+    const [imageUrl, setImageUrl] = useState('');
 
     const categories = type === 'income' ? incomeCategories : expenseCategories;
 
-    const handleSubmit = () => {
+    const handleSubmit = async () => {
         if (!category || amount <= 0) {
-            alert('Vui lòng điền đầy đủ thông tin');
+            toast.error('Vui lòng điền đầy đủ thông tin');
             return;
         }
 
-        onSubmit({
+        await onSubmit({
             type,
             category,
             amount,
-            paymentMethod,
+            payment_method: paymentMethod,
             notes,
             date,
-            status: 'pending'
+            image_url: imageUrl || undefined,
         });
+    };
 
-        onClose();
+    // Format currency input
+    const formatInputCurrency = (value: number): string => {
+        if (value === 0) return '';
+        return value.toLocaleString('vi-VN');
+    };
+
+    const parseInputCurrency = (value: string): number => {
+        const cleaned = value.replace(/[^\d]/g, '');
+        return parseInt(cleaned) || 0;
     };
 
     return (
@@ -68,12 +119,12 @@ function TransactionForm({ type, onClose, onSubmit }: TransactionFormProps) {
             <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                     {type === 'income' ? (
-                        <div className="h-8 w-8 rounded-full bg-success/10 flex items-center justify-center">
-                            <Plus className="h-4 w-4 text-success" />
+                        <div className="h-8 w-8 rounded-full bg-green-100 flex items-center justify-center">
+                            <Plus className="h-4 w-4 text-green-600" />
                         </div>
                     ) : (
-                        <div className="h-8 w-8 rounded-full bg-danger/10 flex items-center justify-center">
-                            <FileText className="h-4 w-4 text-danger" />
+                        <div className="h-8 w-8 rounded-full bg-red-100 flex items-center justify-center">
+                            <FileText className="h-4 w-4 text-red-600" />
                         </div>
                     )}
                     Tạo phiếu {type === 'income' ? 'thu' : 'chi'}
@@ -114,10 +165,9 @@ function TransactionForm({ type, onClose, onSubmit }: TransactionFormProps) {
                     <Label>Số tiền *</Label>
                     <div className="relative">
                         <Input
-                            type="number"
-                            min="0"
-                            value={amount}
-                            onChange={(e) => setAmount(parseInt(e.target.value) || 0)}
+                            type="text"
+                            value={formatInputCurrency(amount)}
+                            onChange={(e) => setAmount(parseInputCurrency(e.target.value))}
                             className="pr-16"
                             placeholder="0"
                         />
@@ -156,19 +206,31 @@ function TransactionForm({ type, onClose, onSubmit }: TransactionFormProps) {
                     />
                 </div>
 
-                {/* File Upload */}
+                {/* Image URL */}
                 <div className="space-y-2">
-                    <Label>File đính kèm</Label>
-                    <div className="border-2 border-dashed rounded-lg p-4 text-center hover:bg-muted/50 transition-colors cursor-pointer">
-                        <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                        <p className="text-sm text-muted-foreground">Click để upload file</p>
+                    <Label>Ảnh đính kèm</Label>
+                    <div className="flex gap-2">
+                        <Input
+                            placeholder="URL ảnh hoặc upload..."
+                            value={imageUrl}
+                            onChange={(e) => setImageUrl(e.target.value)}
+                            className="flex-1"
+                        />
+                        <Button variant="outline" size="icon" disabled>
+                            <Upload className="h-4 w-4" />
+                        </Button>
                     </div>
                 </div>
             </div>
 
             <DialogFooter>
-                <Button variant="outline" onClick={onClose}>Huỷ</Button>
-                <Button onClick={handleSubmit} variant={type === 'income' ? 'success' : 'destructive'}>
+                <Button variant="outline" onClick={onClose} disabled={loading}>Huỷ</Button>
+                <Button
+                    onClick={handleSubmit}
+                    disabled={loading || !category || amount <= 0}
+                    className={type === 'income' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}
+                >
+                    {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                     Tạo phiếu
                 </Button>
             </DialogFooter>
@@ -178,12 +240,31 @@ function TransactionForm({ type, onClose, onSubmit }: TransactionFormProps) {
 
 function TransactionTable({
     transactions,
-    userRole
+    userRole,
+    onApprove,
+    onCancel,
+    onDelete,
+    onView,
+    loading,
 }: {
     transactions: Transaction[];
     userRole: string;
+    onApprove: (id: string) => void;
+    onCancel: (id: string) => void;
+    onDelete: (id: string) => void;
+    onView: (trans: Transaction) => void;
+    loading: boolean;
 }) {
     const canEdit = userRole === 'accountant' || userRole === 'manager' || userRole === 'admin';
+
+    if (transactions.length === 0) {
+        return (
+            <div className="py-12 text-center text-muted-foreground">
+                <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>Chưa có giao dịch nào</p>
+            </div>
+        );
+    }
 
     return (
         <>
@@ -198,29 +279,40 @@ function TransactionTable({
                             <th className="p-3 text-right text-sm font-medium text-muted-foreground">Số tiền</th>
                             <th className="p-3 text-left text-sm font-medium text-muted-foreground">Người tạo</th>
                             <th className="p-3 text-left text-sm font-medium text-muted-foreground">Trạng thái</th>
-                            {canEdit && (
-                                <th className="p-3 text-right text-sm font-medium text-muted-foreground">Thao tác</th>
-                            )}
+                            <th className="p-3 text-right text-sm font-medium text-muted-foreground">Thao tác</th>
                         </tr>
                     </thead>
                     <tbody>
                         {transactions.map((trans) => (
-                            <tr key={trans.id} className="border-b hover:bg-muted/30 transition-colors">
-                                <td className="p-3 font-medium">{trans.code}</td>
+                            <tr
+                                key={trans.id}
+                                className="border-b hover:bg-muted/30 transition-colors cursor-pointer"
+                                onClick={() => onView(trans)}
+                            >
+                                <td className="p-3">
+                                    <div>
+                                        <p className="font-medium">{trans.code}</p>
+                                        {trans.order_code && (
+                                            <p className="text-xs text-muted-foreground">ĐH: {trans.order_code}</p>
+                                        )}
+                                    </div>
+                                </td>
                                 <td className="p-3 text-sm">{formatDate(trans.date)}</td>
                                 <td className="p-3">
                                     <Badge variant="outline">{trans.category}</Badge>
                                 </td>
-                                <td className={`p-3 text-right font-semibold ${trans.type === 'income' ? 'text-success' : 'text-danger'}`}>
+                                <td className={`p-3 text-right font-semibold ${trans.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
                                     {trans.type === 'income' ? '+' : '-'}{formatCurrency(trans.amount)}
                                 </td>
                                 <td className="p-3">
                                     <div className="flex items-center gap-2">
                                         <Avatar className="h-7 w-7">
-                                            <AvatarImage src={trans.createdBy.avatar} />
-                                            <AvatarFallback className="text-xs">{trans.createdBy.name.charAt(0)}</AvatarFallback>
+                                            <AvatarImage src={trans.created_by_user?.avatar} />
+                                            <AvatarFallback className="text-xs">
+                                                {trans.created_by_user?.name?.charAt(0) || '?'}
+                                            </AvatarFallback>
                                         </Avatar>
-                                        <span className="text-sm">{trans.createdBy.name}</span>
+                                        <span className="text-sm">{trans.created_by_user?.name || 'N/A'}</span>
                                     </div>
                                 </td>
                                 <td className="p-3">
@@ -228,28 +320,49 @@ function TransactionTable({
                                         {statusLabels[trans.status].label}
                                     </Badge>
                                 </td>
-                                {canEdit && (
-                                    <td className="p-3 text-right">
-                                        <div className="flex items-center justify-end gap-1">
-                                            {trans.status === 'pending' && (
-                                                <>
-                                                    <Button variant="ghost" size="icon" className="text-success hover:bg-success/10">
-                                                        <Check className="h-4 w-4" />
-                                                    </Button>
-                                                    <Button variant="ghost" size="icon" className="text-danger hover:bg-danger/10">
-                                                        <X className="h-4 w-4" />
-                                                    </Button>
-                                                </>
-                                            )}
-                                            <Button variant="ghost" size="icon">
-                                                <Edit className="h-4 w-4" />
-                                            </Button>
-                                            <Button variant="ghost" size="icon" className="text-danger hover:bg-danger/10">
-                                                <Trash2 className="h-4 w-4" />
-                                            </Button>
-                                        </div>
-                                    </td>
-                                )}
+                                <td className="p-3 text-right">
+                                    <div className="flex items-center justify-end gap-1">
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="text-blue-600 hover:bg-blue-100"
+                                            onClick={(e) => { e.stopPropagation(); onView(trans); }}
+                                        >
+                                            <Eye className="h-4 w-4" />
+                                        </Button>
+                                        {canEdit && trans.status === 'pending' && (
+                                            <>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="text-green-600 hover:bg-green-100"
+                                                    onClick={(e) => { e.stopPropagation(); onApprove(trans.id); }}
+                                                    disabled={loading}
+                                                >
+                                                    <Check className="h-4 w-4" />
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="text-red-600 hover:bg-red-100"
+                                                    onClick={(e) => { e.stopPropagation(); onCancel(trans.id); }}
+                                                    disabled={loading}
+                                                >
+                                                    <X className="h-4 w-4" />
+                                                </Button>
+                                                <Button
+                                                    variant="ghost"
+                                                    size="icon"
+                                                    className="text-red-600 hover:bg-red-100"
+                                                    onClick={(e) => { e.stopPropagation(); onDelete(trans.id); }}
+                                                    disabled={loading}
+                                                >
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </>
+                                        )}
+                                    </div>
+                                </td>
                             </tr>
                         ))}
                     </tbody>
@@ -259,7 +372,11 @@ function TransactionTable({
             {/* Mobile Card View */}
             <div className="md:hidden space-y-3 p-4">
                 {transactions.map((trans) => (
-                    <div key={trans.id} className="p-4 rounded-lg border bg-card">
+                    <div
+                        key={trans.id}
+                        className="p-4 rounded-lg border bg-card cursor-pointer"
+                        onClick={() => onView(trans)}
+                    >
                         <div className="flex items-start justify-between mb-3">
                             <div>
                                 <p className="font-semibold">{trans.code}</p>
@@ -272,7 +389,7 @@ function TransactionTable({
 
                         <div className="flex items-center justify-between mb-3">
                             <Badge variant="outline">{trans.category}</Badge>
-                            <span className={`text-lg font-bold ${trans.type === 'income' ? 'text-success' : 'text-danger'}`}>
+                            <span className={`text-lg font-bold ${trans.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
                                 {trans.type === 'income' ? '+' : '-'}{formatCurrency(trans.amount)}
                             </span>
                         </div>
@@ -280,18 +397,32 @@ function TransactionTable({
                         <div className="flex items-center justify-between pt-3 border-t">
                             <div className="flex items-center gap-2">
                                 <Avatar className="h-6 w-6">
-                                    <AvatarImage src={trans.createdBy.avatar} />
-                                    <AvatarFallback className="text-xs">{trans.createdBy.name.charAt(0)}</AvatarFallback>
+                                    <AvatarImage src={trans.created_by_user?.avatar} />
+                                    <AvatarFallback className="text-xs">
+                                        {trans.created_by_user?.name?.charAt(0) || '?'}
+                                    </AvatarFallback>
                                 </Avatar>
-                                <span className="text-sm text-muted-foreground">{trans.createdBy.name}</span>
+                                <span className="text-sm text-muted-foreground">{trans.created_by_user?.name || 'N/A'}</span>
                             </div>
 
-                            {canEdit && (
+                            {canEdit && trans.status === 'pending' && (
                                 <div className="flex gap-1">
-                                    <Button variant="ghost" size="icon" className="h-8 w-8">
-                                        <Edit className="h-4 w-4" />
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 text-green-600"
+                                        onClick={() => onApprove(trans.id)}
+                                        disabled={loading}
+                                    >
+                                        <Check className="h-4 w-4" />
                                     </Button>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-danger">
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8 text-red-600"
+                                        onClick={() => onDelete(trans.id)}
+                                        disabled={loading}
+                                    >
                                         <Trash2 className="h-4 w-4" />
                                     </Button>
                                 </div>
@@ -310,29 +441,124 @@ export function FinancePage({ currentUser }: FinancePageProps) {
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');
 
+    // Data states
+    const [transactions, setTransactions] = useState<Transaction[]>([]);
+    const [summary, setSummary] = useState({
+        totalIncome: 0,
+        totalExpense: 0,
+        balance: 0,
+        pendingIncomeCount: 0,
+        pendingExpenseCount: 0,
+    });
+    const [loading, setLoading] = useState(false);
+    const [actionLoading, setActionLoading] = useState(false);
+    const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+
+    // Fetch transactions
+    const fetchTransactions = useCallback(async () => {
+        setLoading(true);
+        try {
+            const params: any = {};
+            if (activeTab) params.type = activeTab;
+            if (statusFilter !== 'all') params.status = statusFilter;
+            if (searchTerm) params.search = searchTerm;
+
+            const response = await transactionsApi.getAll(params);
+            setTransactions(response.data.data?.transactions || []);
+        } catch (error: any) {
+            toast.error(error.response?.data?.message || 'Lỗi khi tải dữ liệu');
+        } finally {
+            setLoading(false);
+        }
+    }, [activeTab, statusFilter, searchTerm]);
+
+    // Fetch summary
+    const fetchSummary = useCallback(async () => {
+        try {
+            const response = await transactionsApi.getSummary();
+            setSummary(response.data.data || {
+                totalIncome: 0,
+                totalExpense: 0,
+                balance: 0,
+                pendingIncomeCount: 0,
+                pendingExpenseCount: 0,
+            });
+        } catch (error) {
+            console.error('Error fetching summary:', error);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchTransactions();
+        fetchSummary();
+    }, [fetchTransactions, fetchSummary]);
+
+    // Create transaction
+    const handleCreateTransaction = async (data: any) => {
+        setActionLoading(true);
+        try {
+            await transactionsApi.create(data);
+            toast.success(`Đã tạo phiếu ${data.type === 'income' ? 'thu' : 'chi'}`);
+            setShowForm(null);
+            fetchTransactions();
+            fetchSummary();
+        } catch (error: any) {
+            toast.error(error.response?.data?.message || 'Lỗi khi tạo phiếu');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    // Approve transaction
+    const handleApprove = async (id: string) => {
+        setActionLoading(true);
+        try {
+            await transactionsApi.updateStatus(id, 'approved');
+            toast.success('Đã duyệt phiếu');
+            fetchTransactions();
+            fetchSummary();
+        } catch (error: any) {
+            toast.error(error.response?.data?.message || 'Lỗi khi duyệt phiếu');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    // Cancel transaction
+    const handleCancel = async (id: string) => {
+        setActionLoading(true);
+        try {
+            await transactionsApi.updateStatus(id, 'cancelled');
+            toast.success('Đã hủy phiếu');
+            fetchTransactions();
+            fetchSummary();
+        } catch (error: any) {
+            toast.error(error.response?.data?.message || 'Lỗi khi hủy phiếu');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    // Delete transaction
+    const handleDelete = async (id: string) => {
+        if (!confirm('Bạn có chắc muốn xóa phiếu này?')) return;
+
+        setActionLoading(true);
+        try {
+            await transactionsApi.delete(id);
+            toast.success('Đã xóa phiếu');
+            fetchTransactions();
+            fetchSummary();
+        } catch (error: any) {
+            toast.error(error.response?.data?.message || 'Lỗi khi xóa phiếu');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
     const incomeTransactions = transactions.filter(t => t.type === 'income');
     const expenseTransactions = transactions.filter(t => t.type === 'expense');
-
-    const totalIncome = incomeTransactions
-        .filter(t => t.status === 'approved')
-        .reduce((sum, t) => sum + t.amount, 0);
-
-    const totalExpense = expenseTransactions
-        .filter(t => t.status === 'approved')
-        .reduce((sum, t) => sum + t.amount, 0);
-
-    const filteredTransactions = (activeTab === 'income' ? incomeTransactions : expenseTransactions)
-        .filter(t => {
-            const matchesSearch = t.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                t.category.toLowerCase().includes(searchTerm.toLowerCase());
-            const matchesStatus = statusFilter === 'all' || t.status === statusFilter;
-            return matchesSearch && matchesStatus;
-        });
-
-    const handleCreateTransaction = (data: Partial<Transaction>) => {
-        console.log('Creating transaction:', data);
-        alert('Đã tạo phiếu thành công!');
-    };
+    const currentTransactions = activeTab === 'income' ? incomeTransactions : expenseTransactions;
 
     return (
         <div className="space-y-6 animate-fade-in">
@@ -343,11 +569,19 @@ export function FinancePage({ currentUser }: FinancePageProps) {
                     <p className="text-muted-foreground">Quản lý phiếu thu và phiếu chi</p>
                 </div>
                 <div className="flex gap-2">
-                    <Button onClick={() => setShowForm('income')} variant="success">
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => { fetchTransactions(); fetchSummary(); }}
+                        disabled={loading}
+                    >
+                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                    </Button>
+                    <Button onClick={() => setShowForm('income')} className="bg-green-600 hover:bg-green-700">
                         <Plus className="h-4 w-4 mr-2" />
                         Phiếu thu
                     </Button>
-                    <Button onClick={() => setShowForm('expense')} variant="destructive">
+                    <Button onClick={() => setShowForm('expense')} className="bg-red-600 hover:bg-red-700">
                         <Plus className="h-4 w-4 mr-2" />
                         Phiếu chi
                     </Button>
@@ -356,23 +590,33 @@ export function FinancePage({ currentUser }: FinancePageProps) {
 
             {/* Summary Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Card className="bg-success-light border-0">
+                <Card className="bg-green-50 border-green-200">
                     <CardContent className="p-5">
                         <p className="text-sm font-medium text-muted-foreground mb-1">Tổng thu (đã duyệt)</p>
-                        <p className="text-2xl font-bold text-success">{formatCurrency(totalIncome)}</p>
+                        <p className="text-2xl font-bold text-green-600">{formatCurrency(summary.totalIncome)}</p>
+                        {summary.pendingIncomeCount > 0 && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                                {summary.pendingIncomeCount} phiếu chờ duyệt
+                            </p>
+                        )}
                     </CardContent>
                 </Card>
-                <Card className="bg-danger-light border-0">
+                <Card className="bg-red-50 border-red-200">
                     <CardContent className="p-5">
                         <p className="text-sm font-medium text-muted-foreground mb-1">Tổng chi (đã duyệt)</p>
-                        <p className="text-2xl font-bold text-danger">{formatCurrency(totalExpense)}</p>
+                        <p className="text-2xl font-bold text-red-600">{formatCurrency(summary.totalExpense)}</p>
+                        {summary.pendingExpenseCount > 0 && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                                {summary.pendingExpenseCount} phiếu chờ duyệt
+                            </p>
+                        )}
                     </CardContent>
                 </Card>
-                <Card className="bg-purple-light border-0">
+                <Card className="bg-purple-50 border-purple-200">
                     <CardContent className="p-5">
                         <p className="text-sm font-medium text-muted-foreground mb-1">Chênh lệch</p>
-                        <p className={`text-2xl font-bold ${totalIncome - totalExpense >= 0 ? 'text-success' : 'text-danger'}`}>
-                            {formatCurrency(totalIncome - totalExpense)}
+                        <p className={`text-2xl font-bold ${summary.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {formatCurrency(summary.balance)}
                         </p>
                     </CardContent>
                 </Card>
@@ -385,12 +629,12 @@ export function FinancePage({ currentUser }: FinancePageProps) {
                         <div className="border-b px-4 pt-4">
                             <TabsList className="mb-4">
                                 <TabsTrigger value="income" className="gap-2">
-                                    <div className="h-2 w-2 rounded-full bg-success" />
+                                    <div className="h-2 w-2 rounded-full bg-green-500" />
                                     Phiếu thu
                                     <Badge variant="secondary" className="ml-1">{incomeTransactions.length}</Badge>
                                 </TabsTrigger>
                                 <TabsTrigger value="expense" className="gap-2">
-                                    <div className="h-2 w-2 rounded-full bg-danger" />
+                                    <div className="h-2 w-2 rounded-full bg-red-500" />
                                     Phiếu chi
                                     <Badge variant="secondary" className="ml-1">{expenseTransactions.length}</Badge>
                                 </TabsTrigger>
@@ -422,11 +666,39 @@ export function FinancePage({ currentUser }: FinancePageProps) {
                         </div>
 
                         <TabsContent value="income" className="m-0">
-                            <TransactionTable transactions={filteredTransactions} userRole={currentUser.role} />
+                            {loading ? (
+                                <div className="py-12 flex items-center justify-center">
+                                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                </div>
+                            ) : (
+                                <TransactionTable
+                                    transactions={currentTransactions}
+                                    userRole={currentUser.role}
+                                    onApprove={handleApprove}
+                                    onCancel={handleCancel}
+                                    onDelete={handleDelete}
+                                    onView={setSelectedTransaction}
+                                    loading={actionLoading}
+                                />
+                            )}
                         </TabsContent>
 
                         <TabsContent value="expense" className="m-0">
-                            <TransactionTable transactions={filteredTransactions} userRole={currentUser.role} />
+                            {loading ? (
+                                <div className="py-12 flex items-center justify-center">
+                                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                </div>
+                            ) : (
+                                <TransactionTable
+                                    transactions={currentTransactions}
+                                    userRole={currentUser.role}
+                                    onApprove={handleApprove}
+                                    onCancel={handleCancel}
+                                    onDelete={handleDelete}
+                                    onView={setSelectedTransaction}
+                                    loading={actionLoading}
+                                />
+                            )}
                         </TabsContent>
                     </Tabs>
                 </CardContent>
@@ -439,7 +711,128 @@ export function FinancePage({ currentUser }: FinancePageProps) {
                         type={showForm}
                         onClose={() => setShowForm(null)}
                         onSubmit={handleCreateTransaction}
+                        loading={actionLoading}
                     />
+                )}
+            </Dialog>
+
+            {/* Transaction Detail Dialog */}
+            <Dialog open={!!selectedTransaction} onOpenChange={() => setSelectedTransaction(null)}>
+                {selectedTransaction && (
+                    <DialogContent className="max-w-lg">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-3">
+                                <div className={`h-10 w-10 rounded-full flex items-center justify-center ${selectedTransaction.type === 'income' ? 'bg-green-100' : 'bg-red-100'
+                                    }`}>
+                                    <FileText className={`h-5 w-5 ${selectedTransaction.type === 'income' ? 'text-green-600' : 'text-red-600'
+                                        }`} />
+                                </div>
+                                <div>
+                                    <p className="text-lg font-semibold">{selectedTransaction.code}</p>
+                                    <p className="text-sm text-muted-foreground font-normal">
+                                        Phiếu {selectedTransaction.type === 'income' ? 'thu' : 'chi'}
+                                    </p>
+                                </div>
+                            </DialogTitle>
+                        </DialogHeader>
+
+                        <div className="space-y-4 py-4">
+                            {/* Amount */}
+                            <div className={`text-center py-4 rounded-lg ${selectedTransaction.type === 'income' ? 'bg-green-50' : 'bg-red-50'
+                                }`}>
+                                <p className="text-sm text-muted-foreground mb-1">Số tiền</p>
+                                <p className={`text-3xl font-bold ${selectedTransaction.type === 'income' ? 'text-green-600' : 'text-red-600'
+                                    }`}>
+                                    {selectedTransaction.type === 'income' ? '+' : '-'}
+                                    {formatCurrency(selectedTransaction.amount)}
+                                </p>
+                            </div>
+
+                            {/* Details Grid */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <p className="text-sm text-muted-foreground mb-1">Ngày</p>
+                                    <p className="font-medium">{formatDate(selectedTransaction.date)}</p>
+                                </div>
+                                <div>
+                                    <p className="text-sm text-muted-foreground mb-1">Trạng thái</p>
+                                    <Badge variant={statusLabels[selectedTransaction.status].variant}>
+                                        {statusLabels[selectedTransaction.status].label}
+                                    </Badge>
+                                </div>
+                                <div>
+                                    <p className="text-sm text-muted-foreground mb-1">Loại</p>
+                                    <p className="font-medium">{selectedTransaction.category}</p>
+                                </div>
+                                <div>
+                                    <p className="text-sm text-muted-foreground mb-1">Phương thức</p>
+                                    <p className="font-medium">{paymentMethodLabels[selectedTransaction.payment_method]}</p>
+                                </div>
+                            </div>
+
+                            {/* Order Link */}
+                            {selectedTransaction.order_code && (
+                                <div className="p-3 bg-muted/50 rounded-lg">
+                                    <p className="text-sm text-muted-foreground mb-1">Liên kết đơn hàng</p>
+                                    <a
+                                        href={`/orders/${selectedTransaction.order_id}`}
+                                        className="flex items-center gap-2 text-primary hover:underline font-medium"
+                                    >
+                                        {selectedTransaction.order_code}
+                                        <ExternalLink className="h-4 w-4" />
+                                    </a>
+                                </div>
+                            )}
+
+                            {/* Notes */}
+                            {selectedTransaction.notes && (
+                                <div>
+                                    <p className="text-sm text-muted-foreground mb-1">Ghi chú</p>
+                                    <p className="text-sm bg-muted/50 p-3 rounded-lg">{selectedTransaction.notes}</p>
+                                </div>
+                            )}
+
+                            {/* Image */}
+                            {selectedTransaction.image_url && (
+                                <div>
+                                    <p className="text-sm text-muted-foreground mb-2">Ảnh đính kèm</p>
+                                    <img
+                                        src={selectedTransaction.image_url}
+                                        alt="Chứng từ"
+                                        className="w-full max-h-48 object-contain rounded-lg border"
+                                    />
+                                </div>
+                            )}
+
+                            {/* Meta */}
+                            <div className="pt-3 border-t grid grid-cols-2 gap-4 text-sm">
+                                <div>
+                                    <p className="text-muted-foreground">Người tạo</p>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <Avatar className="h-6 w-6">
+                                            <AvatarImage src={selectedTransaction.created_by_user?.avatar} />
+                                            <AvatarFallback className="text-xs">
+                                                {selectedTransaction.created_by_user?.name?.charAt(0) || '?'}
+                                            </AvatarFallback>
+                                        </Avatar>
+                                        <span>{selectedTransaction.created_by_user?.name || 'N/A'}</span>
+                                    </div>
+                                </div>
+                                {selectedTransaction.approved_by_user && (
+                                    <div>
+                                        <p className="text-muted-foreground">Người duyệt</p>
+                                        <p className="mt-1 font-medium">{selectedTransaction.approved_by_user.name}</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setSelectedTransaction(null)}>
+                                Đóng
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
                 )}
             </Dialog>
         </div>

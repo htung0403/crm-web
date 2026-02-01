@@ -50,6 +50,15 @@ export interface Lead {
     last_contact?: string;
     created_at: string;
     updated_at?: string;
+
+    // Facebook Profile (new)
+    fb_profile_name?: string;
+    fb_profile_pic?: string;
+    fb_link?: string;
+
+    // Follow-up (new)
+    next_followup_time?: string;
+    care_note?: string;
 }
 
 export interface UseLeadsReturn {

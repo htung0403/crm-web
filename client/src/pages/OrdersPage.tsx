@@ -168,122 +168,137 @@ export function OrdersPage() {
     return (
         <>
             <Toaster position="top-right" richColors />
-            <div className="space-y-6 animate-fade-in">
-                {/* Page Header */}
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                    <div>
-                        <h1 className="text-2xl font-bold text-foreground">Quản lý đơn hàng</h1>
-                        <p className="text-muted-foreground">Theo dõi và xử lý đơn hàng theo trạng thái</p>
+            <div className="space-y-6 animate-fade-in max-w-screen-2xl mx-auto" style={{ contain: 'inline-size' }}>
+                {/* Page Header + Stats Container - Contained width */}
+                <div className="space-y-6">
+                    {/* Page Header */}
+                    <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div className="min-w-0 flex-1">
+                            <h1 className="text-2xl font-bold text-foreground">Quản lý đơn hàng</h1>
+                            <p className="text-muted-foreground">Theo dõi và xử lý đơn hàng theo trạng thái</p>
+                        </div>
+                        <Button onClick={() => navigate('/orders/new')} className="shrink-0">
+                            <Plus className="h-4 w-4 mr-2" />
+                            Tạo đơn hàng
+                        </Button>
                     </div>
-                    <Button onClick={() => navigate('/orders/new')}>
-                        <Plus className="h-4 w-4 mr-2" />
-                        Tạo đơn hàng
-                    </Button>
-                </div>
 
-                {/* Error Message */}
-                {error && (
-                    <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-600">
-                        {error}
-                    </div>
-                )}
+                    {/* Error Message */}
+                    {error && (
+                        <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-600">
+                            {error}
+                        </div>
+                    )}
 
-                {/* Stats */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-                    {columns.map((column) => {
-                        const count = getOrdersByStatus(column.id).length;
-                        return (
-                            <Card key={column.id} className={`${column.bgColor} border-0`}>
-                                <CardContent className="p-4">
-                                    <div className="flex items-center justify-between">
-                                        <span className={`text-sm font-medium ${column.color}`}>{column.title}</span>
-                                        <span className={`text-2xl font-bold ${column.color}`}>{count}</span>
-                                    </div>
-                                </CardContent>
-                            </Card>
-                        );
-                    })}
-                </div>
-
-                {/* Kanban Board */}
-                <DragDropContext onDragEnd={handleDragEnd}>
-                    <div className="flex gap-4 overflow-x-auto pb-4 -mx-4 px-4 lg:mx-0 lg:px-0">
-                        {columns.map((column) => (
-                            <div key={column.id} className="shrink-0 w-72 lg:flex-1 lg:min-w-0">
-                                <Card className={`${column.bgColor} border ${column.borderColor}`}>
-                                    <CardHeader className="p-3 pb-2">
-                                        <CardTitle className={`text-sm font-semibold flex items-center justify-between ${column.color}`}>
-                                            <span>{column.title}</span>
-                                            <Badge variant="secondary" className="bg-white/80">
-                                                {getOrdersByStatus(column.id).length}
-                                            </Badge>
-                                        </CardTitle>
-                                    </CardHeader>
-                                    <CardContent className="p-2">
-                                        <Droppable droppableId={column.id}>
-                                            {(provided, snapshot) => (
-                                                <div
-                                                    ref={provided.innerRef}
-                                                    {...provided.droppableProps}
-                                                    className={`kanban-column space-y-3 min-h-100 p-1 rounded-lg transition-colors ${snapshot.isDraggingOver ? 'bg-white/50' : ''
-                                                        }`}
-                                                >
-                                                    {getOrdersByStatus(column.id).map((order, index) => (
-                                                        <OrderCard
-                                                            key={order.id}
-                                                            order={order}
-                                                            index={index}
-                                                            onClick={() => navigate(`/orders/${order.id}`)}
-                                                        />
-                                                    ))}
-                                                    {provided.placeholder}
-
-                                                    {getOrdersByStatus(column.id).length === 0 && (
-                                                        <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
-                                                            Không có đơn hàng
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </Droppable>
+                    {/* Stats */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                        {columns.map((column) => {
+                            const count = getOrdersByStatus(column.id).length;
+                            return (
+                                <Card key={column.id} className={`${column.bgColor} border-0`}>
+                                    <CardContent className="p-4">
+                                        <div className="flex items-center justify-between">
+                                            <span className={`text-sm font-medium ${column.color}`}>{column.title}</span>
+                                            <span className={`text-2xl font-bold ${column.color}`}>{count}</span>
+                                        </div>
                                     </CardContent>
                                 </Card>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
-                </DragDropContext>
+                </div>
 
-                {/* Edit Order Dialog */}
-                <EditOrderDialog
-                    order={editingOrder}
-                    open={!!editingOrder}
-                    onClose={() => setEditingOrder(null)}
-                    onSubmit={handleUpdateOrder}
-                    products={products}
-                    services={services}
-                    packages={packages}
-                    vouchers={vouchers}
-                />
-
-                {/* Payment Dialog */}
-                <PaymentDialog
-                    order={payingOrder}
-                    open={!!payingOrder}
-                    onClose={handlePaymentClose}
-                    onSuccess={handlePaymentSuccess}
-                />
-
-                {/* Order Confirmation Dialog (after creating new order) */}
-                <OrderConfirmationDialog
-                    open={!!newlyCreatedOrder}
-                    onClose={() => setNewlyCreatedOrder(null)}
-                    order={newlyCreatedOrder}
-                    onConfirm={async () => {
-                        await fetchOrders();
-                        setNewlyCreatedOrder(null);
+                {/* Kanban Board - Full viewport width with scroll */}
+                <div
+                    className="relative"
+                    style={{
+                        marginLeft: 'calc(-1 * var(--page-padding, 1rem))',
+                        marginRight: 'calc(-1 * var(--page-padding, 1rem))',
+                        width: 'calc(100% + 2 * var(--page-padding, 1rem))'
                     }}
-                />
+                >
+                    <DragDropContext onDragEnd={handleDragEnd}>
+                        <div
+                            className="flex gap-4 overflow-x-auto pb-4"
+                            style={{ paddingLeft: 'var(--page-padding, 1rem)', paddingRight: 'var(--page-padding, 1rem)' }}
+                        >
+                            {columns.map((column) => (
+                                <div key={column.id} className="shrink-0 w-72 lg:flex-1 lg:min-w-0">
+                                    <Card className={`${column.bgColor} border ${column.borderColor}`}>
+                                        <CardHeader className="p-3 pb-2">
+                                            <CardTitle className={`text-sm font-semibold flex items-center justify-between ${column.color}`}>
+                                                <span>{column.title}</span>
+                                                <Badge variant="secondary" className="bg-white/80">
+                                                    {getOrdersByStatus(column.id).length}
+                                                </Badge>
+                                            </CardTitle>
+                                        </CardHeader>
+                                        <CardContent className="p-2">
+                                            <Droppable droppableId={column.id}>
+                                                {(provided, snapshot) => (
+                                                    <div
+                                                        ref={provided.innerRef}
+                                                        {...provided.droppableProps}
+                                                        className={`kanban-column space-y-3 min-h-100 p-1 rounded-lg transition-colors ${snapshot.isDraggingOver ? 'bg-white/50' : ''
+                                                            }`}
+                                                    >
+                                                        {getOrdersByStatus(column.id).map((order, index) => (
+                                                            <OrderCard
+                                                                key={order.id}
+                                                                order={order}
+                                                                index={index}
+                                                                onClick={() => navigate(`/orders/${order.id}`)}
+                                                            />
+                                                        ))}
+                                                        {provided.placeholder}
+
+                                                        {getOrdersByStatus(column.id).length === 0 && (
+                                                            <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
+                                                                Không có đơn hàng
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </Droppable>
+                                        </CardContent>
+                                    </Card>
+                                </div>
+                            ))}
+                        </div>
+                    </DragDropContext>
+                </div>
             </div>
+
+            {/* Edit Order Dialog */}
+            <EditOrderDialog
+                order={editingOrder}
+                open={!!editingOrder}
+                onClose={() => setEditingOrder(null)}
+                onSubmit={handleUpdateOrder}
+                products={products}
+                services={services}
+                packages={packages}
+                vouchers={vouchers}
+            />
+
+            {/* Payment Dialog */}
+            <PaymentDialog
+                order={payingOrder}
+                open={!!payingOrder}
+                onClose={handlePaymentClose}
+                onSuccess={handlePaymentSuccess}
+            />
+
+            {/* Order Confirmation Dialog (after creating new order) */}
+            <OrderConfirmationDialog
+                open={!!newlyCreatedOrder}
+                onClose={() => setNewlyCreatedOrder(null)}
+                order={newlyCreatedOrder}
+                onConfirm={async () => {
+                    await fetchOrders();
+                    setNewlyCreatedOrder(null);
+                }}
+            />
         </>
     );
 }

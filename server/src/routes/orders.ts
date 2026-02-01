@@ -5,6 +5,64 @@ import { authenticate, AuthenticatedRequest, requireSale } from '../middleware/a
 
 const router = Router();
 
+// =====================================================
+// ORDER CODE GENERATION HELPERS
+// =====================================================
+
+/**
+ * Generate next order code in format A-1, A-2, A-3...
+ * Queries database for the highest existing number and increments
+ */
+async function generateNextOrderCode(): Promise<string> {
+    const prefix = 'A';
+
+    // Get the latest order with A-X pattern
+    const { data: orders } = await supabaseAdmin
+        .from('orders')
+        .select('order_code')
+        .like('order_code', `${prefix}-%`)
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+    let maxNumber = 0;
+
+    if (orders && orders.length > 0) {
+        for (const order of orders) {
+            // Parse A-X format to extract number
+            const match = order.order_code.match(/^A-(\d+)$/);
+            if (match) {
+                const num = parseInt(match[1], 10);
+                if (num > maxNumber) maxNumber = num;
+            }
+        }
+    }
+
+    return `${prefix}-${maxNumber + 1}`;
+}
+
+/**
+ * Generate product code in format A-1-1, A-1-2...
+ * Based on order code and product index
+ */
+function generateProductCode(orderCode: string, productIndex: number): string {
+    return `${orderCode}-${productIndex + 1}`;
+}
+
+// Get next order code (for preview on client)
+router.get('/next-code', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const nextOrderCode = await generateNextOrderCode();
+        res.json({
+            status: 'success',
+            data: {
+                nextOrderCode
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 // Get all orders
 router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -454,7 +512,7 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
 // Create order with customer products (shoes, bags, etc.)
 router.post('/v2', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { customer_id, products, notes, discount, status } = req.body;
+        const { customer_id, products, notes, discount, discount_type, discount_value, surcharges, paid_amount, status } = req.body;
 
         if (!customer_id || !products || products.length === 0) {
             throw new ApiError('Khách hàng và sản phẩm là bắt buộc', 400);
@@ -469,11 +527,26 @@ router.post('/v2', authenticate, requireSale, async (req: AuthenticatedRequest, 
                 }
             }
         }
-        const discountAmount = discount || 0;
-        const totalAmount = subtotal - discountAmount;
 
-        // Tạo mã đơn hàng
-        const orderCode = `DH${Date.now().toString().slice(-8)}`;
+        // Calculate discount amount (already calculated in frontend, but verify)
+        const discountAmount = discount || 0;
+
+        // Calculate total surcharges amount
+        let totalSurchargesAmount = 0;
+        if (surcharges && surcharges.length > 0) {
+            for (const surcharge of surcharges) {
+                totalSurchargesAmount += surcharge.amount || 0;
+            }
+        }
+
+        const totalAmount = Math.max(0, subtotal - discountAmount + totalSurchargesAmount);
+
+        // Calculate remaining debt
+        const paidAmountValue = paid_amount || 0;
+        const remainingDebt = Math.max(0, totalAmount - paidAmountValue);
+
+        // Tạo mã đơn hàng theo format A-1, A-2, ...
+        const orderCode = await generateNextOrderCode();
 
         // Tạo đơn hàng
         const { data: order, error: orderError } = await supabaseAdmin
@@ -484,7 +557,14 @@ router.post('/v2', authenticate, requireSale, async (req: AuthenticatedRequest, 
                 sales_id: req.user!.id,
                 subtotal,
                 discount: discountAmount,
+                discount_type: discount_type || 'amount',
+                discount_value: discount_value || 0,
+                surcharges: surcharges || [],
+                surcharges_amount: totalSurchargesAmount,
                 total_amount: totalAmount,
+                paid_amount: paidAmountValue,
+                remaining_debt: remainingDebt,
+                payment_status: remainingDebt <= 0 ? 'paid' : (paidAmountValue > 0 ? 'partial' : 'unpaid'),
                 status: status || 'pending',
                 notes,
                 created_by: req.user!.id,
@@ -499,9 +579,10 @@ router.post('/v2', authenticate, requireSale, async (req: AuthenticatedRequest, 
         // Tạo order_products và order_product_services
         const createdProducts = [];
 
-        for (const product of products) {
-            // Generate unique product code for QR
-            const productCode = `SP${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+        for (let productIndex = 0; productIndex < products.length; productIndex++) {
+            const product = products[productIndex];
+            // Generate product code in format A-1-1, A-1-2, ...
+            const productCode = generateProductCode(orderCode, productIndex);
 
             // Create order_product
             const { data: orderProduct, error: productError } = await supabaseAdmin
@@ -655,6 +736,47 @@ router.post('/v2', authenticate, requireSale, async (req: AuthenticatedRequest, 
             });
         }
 
+        // Create transaction record if paid_amount > 0
+        if (paidAmountValue > 0) {
+            // Generate transaction code
+            const { data: lastTrans } = await supabaseAdmin
+                .from('transactions')
+                .select('code')
+                .like('code', 'PT%')
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+            let transCode = 'PT000001';
+            if (lastTrans && lastTrans.length > 0) {
+                const lastNum = parseInt(lastTrans[0].code.replace('PT', ''), 10);
+                transCode = `PT${String(lastNum + 1).padStart(6, '0')}`;
+            }
+
+            const { error: transError } = await supabaseAdmin
+                .from('transactions')
+                .insert({
+                    code: transCode,
+                    type: 'income',
+                    category: 'Thanh toán đơn hàng',
+                    amount: paidAmountValue,
+                    payment_method: 'cash',
+                    notes: `Thanh toán trước khi tạo đơn - ${orderCode}`,
+                    date: new Date().toISOString().split('T')[0],
+                    order_id: order.id,
+                    order_code: orderCode,
+                    status: 'approved',
+                    created_by: req.user!.id,
+                    approved_by: req.user!.id,
+                    approved_at: new Date().toISOString(),
+                });
+
+            if (transError) {
+                console.error('Error creating transaction for order payment:', transError);
+            } else {
+                console.log(`Created transaction ${transCode} for order ${orderCode} with amount ${paidAmountValue}`);
+            }
+        }
+
         res.status(201).json({
             status: 'success',
             data: {
@@ -806,6 +928,156 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
         res.json({
             status: 'success',
             data: { order },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// =====================================================
+// PAYMENT RECORDS - Thanh toán đơn hàng
+// =====================================================
+
+// Get payment records for an order
+router.get('/:id/payments', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+
+        const { data: payments, error } = await supabaseAdmin
+            .from('payment_records')
+            .select('*, created_by_user:users!payment_records_created_by_fkey(id, name, avatar)')
+            .eq('order_id', id)
+            .order('created_at', { ascending: false });
+
+        if (error) {
+            console.error('Error fetching payments:', error);
+            throw new ApiError('Lỗi khi lấy danh sách thanh toán', 500);
+        }
+
+        res.json({
+            status: 'success',
+            data: { payments: payments || [] },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Create a payment record for an order
+router.post('/:id/payments', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { content, amount, payment_method, image_url, notes } = req.body;
+
+        if (!content || !amount || amount <= 0) {
+            throw new ApiError('Nội dung và số tiền là bắt buộc', 400);
+        }
+
+        // Get order details
+        const { data: order, error: orderError } = await supabaseAdmin
+            .from('orders')
+            .select('id, order_code, total_amount, paid_amount, remaining_debt')
+            .eq('id', id)
+            .single();
+
+        if (orderError || !order) {
+            throw new ApiError('Không tìm thấy đơn hàng', 404);
+        }
+
+        // Create payment record
+        const { data: payment, error: paymentError } = await supabaseAdmin
+            .from('payment_records')
+            .insert({
+                order_id: order.id,
+                order_code: order.order_code,
+                content,
+                amount,
+                payment_method: payment_method || 'cash',
+                image_url,
+                notes,
+                transaction_type: 'income',
+                transaction_category: 'Thanh toán đơn hàng',
+                transaction_status: 'approved',
+                created_by: req.user!.id,
+            })
+            .select()
+            .single();
+
+        if (paymentError) {
+            console.error('Error creating payment:', paymentError);
+            throw new ApiError('Lỗi khi tạo thanh toán: ' + paymentError.message, 500);
+        }
+
+        // Update order's paid_amount and remaining_debt
+        const newPaidAmount = (order.paid_amount || 0) + amount;
+        const newRemainingDebt = Math.max(0, order.total_amount - newPaidAmount);
+        const newPaymentStatus = newRemainingDebt <= 0 ? 'paid' : (newPaidAmount > 0 ? 'partial' : 'unpaid');
+
+        const { error: updateError } = await supabaseAdmin
+            .from('orders')
+            .update({
+                paid_amount: newPaidAmount,
+                remaining_debt: newRemainingDebt,
+                payment_status: newPaymentStatus,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('id', id);
+
+        if (updateError) {
+            console.error('Error updating order payment:', updateError);
+            // Don't fail, payment was recorded
+        }
+
+        // Also create a transaction record for Thu Chi
+        const { data: lastTrans } = await supabaseAdmin
+            .from('transactions')
+            .select('code')
+            .like('code', 'PT%')
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+        let transCode = 'PT000001';
+        if (lastTrans && lastTrans.length > 0) {
+            const lastNum = parseInt(lastTrans[0].code.replace('PT', ''), 10);
+            transCode = `PT${String(lastNum + 1).padStart(6, '0')}`;
+        }
+
+        const { error: transError } = await supabaseAdmin
+            .from('transactions')
+            .insert({
+                code: transCode,
+                type: 'income',
+                category: 'Thanh toán đơn hàng',
+                amount,
+                payment_method: payment_method || 'cash',
+                notes: `${content} - ${order.order_code}`,
+                image_url,
+                date: new Date().toISOString().split('T')[0],
+                order_id: order.id,
+                order_code: order.order_code,
+                status: 'approved',
+                created_by: req.user!.id,
+                approved_by: req.user!.id,
+                approved_at: new Date().toISOString(),
+            });
+
+        if (transError) {
+            console.error('Error creating transaction for payment:', transError);
+        } else {
+            console.log(`Created transaction ${transCode} for order ${order.order_code} payment`);
+        }
+
+        res.status(201).json({
+            status: 'success',
+            data: {
+                payment,
+                order: {
+                    paid_amount: newPaidAmount,
+                    remaining_debt: newRemainingDebt,
+                    payment_status: newPaymentStatus,
+                }
+            },
+            message: `Đã ghi nhận thanh toán ${amount.toLocaleString()}đ`,
         });
     } catch (error) {
         next(error);

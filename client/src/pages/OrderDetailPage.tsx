@@ -25,6 +25,7 @@ import { WorkflowStepsTimeline } from "@/components/orders/WorkflowStepsTimeline
 import { PrintQRDialog } from '@/components/orders/PrintQRDialog';
 import { EditOrderDialog } from '@/components/orders/EditOrderDialog';
 import { PaymentDialog } from '@/components/orders/PaymentDialog';
+import { PaymentRecordDialog } from '@/components/orders/PaymentRecordDialog';
 import { useProducts } from '@/hooks/useProducts';
 import { usePackages } from '@/hooks/usePackages';
 import { useVouchers } from '@/hooks/useVouchers';
@@ -45,6 +46,7 @@ export function OrderDetailPage() {
     const [showPrintDialog, setShowPrintDialog] = useState(false);
     const [showEditDialog, setShowEditDialog] = useState(false);
     const [showPaymentDialog, setShowPaymentDialog] = useState(false);
+    const [showPaymentRecordDialog, setShowPaymentRecordDialog] = useState(false);
 
     // Assign technician dialog state
     const [showAssignDialog, setShowAssignDialog] = useState(false);
@@ -316,10 +318,11 @@ export function OrderDetailPage() {
                                 Sửa đơn
                             </Button>
                         )}
-                        {order.status === 'processing' && (
+                        {/* Payment button - always show when order is not completed/cancelled */}
+                        {order.status !== 'completed' && order.status !== 'cancelled' && (
                             <Button
                                 className="bg-green-600 hover:bg-green-700"
-                                onClick={() => setShowPaymentDialog(true)}
+                                onClick={() => setShowPaymentRecordDialog(true)}
                             >
                                 <CreditCard className="h-4 w-4 mr-2" />
                                 Thanh toán
@@ -467,32 +470,67 @@ export function OrderDetailPage() {
                                             <span className="font-medium">{formatCurrency(order.subtotal)}</span>
                                         </div>
                                         {order.discount > 0 && (
-                                            <div className="flex justify-between text-sm text-green-600">
+                                            <div className="flex justify-between text-sm text-red-600">
                                                 <span className="flex items-center gap-1">
                                                     <Gift className="h-3.5 w-3.5" />
-                                                    Giảm giá:
+                                                    Giảm giá{order.discount_type === 'percent' && order.discount_value ? ` (${order.discount_value}%)` : ''}:
                                                 </span>
                                                 <span className="font-medium">-{formatCurrency(order.discount)}</span>
+                                            </div>
+                                        )}
+                                        {/* Surcharges */}
+                                        {order.surcharges && Array.isArray(order.surcharges) && order.surcharges.length > 0 && (
+                                            <>
+                                                {order.surcharges.map((surcharge: any, i: number) => (
+                                                    <div key={i} className="flex justify-between text-sm text-orange-600">
+                                                        <span className="flex items-center gap-1">
+                                                            {surcharge.label}{surcharge.is_percent ? ` (${surcharge.value}%)` : ''}:
+                                                        </span>
+                                                        <span className="font-medium">+{formatCurrency(surcharge.amount || 0)}</span>
+                                                    </div>
+                                                ))}
+                                            </>
+                                        )}
+                                        {(order.surcharges_amount ?? 0) > 0 && (
+                                            <div className="flex justify-between text-sm text-orange-600 pt-1 border-t border-dashed">
+                                                <span>Tổng phụ phí:</span>
+                                                <span className="font-medium">+{formatCurrency(order.surcharges_amount ?? 0)}</span>
                                             </div>
                                         )}
                                         <div className="flex justify-between text-xl font-bold pt-3 border-t">
                                             <span>Tổng:</span>
                                             <span className="text-primary">{formatCurrency(order.total_amount)}</span>
                                         </div>
-                                        {order.paid_amount !== undefined && order.paid_amount >= 0 && (
-                                            <div className="flex justify-between text-sm pt-3 border-t">
+
+                                        {/* Payment Info */}
+                                        <div className="pt-3 border-t space-y-2">
+                                            <div className="flex justify-between text-sm">
                                                 <span>Đã thanh toán:</span>
-                                                <span className={`font-medium ${order.paid_amount >= order.total_amount ? 'text-green-600' : 'text-amber-600'}`}>
-                                                    {formatCurrency(order.paid_amount)}
+                                                <span className={`font-medium ${(order.paid_amount || 0) >= order.total_amount ? 'text-green-600' : 'text-blue-600'}`}>
+                                                    {formatCurrency(order.paid_amount || 0)}
                                                 </span>
                                             </div>
-                                        )}
-                                        {order.paid_amount !== undefined && order.paid_amount < order.total_amount && (
-                                            <div className="flex justify-between text-sm text-amber-600">
-                                                <span>Còn lại:</span>
-                                                <span className="font-medium">{formatCurrency(order.total_amount - order.paid_amount)}</span>
+                                            <div className="flex justify-between text-sm">
+                                                <span>Còn nợ:</span>
+                                                <span className={`font-medium ${(order.remaining_debt || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                                    {formatCurrency(order.remaining_debt || (order.total_amount - (order.paid_amount || 0)))}
+                                                </span>
                                             </div>
-                                        )}
+                                            <div className="flex justify-between items-center text-sm">
+                                                <span>Trạng thái TT:</span>
+                                                <Badge
+                                                    className={
+                                                        order.payment_status === 'paid' ? 'bg-green-500' :
+                                                            order.payment_status === 'partial' ? 'bg-yellow-500' :
+                                                                'bg-red-500'
+                                                    }
+                                                >
+                                                    {order.payment_status === 'paid' ? 'Đã thanh toán' :
+                                                        order.payment_status === 'partial' ? 'Thanh toán một phần' :
+                                                            'Chưa thanh toán'}
+                                                </Badge>
+                                            </div>
+                                        </div>
                                     </CardContent>
                                 </Card>
 
@@ -1192,6 +1230,18 @@ export function OrderDetailPage() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Payment Record Dialog */}
+            {order && (
+                <PaymentRecordDialog
+                    open={showPaymentRecordDialog}
+                    onOpenChange={setShowPaymentRecordDialog}
+                    orderId={order.id}
+                    orderCode={order.order_code}
+                    remainingDebt={order.remaining_debt ?? (order.total_amount - (order.paid_amount || 0))}
+                    onSuccess={reloadOrder}
+                />
+            )}
         </>
     );
 }

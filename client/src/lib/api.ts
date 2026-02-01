@@ -138,8 +138,23 @@ export const ordersApi = {
         api.post<ApiResponse<{ order: any }>>('/orders', data),
 
     // V2: Create order with customer products (shoes, bags, etc.)
-    createV2: (data: { customer_id: string; products: any[]; notes?: string; discount?: number; status?: 'pending' | 'confirmed' }) =>
-        api.post<ApiResponse<{ order: any; products: any[] }>>('/orders/v2', data),
+    createV2: (data: {
+        customer_id: string;
+        products: any[];
+        notes?: string;
+        discount?: number;
+        discount_type?: 'amount' | 'percent';
+        discount_value?: number;
+        surcharges?: Array<{
+            type: string;
+            label: string;
+            value: number;
+            is_percent: boolean;
+            amount: number;
+        }>;
+        paid_amount?: number;
+        status?: 'pending' | 'confirmed';
+    }) => api.post<ApiResponse<{ order: any; products: any[] }>>('/orders/v2', data),
 
     update: (id: string, data: any) =>
         api.put<ApiResponse<{ order: any }>>(`/orders/${id}`, data),
@@ -149,6 +164,18 @@ export const ordersApi = {
 
     delete: (id: string) =>
         api.delete<ApiResponse<null>>(`/orders/${id}`),
+
+    // Payment records
+    getPayments: (orderId: string) =>
+        api.get<ApiResponse<{ payments: any[] }>>(`/orders/${orderId}/payments`),
+
+    createPayment: (orderId: string, data: {
+        content: string;
+        amount: number;
+        payment_method?: 'cash' | 'transfer' | 'card';
+        image_url?: string;
+        notes?: string;
+    }) => api.post<ApiResponse<{ payment: any; order: any }>>(`/orders/${orderId}/payments`, data),
 };
 
 // Order Products API (Customer's products: shoes, bags, etc.)
@@ -402,6 +429,52 @@ export const usersApi = {
 
     delete: (id: string) =>
         api.delete<ApiResponse<null>>(`/users/${id}`),
+};
+
+// Transactions API (Thu Chi)
+export const transactionsApi = {
+    getAll: (params?: {
+        type?: 'income' | 'expense';
+        status?: 'pending' | 'approved' | 'cancelled';
+        search?: string;
+        start_date?: string;
+        end_date?: string;
+        page?: number;
+        limit?: number;
+    }) => api.get<PaginatedResponse<{ transactions: any[] }>>('/transactions', { params }),
+
+    getSummary: (params?: { start_date?: string; end_date?: string }) =>
+        api.get<ApiResponse<{
+            totalIncome: number;
+            totalExpense: number;
+            balance: number;
+            pendingIncomeCount: number;
+            pendingExpenseCount: number;
+        }>>('/transactions/summary', { params }),
+
+    getById: (id: string) =>
+        api.get<ApiResponse<{ transaction: any }>>(`/transactions/${id}`),
+
+    create: (data: {
+        type: 'income' | 'expense';
+        category: string;
+        amount: number;
+        payment_method?: 'cash' | 'transfer' | 'card';
+        notes?: string;
+        image_url?: string;
+        date?: string;
+        order_id?: string;
+        order_code?: string;
+    }) => api.post<ApiResponse<{ transaction: any }>>('/transactions', data),
+
+    updateStatus: (id: string, status: 'pending' | 'approved' | 'cancelled') =>
+        api.patch<ApiResponse<{ transaction: any }>>(`/transactions/${id}/status`, { status }),
+
+    update: (id: string, data: any) =>
+        api.put<ApiResponse<{ transaction: any }>>(`/transactions/${id}`, data),
+
+    delete: (id: string) =>
+        api.delete<ApiResponse<null>>(`/transactions/${id}`),
 };
 
 export default api;

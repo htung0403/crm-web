@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
     ArrowLeft, Phone, MessageCircle, Copy, Check, ArrowRightLeft,
     Loader2, User, Building, Calendar, Tag, UserCheck, Mail,
-    Clock, MessageSquare, TrendingUp, Timer
+    Clock, MessageSquare, TrendingUp, Timer, Facebook, ExternalLink, CalendarClock,
+    ShoppingBag
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,8 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { leadsApi } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
 import type { Lead } from '@/hooks/useLeads';
@@ -34,6 +37,13 @@ export function LeadDetailPage() {
     const [activities, setActivities] = useState<any[]>([]);
     const [loadingActivities, setLoadingActivities] = useState(false);
     const [elapsedTime, setElapsedTime] = useState('');
+
+    // Edit lead fields state
+    const [editFbLink, setEditFbLink] = useState('');
+    const [editFbName, setEditFbName] = useState('');
+    const [editNextFollowup, setEditNextFollowup] = useState('');
+    const [editAppointment, setEditAppointment] = useState('');
+    const [isEditingInfo, setIsEditingInfo] = useState(false);
 
     // Fetch lead data
     useEffect(() => {
@@ -62,6 +72,16 @@ export function LeadDetailPage() {
 
         fetchLead();
     }, [id]);
+
+    // Initialize edit fields when lead data loads
+    useEffect(() => {
+        if (lead) {
+            setEditFbLink(lead.fb_link || lead.link_message || '');
+            setEditFbName(lead.fb_profile_name || '');
+            setEditNextFollowup(lead.next_followup_time ? new Date(lead.next_followup_time).toISOString().slice(0, 16) : '');
+            setEditAppointment(lead.appointment_time ? new Date(lead.appointment_time).toISOString().slice(0, 16) : '');
+        }
+    }, [lead]);
 
     // Fetch activities
     useEffect(() => {
@@ -225,6 +245,29 @@ export function LeadDetailPage() {
         }
     };
 
+    const handleSaveInfo = async () => {
+        setIsSaving(true);
+        try {
+            const updateData: Partial<Lead> = {
+                fb_link: editFbLink || undefined,
+                fb_profile_name: editFbName || undefined,
+                next_followup_time: editNextFollowup ? new Date(editNextFollowup).toISOString() : undefined,
+                appointment_time: editAppointment ? new Date(editAppointment).toISOString() : undefined,
+            };
+
+            await updateLead(lead.id, updateData);
+
+            // Update local state
+            setLead(prev => prev ? { ...prev, ...updateData } : null);
+            setIsEditingInfo(false);
+            toast.success('Đã cập nhật thông tin');
+        } catch {
+            toast.error('Lỗi khi cập nhật thông tin');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     return (
         <div className="space-y-6 animate-fade-in">
             {/* Header */}
@@ -266,9 +309,22 @@ export function LeadDetailPage() {
                         <MessageCircle className="h-4 w-4 mr-2" />
                         Zalo
                     </Button>
-                    <Button size="sm" onClick={handleConvert} className="bg-green-600 hover:bg-green-700">
-                        <ArrowRightLeft className="h-4 w-4 mr-2" />
-                        Chuyển đổi KH
+                    <Button
+                        size="sm"
+                        onClick={() => {
+                            // Navigate to create order with lead info
+                            const params = new URLSearchParams({
+                                lead_id: lead.id,
+                                lead_name: lead.name,
+                                lead_phone: lead.phone,
+                                lead_email: lead.email || '',
+                            });
+                            navigate(`/orders/new?${params.toString()}`);
+                        }}
+                        className="bg-green-600 hover:bg-green-700"
+                    >
+                        <ShoppingBag className="h-4 w-4 mr-2" />
+                        Tạo đơn hàng
                     </Button>
                 </div>
             </div>
@@ -365,6 +421,88 @@ export function LeadDetailPage() {
                                     <p className="font-medium">{formatDateTime(lead.created_at)}</p>
                                 </div>
                             </div>
+
+                            {/* Facebook Link */}
+                            {(lead.fb_link || lead.link_message) && (
+                                <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className="p-2 rounded-lg bg-blue-100">
+                                            <Facebook className="h-4 w-4 text-blue-600" />
+                                        </div>
+                                        <div>
+                                            <p className="text-xs text-muted-foreground">Link Facebook</p>
+                                            <p className="font-medium text-sm truncate max-w-[180px]">
+                                                {lead.fb_profile_name || 'Xem profile'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-8 w-8"
+                                        onClick={() => window.open(lead.fb_link || lead.link_message, '_blank')}
+                                    >
+                                        <ExternalLink className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            )}
+
+                            {/* Last Message Time */}
+                            {lead.last_message_time && (
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-lg bg-cyan-100">
+                                        <MessageCircle className="h-4 w-4 text-cyan-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Tin nhắn cuối</p>
+                                        <p className="font-medium">{formatDateTime(lead.last_message_time)}</p>
+                                        {lead.last_actor && (
+                                            <p className="text-xs text-muted-foreground">
+                                                {lead.last_actor === 'lead' ? 'Từ khách' : 'Từ sale'}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Next Follow-up Time */}
+                            {lead.next_followup_time && (
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-lg bg-orange-100">
+                                        <CalendarClock className="h-4 w-4 text-orange-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Hẹn liên hệ tiếp</p>
+                                        <p className="font-medium">{formatDateTime(lead.next_followup_time)}</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Appointment Time */}
+                            {lead.appointment_time && (
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-lg bg-pink-100">
+                                        <CalendarClock className="h-4 w-4 text-pink-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Hẹn lịch chăm sóc</p>
+                                        <p className="font-medium">{formatDateTime(lead.appointment_time)}</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Owner Sale */}
+                            {lead.owner_sale && (
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-lg bg-violet-100">
+                                        <UserCheck className="h-4 w-4 text-violet-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Sale chăm sóc</p>
+                                        <p className="font-medium">{lead.owner_sale}</p>
+                                    </div>
+                                </div>
+                            )}
                         </CardContent>
                     </Card>
 
@@ -392,6 +530,105 @@ export function LeadDetailPage() {
                                     ))}
                                 </SelectContent>
                             </Select>
+                        </CardContent>
+                    </Card>
+
+                    {/* Edit Info Card */}
+                    <Card>
+                        <CardHeader className="pb-3">
+                            <div className="flex items-center justify-between">
+                                <CardTitle className="text-base flex items-center gap-2">
+                                    <Facebook className="h-4 w-4 text-blue-600" />
+                                    Chăm sóc & Theo dõi
+                                </CardTitle>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setIsEditingInfo(!isEditingInfo)}
+                                    className="text-xs"
+                                >
+                                    {isEditingInfo ? 'Hủy' : 'Chỉnh sửa'}
+                                </Button>
+                            </div>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                            {/* Facebook Link */}
+                            <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Link Facebook</Label>
+                                {isEditingInfo ? (
+                                    <Input
+                                        value={editFbLink}
+                                        onChange={(e) => setEditFbLink(e.target.value)}
+                                        placeholder="https://facebook.com/..."
+                                        className="h-9"
+                                    />
+                                ) : (
+                                    <p className="text-sm font-medium truncate">
+                                        {lead.fb_link || lead.link_message || '-'}
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* FB Profile Name */}
+                            <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Tên Facebook</Label>
+                                {isEditingInfo ? (
+                                    <Input
+                                        value={editFbName}
+                                        onChange={(e) => setEditFbName(e.target.value)}
+                                        placeholder="Tên profile"
+                                        className="h-9"
+                                    />
+                                ) : (
+                                    <p className="text-sm font-medium">{lead.fb_profile_name || '-'}</p>
+                                )}
+                            </div>
+
+                            {/* Next Follow-up */}
+                            <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Hẹn liên hệ tiếp</Label>
+                                {isEditingInfo ? (
+                                    <Input
+                                        type="datetime-local"
+                                        value={editNextFollowup}
+                                        onChange={(e) => setEditNextFollowup(e.target.value)}
+                                        className="h-9"
+                                    />
+                                ) : (
+                                    <p className="text-sm font-medium">
+                                        {lead.next_followup_time ? formatDateTime(lead.next_followup_time) : '-'}
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* Appointment Time */}
+                            <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Hẹn lịch chăm sóc</Label>
+                                {isEditingInfo ? (
+                                    <Input
+                                        type="datetime-local"
+                                        value={editAppointment}
+                                        onChange={(e) => setEditAppointment(e.target.value)}
+                                        className="h-9"
+                                    />
+                                ) : (
+                                    <p className="text-sm font-medium">
+                                        {lead.appointment_time ? formatDateTime(lead.appointment_time) : '-'}
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* Save Button */}
+                            {isEditingInfo && (
+                                <Button
+                                    className="w-full mt-2"
+                                    onClick={handleSaveInfo}
+                                    disabled={isSaving}
+                                >
+                                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                                    Lưu thông tin
+                                </Button>
+                            )}
                         </CardContent>
                     </Card>
 

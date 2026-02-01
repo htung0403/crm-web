@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
     ArrowLeft, ArrowRight, Plus, Trash2, Camera, Package, Sparkles,
     Loader2, User, Search, CheckCircle, ShoppingBag, QrCode, Image as ImageIcon,
-    Tag, Palette, Layers, FileText, Check, Wrench, UserCheck, X, UserPlus
+    Tag, Palette, Layers, FileText, Check, Wrench, UserCheck, X, UserPlus,
+    Percent, DollarSign, ChevronDown, CreditCard
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Button } from '@/components/ui/button';
@@ -35,11 +36,29 @@ const PRODUCT_TYPES = [
     { value: 'khác', label: 'Khác' },
 ];
 
+// Common surcharge types
+const SURCHARGE_TYPES = [
+    { value: 'shipping', label: 'Phí giao hàng' },
+    { value: 'express', label: 'Phí gấp' },
+    { value: 'insurance', label: 'Phí bảo hiểm' },
+    { value: 'special_material', label: 'Phí chất liệu đặc biệt' },
+    { value: 'pickup', label: 'Phí lấy hàng' },
+    { value: 'other', label: 'Phụ phí khác' },
+];
+
 // Common brands
 const COMMON_BRANDS = [
     'Nike', 'Adidas', 'Gucci', 'Louis Vuitton', 'Chanel', 'Hermes',
     'Prada', 'Dior', 'Balenciaga', 'Converse', 'Vans', 'Khác'
 ];
+
+interface Surcharge {
+    id: string;
+    type: string;
+    label: string;
+    value: number;
+    isPercent: boolean;
+}
 
 interface CustomerProduct {
     id: string;
@@ -69,8 +88,9 @@ const generateTempId = () => `temp_${Date.now()}_${Math.random().toString(36).su
 
 export function CreateOrderPage() {
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
 
-    // Steps: 1 = Customer, 2 = Products, 3 = Services, 4 = Review
+    // Steps: 1 = Customer, 2 = Products (with Services), 3 = Review
     const [step, setStep] = useState(1);
 
     // Data hooks
@@ -86,6 +106,9 @@ export function CreateOrderPage() {
     const [currentProductIndex, setCurrentProductIndex] = useState<number | null>(null);
     const [notes, setNotes] = useState('');
     const [discount, setDiscount] = useState(0);
+    const [discountType, setDiscountType] = useState<'amount' | 'percent'>('amount');
+    const [surcharges, setSurcharges] = useState<Surcharge[]>([]);
+    const [paidAmount, setPaidAmount] = useState(0);
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [createdOrder, setCreatedOrder] = useState<any>(null);
@@ -102,6 +125,18 @@ export function CreateOrderPage() {
 
     // Create customer dialog state
     const [showCreateCustomerDialog, setShowCreateCustomerDialog] = useState(false);
+    const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
+
+    // Track confirmed products (products with info confirmed, ready for services)
+    const [confirmedProducts, setConfirmedProducts] = useState<Set<number>>(new Set());
+
+    // Service dialog state for adding services to a product
+    const [showServiceDialog, setShowServiceDialog] = useState(false);
+    const [serviceDialogProductIndex, setServiceDialogProductIndex] = useState<number | null>(null);
+    const [serviceSearch, setServiceSearch] = useState('');
+
+    // Next order code for QR preview
+    const [nextOrderCode, setNextOrderCode] = useState<string>('');
 
     // Fetch data
     useEffect(() => {
@@ -122,6 +157,75 @@ export function CreateOrderPage() {
         };
         fetchData();
     }, [fetchCustomers, fetchServices, fetchPackages, fetchTechnicians]);
+
+    // Fetch next order code separately (for QR preview)
+    useEffect(() => {
+        const fetchNextCode = async () => {
+            try {
+                const codeResponse = await fetch('/api/orders/next-code', {
+                    headers: {
+                        'Authorization': `Bearer ${localStorage.getItem('token')}`
+                    }
+                });
+                if (codeResponse.ok) {
+                    const codeData = await codeResponse.json();
+                    setNextOrderCode(codeData.data?.nextOrderCode || 'A-1');
+                } else {
+                    setNextOrderCode('A-1');
+                }
+            } catch {
+                setNextOrderCode('A-1');
+            }
+        };
+        fetchNextCode();
+    }, []);
+
+    // Flag to prevent duplicate lead processing
+    const leadProcessedRef = useRef(false);
+
+    // Handle lead info from URL params (when coming from Lead Detail page)
+    useEffect(() => {
+        // Skip if already processed
+        if (leadProcessedRef.current) return;
+
+        const leadId = searchParams.get('lead_id');
+        const leadName = searchParams.get('lead_name');
+        const leadPhone = searchParams.get('lead_phone');
+        const leadEmail = searchParams.get('lead_email');
+
+        if (leadPhone && customers.length > 0) {
+            leadProcessedRef.current = true; // Mark as processed
+
+            // Try to find existing customer by phone
+            const existingCustomer = customers.find(c => c.phone === leadPhone);
+
+            if (existingCustomer) {
+                // Auto-select the existing customer
+                setCustomerId(existingCustomer.id);
+                setStep(2); // Move to products step
+                toast.success(`Đã chọn khách hàng: ${existingCustomer.name}`);
+            } else if (leadName) {
+                // Create new customer from lead info
+                const createNewCustomer = async () => {
+                    try {
+                        const newCustomer = await createCustomer({
+                            name: leadName,
+                            phone: leadPhone,
+                            email: leadEmail || undefined,
+                            status: 'active',
+                            notes: leadId ? `Tạo từ lead #${leadId}` : undefined,
+                        });
+                        setCustomerId(newCustomer.id);
+                        setStep(2); // Move to products step
+                        toast.success(`Đã tạo khách hàng mới: ${leadName}`);
+                    } catch (error) {
+                        toast.error('Không thể tạo khách hàng từ lead');
+                    }
+                };
+                createNewCustomer();
+            }
+        }
+    }, [searchParams, customers, createCustomer]);
 
     // Filter technicians by role
     const availableTechnicians = technicians.filter(t =>
@@ -298,10 +402,79 @@ export function CreateOrderPage() {
     const subtotal = products.reduce((sum, p) =>
         sum + p.services.reduce((ssum, s) => ssum + s.price, 0), 0
     );
-    const total = Math.max(0, subtotal - discount);
 
-    // Order Sidebar Component
-    const OrderSidebar = () => (
+    // Calculate discount amount
+    const discountAmount = discountType === 'percent'
+        ? Math.round(subtotal * discount / 100)
+        : discount;
+
+    // Calculate total surcharges
+    const totalSurcharges = surcharges.reduce((sum, s) => {
+        return sum + (s.isPercent ? Math.round(subtotal * s.value / 100) : s.value);
+    }, 0);
+
+    const total = Math.max(0, subtotal - discountAmount + totalSurcharges);
+    const remainingDebt = total - paidAmount;
+
+    // Helper to format number with dots for display
+    const formatInputCurrency = (value: number): string => {
+        if (!value) return '';
+        return value.toLocaleString('vi-VN');
+    };
+
+    // Helper to parse formatted string back to number
+    const parseInputCurrency = (value: string): number => {
+        const cleanValue = value.replace(/\./g, '').replace(/,/g, '');
+        return Number(cleanValue) || 0;
+    };
+
+    // Add surcharge handler
+    const handleAddSurcharge = (type: string) => {
+        const surchargeType = SURCHARGE_TYPES.find(s => s.value === type);
+        if (!surchargeType) return;
+
+        // Check if already exists
+        if (surcharges.some(s => s.type === type)) {
+            return;
+        }
+
+        setSurcharges(prev => [...prev, {
+            id: `surcharge_${Date.now()}`,
+            type: type,
+            label: surchargeType.label,
+            value: 0,
+            isPercent: false
+        }]);
+    };
+
+    const handleUpdateSurcharge = (id: string, field: 'value' | 'isPercent', value: number | boolean) => {
+        setSurcharges(prev => prev.map(s => {
+            if (s.id !== id) return s;
+
+            if (field === 'value' && typeof value === 'number') {
+                // If percent mode, limit to 100
+                if (s.isPercent && value > 100) {
+                    return { ...s, value: 100 };
+                }
+                return { ...s, value };
+            }
+
+            if (field === 'isPercent' && typeof value === 'boolean') {
+                // When switching to percent, limit existing value to 100
+                const newValue = value && s.value > 100 ? 100 : s.value;
+                return { ...s, isPercent: value, value: newValue };
+            }
+
+            return s;
+        }));
+    };
+
+    const handleRemoveSurcharge = (id: string) => {
+        setSurcharges(prev => prev.filter(s => s.id !== id));
+    };
+
+    // Order Sidebar JSX - not a component to avoid re-mount on state changes
+    const orderSidebarContent = (
         <div className="space-y-4 sticky top-4">
             {/* Customer Info */}
             {selectedCustomer && (
@@ -328,61 +501,33 @@ export function CreateOrderPage() {
                 </Card>
             )}
 
-            {/* Order Summary */}
+            {/* Order Summary - Compact */}
             {products.length > 0 && (
                 <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm flex items-center gap-2">
-                            <ShoppingBag className="h-4 w-4" />
-                            Tóm tắt đơn hàng
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                        {/* Products list */}
-                        <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
-                            {products.map((product, idx) => (
-                                <div key={product.id} className="text-sm border-b pb-2 last:border-0">
-                                    <div className="flex items-center gap-2">
-                                        <span className="font-medium truncate flex-1">
-                                            {product.name || `Sản phẩm ${idx + 1}`}
-                                        </span>
-                                        <Badge variant="outline" className="text-xs shrink-0">
-                                            {PRODUCT_TYPES.find(t => t.value === product.type)?.label || 'Khác'}
-                                        </Badge>
-                                    </div>
-                                    {product.services.length > 0 && (
-                                        <div className="ml-2 mt-1 space-y-1">
-                                            {product.services.map((s, si) => (
-                                                <div key={si} className="flex justify-between text-xs text-muted-foreground">
-                                                    <span className="truncate">{s.name}</span>
-                                                    <span className="text-green-600 font-medium">{formatCurrency(s.price)}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                        </div>
-
-                        {/* Totals */}
-                        <div className="pt-2 border-t space-y-1">
-                            <div className="flex justify-between text-sm">
-                                <span className="text-muted-foreground">Số sản phẩm</span>
-                                <span className="font-medium">{products.length}</span>
+                    <CardContent className="p-4">
+                        <div className="grid grid-cols-4 gap-3 text-center">
+                            <div>
+                                <p className="text-xs text-muted-foreground">Tổng tiền</p>
+                                <p className="font-bold text-primary">{formatCurrency(total)}</p>
                             </div>
-                            <div className="flex justify-between text-sm">
-                                <span className="text-muted-foreground">Tạm tính</span>
-                                <span className="font-medium">{formatCurrency(subtotal)}</span>
+                            <div>
+                                <p className="text-xs text-muted-foreground">Đã thanh toán</p>
+                                <p className="font-bold text-green-600">{formatCurrency(paidAmount)}</p>
                             </div>
-                            {discount > 0 && (
-                                <div className="flex justify-between text-sm text-red-600">
-                                    <span>Giảm giá</span>
-                                    <span>-{formatCurrency(discount)}</span>
-                                </div>
-                            )}
-                            <div className="flex justify-between text-base font-bold pt-1 border-t">
-                                <span>Tổng cộng</span>
-                                <span className="text-primary">{formatCurrency(total)}</span>
+                            <div>
+                                <p className="text-xs text-muted-foreground">Còn nợ</p>
+                                <p className={`font-bold ${remainingDebt > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                    {formatCurrency(remainingDebt)}
+                                </p>
+                            </div>
+                            <div>
+                                <p className="text-xs text-muted-foreground">Trạng thái</p>
+                                <Badge
+                                    variant={remainingDebt <= 0 ? 'default' : 'destructive'}
+                                    className={remainingDebt <= 0 ? 'bg-green-500' : ''}
+                                >
+                                    {remainingDebt <= 0 ? 'Không nợ' : 'Còn nợ'}
+                                </Badge>
                             </div>
                         </div>
                     </CardContent>
@@ -438,11 +583,21 @@ export function CreateOrderPage() {
                     }))
                 })),
                 notes: notes || undefined,
-                discount: discount > 0 ? discount : undefined
+                discount: discountAmount > 0 ? discountAmount : undefined,
+                discount_type: discountType,
+                discount_value: discount > 0 ? discount : undefined,
+                surcharges: surcharges.length > 0 ? surcharges.map(s => ({
+                    type: s.type,
+                    label: s.label,
+                    value: s.value,
+                    is_percent: s.isPercent,
+                    amount: s.isPercent ? Math.round(subtotal * s.value / 100) : s.value
+                })) : undefined,
+                paid_amount: paidAmount > 0 ? paidAmount : undefined
             });
 
             setCreatedOrder(response.data.data);
-            setStep(5); // Success step
+            setStep(4); // Success step
             toast.success('Đã tạo đơn hàng thành công!');
         } catch (error: any) {
             toast.error(error.response?.data?.message || 'Lỗi khi tạo đơn hàng');
@@ -451,13 +606,12 @@ export function CreateOrderPage() {
         }
     };
 
-    // Navigation
+    // Navigation - Now 3 steps: Customer, Products (with Services), Review
     const canGoNext = () => {
         switch (step) {
             case 1: return !!customerId;
-            case 2: return products.length > 0 && products.every(p => p.name.trim());
-            case 3: return products.every(p => p.services.length > 0);
-            case 4: return true;
+            case 2: return products.length > 0 && products.every(p => p.name.trim() && p.services.length > 0);
+            case 3: return true;
             default: return false;
         }
     };
@@ -489,14 +643,13 @@ export function CreateOrderPage() {
                 </div>
             </div>
 
-            {/* Progress Steps */}
-            {step < 5 && (
+            {/* Progress Steps - 3 steps now */}
+            {step < 4 && (
                 <div className="flex items-center justify-between">
                     {[
                         { num: 1, label: 'Khách hàng', icon: User },
-                        { num: 2, label: 'Sản phẩm', icon: Package },
-                        { num: 3, label: 'Dịch vụ', icon: Sparkles },
-                        { num: 4, label: 'Xác nhận', icon: CheckCircle }
+                        { num: 2, label: 'Sản phẩm & Dịch vụ', icon: Package },
+                        { num: 3, label: 'Xác nhận', icon: CheckCircle }
                     ].map((s, i) => (
                         <div key={s.num} className="flex items-center flex-1">
                             <div className={`flex items-center gap-2 ${step >= s.num ? 'text-primary' : 'text-muted-foreground'}`}>
@@ -508,7 +661,7 @@ export function CreateOrderPage() {
                                 </div>
                                 <span className="hidden md:inline font-medium">{s.label}</span>
                             </div>
-                            {i < 3 && (
+                            {i < 2 && (
                                 <div className={`flex-1 h-1 mx-2 rounded ${step > s.num ? 'bg-primary' : 'bg-muted'}`} />
                             )}
                         </div>
@@ -553,56 +706,72 @@ export function CreateOrderPage() {
                                 </Button>
                             </div>
                         ) : (
-                            <div className="space-y-4">
-                                <div className="flex gap-2">
-                                    <div className="relative flex-1">
+                            <div className="space-y-2">
+                                <div className="relative">
+                                    <div className="relative">
                                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                                         <Input
                                             placeholder="Tìm theo tên hoặc số điện thoại..."
                                             value={customerSearch}
                                             onChange={(e) => setCustomerSearch(e.target.value)}
+                                            onFocus={() => setCustomerDropdownOpen(true)}
                                             className="pl-10"
                                         />
                                     </div>
-                                </div>
-                                <div className="max-h-[60vh] overflow-y-auto border rounded-lg divide-y">
-                                    {filteredCustomers.length === 0 ? (
-                                        <div className="text-center py-8">
-                                            <p className="text-muted-foreground mb-4">
-                                                Không tìm thấy khách hàng
-                                            </p>
-                                            <Button
-                                                variant="outline"
-                                                onClick={() => setShowCreateCustomerDialog(true)}
-                                                className="gap-2"
-                                            >
-                                                <UserPlus className="h-4 w-4" />
-                                                Thêm khách hàng mới
-                                            </Button>
-                                        </div>
-                                    ) : (
-                                        filteredCustomers.slice(0, 20).map(c => (
-                                            <button
-                                                key={c.id}
-                                                onClick={() => {
-                                                    setCustomerId(c.id);
-                                                    setCustomerSearch('');
-                                                }}
-                                                className="w-full flex items-center gap-3 p-4 hover:bg-muted/50 transition-colors"
-                                            >
-                                                <Avatar>
-                                                    <AvatarFallback className="bg-primary/10 text-primary">
-                                                        {c.name.charAt(0)}
-                                                    </AvatarFallback>
-                                                </Avatar>
-                                                <div className="text-left">
-                                                    <p className="font-medium">{c.name}</p>
-                                                    <p className="text-sm text-muted-foreground">{c.phone}</p>
+
+                                    {/* Dropdown results */}
+                                    {customerDropdownOpen && (
+                                        <div className="absolute z-50 w-full mt-1 bg-background border rounded-lg shadow-lg max-h-[300px] overflow-y-auto">
+                                            {filteredCustomers.length === 0 ? (
+                                                <div className="text-center py-4 px-3">
+                                                    <p className="text-sm text-muted-foreground mb-2">
+                                                        Không tìm thấy khách hàng
+                                                    </p>
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => {
+                                                            setShowCreateCustomerDialog(true);
+                                                            setCustomerDropdownOpen(false);
+                                                        }}
+                                                        className="gap-1"
+                                                    >
+                                                        <UserPlus className="h-3 w-3" />
+                                                        Thêm mới
+                                                    </Button>
                                                 </div>
-                                            </button>
-                                        ))
+                                            ) : (
+                                                filteredCustomers.slice(0, 10).map(c => (
+                                                    <button
+                                                        key={c.id}
+                                                        onClick={() => {
+                                                            setCustomerId(c.id);
+                                                            setCustomerSearch('');
+                                                            setCustomerDropdownOpen(false);
+                                                        }}
+                                                        className="w-full flex items-center gap-2 p-2 hover:bg-muted/50 transition-colors text-left"
+                                                    >
+                                                        <Avatar className="h-7 w-7">
+                                                            <AvatarFallback className="bg-primary/10 text-primary text-xs">
+                                                                {c.name.charAt(0)}
+                                                            </AvatarFallback>
+                                                        </Avatar>
+                                                        <span className="font-medium text-sm">{c.name}</span>
+                                                        <span className="text-xs text-muted-foreground">• {c.phone}</span>
+                                                    </button>
+                                                ))
+                                            )}
+                                        </div>
                                     )}
                                 </div>
+
+                                {/* Click outside to close dropdown */}
+                                {customerDropdownOpen && (
+                                    <div
+                                        className="fixed inset-0 z-40"
+                                        onClick={() => setCustomerDropdownOpen(false)}
+                                    />
+                                )}
                             </div>
                         )}
                     </CardContent>
@@ -640,16 +809,30 @@ export function CreateOrderPage() {
                                 {products.map((product, index) => (
                                     <Card key={product.id} className={currentProductIndex === index ? 'ring-2 ring-primary' : ''}>
                                         <CardHeader className="pb-3">
-                                            <div className="flex items-center justify-between">
-                                                <div className="flex items-center gap-2">
+                                            <div className="flex items-center justify-between gap-3">
+                                                {/* QR Code on left for confirmed products */}
+                                                {confirmedProducts.has(index) && (
+                                                    <div className="bg-white p-1 rounded border shadow-sm flex-shrink-0">
+                                                        <QRCodeSVG
+                                                            value={`${nextOrderCode || 'A-1'}-${index + 1}`}
+                                                            size={50}
+                                                            level="M"
+                                                        />
+                                                        <p className="text-[10px] font-mono font-bold text-primary text-center mt-0.5">
+                                                            {nextOrderCode || 'A-1'}-{index + 1}
+                                                        </p>
+                                                    </div>
+                                                )}
+
+                                                <div className="flex items-center gap-2 flex-1 min-w-0">
                                                     <Badge variant="outline" className="shrink-0">
                                                         {PRODUCT_TYPES.find(t => t.value === product.type)?.label || 'Khác'}
                                                     </Badge>
-                                                    <CardTitle className="text-base">
+                                                    <CardTitle className="text-base truncate">
                                                         {product.name || `Sản phẩm ${index + 1}`}
                                                     </CardTitle>
                                                 </div>
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex items-center gap-2 flex-shrink-0">
                                                     <Button
                                                         variant="ghost"
                                                         size="sm"
@@ -669,7 +852,7 @@ export function CreateOrderPage() {
                                             </div>
                                         </CardHeader>
 
-                                        {currentProductIndex === index && (
+                                        {currentProductIndex === index && !confirmedProducts.has(index) && (
                                             <CardContent className="space-y-4 border-t pt-4">
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                     <div className="space-y-2">
@@ -764,22 +947,156 @@ export function CreateOrderPage() {
                                                         rows={2}
                                                     />
                                                 </div>
+
+                                                {/* Confirm Button */}
+                                                <div className="flex justify-end pt-2 border-t">
+                                                    <Button
+                                                        onClick={() => {
+                                                            if (!product.name.trim()) {
+                                                                toast.error('Vui lòng nhập tên sản phẩm');
+                                                                return;
+                                                            }
+                                                            setConfirmedProducts(prev => new Set([...prev, index]));
+                                                            setCurrentProductIndex(null);
+                                                        }}
+                                                        className="bg-green-600 hover:bg-green-700"
+                                                    >
+                                                        <Check className="h-4 w-4 mr-2" />
+                                                        Xác nhận thông tin
+                                                    </Button>
+                                                </div>
                                             </CardContent>
                                         )}
 
-                                        {/* Show brief info when collapsed */}
+                                        {/* Show collapsed info with service selection for confirmed products */}
                                         {currentProductIndex !== index && product.name && (
-                                            <CardContent className="pt-0">
+                                            <CardContent className="pt-0 space-y-3">
+                                                {/* Product info badges */}
                                                 <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
                                                     {product.brand && <Badge variant="outline">{product.brand}</Badge>}
                                                     {product.color && <Badge variant="outline">{product.color}</Badge>}
                                                     {product.size && <Badge variant="outline">Size {product.size}</Badge>}
-                                                    {product.services.length > 0 && (
+                                                    {confirmedProducts.has(index) && (
                                                         <Badge className="bg-green-100 text-green-700">
-                                                            {product.services.length} dịch vụ
+                                                            <Check className="h-3 w-3 mr-1" /> Đã xác nhận
                                                         </Badge>
                                                     )}
                                                 </div>
+
+                                                {/* Service selection for confirmed products */}
+                                                {confirmedProducts.has(index) && (
+                                                    <div className="border-t pt-3 space-y-3">
+                                                        {/* Added services list with technicians */}
+                                                        {product.services.length > 0 && (
+                                                            <div className="space-y-3">
+                                                                <p className="text-sm font-medium text-green-700">Dịch vụ đã chọn:</p>
+                                                                {product.services.map((s, si) => (
+                                                                    <div key={si} className="bg-green-50 p-2 rounded-lg space-y-1">
+                                                                        {/* Service info row */}
+                                                                        <div className="flex items-center justify-between">
+                                                                            <div className="flex-1">
+                                                                                <p className="text-sm font-medium">{s.name}</p>
+                                                                                <p className="text-xs text-green-600">{formatCurrency(s.price)}</p>
+                                                                            </div>
+                                                                            <Button
+                                                                                variant="ghost"
+                                                                                size="icon"
+                                                                                className="h-6 w-6 text-red-500 hover:text-red-600"
+                                                                                onClick={() => handleRemoveService(index, si)}
+                                                                            >
+                                                                                <Trash2 className="h-3 w-3" />
+                                                                            </Button>
+                                                                        </div>
+
+                                                                        {/* Technicians section - compact */}
+                                                                        <div className="pt-1">
+                                                                            <p className="text-xs text-muted-foreground mb-1">Kỹ thuật viên:</p>
+
+                                                                            {/* Assigned technicians */}
+                                                                            {s.technicians && s.technicians.length > 0 ? (
+                                                                                <div className="space-y-1 mb-1">
+                                                                                    {s.technicians.map((tech, ti) => (
+                                                                                        <div key={ti} className="flex items-center gap-1 bg-white p-1.5 rounded border text-xs">
+                                                                                            <Avatar className="h-5 w-5 flex-shrink-0">
+                                                                                                <AvatarFallback className="bg-blue-100 text-blue-700 text-[10px]">
+                                                                                                    {tech.name.charAt(0)}
+                                                                                                </AvatarFallback>
+                                                                                            </Avatar>
+                                                                                            <span className="font-medium flex-1 min-w-0 truncate">{tech.name}</span>
+                                                                                            <Input
+                                                                                                type="number"
+                                                                                                min="0"
+                                                                                                max="100"
+                                                                                                value={tech.commission || 0}
+                                                                                                onChange={(e) => handleUpdateTechnicianCommission(index, si, tech.id, Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
+                                                                                                onFocus={(e) => e.target.select()}
+                                                                                                className="w-12 h-6 text-xs text-center p-0"
+                                                                                            />
+                                                                                            <span className="text-[10px]">%=</span>
+                                                                                            <span className="font-semibold text-emerald-600 w-16 text-right">
+                                                                                                {formatCurrency(s.price * (tech.commission || 0) / 100)}
+                                                                                            </span>
+                                                                                            <Button
+                                                                                                variant="ghost"
+                                                                                                size="icon"
+                                                                                                className="h-5 w-5 text-red-400 hover:text-red-600 flex-shrink-0"
+                                                                                                onClick={() => handleRemoveTechnicianFromService(index, si, tech.id)}
+                                                                                            >
+                                                                                                <X className="h-3 w-3" />
+                                                                                            </Button>
+                                                                                        </div>
+                                                                                    ))}
+                                                                                </div>
+                                                                            ) : null}
+
+                                                                            {/* Add technician dropdown */}
+                                                                            <Select
+                                                                                value=""
+                                                                                onValueChange={(techId) => {
+                                                                                    if (techId) handleAddTechnicianToService(index, si, techId, 0);
+                                                                                }}
+                                                                            >
+                                                                                <SelectTrigger className="h-7 text-xs">
+                                                                                    <SelectValue placeholder="+ Chọn kỹ thuật viên" />
+                                                                                </SelectTrigger>
+                                                                                <SelectContent>
+                                                                                    {availableTechnicians
+                                                                                        .filter(tech => !s.technicians?.some(t => t.id === tech.id))
+                                                                                        .map(tech => (
+                                                                                            <SelectItem key={tech.id} value={tech.id}>
+                                                                                                {tech.name}
+                                                                                            </SelectItem>
+                                                                                        ))}
+                                                                                </SelectContent>
+                                                                            </Select>
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+
+                                                        {/* Add Service Button */}
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className="w-full border-dashed h-8"
+                                                            onClick={() => {
+                                                                setServiceDialogProductIndex(index);
+                                                                setShowServiceDialog(true);
+                                                            }}
+                                                        >
+                                                            <Plus className="h-3 w-3 mr-1" />
+                                                            Thêm dịch vụ
+                                                        </Button>
+                                                    </div>
+                                                )}
+
+                                                {/* Show service count for non-confirmed products */}
+                                                {!confirmedProducts.has(index) && product.services.length > 0 && (
+                                                    <Badge className="bg-green-100 text-green-700">
+                                                        {product.services.length} dịch vụ
+                                                    </Badge>
+                                                )}
                                             </CardContent>
                                         )}
                                     </Card>
@@ -790,345 +1107,360 @@ export function CreateOrderPage() {
 
                     {/* Sidebar */}
                     <div className="hidden lg:block">
-                        <OrderSidebar />
+                        {orderSidebarContent}
                     </div>
                 </div>
             )}
 
-            {/* Step 3: Add Services */}
+            {/* Step 3: Review */}
             {step === 3 && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div className="lg:col-span-2 grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        {/* Products List */}
-                        <div className="space-y-4">
-                            <h2 className="text-lg font-semibold">Sản phẩm ({products.length})</h2>
-                            {products.map((product, index) => (
-                                <Card
-                                    key={product.id}
-                                    className={`cursor-pointer transition-all ${currentProductIndex === index ? 'ring-2 ring-primary' : 'hover:border-primary/50'
-                                        }`}
-                                    onClick={() => setCurrentProductIndex(index)}
-                                >
-                                    <CardContent className="p-4">
-                                        <div className="flex items-start gap-3">
-                                            <Badge variant="outline" className="shrink-0">
-                                                {PRODUCT_TYPES.find(t => t.value === product.type)?.label || 'Khác'}
-                                            </Badge>
-                                            <div className="flex-1">
-                                                <p className="font-medium">{product.name}</p>
-                                                <div className="flex flex-wrap gap-1 mt-1">
-                                                    {product.brand && <Badge variant="outline" className="text-xs">{product.brand}</Badge>}
-                                                    {product.color && <Badge variant="outline" className="text-xs">{product.color}</Badge>}
+                    {/* Left Column - Products */}
+                    <div className="lg:col-span-2 space-y-4">
+                        {/* Products Summary */}
+                        <Card>
+                            <CardHeader className="pb-3 border-b">
+                                <div className="flex items-center justify-between">
+                                    <CardTitle className="text-base flex items-center gap-2">
+                                        <ShoppingBag className="h-5 w-5 text-primary" />
+                                        Sản phẩm & Dịch vụ
+                                    </CardTitle>
+                                    <Badge variant="secondary" className="text-sm">
+                                        {products.length} sản phẩm
+                                    </Badge>
+                                </div>
+                            </CardHeader>
+                            <CardContent className="p-4 space-y-3">
+                                {products.map((product, index) => (
+                                    <div key={product.id} className="bg-muted/30 rounded-xl p-4 hover:bg-muted/50 transition-colors">
+                                        <div className="flex items-start gap-4">
+                                            {/* QR Code Preview */}
+                                            <div className="shrink-0 p-2 bg-white rounded-lg border shadow-sm">
+                                                <QRCodeSVG
+                                                    value={`${nextOrderCode}-${index + 1}`}
+                                                    size={64}
+                                                    level="M"
+                                                />
+                                                <p className="text-[10px] text-center text-muted-foreground mt-1 font-mono font-bold">
+                                                    {nextOrderCode}-{index + 1}
+                                                </p>
+                                            </div>
+
+                                            {/* Product Info */}
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <Badge className="bg-primary/10 text-primary border-0">
+                                                        {PRODUCT_TYPES.find(t => t.value === product.type)?.label || 'Khác'}
+                                                    </Badge>
+                                                    {product.brand && (
+                                                        <Badge variant="outline" className="text-xs bg-white">
+                                                            {product.brand}
+                                                        </Badge>
+                                                    )}
                                                 </div>
+                                                <p className="font-semibold text-lg">{product.name}</p>
+                                                <div className="flex flex-wrap gap-1.5 mt-2">
+                                                    {product.color && (
+                                                        <span className="text-xs text-muted-foreground bg-white px-2 py-1 rounded border">
+                                                            Màu: {product.color}
+                                                        </span>
+                                                    )}
+                                                    {product.size && (
+                                                        <span className="text-xs text-muted-foreground bg-white px-2 py-1 rounded border">
+                                                            Size: {product.size}
+                                                        </span>
+                                                    )}
+                                                </div>
+
+                                                {/* Services */}
                                                 {product.services.length > 0 && (
-                                                    <div className="mt-2 space-y-1">
+                                                    <div className="mt-3 space-y-2">
                                                         {product.services.map((s, si) => (
-                                                            <div key={si} className="flex items-center justify-between text-sm">
-                                                                <span className="text-muted-foreground">{s.name}</span>
-                                                                <span className="font-medium text-green-600">{formatCurrency(s.price)}</span>
+                                                            <div key={si} className="flex justify-between items-start bg-white p-3 rounded-lg border">
+                                                                <div className="flex-1">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <Sparkles className="h-4 w-4 text-purple-500" />
+                                                                        <span className="font-medium">{s.name}</span>
+                                                                    </div>
+                                                                    {s.technicians.length > 0 && (
+                                                                        <div className="flex flex-wrap gap-1 mt-2 ml-6">
+                                                                            {s.technicians.map((tech, ti) => (
+                                                                                <span key={ti} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full">
+                                                                                    KTV: {tech.name} ({tech.commission}%)
+                                                                                </span>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                                <span className="font-bold text-green-600 text-lg">{formatCurrency(s.price)}</span>
                                                             </div>
                                                         ))}
                                                     </div>
                                                 )}
-                                            </div>
-                                            {product.services.length > 0 ? (
-                                                <CheckCircle className="h-5 w-5 text-green-500" />
-                                            ) : (
-                                                <Badge variant="destructive" className="text-xs">Chưa có DV</Badge>
-                                            )}
-                                        </div>
-                                    </CardContent>
-                                </Card>
-                            ))}
-                        </div>
 
-                        {/* Services Selection */}
-                        <div className="space-y-4">
-                            <h2 className="text-lg font-semibold">
-                                {currentProductIndex !== null
-                                    ? `Dịch vụ cho: ${products[currentProductIndex]?.name || 'Sản phẩm'}`
-                                    : 'Chọn sản phẩm để thêm dịch vụ'
-                                }
-                            </h2>
-
-                            {currentProductIndex !== null && (
-                                <>
-                                    {/* Selected services */}
-                                    {products[currentProductIndex]?.services.length > 0 && (
-                                        <Card className="bg-green-50 border-green-200">
-                                            <CardContent className="p-4">
-                                                <p className="text-sm font-medium text-green-700 mb-2">Đã chọn:</p>
-                                                <div className="space-y-3">
-                                                    {products[currentProductIndex].services.map((s, si) => (
-                                                        <div key={si} className="bg-white p-3 rounded border space-y-2">
-                                                            <div className="flex items-center justify-between">
-                                                                <div className="flex-1">
-                                                                    <p className="font-medium text-sm">{s.name}</p>
-                                                                    <p className="text-xs text-green-600 font-medium">{formatCurrency(s.price)}</p>
-                                                                </div>
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="icon"
-                                                                    className="h-8 w-8 text-red-500 hover:text-red-600"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        handleRemoveService(currentProductIndex, si);
-                                                                    }}
-                                                                >
-                                                                    <Trash2 className="h-4 w-4" />
-                                                                </Button>
-                                                            </div>
-
-                                                            {/* Technicians list */}
-                                                            <div className="space-y-1">
-                                                                {s.technicians.map((tech, ti) => (
-                                                                    <div key={ti} className="flex items-center gap-2 bg-blue-50 p-2 rounded text-sm">
-                                                                        <span className="flex-1 font-medium">{tech.name}</span>
-                                                                        <div className="flex items-center gap-1">
-                                                                            <Input
-                                                                                type="number"
-                                                                                value={tech.commission}
-                                                                                onChange={(e) => handleUpdateTechnicianCommission(
-                                                                                    currentProductIndex, si, tech.id, Number(e.target.value)
-                                                                                )}
-                                                                                onFocus={(e) => e.target.select()}
-                                                                                className="w-14 h-7 text-xs text-center"
-                                                                                min={0}
-                                                                                max={100}
-                                                                            />
-                                                                            <span className="text-xs text-muted-foreground">%</span>
-                                                                            <span className="text-xs font-medium text-green-600 ml-1">
-                                                                                = {formatCurrency(s.price * tech.commission / 100)}
-                                                                            </span>
-                                                                        </div>
-                                                                        <Button
-                                                                            variant="ghost"
-                                                                            size="icon"
-                                                                            className="h-6 w-6 text-red-500"
-                                                                            onClick={() => handleRemoveTechnicianFromService(currentProductIndex, si, tech.id)}
-                                                                        >
-                                                                            <X className="h-3 w-3" />
-                                                                        </Button>
-                                                                    </div>
-                                                                ))}
-                                                            </div>
-
-                                                            {/* Add technician */}
-                                                            <Select
-                                                                value=""
-                                                                onValueChange={(v) => handleAddTechnicianToService(currentProductIndex, si, v, 0)}
-                                                            >
-                                                                <SelectTrigger className="h-8 text-xs">
-                                                                    <SelectValue placeholder="+ Thêm KTV" />
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    {availableTechnicians
-                                                                        .filter(tech => !s.technicians.some(t => t.id === tech.id))
-                                                                        .map(tech => (
-                                                                            <SelectItem key={tech.id} value={tech.id}>
-                                                                                {tech.name}
-                                                                            </SelectItem>
-                                                                        ))}
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-                                    )}
-
-                                    {/* Services list */}
-                                    <Card>
-                                        <CardHeader className="pb-2">
-                                            <CardTitle className="text-sm flex items-center gap-2">
-                                                <Sparkles className="h-4 w-4" />
-                                                Dịch vụ đơn lẻ
-                                            </CardTitle>
-                                        </CardHeader>
-                                        <CardContent>
-                                            <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
-                                                {services.map(s => (
-                                                    <button
-                                                        key={s.id}
-                                                        onClick={() => handleServiceClick(currentProductIndex, {
-                                                            id: s.id,
-                                                            type: 'service',
-                                                            name: s.name,
-                                                            price: s.price
-                                                        })}
-                                                        className="p-3 text-left border rounded-lg hover:border-purple-500 hover:bg-purple-50 transition-colors"
-                                                    >
-                                                        <p className="font-medium text-sm truncate">{s.name}</p>
-                                                        <p className="text-purple-600 font-semibold text-sm">{formatCurrency(s.price)}</p>
-                                                    </button>
-                                                ))}
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-
-                                    {/* Packages list */}
-                                    {activePackages.length > 0 && (
-                                        <Card>
-                                            <CardHeader className="pb-2">
-                                                <CardTitle className="text-sm flex items-center gap-2">
-                                                    <Package className="h-4 w-4" />
-                                                    Gói dịch vụ
-                                                </CardTitle>
-                                            </CardHeader>
-                                            <CardContent>
-                                                <div className="grid grid-cols-2 gap-2 max-h-64 overflow-y-auto">
-                                                    {activePackages.map(pkg => (
-                                                        <button
-                                                            key={pkg.id}
-                                                            onClick={() => handleServiceClick(currentProductIndex, {
-                                                                id: pkg.id,
-                                                                type: 'package',
-                                                                name: pkg.name,
-                                                                price: pkg.price
-                                                            })}
-                                                            className="p-3 text-left border rounded-lg hover:border-emerald-500 hover:bg-emerald-50 transition-colors"
-                                                        >
-                                                            <p className="font-medium text-sm truncate">{pkg.name}</p>
-                                                            <p className="text-emerald-600 font-semibold text-sm">{formatCurrency(pkg.price)}</p>
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-                                    )}
-                                </>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Sidebar */}
-                    <div className="hidden lg:block">
-                        <OrderSidebar />
-                    </div>
-                </div>
-            )}
-
-            {/* Step 4: Review */}
-            {step === 4 && (
-                <div className="space-y-6">
-                    {/* Customer */}
-                    <Card>
-                        <CardHeader className="pb-2">
-                            <CardTitle className="text-sm text-muted-foreground">Khách hàng</CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="flex items-center gap-3">
-                                <Avatar className="h-12 w-12">
-                                    <AvatarFallback className="bg-primary text-white">
-                                        {selectedCustomer?.name.charAt(0)}
-                                    </AvatarFallback>
-                                </Avatar>
-                                <div>
-                                    <p className="font-semibold">{selectedCustomer?.name}</p>
-                                    <p className="text-muted-foreground">{selectedCustomer?.phone}</p>
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    {/* Products Summary */}
-                    <Card>
-                        <CardHeader className="pb-2">
-                            <CardTitle className="text-sm text-muted-foreground">
-                                Sản phẩm & Dịch vụ ({products.length} sản phẩm)
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            {products.map((product, index) => (
-                                <div key={product.id} className="border rounded-lg p-4">
-                                    <div className="flex items-start gap-3 mb-3">
-                                        <Badge variant="outline" className="shrink-0">
-                                            {PRODUCT_TYPES.find(t => t.value === product.type)?.label || 'Khác'}
-                                        </Badge>
-                                        <div>
-                                            <p className="font-semibold">{product.name}</p>
-                                            <div className="flex flex-wrap gap-1 mt-1">
-                                                {product.brand && <Badge variant="outline" className="text-xs">{product.brand}</Badge>}
-                                                {product.color && <Badge variant="outline" className="text-xs">{product.color}</Badge>}
-                                                {product.size && <Badge variant="outline" className="text-xs">Size {product.size}</Badge>}
+                                                {product.services.length === 0 && (
+                                                    <p className="text-sm text-muted-foreground mt-2 italic">Chưa có dịch vụ</p>
+                                                )}
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="pl-10 space-y-2">
-                                        {product.services.map((s, si) => (
-                                            <div key={si} className="flex justify-between items-start text-sm bg-muted/30 p-2 rounded">
-                                                <div className="flex-1">
-                                                    <span className="font-medium">{s.name}</span>
-                                                    {s.technicians.length > 0 && (
-                                                        <div className="flex flex-wrap gap-1 mt-1">
-                                                            {s.technicians.map((tech, ti) => (
-                                                                <span key={ti} className="text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
-                                                                    {tech.name}: {tech.commission}% = {formatCurrency(s.price * tech.commission / 100)}
-                                                                </span>
-                                                            ))}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                <span className="font-semibold text-green-600">{formatCurrency(s.price)}</span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            ))}
-                        </CardContent>
-                    </Card>
+                                ))}
+                            </CardContent>
+                        </Card>
 
-                    {/* Notes & Discount */}
-                    <Card>
-                        <CardContent className="p-4 space-y-4">
-                            <div className="space-y-2">
-                                <Label>Ghi chú đơn hàng</Label>
+                        {/* Notes */}
+                        <Card>
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-sm flex items-center gap-2">
+                                    <FileText className="h-4 w-4" />
+                                    Ghi chú đơn hàng
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent>
                                 <Textarea
-                                    placeholder="Ghi chú thêm..."
+                                    placeholder="Nhập ghi chú cho đơn hàng..."
                                     value={notes}
                                     onChange={(e) => setNotes(e.target.value)}
-                                    rows={2}
+                                    rows={3}
+                                    className="resize-none"
                                 />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Giảm giá</Label>
-                                <Input
-                                    type="number"
-                                    placeholder="0"
-                                    value={discount || ''}
-                                    onChange={(e) => setDiscount(Number(e.target.value) || 0)}
-                                />
-                            </div>
-                        </CardContent>
-                    </Card>
+                            </CardContent>
+                        </Card>
+                    </div>
 
-                    {/* Total */}
-                    <Card className="bg-gradient-to-r from-primary/10 to-purple-100">
-                        <CardContent className="p-4">
-                            <div className="space-y-2">
-                                <div className="flex justify-between">
-                                    <span className="text-muted-foreground">Tạm tính</span>
-                                    <span>{formatCurrency(subtotal)}</span>
-                                </div>
-                                {discount > 0 && (
-                                    <div className="flex justify-between text-red-600">
-                                        <span>Giảm giá</span>
-                                        <span>-{formatCurrency(discount)}</span>
+                    {/* Right Column - Summary & Payment */}
+                    <div className="space-y-4">
+                        {/* Customer Info */}
+                        <Card className="bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20">
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-sm flex items-center gap-2">
+                                    <User className="h-4 w-4" />
+                                    Khách hàng
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="flex items-center gap-3">
+                                    <Avatar className="h-12 w-12 ring-2 ring-primary/20">
+                                        <AvatarFallback className="bg-primary text-white font-bold">
+                                            {selectedCustomer?.name.charAt(0)}
+                                        </AvatarFallback>
+                                    </Avatar>
+                                    <div>
+                                        <p className="font-semibold">{selectedCustomer?.name}</p>
+                                        <p className="text-sm text-muted-foreground">{selectedCustomer?.phone}</p>
                                     </div>
-                                )}
-                                <div className="flex justify-between text-xl font-bold pt-2 border-t">
-                                    <span>Tổng cộng</span>
-                                    <span className="text-primary">{formatCurrency(total)}</span>
                                 </div>
-                            </div>
-                        </CardContent>
-                    </Card>
+                            </CardContent>
+                        </Card>
+
+                        {/* Discount & Surcharges */}
+                        <Card>
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-sm">Giảm giá & Phụ phí</CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                {/* Discount */}
+                                <div className="space-y-2">
+                                    <Label className="text-xs text-muted-foreground">Giảm giá</Label>
+                                    <div className="flex gap-2">
+                                        <div className="relative flex-1">
+                                            <Input
+                                                type="text"
+                                                value={discountType === 'amount' ? formatInputCurrency(discount) : (discount || '')}
+                                                onChange={(e) => {
+                                                    if (discountType === 'amount') {
+                                                        setDiscount(parseInputCurrency(e.target.value));
+                                                    } else {
+                                                        const val = Number(e.target.value.replace(/[^0-9]/g, '')) || 0;
+                                                        setDiscount(Math.min(val, 100));
+                                                    }
+                                                }}
+                                                placeholder="0"
+                                                className="pr-10"
+                                            />
+                                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                                                {discountType === 'percent' ? '%' : 'đ'}
+                                            </span>
+                                        </div>
+                                        <div className="flex border rounded-md overflow-hidden">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setDiscountType('amount');
+                                                }}
+                                                className={`px-2.5 py-1.5 text-xs transition-colors ${discountType === 'amount' ? 'bg-primary text-white' : 'bg-muted hover:bg-muted/80'}`}
+                                            >
+                                                <DollarSign className="h-4 w-4" />
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    setDiscountType('percent');
+                                                    if (discount > 100) setDiscount(100);
+                                                }}
+                                                className={`px-2.5 py-1.5 text-xs transition-colors ${discountType === 'percent' ? 'bg-primary text-white' : 'bg-muted hover:bg-muted/80'}`}
+                                            >
+                                                <Percent className="h-4 w-4" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Surcharges */}
+                                <div className="space-y-2">
+                                    <div className="flex items-center justify-between">
+                                        <Label className="text-xs text-muted-foreground">Phụ phí</Label>
+                                        <Select onValueChange={handleAddSurcharge}>
+                                            <SelectTrigger className="w-auto h-7 text-xs gap-1 px-2">
+                                                <Plus className="h-3 w-3" />
+                                                <span>Thêm</span>
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {SURCHARGE_TYPES.filter(st => !surcharges.some(s => s.type === st.value)).map(st => (
+                                                    <SelectItem key={st.value} value={st.value}>
+                                                        {st.label}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    {surcharges.length > 0 && (
+                                        <div className="space-y-2">
+                                            {surcharges.map(surcharge => (
+                                                <div key={surcharge.id} className="p-2 bg-muted/50 rounded-lg">
+                                                    <div className="flex items-center justify-between mb-1.5">
+                                                        <span className="text-xs font-medium">{surcharge.label}</span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleRemoveSurcharge(surcharge.id)}
+                                                            className="p-1 text-red-500 hover:bg-red-50 rounded"
+                                                        >
+                                                            <X className="h-3 w-3" />
+                                                        </button>
+                                                    </div>
+                                                    <div className="flex gap-1.5">
+                                                        <div className="relative flex-1">
+                                                            <Input
+                                                                type="text"
+                                                                value={surcharge.isPercent ? (surcharge.value || '') : formatInputCurrency(surcharge.value)}
+                                                                onChange={(e) => {
+                                                                    if (surcharge.isPercent) {
+                                                                        const val = Number(e.target.value.replace(/[^0-9]/g, '')) || 0;
+                                                                        handleUpdateSurcharge(surcharge.id, 'value', Math.min(val, 100));
+                                                                    } else {
+                                                                        handleUpdateSurcharge(surcharge.id, 'value', parseInputCurrency(e.target.value));
+                                                                    }
+                                                                }}
+                                                                className="h-8 text-sm pr-8"
+                                                                placeholder="0"
+                                                            />
+                                                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground">
+                                                                {surcharge.isPercent ? '%' : 'đ'}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex border rounded overflow-hidden">
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleUpdateSurcharge(surcharge.id, 'isPercent', false)}
+                                                                className={`px-1.5 py-1 text-xs ${!surcharge.isPercent ? 'bg-primary text-white' : 'bg-background'}`}
+                                                            >
+                                                                <DollarSign className="h-3 w-3" />
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => handleUpdateSurcharge(surcharge.id, 'isPercent', true)}
+                                                                className={`px-1.5 py-1 text-xs ${surcharge.isPercent ? 'bg-primary text-white' : 'bg-background'}`}
+                                                            >
+                                                                <Percent className="h-3 w-3" />
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        {/* Payment Summary */}
+                        <Card className="bg-gradient-to-br from-green-50 to-emerald-50 border-green-200">
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-sm flex items-center gap-2 text-green-700">
+                                    <CreditCard className="h-4 w-4" />
+                                    Thanh toán
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-3">
+                                {/* Totals */}
+                                <div className="space-y-1.5 text-sm">
+                                    <div className="flex justify-between">
+                                        <span className="text-muted-foreground">Tạm tính</span>
+                                        <span>{formatCurrency(subtotal)}</span>
+                                    </div>
+                                    {discountAmount > 0 && (
+                                        <div className="flex justify-between text-red-600">
+                                            <span>Giảm giá {discountType === 'percent' ? `(${discount}%)` : ''}</span>
+                                            <span>-{formatCurrency(discountAmount)}</span>
+                                        </div>
+                                    )}
+                                    {totalSurcharges > 0 && (
+                                        <div className="flex justify-between text-orange-600">
+                                            <span>Phụ phí</span>
+                                            <span>+{formatCurrency(totalSurcharges)}</span>
+                                        </div>
+                                    )}
+                                    <div className="flex justify-between text-lg font-bold pt-2 border-t border-green-200">
+                                        <span>Tổng cộng</span>
+                                        <span className="text-green-600">{formatCurrency(total)}</span>
+                                    </div>
+                                </div>
+
+                                {/* Payment Input */}
+                                <div className="space-y-2 pt-2 border-t border-green-200">
+                                    <Label className="text-xs text-green-700">Nhận thanh toán</Label>
+                                    <div className="flex gap-2">
+                                        <Input
+                                            type="text"
+                                            value={formatInputCurrency(paidAmount)}
+                                            onChange={(e) => setPaidAmount(parseInputCurrency(e.target.value))}
+                                            placeholder="Số tiền khách trả"
+                                            className="flex-1 border-green-200 focus:ring-green-500"
+                                        />
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setPaidAmount(total)}
+                                            className="whitespace-nowrap border-green-300 text-green-600 hover:bg-green-50"
+                                        >
+                                            Đủ
+                                        </Button>
+                                    </div>
+                                </div>
+
+                                {/* Payment Status */}
+                                <div className="flex items-center justify-between pt-2 border-t border-green-200">
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Còn nợ</p>
+                                        <p className={`text-lg font-bold ${remainingDebt > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                            {formatCurrency(remainingDebt)}
+                                        </p>
+                                    </div>
+                                    <Badge
+                                        className={remainingDebt <= 0 ? 'bg-green-500' : remainingDebt < total ? 'bg-yellow-500' : 'bg-red-500'}
+                                    >
+                                        {remainingDebt <= 0 ? 'Đã thanh toán' : remainingDebt < total ? 'Một phần' : 'Chưa thanh toán'}
+                                    </Badge>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
                 </div>
             )}
 
-            {/* Step 5: Success */}
-            {step === 5 && createdOrder && (
+            {/* Step 4: Success */}
+            {step === 4 && createdOrder && (
                 <Card className="text-center py-12">
                     <CardContent>
                         <CheckCircle className="h-20 w-20 text-green-500 mx-auto mb-6" />
@@ -1141,15 +1473,16 @@ export function CreateOrderPage() {
                         {createdOrder.products && createdOrder.products.length > 0 && (
                             <div className="mb-8">
                                 <h3 className="font-semibold mb-4">Mã QR sản phẩm</h3>
-                                <div className="flex flex-wrap justify-center gap-4">
+                                <div className="flex flex-wrap justify-center gap-6">
                                     {createdOrder.products.map((p: any, index: number) => (
-                                        <div key={index} className="p-4 border rounded-lg bg-white">
+                                        <div key={index} className="p-4 border rounded-lg bg-white shadow-sm">
                                             <QRCodeSVG
-                                                value={`${window.location.origin}/product/${p.product_code || p.qr_code}`}
-                                                size={120}
+                                                value={p.product_code || p.qr_code || `Product-${index + 1}`}
+                                                size={140}
                                                 level="M"
+                                                includeMargin={true}
                                             />
-                                            <p className="text-xs font-mono mt-2">{p.product_code || p.qr_code}</p>
+                                            <p className="text-lg font-mono font-bold mt-3 text-primary">{p.product_code || p.qr_code}</p>
                                             <p className="text-sm text-muted-foreground">{p.name}</p>
                                         </div>
                                     ))}
@@ -1216,7 +1549,7 @@ export function CreateOrderPage() {
             )}
 
             {/* Navigation Buttons */}
-            {step < 5 && (
+            {step < 4 && (
                 <div className="flex justify-between pt-4 border-t">
                     <Button
                         variant="outline"
@@ -1227,7 +1560,7 @@ export function CreateOrderPage() {
                         Quay lại
                     </Button>
 
-                    {step < 4 ? (
+                    {step < 3 ? (
                         <Button
                             onClick={() => setStep(s => s + 1)}
                             disabled={!canGoNext()}
@@ -1362,6 +1695,118 @@ export function CreateOrderPage() {
                 onClose={() => setShowCreateCustomerDialog(false)}
                 onSubmit={handleCreateCustomer}
             />
+
+            {/* Service Selection Dialog for confirmed products */}
+            <Dialog open={showServiceDialog} onOpenChange={setShowServiceDialog}>
+                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Sparkles className="h-5 w-5 text-primary" />
+                            Chọn dịch vụ cho sản phẩm
+                        </DialogTitle>
+                    </DialogHeader>
+
+                    <div className="space-y-4">
+                        {/* Search Input */}
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            <Input
+                                placeholder="Tìm dịch vụ..."
+                                value={serviceSearch}
+                                onChange={(e) => setServiceSearch(e.target.value)}
+                                className="pl-10"
+                            />
+                        </div>
+
+                        {/* Services Grid */}
+                        <div>
+                            <h3 className="font-semibold mb-3 flex items-center gap-2">
+                                <Wrench className="h-4 w-4" />
+                                Dịch vụ đơn lẻ
+                            </h3>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                {services
+                                    .filter(s => s.status === 'active')
+                                    .filter(s => s.name.toLowerCase().includes(serviceSearch.toLowerCase()))
+                                    .map(service => (
+                                        <button
+                                            key={service.id}
+                                            onClick={() => {
+                                                if (serviceDialogProductIndex !== null) {
+                                                    handleServiceClick(serviceDialogProductIndex, {
+                                                        id: service.id,
+                                                        type: 'service',
+                                                        name: service.name,
+                                                        price: service.price
+                                                    });
+                                                    setShowServiceDialog(false);
+                                                    setServiceDialogProductIndex(null);
+                                                    setServiceSearch('');
+                                                }
+                                            }}
+                                            className="p-3 text-left border rounded-lg hover:border-primary hover:bg-primary/5 transition-colors"
+                                        >
+                                            <p className="font-medium text-sm truncate">{service.name}</p>
+                                            <p className="text-primary font-semibold text-sm">{formatCurrency(service.price)}</p>
+                                        </button>
+                                    ))}
+                            </div>
+                            {services.filter(s => s.status === 'active').filter(s => s.name.toLowerCase().includes(serviceSearch.toLowerCase())).length === 0 && (
+                                <p className="text-sm text-muted-foreground text-center py-4">Không tìm thấy dịch vụ</p>
+                            )}
+                        </div>
+
+                        {/* Packages Grid */}
+                        {packages.filter(p => p.status === 'active').filter(p => p.name.toLowerCase().includes(serviceSearch.toLowerCase())).length > 0 && (
+                            <div>
+                                <h3 className="font-semibold mb-3 flex items-center gap-2">
+                                    <Layers className="h-4 w-4" />
+                                    Gói dịch vụ
+                                </h3>
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                    {packages
+                                        .filter(p => p.status === 'active')
+                                        .filter(p => p.name.toLowerCase().includes(serviceSearch.toLowerCase()))
+                                        .map(pkg => (
+                                            <button
+                                                key={pkg.id}
+                                                onClick={() => {
+                                                    if (serviceDialogProductIndex !== null) {
+                                                        handleServiceClick(serviceDialogProductIndex, {
+                                                            id: pkg.id,
+                                                            type: 'package',
+                                                            name: pkg.name,
+                                                            price: pkg.price
+                                                        });
+                                                        setShowServiceDialog(false);
+                                                        setServiceDialogProductIndex(null);
+                                                        setServiceSearch('');
+                                                    }
+                                                }}
+                                                className="p-3 text-left border rounded-lg hover:border-emerald-500 hover:bg-emerald-50 transition-colors"
+                                            >
+                                                <p className="font-medium text-sm truncate">{pkg.name}</p>
+                                                <p className="text-emerald-600 font-semibold text-sm">{formatCurrency(pkg.price)}</p>
+                                            </button>
+                                        ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                setShowServiceDialog(false);
+                                setServiceDialogProductIndex(null);
+                            }}
+                        >
+                            Đóng
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
