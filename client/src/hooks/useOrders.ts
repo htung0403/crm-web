@@ -9,10 +9,11 @@ export interface OrderItem {
     item_type: string;
     item_name: string;
     image?: string;
+    item_code?: string;
     quantity: number;
     unit_price: number;
     total_price: number;
-    status?: 'pending' | 'assigned' | 'in_progress' | 'completed' | 'cancelled';
+    status?: string;
     technician_id?: string;
     technician?: { id: string; name: string; avatar?: string };
     started_at?: string;
@@ -20,6 +21,8 @@ export interface OrderItem {
     // Nested objects from API join
     product?: { id: string; name: string; image?: string; price?: number };
     service?: { id: string; name: string; image?: string; price?: number };
+    accessory?: { id: string; order_item_id: string; status: string; notes?: string; updated_at: string } | null;
+    partner?: { id: string; order_item_id: string; status: string; notes?: string; updated_at: string } | null;
 }
 
 export interface Order {
@@ -46,11 +49,46 @@ export interface Order {
     remaining_debt?: number;
     payment_status?: 'unpaid' | 'partial' | 'paid';
     status: string;
+    confirmed_at?: string;
+    due_at?: string;
+    after_sale_stage?: string | null;
+    completion_photos?: string[];
+    debt_checked?: boolean;
+    debt_checked_at?: string | null;
+    debt_checked_notes?: string | null;
+    packaging_photos?: string[];
+    delivery_carrier?: string | null;
+    delivery_address?: string | null;
+    delivery_self_pickup?: boolean;
+    delivery_notes?: string | null;
+    hd_sent?: boolean;
+    hd_sent_at?: string | null;
+    feedback_requested?: boolean;
+    feedback_requested_at?: string | null;
+    care_warranty_flow?: string | null;
+    care_warranty_stage?: string | null;
     notes?: string;
     items?: OrderItem[];
     completed_at?: string;
     created_at: string;
     updated_at?: string;
+    extension_request?: OrderExtensionRequest | null;
+}
+
+export interface OrderExtensionRequest {
+    id: string;
+    order_id: string;
+    requested_by: string;
+    reason: string;
+    status: string;
+    customer_result?: string;
+    new_due_at?: string;
+    approved_by?: string;
+    approved_at?: string;
+    valid_reason?: boolean;
+    kpi_late_recorded?: boolean;
+    created_at: string;
+    updated_at: string;
 }
 
 export function useOrders() {

@@ -137,10 +137,11 @@ export const ordersApi = {
     create: (data: any) =>
         api.post<ApiResponse<{ order: any }>>('/orders', data),
 
-    // V2: Create order with customer products (shoes, bags, etc.)
+    // V2: Create order with customer products (shoes, bags, etc.) + optional add-on products
     createV2: (data: {
         customer_id: string;
         products: any[];
+        add_on_products?: Array<{ product_id: string; name: string; unit_price: number; quantity: number }>;
         notes?: string;
         discount?: number;
         discount_type?: 'amount' | 'percent';
@@ -159,11 +160,40 @@ export const ordersApi = {
     update: (id: string, data: any) =>
         api.put<ApiResponse<{ order: any }>>(`/orders/${id}`, data),
 
+    patch: (id: string, data: {
+        due_at?: string | null;
+        after_sale_stage?: string | null;
+        completion_photos?: string[];
+        debt_checked?: boolean;
+        debt_checked_notes?: string | null;
+        packaging_photos?: string[];
+        delivery_carrier?: string | null;
+        delivery_address?: string | null;
+        delivery_self_pickup?: boolean;
+        delivery_notes?: string | null;
+        hd_sent?: boolean;
+        feedback_requested?: boolean;
+        care_warranty_flow?: string | null;
+        care_warranty_stage?: string | null;
+    }) => api.patch<ApiResponse<{ order: any }>>(`/orders/${id}`, data),
+
+    updateAfterSaleStage: (orderId: string, stage: string | null) =>
+        api.patch<ApiResponse<{ order: any }>>(`/orders/${orderId}`, { after_sale_stage: stage }),
+
     updateStatus: (id: string, status: string) =>
         api.patch<ApiResponse<{ order: any }>>(`/orders/${id}/status`, { status }),
 
     delete: (id: string) =>
         api.delete<ApiResponse<null>>(`/orders/${id}`),
+
+    createExtensionRequest: (orderId: string, data: { reason: string }) =>
+        api.post<ApiResponse<any>>(`/orders/${orderId}/extension-request`, data),
+
+    updateExtensionRequest: (orderId: string, data: { customer_result?: string; new_due_at?: string; valid_reason?: boolean; status?: string }) =>
+        api.patch<ApiResponse<any>>(`/orders/${orderId}/extension-request`, data),
+
+    getKanbanLogs: (orderId: string, tab: 'sales' | 'workflow' | 'aftersale' | 'care') =>
+        api.get<ApiResponse<{ logs: any[] }>>(`/orders/${orderId}/kanban-logs`, { params: { tab } }),
 
     // Payment records
     getPayments: (orderId: string) =>
@@ -219,6 +249,9 @@ export const orderItemsApi = {
     complete: (id: string, notes?: string) =>
         api.patch<ApiResponse<{ allItemsCompleted: boolean }>>(`/order-items/${id}/complete`, { notes }),
 
+    updateStatus: (id: string, status: string) =>
+        api.patch<ApiResponse<any>>(`/order-items/${id}/status`, { status }),
+
     // Order Item Steps (Workflow Steps)
     getSteps: (orderItemId: string) =>
         api.get<ApiResponse<any[]>>(`/order-items/${orderItemId}/steps`),
@@ -234,6 +267,22 @@ export const orderItemsApi = {
 
     skipStep: (stepId: string, notes?: string) =>
         api.patch<ApiResponse<any>>(`/order-items/steps/${stepId}/skip`, { notes }),
+
+    updateAccessory: (orderItemId: string, data: { status: string; notes?: string }) =>
+        api.patch<ApiResponse<any>>(`/order-items/${orderItemId}/accessory`, data),
+
+    updatePartner: (orderItemId: string, data: { status: string; notes?: string }) =>
+        api.patch<ApiResponse<any>>(`/order-items/${orderItemId}/partner`, data),
+};
+
+// Requests API (admin/manager - Mua phụ kiện, Gửi Đối Tác, Xin gia hạn)
+export const requestsApi = {
+    getAccessories: () =>
+        api.get<ApiResponse<any[]>>('/requests/accessories'),
+    getPartners: () =>
+        api.get<ApiResponse<any[]>>('/requests/partners'),
+    getExtensions: () =>
+        api.get<ApiResponse<any[]>>('/requests/extensions'),
 };
 
 // Invoices API

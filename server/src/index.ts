@@ -29,6 +29,7 @@ import notificationsRouter from './routes/notifications.js';
 import workflowsRouter from './routes/workflows.js';
 import orderProductsRouter from './routes/order-products.js';
 import { transactionsRouter } from './routes/transactions.js';
+import { requestsRouter } from './routes/requests.js';
 
 dotenv.config();
 
@@ -77,6 +78,7 @@ app.use('/api/notifications', notificationsRouter);
 app.use('/api/workflows', workflowsRouter);
 app.use('/api/order-products', orderProductsRouter);
 app.use('/api/transactions', transactionsRouter);
+app.use('/api/requests', requestsRouter);
 
 // Error handling
 app.use(errorHandler);

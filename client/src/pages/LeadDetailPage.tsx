@@ -271,41 +271,44 @@ export function LeadDetailPage() {
     return (
         <div className="space-y-6 animate-fade-in">
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                <Button variant="ghost" size="icon" onClick={() => navigate('/leads')} className="self-start">
-                    <ArrowLeft className="h-5 w-5" />
-                </Button>
-                <div className="flex-1 flex flex-col sm:flex-row sm:items-center gap-4">
-                    <Avatar className="h-14 w-14 shrink-0">
-                        <AvatarFallback className={`${column.color} text-white text-xl font-semibold`}>
-                            {lead.name.charAt(0)}
-                        </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                        <div className="flex flex-wrap items-center gap-2 mb-1">
-                            <h1 className="text-2xl font-bold">{lead.name}</h1>
-                            <Badge className={`${column.bgColor} ${column.textColor}`}>
-                                {column.label}
-                            </Badge>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3">
-                            <p className="text-muted-foreground">{lead.phone}</p>
-                            {elapsedTime && (
-                                <div className="flex items-center gap-1.5 px-2 py-1 bg-orange-100 text-orange-700 rounded-lg text-sm font-medium">
-                                    <Timer className="h-4 w-4" />
-                                    <span>{elapsedTime}</span>
-                                </div>
-                            )}
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+                <div className="flex items-start gap-3 flex-1">
+                    <Button variant="ghost" size="icon" onClick={() => navigate('/leads')} className="-ml-2 shrink-0">
+                        <ArrowLeft className="h-5 w-5" />
+                    </Button>
+                    <div className="flex items-center gap-3 sm:gap-4 flex-1">
+                        <Avatar className="h-12 w-12 sm:h-14 sm:w-14 shrink-0">
+                            <AvatarFallback className={`${column.color} text-white text-lg sm:text-xl font-semibold`}>
+                                {lead.name.charAt(0)}
+                            </AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 mb-1">
+                                <h1 className="text-xl sm:text-2xl font-bold truncate pr-2">{lead.name}</h1>
+                                <Badge className={`${column.bgColor} ${column.textColor} whitespace-nowrap`}>
+                                    {column.label}
+                                </Badge>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                <p className="text-muted-foreground text-sm sm:text-base">{lead.phone}</p>
+                                {elapsedTime && (
+                                    <div className="flex items-center gap-1.5 px-2 py-0.5 sm:py-1 bg-orange-100 text-orange-700 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap">
+                                        <Timer className="h-3.5 w-3.5" />
+                                        <span>{elapsedTime}</span>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
+
                 {/* Quick Actions */}
-                <div className="flex gap-2 flex-wrap">
-                    <Button variant="outline" size="sm" onClick={handleCallPhone}>
+                <div className="flex gap-2 w-full sm:w-auto mt-1 sm:mt-0">
+                    <Button variant="outline" size="sm" onClick={handleCallPhone} className="flex-1 sm:flex-none">
                         <Phone className="h-4 w-4 mr-2" />
                         Gọi điện
                     </Button>
-                    <Button variant="outline" size="sm" onClick={handleZaloClick}>
+                    <Button variant="outline" size="sm" onClick={handleZaloClick} className="flex-1 sm:flex-none">
                         <MessageCircle className="h-4 w-4 mr-2" />
                         Zalo
                     </Button>
@@ -321,10 +324,10 @@ export function LeadDetailPage() {
                             });
                             navigate(`/orders/new?${params.toString()}`);
                         }}
-                        className="bg-green-600 hover:bg-green-700"
+                        className="bg-green-600 hover:bg-green-700 flex-1 sm:flex-none whitespace-nowrap"
                     >
                         <ShoppingBag className="h-4 w-4 mr-2" />
-                        Tạo đơn hàng
+                        Tạo đơn
                     </Button>
                 </div>
             </div>

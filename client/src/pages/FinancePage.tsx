@@ -115,7 +115,7 @@ function TransactionForm({ type, onClose, onSubmit, loading }: TransactionFormPr
     };
 
     return (
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
             <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                     {type === 'income' ? (
@@ -568,52 +568,66 @@ export function FinancePage({ currentUser }: FinancePageProps) {
                     <h1 className="text-2xl font-bold text-foreground">Thu Chi</h1>
                     <p className="text-muted-foreground">Quản lý phiếu thu và phiếu chi</p>
                 </div>
-                <div className="flex gap-2">
-                    <Button
-                        variant="outline"
-                        size="icon"
-                        onClick={() => { fetchTransactions(); fetchSummary(); }}
-                        disabled={loading}
-                    >
-                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                    </Button>
-                    <Button onClick={() => setShowForm('income')} className="bg-green-600 hover:bg-green-700">
-                        <Plus className="h-4 w-4 mr-2" />
-                        Phiếu thu
-                    </Button>
-                    <Button onClick={() => setShowForm('expense')} className="bg-red-600 hover:bg-red-700">
-                        <Plus className="h-4 w-4 mr-2" />
-                        Phiếu chi
-                    </Button>
+                <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="flex gap-2">
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            onClick={() => { fetchTransactions(); fetchSummary(); }}
+                            disabled={loading}
+                            className="hidden sm:flex"
+                        >
+                            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        </Button>
+                        <Button
+                            variant="outline"
+                            className="flex-1 sm:hidden justify-center"
+                            onClick={() => { fetchTransactions(); fetchSummary(); }}
+                            disabled={loading}
+                        >
+                            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+                            Làm mới
+                        </Button>
+                    </div>
+                    <div className="flex gap-2 w-full sm:w-auto">
+                        <Button onClick={() => setShowForm('income')} className="flex-1 bg-green-600 hover:bg-green-700">
+                            <Plus className="h-4 w-4 mr-2" />
+                            Phiếu thu
+                        </Button>
+                        <Button onClick={() => setShowForm('expense')} className="flex-1 bg-red-600 hover:bg-red-700">
+                            <Plus className="h-4 w-4 mr-2" />
+                            Phiếu chi
+                        </Button>
+                    </div>
                 </div>
             </div>
 
             {/* Summary Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <Card className="bg-green-50 border-green-200">
-                    <CardContent className="p-5">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+                <Card className="bg-green-50 border-green-200 shadow-sm">
+                    <CardContent className="p-4 sm:p-5">
                         <p className="text-sm font-medium text-muted-foreground mb-1">Tổng thu (đã duyệt)</p>
                         <p className="text-2xl font-bold text-green-600">{formatCurrency(summary.totalIncome)}</p>
                         {summary.pendingIncomeCount > 0 && (
-                            <p className="text-xs text-muted-foreground mt-1">
+                            <p className="text-xs text-muted-foreground mt-1 bg-white/50 w-fit px-2 py-0.5 rounded-full">
                                 {summary.pendingIncomeCount} phiếu chờ duyệt
                             </p>
                         )}
                     </CardContent>
                 </Card>
-                <Card className="bg-red-50 border-red-200">
-                    <CardContent className="p-5">
+                <Card className="bg-red-50 border-red-200 shadow-sm">
+                    <CardContent className="p-4 sm:p-5">
                         <p className="text-sm font-medium text-muted-foreground mb-1">Tổng chi (đã duyệt)</p>
                         <p className="text-2xl font-bold text-red-600">{formatCurrency(summary.totalExpense)}</p>
                         {summary.pendingExpenseCount > 0 && (
-                            <p className="text-xs text-muted-foreground mt-1">
+                            <p className="text-xs text-muted-foreground mt-1 bg-white/50 w-fit px-2 py-0.5 rounded-full">
                                 {summary.pendingExpenseCount} phiếu chờ duyệt
                             </p>
                         )}
                     </CardContent>
                 </Card>
-                <Card className="bg-purple-50 border-purple-200">
-                    <CardContent className="p-5">
+                <Card className="bg-purple-50 border-purple-200 shadow-sm">
+                    <CardContent className="p-4 sm:p-5">
                         <p className="text-sm font-medium text-muted-foreground mb-1">Chênh lệch</p>
                         <p className={`text-2xl font-bold ${summary.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                             {formatCurrency(summary.balance)}
@@ -719,8 +733,8 @@ export function FinancePage({ currentUser }: FinancePageProps) {
             {/* Transaction Detail Dialog */}
             <Dialog open={!!selectedTransaction} onOpenChange={() => setSelectedTransaction(null)}>
                 {selectedTransaction && (
-                    <DialogContent className="max-w-lg">
-                        <DialogHeader>
+                    <DialogContent className="max-w-lg w-full h-full sm:h-auto sm:max-h-[90vh] p-0 sm:p-6 flex flex-col gap-0">
+                        <DialogHeader className="p-4 sm:p-0 border-b sm:border-none shrink-0">
                             <DialogTitle className="flex items-center gap-3">
                                 <div className={`h-10 w-10 rounded-full flex items-center justify-center ${selectedTransaction.type === 'income' ? 'bg-green-100' : 'bg-red-100'
                                     }`}>
@@ -736,7 +750,7 @@ export function FinancePage({ currentUser }: FinancePageProps) {
                             </DialogTitle>
                         </DialogHeader>
 
-                        <div className="space-y-4 py-4">
+                        <div className="flex-1 overflow-y-auto p-4 sm:p-0 sm:pt-4 space-y-4">
                             {/* Amount */}
                             <div className={`text-center py-4 rounded-lg ${selectedTransaction.type === 'income' ? 'bg-green-50' : 'bg-red-50'
                                 }`}>
@@ -749,7 +763,7 @@ export function FinancePage({ currentUser }: FinancePageProps) {
                             </div>
 
                             {/* Details Grid */}
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
                                     <p className="text-sm text-muted-foreground mb-1">Ngày</p>
                                     <p className="font-medium">{formatDate(selectedTransaction.date)}</p>
@@ -798,8 +812,8 @@ export function FinancePage({ currentUser }: FinancePageProps) {
                                     <p className="text-sm text-muted-foreground mb-2">Ảnh đính kèm</p>
                                     <img
                                         src={selectedTransaction.image_url}
-                                        alt="Chứng từ"
-                                        className="w-full max-h-48 object-contain rounded-lg border"
+                                        alt="Đính kèm"
+                                        className="w-full rounded-lg border"
                                     />
                                 </div>
                             )}
@@ -827,11 +841,7 @@ export function FinancePage({ currentUser }: FinancePageProps) {
                             </div>
                         </div>
 
-                        <DialogFooter>
-                            <Button variant="outline" onClick={() => setSelectedTransaction(null)}>
-                                Đóng
-                            </Button>
-                        </DialogFooter>
+
                     </DialogContent>
                 )}
             </Dialog>

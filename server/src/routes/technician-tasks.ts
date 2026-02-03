@@ -949,10 +949,10 @@ router.put('/:id/complete', async (req: AuthenticatedRequest, res: Response, nex
             return res.json(data);
         }
 
-        // Try order_item_steps (Workflow Step)
+        // Try order_item_steps (Workflow Step) - complete step then check next step / all-done (same as order-items complete step)
         const { data: step } = await supabaseAdmin
             .from('order_item_steps')
-            .select('id, started_at')
+            .select('id, started_at, order_item_id, order_product_service_id')
             .eq('id', id)
             .maybeSingle();
 
@@ -969,7 +969,8 @@ router.put('/:id/complete', async (req: AuthenticatedRequest, res: Response, nex
                 .update({
                     status: 'completed',
                     completed_at: new Date().toISOString(),
-                    duration_minutes: actualDuration
+                    notes: notes || undefined,
+                    ...(typeof actualDuration === 'number' && { duration_minutes: actualDuration })
                 })
                 .eq('id', id)
                 .select()
@@ -977,10 +978,46 @@ router.put('/:id/complete', async (req: AuthenticatedRequest, res: Response, nex
 
             if (stepError) throw stepError;
 
+            const isV2 = !!updatedStep.order_product_service_id;
+            const itemFilter = isV2
+                ? { order_product_service_id: updatedStep.order_product_service_id }
+                : { order_item_id: updatedStep.order_item_id };
+
+            const { data: allSteps, error: stepsError } = await supabaseAdmin
+                .from('order_item_steps')
+                .select('id, step_order, status')
+                .match(itemFilter)
+                .order('step_order', { ascending: true });
+
+            let allStepsCompleted = true;
+            let nextStep: { id: string; step_order: number } | null = null;
+
+            if (!stepsError && allSteps?.length) {
+                allStepsCompleted = allSteps.every((s: { status: string }) => s.status === 'completed' || s.status === 'skipped');
+                if (allStepsCompleted) {
+                    if (isV2 && updatedStep.order_product_service_id) {
+                        await supabaseAdmin
+                            .from('order_product_services')
+                            .update({ status: 'completed', completed_at: new Date().toISOString() })
+                            .eq('id', updatedStep.order_product_service_id);
+                    } else if (updatedStep.order_item_id) {
+                        await supabaseAdmin
+                            .from('order_items')
+                            .update({ status: 'completed', completed_at: new Date().toISOString() })
+                            .eq('id', updatedStep.order_item_id);
+                    }
+                } else {
+                    const nextRow = allSteps.find((s: { status: string }) => s.status !== 'completed' && s.status !== 'skipped');
+                    if (nextRow) nextStep = { id: nextRow.id, step_order: nextRow.step_order };
+                }
+            }
+
             return res.json({
                 ...updatedStep,
                 type: 'workflow_step',
-                is_virtual: true
+                is_virtual: true,
+                allStepsCompleted,
+                nextStep
             });
         }
 

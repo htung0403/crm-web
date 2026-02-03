@@ -27,13 +27,23 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import api from '@/lib/api';
+import { orderItemsApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 
+interface WorkflowStep {
+    id: string;
+    step_name: string;
+    step_order: number;
+    status: string;
+    started_at?: string;
+    completed_at?: string;
+}
+
 interface TaskData {
     id: string;
-    type: 'task' | 'order_item';
+    type?: 'task' | 'order_item' | 'v2_service' | 'workflow_step';
     item_code: string;
     task_code?: string;
     service_name: string;
@@ -231,6 +241,7 @@ export function TaskQRPage() {
     const [actionLoading, setActionLoading] = useState(false);
     const [showCompleteDialog, setShowCompleteDialog] = useState(false);
     const [startTime, setStartTime] = useState<Date | null>(null);
+    const [steps, setSteps] = useState<WorkflowStep[]>([]);
 
     useEffect(() => {
         if (code) {
@@ -238,12 +249,15 @@ export function TaskQRPage() {
         }
     }, [code]);
 
-    // Set start time when task is in progress
+    // Set start time when task or current step is in progress
     useEffect(() => {
-        if (task?.started_at && task.status === 'in_progress') {
+        const stepInProgress = steps.find(s => s.status === 'in_progress');
+        if (stepInProgress?.started_at) {
+            setStartTime(new Date(stepInProgress.started_at));
+        } else if (task?.started_at && task.status === 'in_progress') {
             setStartTime(new Date(task.started_at));
         }
-    }, [task?.started_at, task?.status]);
+    }, [task?.started_at, task?.status, steps]);
 
     const fetchTask = async () => {
         setLoading(true);
@@ -258,13 +272,29 @@ export function TaskQRPage() {
         }
     };
 
+    // Load workflow steps when task is a service (order_item or v2_service) - Option A: by-code returns service, we load steps
+    useEffect(() => {
+        const loadSteps = async () => {
+            if (!task?.id) return;
+            const type = task.type || 'order_item';
+            if (type !== 'order_item' && type !== 'v2_service') return;
+            try {
+                const res = await orderItemsApi.getSteps(task.id);
+                const data = (res.data?.data as WorkflowStep[]) || [];
+                setSteps(Array.isArray(data) ? data : []);
+            } catch {
+                setSteps([]);
+            }
+        };
+        loadSteps();
+    }, [task?.id, task?.type]);
+
     const handleStartTask = async () => {
         if (!task) return;
 
         setActionLoading(true);
         try {
             const response = await api.put(`/technician-tasks/${task.id}/start`);
-            // Update local state with new status
             setTask(prev => prev ? {
                 ...prev,
                 ...response.data,
@@ -286,7 +316,6 @@ export function TaskQRPage() {
         setActionLoading(true);
         try {
             const response = await api.put(`/technician-tasks/${task.id}/complete`, data);
-            // Update local state with completed status
             setTask(prev => prev ? {
                 ...prev,
                 ...response.data,
@@ -302,18 +331,66 @@ export function TaskQRPage() {
         }
     };
 
+    // Check if current user is the assigned technician (check both single and multiple technicians) – declare before use in canStartStep/canCompleteStep
+    const isAssignedTechnician = task?.technician?.id === user?.id ||
+        (task?.technicians?.some(t => t.technician?.id === user?.id || t.technician_id === user?.id) ?? false);
+
+    // Workflow step mode: current step (first pending/assigned or in_progress)
+    const currentStep = steps.length > 0
+        ? steps.find(s => s.status === 'in_progress') || steps.find(s => s.status === 'pending' || s.status === 'assigned')
+        : null;
+    const hasSteps = steps.length > 0;
+    const allStepsCompleted = hasSteps && steps.every(s => s.status === 'completed' || s.status === 'skipped');
+    const canStartStep = currentStep && (currentStep.status === 'pending' || currentStep.status === 'assigned') && isAssignedTechnician;
+    const canCompleteStep = currentStep && currentStep.status === 'in_progress' && isAssignedTechnician;
+
+    const handleStartStep = async () => {
+        if (!currentStep) return;
+        setActionLoading(true);
+        try {
+            await orderItemsApi.startStep(currentStep.id);
+            const res = await orderItemsApi.getSteps(task!.id);
+            const data = (res.data?.data as WorkflowStep[]) || [];
+            setSteps(Array.isArray(data) ? data : []);
+            setStartTime(new Date());
+            toast.success('Đã bắt đầu bước');
+        } catch (err: any) {
+            toast.error(err.response?.data?.message || 'Không thể bắt đầu bước');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const handleCompleteStep = async (payload: { notes?: string; duration_minutes?: number }) => {
+        if (!currentStep) return;
+        setActionLoading(true);
+        try {
+            await orderItemsApi.completeStep(currentStep.id, payload.notes);
+            const res = await orderItemsApi.getSteps(task!.id);
+            const nextSteps = (res.data?.data as WorkflowStep[]) || [];
+            setSteps(Array.isArray(nextSteps) ? nextSteps : []);
+            setShowCompleteDialog(false);
+            if (nextSteps.length > 0 && nextSteps.every((s: WorkflowStep) => s.status === 'completed' || s.status === 'skipped')) {
+                toast.success('Đã hoàn thành tất cả bước');
+            } else {
+                toast.success('Đã hoàn thành bước. Chuyển sang bước tiếp theo.');
+            }
+        } catch (err: any) {
+            toast.error(err.response?.data?.message || 'Không thể hoàn thành bước');
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
     // Calculate elapsed minutes
     const getElapsedMinutes = useCallback(() => {
         if (!startTime) return 0;
         return Math.floor((Date.now() - startTime.getTime()) / 60000);
     }, [startTime]);
 
-    // Check if current user is the assigned technician (check both single and multiple technicians)
-    const isAssignedTechnician = task?.technician?.id === user?.id ||
-        (task?.technicians?.some(t => t.technician?.id === user?.id || t.technician_id === user?.id) ?? false);
-    const canStartTask = task?.status === 'assigned' && isAssignedTechnician;
-    const canCompleteTask = task?.status === 'in_progress' && isAssignedTechnician;
-    const isInProgress = task?.status === 'in_progress';
+    const canStartTask = !hasSteps && task?.status === 'assigned' && isAssignedTechnician;
+    const canCompleteTask = !hasSteps && task?.status === 'in_progress' && isAssignedTechnician;
+    const isInProgress = hasSteps ? (currentStep?.status === 'in_progress') : (task?.status === 'in_progress');
 
     if (loading) {
         return (
@@ -591,8 +668,56 @@ export function TaskQRPage() {
                         </CardContent>
                     </Card>
 
-                    {/* Action Buttons */}
-                    {isAssignedTechnician && (
+                    {/* Workflow steps: Bước hiện tại + Start/Complete theo step */}
+                    {hasSteps && isAssignedTechnician && (
+                        <Card>
+                            <CardContent className="p-4">
+                                <h4 className="font-semibold text-sm text-muted-foreground uppercase mb-3">Quy trình theo bước</h4>
+                                {currentStep ? (
+                                    <div className="space-y-3">
+                                        <div className="p-3 rounded-lg bg-muted/50">
+                                            <p className="font-medium">Bước hiện tại: {currentStep.step_name}</p>
+                                            <p className="text-xs text-muted-foreground mt-1">
+                                                {currentStep.status === 'in_progress' ? 'Đang thực hiện' : currentStep.status === 'assigned' ? 'Đã phân công' : currentStep.status}
+                                            </p>
+                                        </div>
+                                        <div className="flex gap-3">
+                                            {canStartStep && (
+                                                <Button
+                                                    className="flex-1 h-12 gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700"
+                                                    onClick={handleStartStep}
+                                                    disabled={actionLoading}
+                                                >
+                                                    {actionLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <PlayCircle className="h-4 w-4" />}
+                                                    Bắt đầu bước
+                                                </Button>
+                                            )}
+                                            {canCompleteStep && (
+                                                <Button
+                                                    className="flex-1 h-12 gap-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700"
+                                                    onClick={() => setShowCompleteDialog(true)}
+                                                    disabled={actionLoading}
+                                                >
+                                                    <CheckCircle2 className="h-4 w-4" />
+                                                    Hoàn thành bước
+                                                </Button>
+                                            )}
+                                        </div>
+                                    </div>
+                                ) : allStepsCompleted ? (
+                                    <div className="flex items-center justify-center gap-2 text-green-600 py-4">
+                                        <CheckCircle2 className="h-6 w-6" />
+                                        <span className="font-semibold">Đã hoàn thành tất cả bước</span>
+                                    </div>
+                                ) : (
+                                    <p className="text-sm text-muted-foreground">Chờ bước tiếp theo.</p>
+                                )}
+                            </CardContent>
+                        </Card>
+                    )}
+
+                    {/* Action Buttons - when no workflow steps (single task) */}
+                    {isAssignedTechnician && !hasSteps && (
                         <Card>
                             <CardContent className="p-4">
                                 <div className="flex gap-3">
@@ -673,11 +798,11 @@ export function TaskQRPage() {
                 </div>
             </div>
 
-            {/* Complete Dialog */}
+            {/* Complete Dialog - step mode uses handleCompleteStep, else handleCompleteTask */}
             <CompleteTaskDialog
                 open={showCompleteDialog}
                 onClose={() => setShowCompleteDialog(false)}
-                onSubmit={handleCompleteTask}
+                onSubmit={hasSteps ? handleCompleteStep : handleCompleteTask}
                 loading={actionLoading}
                 elapsedMinutes={getElapsedMinutes()}
             />

@@ -4,6 +4,7 @@ import {
     LayoutDashboard,
     Users,
     ClipboardList,
+    ClipboardCheck,
     FileText,
     Wallet,
     Package,
@@ -67,6 +68,12 @@ const menuItems: MenuItem[] = [
         roles: ['admin', 'manager', 'sale', 'technician'] // All can view orders
     },
     {
+        id: 'requests',
+        label: 'Yêu cầu',
+        icon: <ClipboardCheck className="h-5 w-5" />,
+        roles: ['admin', 'manager'] // Admin/Manager: Mua phụ kiện, Gửi Đối Tác, Xin gia hạn
+    },
+    {
         id: 'invoices',
         label: 'Hóa đơn',
         icon: <FileText className="h-5 w-5" />,
@@ -101,7 +108,8 @@ const menuItems: MenuItem[] = [
         icon: <Wrench className="h-5 w-5" />,
         roles: ['admin', 'manager', 'technician'], // Only Technician and Manager
         children: [
-            { id: 'scan', label: 'Quét mã QR', roles: ['admin', 'manager', 'technician'] },
+            // { id: 'scan', label: 'Quét mã QR', roles: ['admin', 'manager', 'technician'] },
+            // { id: 'workflow-board', label: 'Bảng quy trình 360', roles: ['admin', 'manager', 'sale', 'technician'] },
             { id: 'tasks', label: 'Danh sách công việc', roles: ['admin', 'manager', 'technician'] },
             { id: 'departments', label: 'Phòng ban', roles: ['admin', 'manager'] },
             { id: 'workflows', label: 'Quy trình', roles: ['admin', 'manager'] },

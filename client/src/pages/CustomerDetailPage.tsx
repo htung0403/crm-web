@@ -369,22 +369,22 @@ export function CustomerDetailPage() {
             <Toaster position="top-right" richColors />
             <div className="space-y-6 animate-fade-in">
                 {/* Header */}
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                        <Button variant="ghost" size="icon" onClick={() => navigate('/customers')}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-start gap-4">
+                        <Button variant="ghost" size="icon" onClick={() => navigate('/customers')} className="-ml-2 shrink-0">
                             <ArrowLeft className="h-5 w-5" />
                         </Button>
                         <div>
-                            <h1 className="text-2xl font-bold">Chi tiết khách hàng</h1>
-                            <p className="text-muted-foreground">{customer.code || customer.name}</p>
+                            <h1 className="text-xl sm:text-2xl font-bold">{customer.name}</h1>
+                            <p className="text-muted-foreground text-sm sm:text-base">{customer.code || customer.name}</p>
                         </div>
                     </div>
-                    <div className="flex gap-2">
-                        <Button variant="outline" onClick={() => navigate(`/customers?edit=${customer.id}`)}>
+                    <div className="flex gap-2 w-full sm:w-auto">
+                        <Button variant="outline" onClick={() => navigate(`/customers?edit=${customer.id}`)} className="flex-1 sm:flex-none">
                             <Edit className="h-4 w-4 mr-2" />
                             Sửa
                         </Button>
-                        <Button onClick={() => setShowContactDialog(true)}>
+                        <Button onClick={() => setShowContactDialog(true)} className="flex-1 sm:flex-none">
                             <MessageCircle className="h-4 w-4 mr-2" />
                             Liên hệ
                         </Button>
@@ -515,12 +515,12 @@ export function CustomerDetailPage() {
                             <TabsContent value="orders" className="space-y-4">
                                 {/* Orders Summary */}
                                 {customerOrders.length > 0 && (
-                                    <div className="grid grid-cols-3 gap-3 p-3 rounded-lg bg-gradient-to-r from-primary/5 to-primary/10">
-                                        <div className="text-center">
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 rounded-lg bg-gradient-to-r from-primary/5 to-primary/10">
+                                        <div className="text-center sm:border-r border-b sm:border-b-0 pb-2 sm:pb-0">
                                             <p className="text-2xl font-bold text-primary">{customerOrders.length}</p>
                                             <p className="text-xs text-muted-foreground">Tổng đơn</p>
                                         </div>
-                                        <div className="text-center border-x">
+                                        <div className="text-center sm:border-r border-b sm:border-b-0 pb-2 sm:pb-0">
                                             <p className="text-2xl font-bold text-emerald-600">
                                                 {customerOrders.filter(o => o.status === 'completed').length}
                                             </p>

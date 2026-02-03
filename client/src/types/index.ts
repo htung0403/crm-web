@@ -37,7 +37,7 @@ export interface LeadHistoryItem {
     createdBy: User;
 }
 
-export type OrderStatus = 'pending' | 'confirmed' | 'processing' | 'completed' | 'cancelled';
+export type OrderStatus = 'pending' | 'confirmed' | 'processing' | 'completed' | 'cancelled' | 'step1' | 'step2' | 'step3' | 'step4' | 'step5';
 
 export interface Order {
     id: string;
@@ -53,6 +53,10 @@ export interface Order {
     createdAt: string;
     slaDeadline: string;
     notes?: string;
+    /** Bảo hành (warranty) hoặc Chăm sóc (care) – từ Khách chê/Khách khen */
+    care_warranty_flow?: string | null;
+    /** war1-war3 (Bảo hành), care6/care12/care-custom (Chăm sóc) */
+    care_warranty_stage?: string | null;
 }
 
 export interface Product {

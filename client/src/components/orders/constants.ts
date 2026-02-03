@@ -9,6 +9,20 @@ export interface KanbanColumn {
     borderColor: string;
 }
 
+/** Kanban Kỹ thuật: 3 phòng cố định. step_order 1 → Phòng Mạ, 2 → Dán đế, 3 → Phòng Da */
+export const TECH_ROOM_IDS = ['phong_ma', 'phong_dan_de', 'phong_da'] as const;
+export type TechRoomId = (typeof TECH_ROOM_IDS)[number];
+export const TECH_ROOMS: { id: TechRoomId; title: string; stepOrder: number }[] = [
+    { id: 'phong_ma', title: 'Phòng Mạ', stepOrder: 1 },
+    { id: 'phong_dan_de', title: 'Phòng Dán đế', stepOrder: 2 },
+    { id: 'phong_da', title: 'Phòng Da', stepOrder: 3 },
+];
+export function getTechRoomByStepOrder(stepOrder: number): TechRoomId {
+    if (stepOrder <= 1) return 'phong_ma';
+    if (stepOrder === 2) return 'phong_dan_de';
+    return 'phong_da';
+}
+
 export const columns: KanbanColumn[] = [
     { id: 'pending', title: 'Đơn nháp', color: 'text-blue-600', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
     { id: 'confirmed', title: 'Đã xác nhận', color: 'text-purple-600', bgColor: 'bg-purple-50', borderColor: 'border-purple-200' },

@@ -188,62 +188,62 @@ export function LeadsPage() {
                             <h1 className="text-2xl font-bold text-foreground">Quản lý Leads</h1>
                             <p className="text-muted-foreground">Theo dõi và chăm sóc khách hàng tiềm năng</p>
                         </div>
-                        <Button onClick={() => setShowCreateDialog(true)} className="shadow-md">
+                        <Button onClick={() => setShowCreateDialog(true)} className="shadow-md w-full sm:w-auto">
                             <Plus className="h-4 w-4 mr-2" />
                             Thêm Lead
                         </Button>
                     </div>
 
                     {/* Stats Cards */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
                         <Card className="overflow-hidden">
-                            <CardContent className="p-4">
+                            <CardContent className="p-3 sm:p-4">
                                 <div className="flex items-center gap-3">
-                                    <div className="p-2.5 rounded-lg bg-blue-100">
+                                    <div className="p-2.5 rounded-lg bg-blue-100 shrink-0">
                                         <Users className="h-5 w-5 text-blue-600" />
                                     </div>
-                                    <div>
-                                        <p className="text-sm text-muted-foreground">Tổng leads</p>
-                                        <p className="text-2xl font-bold text-foreground">{stats.total}</p>
+                                    <div className="min-w-0">
+                                        <p className="text-sm text-muted-foreground truncate">Tổng leads</p>
+                                        <p className="text-xl sm:text-2xl font-bold text-foreground">{stats.total}</p>
                                     </div>
                                 </div>
                             </CardContent>
                         </Card>
                         <Card className="overflow-hidden">
-                            <CardContent className="p-4">
+                            <CardContent className="p-3 sm:p-4">
                                 <div className="flex items-center gap-3">
-                                    <div className="p-2.5 rounded-lg bg-amber-100">
+                                    <div className="p-2.5 rounded-lg bg-amber-100 shrink-0">
                                         <UserPlus className="h-5 w-5 text-amber-600" />
                                     </div>
-                                    <div>
-                                        <p className="text-sm text-muted-foreground">Leads mới</p>
-                                        <p className="text-2xl font-bold text-foreground">{stats.newLeads}</p>
+                                    <div className="min-w-0">
+                                        <p className="text-sm text-muted-foreground truncate">Leads mới</p>
+                                        <p className="text-xl sm:text-2xl font-bold text-foreground">{stats.newLeads}</p>
                                     </div>
                                 </div>
                             </CardContent>
                         </Card>
                         <Card className="overflow-hidden">
-                            <CardContent className="p-4">
+                            <CardContent className="p-3 sm:p-4">
                                 <div className="flex items-center gap-3">
-                                    <div className="p-2.5 rounded-lg bg-purple-100">
+                                    <div className="p-2.5 rounded-lg bg-purple-100 shrink-0">
                                         <Phone className="h-5 w-5 text-purple-600" />
                                     </div>
-                                    <div>
-                                        <p className="text-sm text-muted-foreground">Đang chăm</p>
-                                        <p className="text-2xl font-bold text-foreground">{stats.nurturing}</p>
+                                    <div className="min-w-0">
+                                        <p className="text-sm text-muted-foreground truncate">Đang chăm</p>
+                                        <p className="text-xl sm:text-2xl font-bold text-foreground">{stats.nurturing}</p>
                                     </div>
                                 </div>
                             </CardContent>
                         </Card>
                         <Card className="overflow-hidden">
-                            <CardContent className="p-4">
+                            <CardContent className="p-3 sm:p-4">
                                 <div className="flex items-center gap-3">
-                                    <div className="p-2.5 rounded-lg bg-green-100">
+                                    <div className="p-2.5 rounded-lg bg-green-100 shrink-0">
                                         <TrendingUp className="h-5 w-5 text-green-600" />
                                     </div>
-                                    <div>
-                                        <p className="text-sm text-muted-foreground">Qualified</p>
-                                        <p className="text-2xl font-bold text-foreground">{stats.qualified}</p>
+                                    <div className="min-w-0">
+                                        <p className="text-sm text-muted-foreground truncate">Qualified</p>
+                                        <p className="text-xl sm:text-2xl font-bold text-foreground">{stats.qualified}</p>
                                     </div>
                                 </div>
                             </CardContent>
@@ -306,26 +306,17 @@ export function LeadsPage() {
                 </div>
 
                 {/* Kanban Board - Full viewport width with scroll */}
-                <div
-                    className="relative"
-                    style={{
-                        marginLeft: 'calc(-1 * var(--page-padding, 1rem))',
-                        marginRight: 'calc(-1 * var(--page-padding, 1rem))',
-                        width: 'calc(100% + 2 * var(--page-padding, 1rem))'
-                    }}
-                >
+                <div className="pb-6">
                     <DragDropContext onDragEnd={handleDragEnd}>
-                        <div
-                            className="flex gap-3 overflow-x-auto pb-4"
-                            style={{ paddingLeft: 'var(--page-padding, 1rem)', paddingRight: 'var(--page-padding, 1rem)' }}
-                        >
+                        <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory px-4 sm:px-0">
                             {kanbanColumns.map(column => (
-                                <KanbanColumn
-                                    key={column.id}
-                                    column={column}
-                                    leads={leadsByStatus[column.id] || []}
-                                    onCardClick={(lead) => navigate(`/leads/${lead.id}`)}
-                                />
+                                <div key={column.id} className="w-[90vw] sm:w-80 shrink-0 snap-center first:pl-0 last:pr-0">
+                                    <KanbanColumn
+                                        column={column}
+                                        leads={leadsByStatus[column.id] || []}
+                                        onCardClick={(lead) => navigate(`/leads/${lead.id}`)}
+                                    />
+                                </div>
                             ))}
                         </div>
                     </DragDropContext>

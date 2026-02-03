@@ -24,6 +24,7 @@ import { usePackages } from '@/hooks/usePackages';
 import { useUsers } from '@/hooks/useUsers';
 import { ordersApi } from '@/lib/api';
 import { CreateCustomerDialog } from '@/components/customers/CreateCustomerDialog';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Product types for cleaning services
 const PRODUCT_TYPES = [
@@ -89,13 +90,14 @@ const generateTempId = () => `temp_${Date.now()}_${Math.random().toString(36).su
 export function CreateOrderPage() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
+    const { user } = useAuth();
 
     // Steps: 1 = Customer, 2 = Products (with Services), 3 = Review
     const [step, setStep] = useState(1);
 
     // Data hooks
     const { customers, fetchCustomers, createCustomer } = useCustomers();
-    const { services, fetchServices } = useProducts();
+    const { products: catalogProducts, services, fetchProducts, fetchServices } = useProducts();
     const { packages, fetchPackages } = usePackages();
     const { users: technicians, fetchTechnicians } = useUsers();
 
@@ -138,6 +140,17 @@ export function CreateOrderPage() {
     // Next order code for QR preview
     const [nextOrderCode, setNextOrderCode] = useState<string>('');
 
+    // Sản phẩm bán kèm (từ danh mục, không gắn dịch vụ)
+    interface AddOnProduct {
+        id: string;
+        name: string;
+        price: number;
+        quantity: number;
+    }
+    const [addOnProducts, setAddOnProducts] = useState<AddOnProduct[]>([]);
+    const [addOnDialogOpen, setAddOnDialogOpen] = useState(false);
+    const [addOnSearch, setAddOnSearch] = useState('');
+
     // Fetch data
     useEffect(() => {
         const fetchData = async () => {
@@ -145,6 +158,7 @@ export function CreateOrderPage() {
             try {
                 await Promise.all([
                     fetchCustomers({ status: 'active' }),
+                    fetchProducts({ status: 'active' }),
                     fetchServices({ status: 'active' }),
                     fetchPackages(),
                     fetchTechnicians()
@@ -156,7 +170,7 @@ export function CreateOrderPage() {
             }
         };
         fetchData();
-    }, [fetchCustomers, fetchServices, fetchPackages, fetchTechnicians]);
+    }, [fetchCustomers, fetchProducts, fetchServices, fetchPackages, fetchTechnicians]);
 
     // Fetch next order code separately (for QR preview)
     useEffect(() => {
@@ -398,10 +412,36 @@ export function CreateOrderPage() {
         }));
     };
 
-    // Calculate totals
-    const subtotal = products.reduce((sum, p) =>
+    // Add sản phẩm bán kèm
+    const handleAddAddOn = (product: { id: string; name: string; price: number }, quantity: number = 1) => {
+        const existing = addOnProducts.find(a => a.id === product.id);
+        if (existing) {
+            setAddOnProducts(prev => prev.map(a => a.id === product.id ? { ...a, quantity: a.quantity + quantity } : a));
+        } else {
+            setAddOnProducts(prev => [...prev, { id: product.id, name: product.name, price: product.price, quantity }]);
+        }
+        setAddOnDialogOpen(false);
+        setAddOnSearch('');
+    };
+
+    const handleUpdateAddOnQuantity = (id: string, quantity: number) => {
+        if (quantity < 1) {
+            setAddOnProducts(prev => prev.filter(a => a.id !== id));
+            return;
+        }
+        setAddOnProducts(prev => prev.map(a => a.id === id ? { ...a, quantity } : a));
+    };
+
+    const handleRemoveAddOn = (id: string) => {
+        setAddOnProducts(prev => prev.filter(a => a.id !== id));
+    };
+
+    // Calculate totals (sản phẩm khách + dịch vụ + sản phẩm bán kèm)
+    const subtotalFromCustomerProducts = products.reduce((sum, p) =>
         sum + p.services.reduce((ssum, s) => ssum + s.price, 0), 0
     );
+    const subtotalFromAddOns = addOnProducts.reduce((sum, a) => sum + a.price * a.quantity, 0);
+    const subtotal = subtotalFromCustomerProducts + subtotalFromAddOns;
 
     // Calculate discount amount
     const discountAmount = discountType === 'percent'
@@ -582,6 +622,12 @@ export function CreateOrderPage() {
                         }))
                     }))
                 })),
+                add_on_products: addOnProducts.length > 0 ? addOnProducts.map(a => ({
+                    product_id: a.id,
+                    name: a.name,
+                    unit_price: a.price,
+                    quantity: a.quantity
+                })) : undefined,
                 notes: notes || undefined,
                 discount: discountAmount > 0 ? discountAmount : undefined,
                 discount_type: discountType,
@@ -1107,6 +1153,55 @@ export function CreateOrderPage() {
                                 ))}
                             </div>
                         )}
+
+                        {/* Sản phẩm bán kèm */}
+                        <Card>
+                            <CardHeader className="pb-3">
+                                <div className="flex items-center justify-between">
+                                    <CardTitle className="text-base flex items-center gap-2">
+                                        <Tag className="h-5 w-5 text-amber-600" />
+                                        Sản phẩm bán kèm
+                                    </CardTitle>
+                                    <Button variant="outline" size="sm" onClick={() => setAddOnDialogOpen(true)} className="gap-1">
+                                        <Plus className="h-4 w-4" />
+                                        Thêm SP bán kèm
+                                    </Button>
+                                </div>
+                                <p className="text-sm text-muted-foreground">Sản phẩm từ danh mục bán kèm theo đơn (không gắn dịch vụ)</p>
+                            </CardHeader>
+                            {addOnProducts.length > 0 ? (
+                                <CardContent className="space-y-2">
+                                    {addOnProducts.map((a) => (
+                                        <div key={a.id} className="flex items-center justify-between gap-3 p-3 bg-amber-50/50 rounded-lg border border-amber-200/50">
+                                            <div className="flex-1 min-w-0">
+                                                <p className="font-medium truncate">{a.name}</p>
+                                                <p className="text-sm text-muted-foreground">{formatCurrency(a.price)} × {a.quantity}</p>
+                                            </div>
+                                            <div className="flex items-center gap-2 shrink-0">
+                                                <Input
+                                                    type="number"
+                                                    min={1}
+                                                    value={a.quantity}
+                                                    onChange={(e) => handleUpdateAddOnQuantity(a.id, Math.max(1, parseInt(e.target.value, 10) || 1))}
+                                                    className="w-16 h-8 text-center"
+                                                />
+                                                <span className="font-semibold text-amber-700 w-24 text-right">{formatCurrency(a.price * a.quantity)}</span>
+                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleRemoveAddOn(a.id)}>
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    <p className="text-sm text-muted-foreground pt-1">Tổng SP bán kèm: <span className="font-semibold text-foreground">{formatCurrency(subtotalFromAddOns)}</span></p>
+                                </CardContent>
+                            ) : (
+                                <CardContent className="py-6 text-center text-muted-foreground">
+                                    <Tag className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                                    <p className="text-sm">Chưa có sản phẩm bán kèm</p>
+                                    <Button variant="outline" size="sm" className="mt-2" onClick={() => setAddOnDialogOpen(true)}>Thêm sản phẩm bán kèm</Button>
+                                </CardContent>
+                            )}
+                        </Card>
                     </div>
 
                     {/* Sidebar */}
@@ -1130,11 +1225,13 @@ export function CreateOrderPage() {
                                         Sản phẩm & Dịch vụ
                                     </CardTitle>
                                     <Badge variant="secondary" className="text-sm">
-                                        {products.length} sản phẩm
+                                        {products.length} sản phẩm khách
+                                        {addOnProducts.length > 0 && ` + ${addOnProducts.length} SP bán kèm`}
                                     </Badge>
                                 </div>
                             </CardHeader>
                             <CardContent className="p-4 space-y-3">
+                                {/* Sản phẩm của khách + dịch vụ */}
                                 {products.map((product, index) => (
                                     <div key={product.id} className="bg-muted/30 rounded-xl p-4 hover:bg-muted/50 transition-colors">
                                         <div className="flex items-start gap-4">
@@ -1209,6 +1306,24 @@ export function CreateOrderPage() {
                                         </div>
                                     </div>
                                 ))}
+
+                                {/* Sản phẩm bán kèm - Step 3 Review */}
+                                {addOnProducts.length > 0 && (
+                                    <div className="pt-4 border-t mt-4">
+                                        <p className="text-sm font-medium text-amber-700 mb-2 flex items-center gap-2">
+                                            <Tag className="h-4 w-4" />
+                                            Sản phẩm bán kèm
+                                        </p>
+                                        <div className="space-y-2">
+                                            {addOnProducts.map((a) => (
+                                                <div key={a.id} className="flex justify-between items-center bg-amber-50/50 p-3 rounded-lg border border-amber-200/50">
+                                                    <span className="font-medium">{a.name}</span>
+                                                    <span className="text-amber-700 font-semibold">{a.quantity} × {formatCurrency(a.price)} = {formatCurrency(a.price * a.quantity)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
 
@@ -1574,7 +1689,13 @@ export function CreateOrderPage() {
                         </Button>
                     ) : (
                         <Button
-                            onClick={() => setConfirmDialogOpen(true)}
+                            onClick={() => {
+                                if (user?.role === 'sale') {
+                                    handleSubmit('pending');
+                                } else {
+                                    setConfirmDialogOpen(true);
+                                }
+                            }}
                             disabled={submitting}
                             className="bg-green-600 hover:bg-green-700"
                         >
@@ -1699,6 +1820,49 @@ export function CreateOrderPage() {
                 onClose={() => setShowCreateCustomerDialog(false)}
                 onSubmit={handleCreateCustomer}
             />
+
+            {/* Sản phẩm bán kèm Dialog */}
+            <Dialog open={addOnDialogOpen} onOpenChange={setAddOnDialogOpen}>
+                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Tag className="h-5 w-5 text-amber-600" />
+                            Chọn sản phẩm bán kèm
+                        </DialogTitle>
+                        <p className="text-sm text-muted-foreground">Sản phẩm từ danh mục bán kèm theo đơn (không gắn dịch vụ)</p>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            <Input
+                                placeholder="Tìm sản phẩm..."
+                                value={addOnSearch}
+                                onChange={(e) => setAddOnSearch(e.target.value)}
+                                className="pl-10"
+                            />
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 max-h-[50vh] overflow-y-auto">
+                            {(catalogProducts || [])
+                                .filter((p: { status: string; name: string }) => p.status === 'active')
+                                .filter((p: { name: string }) => !addOnSearch.trim() || p.name.toLowerCase().includes(addOnSearch.toLowerCase()))
+                                .map((p: { id: string; name: string; price: number }) => (
+                                    <button
+                                        key={p.id}
+                                        type="button"
+                                        onClick={() => handleAddAddOn(p)}
+                                        className="p-3 text-left border rounded-lg hover:border-amber-500 hover:bg-amber-50/50 transition-colors"
+                                    >
+                                        <p className="font-medium text-sm truncate">{p.name}</p>
+                                        <p className="text-amber-700 font-semibold text-sm mt-1">{formatCurrency(p.price)}</p>
+                                    </button>
+                                ))}
+                        </div>
+                        {(catalogProducts || []).filter((p: { status: string }) => p.status === 'active').length === 0 && (
+                            <p className="text-sm text-muted-foreground text-center py-4">Chưa có sản phẩm trong danh mục</p>
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
 
             {/* Service Selection Dialog for confirmed products */}
             <Dialog open={showServiceDialog} onOpenChange={setShowServiceDialog}>

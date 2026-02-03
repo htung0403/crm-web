@@ -277,7 +277,7 @@ function InvoiceDetailDialog({
                                 <Package className="h-4 w-4" />
                                 Chi tiết sản phẩm/dịch vụ ({invoice.order.items.length})
                             </p>
-                            <div className="border rounded-lg overflow-hidden">
+                            <div className="border rounded-lg overflow-hidden overflow-x-auto">
                                 <table className="w-full text-sm">
                                     <thead className="bg-muted/50">
                                         <tr>
@@ -535,59 +535,63 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
                         <h1 className="text-2xl font-bold text-foreground">Hóa đơn</h1>
                         <p className="text-muted-foreground">Quản lý hóa đơn bán hàng</p>
                     </div>
+                    <Button onClick={() => setShowCreateDialog(true)} className="w-full sm:w-auto shadow-sm">
+                        <Plus className="h-4 w-4 mr-2" />
+                        Tạo hóa đơn
+                    </Button>
                 </div>
 
                 {/* Stats */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
                     <Card className="bg-gradient-to-br from-blue-50 to-blue-100/50 border-blue-200">
-                        <CardContent className="p-4">
+                        <CardContent className="p-3 sm:p-4">
                             <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-sm text-blue-600 font-medium">Tổng cộng</p>
-                                    <p className="text-2xl font-bold text-blue-700">{stats.total}</p>
+                                <div className="min-w-0">
+                                    <p className="text-sm text-blue-600 font-medium truncate">Tổng cộng</p>
+                                    <p className="text-xl sm:text-2xl font-bold text-blue-700">{stats.total}</p>
                                 </div>
-                                <FileText className="h-8 w-8 text-blue-400" />
+                                <FileText className="h-6 w-6 sm:h-8 sm:w-8 text-blue-400 shrink-0" />
                             </div>
                         </CardContent>
                     </Card>
                     <Card className="bg-gradient-to-br from-amber-50 to-amber-100/50 border-amber-200">
-                        <CardContent className="p-4">
+                        <CardContent className="p-3 sm:p-4">
                             <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-sm text-amber-600 font-medium">Chờ TT</p>
-                                    <p className="text-2xl font-bold text-amber-700">{stats.pending + stats.draft}</p>
+                                <div className="min-w-0">
+                                    <p className="text-sm text-amber-600 font-medium truncate">Chờ TT</p>
+                                    <p className="text-xl sm:text-2xl font-bold text-amber-700">{stats.pending + stats.draft}</p>
                                 </div>
-                                <Clock className="h-8 w-8 text-amber-400" />
+                                <Clock className="h-6 w-6 sm:h-8 sm:w-8 text-amber-400 shrink-0" />
                             </div>
                         </CardContent>
                     </Card>
                     <Card className="bg-gradient-to-br from-green-50 to-green-100/50 border-green-200">
-                        <CardContent className="p-4">
+                        <CardContent className="p-3 sm:p-4">
                             <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-sm text-green-600 font-medium">Đã TT</p>
-                                    <p className="text-2xl font-bold text-green-700">{stats.paid}</p>
+                                <div className="min-w-0">
+                                    <p className="text-sm text-green-600 font-medium truncate">Đã TT</p>
+                                    <p className="text-xl sm:text-2xl font-bold text-green-700">{stats.paid}</p>
                                 </div>
-                                <CheckCircle className="h-8 w-8 text-green-400" />
+                                <CheckCircle className="h-6 w-6 sm:h-8 sm:w-8 text-green-400 shrink-0" />
                             </div>
                         </CardContent>
                     </Card>
-                    <Card className="bg-gradient-to-br from-red-50 to-red-100/50 border-red-200 hidden sm:block">
-                        <CardContent className="p-4">
+                    <Card className="bg-gradient-to-br from-red-50 to-red-100/50 border-red-200">
+                        <CardContent className="p-3 sm:p-4">
                             <div className="flex items-center justify-between">
-                                <div>
-                                    <p className="text-sm text-red-600 font-medium">Đã hủy</p>
-                                    <p className="text-2xl font-bold text-red-700">{stats.cancelled}</p>
+                                <div className="min-w-0">
+                                    <p className="text-sm text-red-600 font-medium truncate">Đã hủy</p>
+                                    <p className="text-xl sm:text-2xl font-bold text-red-700">{stats.cancelled}</p>
                                 </div>
-                                <XCircle className="h-8 w-8 text-red-400" />
+                                <XCircle className="h-6 w-6 sm:h-8 sm:w-8 text-red-400 shrink-0" />
                             </div>
                         </CardContent>
                     </Card>
                     <Card className="bg-gradient-to-br from-primary/5 to-primary/15 border-primary/20 col-span-2 sm:col-span-1">
-                        <CardContent className="p-4">
-                            <div>
-                                <p className="text-sm text-primary font-medium">Doanh thu</p>
-                                <p className="text-xl font-bold text-primary">{formatCurrency(stats.totalAmount)}</p>
+                        <CardContent className="p-3 sm:p-4">
+                            <div className="min-w-0">
+                                <p className="text-sm text-primary font-medium truncate">Doanh thu</p>
+                                <p className="text-xl font-bold text-primary truncate">{formatCurrency(stats.totalAmount)}</p>
                             </div>
                         </CardContent>
                     </Card>
@@ -611,7 +615,7 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
                                     placeholder="Tìm theo mã hóa đơn, tên KH, SĐT..."
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    className="pl-9"
+                                    className="pl-9 w-full"
                                 />
                             </div>
                             <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -651,31 +655,34 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
                                         <div
                                             key={invoice.id}
                                             onClick={() => fetchInvoiceDetail(invoice.id)}
-                                            className="flex items-center justify-between p-4 rounded-xl border hover:bg-muted/30 hover:border-primary/30 transition-all cursor-pointer group"
+                                            className="flex flex-col sm:flex-row sm:items-center justify-between p-3 sm:p-4 rounded-xl border hover:bg-muted/30 hover:border-primary/30 transition-all cursor-pointer group gap-3 sm:gap-4"
                                         >
-                                            <div className="flex items-center gap-4">
-                                                <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
-                                                    <StatusIcon className="h-6 w-6 text-primary" />
+                                            <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
+                                                <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors shrink-0">
+                                                    <StatusIcon className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
                                                 </div>
-                                                <div>
-                                                    <div className="flex items-center gap-2">
-                                                        <p className="font-semibold">{invoice.invoice_code}</p>
+                                                <div className="min-w-0 flex-1">
+                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                        <p className="font-semibold text-sm sm:text-base">{invoice.invoice_code}</p>
                                                         <Badge variant={config?.variant || 'secondary'} className="text-xs">
                                                             {config?.label || invoice.status}
                                                         </Badge>
                                                     </div>
-                                                    <p className="text-sm text-muted-foreground">
+                                                    <p className="text-xs sm:text-sm text-muted-foreground truncate">
                                                         {invoice.customer?.name} • {formatDate(invoice.created_at)}
                                                     </p>
                                                 </div>
                                             </div>
-                                            <div className="text-right">
-                                                <p className="font-bold text-lg text-primary">
-                                                    {formatCurrency(invoice.total_amount)}
-                                                </p>
-                                                <p className="text-xs text-muted-foreground">
-                                                    {invoice.order?.order_code}
-                                                </p>
+                                            <div className="flex items-center justify-between sm:block sm:text-right pl-[52px] sm:pl-0">
+                                                <span className="text-sm font-medium sm:hidden text-muted-foreground">Tổng tiền:</span>
+                                                <div>
+                                                    <p className="font-bold text-base sm:text-lg text-primary">
+                                                        {formatCurrency(invoice.total_amount)}
+                                                    </p>
+                                                    <p className="text-xs text-muted-foreground hidden sm:block">
+                                                        {invoice.order?.order_code}
+                                                    </p>
+                                                </div>
                                             </div>
                                         </div>
                                     );

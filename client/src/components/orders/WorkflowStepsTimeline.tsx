@@ -1,9 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
-import { CheckCircle2, Circle, Clock, User as UserIcon, AlertCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { CheckCircle2, Circle, Clock, User as UserIcon, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { orderItemsApi } from '@/lib/api';
@@ -32,11 +30,14 @@ interface WorkflowStep {
 interface WorkflowStepsTimelineProps {
     itemId: string;
     mode?: 'simple' | 'detailed';
+    onStepCompleted?: () => void;
 }
 
-export const WorkflowStepsTimeline: React.FC<WorkflowStepsTimelineProps> = ({ itemId, mode = 'simple' }) => {
+export const WorkflowStepsTimeline: React.FC<WorkflowStepsTimelineProps> = ({ itemId, mode = 'simple', onStepCompleted }) => {
+    const { user } = useAuth();
     const [steps, setSteps] = useState<WorkflowStep[]>([]);
     const [loading, setLoading] = useState(true);
+    const [completingStepId, setCompletingStepId] = useState<string | null>(null);
 
     useEffect(() => {
         const fetchSteps = async () => {
@@ -57,6 +58,21 @@ export const WorkflowStepsTimeline: React.FC<WorkflowStepsTimelineProps> = ({ it
             fetchSteps();
         }
     }, [itemId]);
+
+    const handleCompleteStep = async (stepId: string) => {
+        setCompletingStepId(stepId);
+        try {
+            await orderItemsApi.completeStep(stepId);
+            toast.success('Đã xác nhận hoàn thành bước');
+            const response = await orderItemsApi.getSteps(itemId);
+            if (response.data?.data) setSteps(response.data.data as WorkflowStep[]);
+            onStepCompleted?.();
+        } catch (e: any) {
+            toast.error(e?.response?.data?.message || 'Không thể hoàn thành bước');
+        } finally {
+            setCompletingStepId(null);
+        }
+    };
 
     if (loading) {
         return <div className="p-4 text-center text-sm text-muted-foreground">Đang tải quy trình...</div>;
@@ -147,6 +163,25 @@ export const WorkflowStepsTimeline: React.FC<WorkflowStepsTimelineProps> = ({ it
                                         </div>
                                     )}
                                 </div>
+
+                                {/* Xác nhận hoàn thành bước - for in_progress step when user is assigned technician */}
+                                {isInProgress && (step.technician as { id?: string })?.id === user?.id && (
+                                    <div className="mt-3 pt-3 border-t border-dashed">
+                                        <Button
+                                            size="sm"
+                                            className="bg-green-600 hover:bg-green-700 gap-2"
+                                            disabled={!!completingStepId}
+                                            onClick={() => handleCompleteStep(step.id)}
+                                        >
+                                            {completingStepId === step.id ? (
+                                                <Loader2 className="h-4 w-4 animate-spin" />
+                                            ) : (
+                                                <CheckCircle2 className="h-4 w-4" />
+                                            )}
+                                            Xác nhận hoàn thành bước
+                                        </Button>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     );

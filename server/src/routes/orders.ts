@@ -225,7 +225,25 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 
             // Map V2 structure to V1 items structure
             for (const product of v2Products) {
-                // If product has services, add them as items
+                // ADD THE PRODUCT ITSELF AS AN ITEM (for Sales Kanban)
+                v2Items.push({
+                    id: product.id,
+                    order_id: order.id,
+                    item_name: product.name,
+                    item_type: 'product', // Treat as product in UI
+                    quantity: 1,
+                    unit_price: 0,
+                    total_price: 0,
+                    status: product.status || 'pending',
+                    item_code: product.product_code,
+                    product: {
+                        image: product.images?.[0] || null
+                    },
+                    is_v2_product: true, // Flag to distinguish
+                    product_type: product.type || null // Loại sản phẩm: giày, túi, ví, ...
+                });
+
+                // If product has services, add them as items (for Workflow/Technician)
                 if (product.services && product.services.length > 0) {
                     for (const s of product.services) {
                         // Get all technicians from junction table (or fallback to single technician)
@@ -263,11 +281,6 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                             }
                         });
                     }
-                } else {
-                    // This is a product without services (just intake)? 
-                    // Should we show it? Maybe not in progress if no service attached.
-                    // But maybe user wants to track the product itself?
-                    // For now, only show services as they are the billable/trackable items.
                 }
             }
 
@@ -278,10 +291,129 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             console.log(`[Order ${order.order_code}] No V2 products found. v2Products:`, v2Products?.length || 0, 'Error:', v2Error);
         }
 
+        // Attach latest extension request for this order (Phase 1 - Xin gia hạn)
+        const { data: extRequest } = await supabaseAdmin
+            .from('order_extension_requests')
+            .select('*')
+            .eq('order_id', order.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+        (order as any).extension_request = extRequest || null;
+
+        // For each order item, attach latest accessory and partner (V1 = order_items, V2 = order_product_services)
+        if (order.items) {
+            for (const item of order.items) {
+                const itemId = item.id;
+                if (!itemId) continue;
+                const { data: acc } = await supabaseAdmin
+                    .from('order_item_accessories')
+                    .select('*')
+                    .or(`order_item_id.eq.${itemId},order_product_service_id.eq.${itemId}`)
+                    .order('updated_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                const { data: part } = await supabaseAdmin
+                    .from('order_item_partner')
+                    .select('*')
+                    .or(`order_item_id.eq.${itemId},order_product_service_id.eq.${itemId}`)
+                    .order('updated_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                (item as any).accessory = acc || null;
+                (item as any).partner = part || null;
+            }
+        }
+
         res.json({
             status: 'success',
             data: { order },
         });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Get Kanban logs by tab (sales | workflow | aftersale) – lịch sử chuyển trạng thái từng tab
+router.get('/:id/kanban-logs', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id: orderIdOrCode } = req.params;
+        const tab = (req.query.tab as string) || 'sales';
+        const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(orderIdOrCode);
+        let orderId: string = orderIdOrCode;
+        if (!isUUID) {
+            const { data: ord } = await supabaseAdmin.from('orders').select('id').eq('order_code', orderIdOrCode).single();
+            if (!ord) throw new ApiError('Không tìm thấy đơn hàng', 404);
+            orderId = ord.id;
+        }
+
+        if (tab === 'sales') {
+            const { data: logs, error } = await supabaseAdmin
+                .from('order_item_status_log')
+                .select('id, entity_type, entity_id, from_status, to_status, created_by, created_at, created_by_user:users!order_item_status_log_created_by_fkey(id, name)')
+                .eq('order_id', orderId)
+                .order('created_at', { ascending: false })
+                .limit(100);
+            if (error) throw new ApiError('Lỗi khi lấy lịch sử Sales', 500);
+            return res.json({ status: 'success', data: { logs: logs || [] } });
+        }
+
+        if (tab === 'aftersale') {
+            const { data: logs, error } = await supabaseAdmin
+                .from('order_after_sale_stage_log')
+                .select('id, from_stage, to_stage, created_by, created_at, created_by_user:users!order_after_sale_stage_log_created_by_fkey(id, name)')
+                .eq('order_id', orderId)
+                .order('created_at', { ascending: false })
+                .limit(100);
+            if (error) throw new ApiError('Lỗi khi lấy lịch sử After sale', 500);
+            return res.json({ status: 'success', data: { logs: logs || [] } });
+        }
+
+        if (tab === 'workflow') {
+            const { data: orderItems } = await supabaseAdmin.from('order_items').select('id').eq('order_id', orderId);
+            const orderItemIds = orderItems?.map((r: { id: string }) => r.id) || [];
+            const { data: orderProducts } = await supabaseAdmin.from('order_products').select('id').eq('order_id', orderId);
+            const opIds = orderProducts?.map((r: { id: string }) => r.id) || [];
+            const { data: services } = opIds.length
+                ? await supabaseAdmin.from('order_product_services').select('id').in('order_product_id', opIds)
+                : { data: [] };
+            const serviceIds = (services as { id: string }[] | null)?.map((r) => r.id) || [];
+            const { data: stepsV1 } = orderItemIds.length
+                ? await supabaseAdmin.from('order_item_steps').select('id').in('order_item_id', orderItemIds)
+                : { data: [] };
+            const { data: stepsV2 } = serviceIds.length
+                ? await supabaseAdmin.from('order_item_steps').select('id').in('order_product_service_id', serviceIds)
+                : { data: [] };
+            const stepIds = [
+                ...((stepsV1 as { id: string }[] | null) || []),
+                ...((stepsV2 as { id: string }[] | null) || [])
+            ].map((s) => s.id);
+            const ids = [...new Set(stepIds)];
+            if (ids.length === 0) {
+                return res.json({ status: 'success', data: { logs: [] } });
+            }
+            const { data: logs, error } = await supabaseAdmin
+                .from('order_workflow_step_log')
+                .select('id, order_item_step_id, action, step_name, step_order, created_by, created_at, created_by_user:users!order_workflow_step_log_created_by_fkey(id, name)')
+                .in('order_item_step_id', ids)
+                .order('created_at', { ascending: false })
+                .limit(100);
+            if (error) throw new ApiError('Lỗi khi lấy lịch sử Workflow', 500);
+            return res.json({ status: 'success', data: { logs: logs || [] } });
+        }
+
+        if (tab === 'care') {
+            const { data: logs, error } = await supabaseAdmin
+                .from('order_care_warranty_log')
+                .select('id, from_stage, to_stage, flow_type, created_by, created_at, created_by_user:users!order_care_warranty_log_created_by_fkey(id, name)')
+                .eq('order_id', orderId)
+                .order('created_at', { ascending: false })
+                .limit(100);
+            if (error) throw new ApiError('Lỗi khi lấy lịch sử Chăm sóc/Bảo hành', 500);
+            return res.json({ status: 'success', data: { logs: logs || [] } });
+        }
+
+        throw new ApiError('tab không hợp lệ. Chọn: sales, workflow, aftersale, care', 400);
     } catch (error) {
         next(error);
     }
@@ -512,21 +644,33 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
 // Create order with customer products (shoes, bags, etc.)
 router.post('/v2', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { customer_id, products, notes, discount, discount_type, discount_value, surcharges, paid_amount, status } = req.body;
+        const { customer_id, products, add_on_products, notes, discount, discount_type, discount_value, surcharges, paid_amount, status } = req.body;
 
         if (!customer_id || !products || products.length === 0) {
             throw new ApiError('Khách hàng và sản phẩm là bắt buộc', 400);
         }
 
-        // Tính tổng tiền từ tất cả services của tất cả products
-        let subtotal = 0;
+        // Tính tổng tiền từ tất cả services của tất cả products (sản phẩm khách + dịch vụ)
+        let subtotalFromProducts = 0;
         for (const product of products) {
             if (product.services && product.services.length > 0) {
                 for (const service of product.services) {
-                    subtotal += service.price || 0;
+                    subtotalFromProducts += service.price || 0;
                 }
             }
         }
+
+        // Tổng tiền từ sản phẩm bán kèm
+        let subtotalFromAddOns = 0;
+        if (add_on_products && Array.isArray(add_on_products) && add_on_products.length > 0) {
+            for (const addOn of add_on_products) {
+                const qty = Math.max(1, Number(addOn.quantity) || 1);
+                const price = Number(addOn.unit_price) || 0;
+                subtotalFromAddOns += price * qty;
+            }
+        }
+
+        const subtotal = subtotalFromProducts + subtotalFromAddOns;
 
         // Calculate discount amount (already calculated in frontend, but verify)
         const discountAmount = discount || 0;
@@ -736,6 +880,36 @@ router.post('/v2', authenticate, requireSale, async (req: AuthenticatedRequest, 
             });
         }
 
+        // Tạo order_items cho sản phẩm bán kèm (V1 order_items, item_type = 'product')
+        if (add_on_products && Array.isArray(add_on_products) && add_on_products.length > 0) {
+            const base = Date.now().toString().slice(-8);
+            const addOnOrderItems = add_on_products.map((addOn: any, idx: number) => {
+                const qty = Math.max(1, Number(addOn.quantity) || 1);
+                const unitPrice = Number(addOn.unit_price) || 0;
+                const totalPrice = unitPrice * qty;
+                const uniqueSuffix = `${idx.toString().padStart(2, '0')}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`;
+                return {
+                    order_id: order.id,
+                    product_id: addOn.product_id || null,
+                    item_type: 'product',
+                    item_name: addOn.name || 'Sản phẩm bán kèm',
+                    quantity: qty,
+                    unit_price: unitPrice,
+                    total_price: totalPrice,
+                    item_code: `IT${base}${uniqueSuffix}`,
+                    status: 'pending'
+                };
+            });
+            const { error: addOnItemsError } = await supabaseAdmin
+                .from('order_items')
+                .insert(addOnOrderItems);
+            if (addOnItemsError) {
+                console.error('Error creating add-on order items:', addOnItemsError);
+            } else {
+                console.log(`Created ${addOnOrderItems.length} add-on order items for order ${orderCode}`);
+            }
+        }
+
         // Create transaction record if paid_amount > 0
         if (paidAmountValue > 0) {
             // Generate transaction code
@@ -899,6 +1073,143 @@ router.put('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, 
     }
 });
 
+const AFTER_SALE_STAGES = ['after1', 'after2', 'after3', 'after4'];
+const CARE_WARRANTY_FLOWS = ['warranty', 'care'];
+const CARE_WARRANTY_STAGES = ['war1', 'war2', 'war3', 'care6', 'care12', 'care-custom'];
+
+// Update order (partial: due_at, after_sale_stage, after-sale data, care_warranty)
+router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const userId = req.user?.id;
+        let oldAfterSaleStage: string | null | undefined;
+        let oldCareFlow: string | null | undefined;
+        let oldCareStage: string | null | undefined;
+        const {
+            due_at,
+            after_sale_stage,
+            completion_photos,
+            debt_checked,
+            debt_checked_notes,
+            packaging_photos,
+            delivery_carrier,
+            delivery_address,
+            delivery_self_pickup,
+            delivery_notes,
+            hd_sent,
+            feedback_requested,
+            care_warranty_flow,
+            care_warranty_stage,
+        } = req.body;
+
+        if (after_sale_stage !== undefined || care_warranty_flow !== undefined || care_warranty_stage !== undefined) {
+            const { data: current } = await supabaseAdmin
+                .from('orders')
+                .select('after_sale_stage, care_warranty_flow, care_warranty_stage')
+                .eq('id', id)
+                .single();
+            if (after_sale_stage !== undefined) oldAfterSaleStage = (current as any)?.after_sale_stage ?? null;
+            if (care_warranty_flow !== undefined || care_warranty_stage !== undefined) {
+                oldCareFlow = (current as any)?.care_warranty_flow ?? null;
+                oldCareStage = (current as any)?.care_warranty_stage ?? null;
+            }
+        }
+
+        const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        if (due_at !== undefined) updatePayload.due_at = due_at || null;
+        if (after_sale_stage !== undefined) {
+            if (after_sale_stage !== null && !AFTER_SALE_STAGES.includes(after_sale_stage)) {
+                throw new ApiError('after_sale_stage không hợp lệ. Chọn: after1, after2, after3, after4', 400);
+            }
+            updatePayload.after_sale_stage = after_sale_stage || null;
+        }
+        if (completion_photos !== undefined) updatePayload.completion_photos = Array.isArray(completion_photos) ? completion_photos : [];
+        if (debt_checked !== undefined) {
+            updatePayload.debt_checked = !!debt_checked;
+            updatePayload.debt_checked_at = !!debt_checked ? new Date().toISOString() : null;
+        }
+        if (debt_checked_notes !== undefined) updatePayload.debt_checked_notes = debt_checked_notes ?? null;
+        if (packaging_photos !== undefined) updatePayload.packaging_photos = Array.isArray(packaging_photos) ? packaging_photos : [];
+        if (delivery_carrier !== undefined) updatePayload.delivery_carrier = delivery_carrier ?? null;
+        if (delivery_address !== undefined) updatePayload.delivery_address = delivery_address ?? null;
+        if (delivery_self_pickup !== undefined) updatePayload.delivery_self_pickup = !!delivery_self_pickup;
+        if (delivery_notes !== undefined) updatePayload.delivery_notes = delivery_notes ?? null;
+        if (hd_sent !== undefined) {
+            updatePayload.hd_sent = !!hd_sent;
+            updatePayload.hd_sent_at = !!hd_sent ? new Date().toISOString() : null;
+        }
+        if (feedback_requested !== undefined) {
+            updatePayload.feedback_requested = !!feedback_requested;
+            updatePayload.feedback_requested_at = !!feedback_requested ? new Date().toISOString() : null;
+        }
+        if (care_warranty_flow !== undefined) {
+            if (care_warranty_flow !== null && !CARE_WARRANTY_FLOWS.includes(care_warranty_flow)) {
+                throw new ApiError('care_warranty_flow không hợp lệ. Chọn: warranty, care', 400);
+            }
+            updatePayload.care_warranty_flow = care_warranty_flow || null;
+        }
+        if (care_warranty_stage !== undefined) {
+            if (care_warranty_stage !== null && !CARE_WARRANTY_STAGES.includes(care_warranty_stage)) {
+                throw new ApiError('care_warranty_stage không hợp lệ. Chọn: war1, war2, war3, care6, care12, care-custom', 400);
+            }
+            updatePayload.care_warranty_stage = care_warranty_stage || null;
+            if (care_warranty_stage && (oldCareStage === null || oldCareStage === undefined)) {
+                updatePayload.care_warranty_started_at = new Date().toISOString();
+            }
+        }
+
+        const { data: order, error } = await supabaseAdmin
+            .from('orders')
+            .update(updatePayload)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) {
+            throw new ApiError('Lỗi khi cập nhật đơn hàng', 500);
+        }
+
+        if (after_sale_stage !== undefined && oldAfterSaleStage !== after_sale_stage) {
+            try {
+                await supabaseAdmin.from('order_after_sale_stage_log').insert({
+                    order_id: id,
+                    from_stage: oldAfterSaleStage ?? null,
+                    to_stage: after_sale_stage ?? null,
+                    created_by: userId ?? null
+                });
+            } catch (logErr) {
+                console.error('order_after_sale_stage_log insert error:', logErr);
+            }
+        }
+
+        const newCareFlow = care_warranty_flow !== undefined ? (care_warranty_flow || null) : oldCareFlow ?? null;
+        const newCareStage = care_warranty_stage !== undefined ? (care_warranty_stage || null) : oldCareStage ?? null;
+        const careStageChanged = (care_warranty_stage !== undefined && (oldCareStage !== care_warranty_stage || oldCareFlow !== care_warranty_flow))
+            || (care_warranty_flow !== undefined && (oldCareFlow !== care_warranty_flow || oldCareStage !== care_warranty_stage));
+        if (careStageChanged && newCareStage) {
+            const flowType = ['war1', 'war2', 'war3'].includes(newCareStage) ? 'warranty' : 'care';
+            try {
+                await supabaseAdmin.from('order_care_warranty_log').insert({
+                    order_id: id,
+                    from_stage: oldCareStage ?? null,
+                    to_stage: newCareStage,
+                    flow_type: flowType,
+                    created_by: userId ?? null
+                });
+            } catch (logErr) {
+                console.error('order_care_warranty_log insert error:', logErr);
+            }
+        }
+
+        res.json({
+            status: 'success',
+            data: { order },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 // Update order status
 router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -910,12 +1221,26 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
             throw new ApiError('Trạng thái không hợp lệ', 400);
         }
 
+        // When confirming: set confirmed_at only on first confirmation (do not overwrite)
+        let confirmedAtPayload: { confirmed_at?: string } = {};
+        if (status === 'confirmed') {
+            const { data: existing } = await supabaseAdmin
+                .from('orders')
+                .select('confirmed_at')
+                .eq('id', id)
+                .single();
+            if (!existing?.confirmed_at) {
+                confirmedAtPayload = { confirmed_at: new Date().toISOString() };
+            }
+        }
+
         const { data: order, error } = await supabaseAdmin
             .from('orders')
             .update({
                 status,
                 updated_at: new Date().toISOString(),
                 ...(status === 'completed' && { completed_at: new Date().toISOString() }),
+                ...confirmedAtPayload,
             })
             .eq('id', id)
             .select()
@@ -1078,6 +1403,108 @@ router.post('/:id/payments', authenticate, async (req: AuthenticatedRequest, res
                 }
             },
             message: `Đã ghi nhận thanh toán ${amount.toLocaleString()}đ`,
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// =====================================================
+// ORDER EXTENSION REQUESTS (Xin gia hạn)
+// =====================================================
+const EXTENSION_STATUSES = ['requested', 'sale_contacted', 'manager_approved', 'notified_tech', 'kpi_recorded'];
+
+router.post('/:id/extension-request', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { reason } = req.body;
+
+        if (!reason || typeof reason !== 'string' || !reason.trim()) {
+            throw new ApiError('Lý do gia hạn là bắt buộc', 400);
+        }
+
+        const { data: order } = await supabaseAdmin.from('orders').select('id').eq('id', id).maybeSingle();
+        if (!order) {
+            throw new ApiError('Không tìm thấy đơn hàng', 404);
+        }
+
+        const { data: row, error } = await supabaseAdmin
+            .from('order_extension_requests')
+            .insert({
+                order_id: id,
+                requested_by: req.user!.id,
+                reason: reason.trim(),
+                status: 'requested',
+            })
+            .select()
+            .single();
+
+        if (error) throw new ApiError('Lỗi tạo yêu cầu gia hạn: ' + error.message, 500);
+
+        res.status(201).json({
+            status: 'success',
+            data: row,
+            message: 'Đã gửi yêu cầu gia hạn',
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+router.patch('/:id/extension-request', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { customer_result, new_due_at, valid_reason, status } = req.body;
+
+        const { data: latest } = await supabaseAdmin
+            .from('order_extension_requests')
+            .select('*')
+            .eq('order_id', id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (!latest) {
+            throw new ApiError('Không tìm thấy yêu cầu gia hạn', 404);
+        }
+
+        const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        if (typeof customer_result === 'string') updatePayload.customer_result = customer_result;
+        if (new_due_at !== undefined) updatePayload.new_due_at = new_due_at || null;
+        if (typeof valid_reason === 'boolean') updatePayload.valid_reason = valid_reason;
+        if (status && EXTENSION_STATUSES.includes(status)) updatePayload.status = status;
+        if (new_due_at && req.user?.id) {
+            updatePayload.approved_by = req.user.id;
+            updatePayload.approved_at = new Date().toISOString();
+        }
+
+        const { data: updated, error } = await supabaseAdmin
+            .from('order_extension_requests')
+            .update(updatePayload)
+            .eq('id', latest.id)
+            .select()
+            .single();
+
+        if (error) throw new ApiError('Lỗi cập nhật: ' + error.message, 500);
+
+        if (new_due_at && updated) {
+            await supabaseAdmin
+                .from('orders')
+                .update({ due_at: new_due_at, updated_at: new Date().toISOString() })
+                .eq('id', id);
+        }
+
+        if (status === 'kpi_recorded' && updated && !(updated as any).valid_reason) {
+            await supabaseAdmin
+                .from('order_extension_requests')
+                .update({ kpi_late_recorded: true })
+                .eq('id', latest.id);
+        }
+
+        res.json({
+            status: 'success',
+            data: updated,
+            message: 'Đã cập nhật yêu cầu gia hạn',
         });
     } catch (error) {
         next(error);

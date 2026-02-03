@@ -115,7 +115,7 @@ export function Header({ onMenuToggle, isMobile, currentUser, onLogout }: Header
                                 />
 
                                 {/* Dropdown */}
-                                <Card className="absolute right-0 top-12 w-80 sm:w-96 z-50 shadow-lg border max-h-[70vh] overflow-hidden">
+                                <Card className="fixed left-2 right-2 top-16 sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:w-96 z-50 shadow-lg border max-h-[70vh] overflow-hidden">
                                     <CardHeader className="pb-2 border-b">
                                         <div className="flex items-center justify-between">
                                             <div className="flex gap-2">

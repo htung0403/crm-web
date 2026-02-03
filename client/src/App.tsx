@@ -26,9 +26,11 @@ import { DepartmentsPage } from '@/pages/DepartmentsPage';
 import { ProductDetailPage } from '@/pages/ProductDetailPage';
 import { WorkflowsPage } from '@/pages/WorkflowsPage';
 import { CreateWorkflowPage } from '@/pages/CreateWorkflowPage';
+import { WorkflowKanbanBoardPage } from '@/pages/WorkflowKanbanBoardPage';
 import { CreateServicePage } from '@/pages/CreateServicePage';
 import { ProductQRPage } from '@/pages/ProductQRPage';
 import { CreateOrderPage } from '@/pages/CreateOrderPage';
+import { RequestsPage } from '@/pages/RequestsPage';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import type { UserRole, User } from '@/types';
@@ -67,6 +69,7 @@ const pagePermissions: Record<string, UserRole[]> = {
   tasks: ['admin', 'manager', 'technician'],
   departments: ['admin', 'manager'],
   workflows: ['admin', 'manager'],
+  'workflow-board': ['admin', 'manager', 'sale', 'technician'],
   accessories: ['admin', 'manager', 'technician'],
   extension: ['admin', 'manager', 'technician'],
   upgrade: ['admin', 'manager', 'technician'],
@@ -176,7 +179,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           currentUser={user}
           onLogout={handleLogout}
           isMobile={isMobile}
-          onMenuToggle={() => setSidebarOpen(true)}
+          onMenuToggle={() => setSidebarOpen(prev => !prev)}
         />
         <main className="flex-1 p-4 md:p-6 lg:p-8 mt-16">
           {children}
@@ -305,6 +308,12 @@ function AppContent() {
               </ProtectedRoute>
             } />
 
+            <Route path="/requests" element={
+              <ProtectedRoute allowedRoles={pagePermissions.requests}>
+                <RequestsPage />
+              </ProtectedRoute>
+            } />
+
             <Route path="/invoices" element={
               <ProtectedRoute allowedRoles={pagePermissions.invoices}>
                 <WithCurrentUser>
@@ -401,6 +410,12 @@ function AppContent() {
               </ProtectedRoute>
             } />
 
+            <Route path="/workflow-board" element={
+              <ProtectedRoute allowedRoles={pagePermissions['workflow-board']}>
+                <WorkflowKanbanBoardPage />
+              </ProtectedRoute>
+            } />
+
             <Route path="/workflows/new" element={
               <ProtectedRoute allowedRoles={pagePermissions.workflows}>
                 <CreateWorkflowPage />
@@ -443,12 +458,12 @@ function AppContent() {
 
 function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
+    <AuthProvider>
+      <BrowserRouter>
         <Toaster position="top-right" richColors />
         <AppContent />
-      </AuthProvider>
-    </BrowserRouter>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }
 

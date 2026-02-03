@@ -172,12 +172,12 @@ export function OrdersPage() {
                 {/* Page Header + Stats Container - Contained width */}
                 <div className="space-y-6">
                     {/* Page Header */}
-                    <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                         <div className="min-w-0 flex-1">
                             <h1 className="text-2xl font-bold text-foreground">Quản lý đơn hàng</h1>
                             <p className="text-muted-foreground">Theo dõi và xử lý đơn hàng theo trạng thái</p>
                         </div>
-                        <Button onClick={() => navigate('/orders/new')} className="shrink-0">
+                        <Button onClick={() => navigate('/orders/new')} className="shrink-0 w-full sm:w-auto">
                             <Plus className="h-4 w-4 mr-2" />
                             Tạo đơn hàng
                         </Button>
@@ -191,15 +191,15 @@ export function OrdersPage() {
                     )}
 
                     {/* Stats */}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
                         {columns.map((column) => {
                             const count = getOrdersByStatus(column.id).length;
                             return (
                                 <Card key={column.id} className={`${column.bgColor} border-0`}>
-                                    <CardContent className="p-4">
+                                    <CardContent className="p-3 sm:p-4">
                                         <div className="flex items-center justify-between">
                                             <span className={`text-sm font-medium ${column.color}`}>{column.title}</span>
-                                            <span className={`text-2xl font-bold ${column.color}`}>{count}</span>
+                                            <span className={`text-xl sm:text-2xl font-bold ${column.color}`}>{count}</span>
                                         </div>
                                     </CardContent>
                                 </Card>
@@ -208,23 +208,13 @@ export function OrdersPage() {
                     </div>
                 </div>
 
-                {/* Kanban Board - Full viewport width with scroll */}
-                <div
-                    className="relative"
-                    style={{
-                        marginLeft: 'calc(-1 * var(--page-padding, 1rem))',
-                        marginRight: 'calc(-1 * var(--page-padding, 1rem))',
-                        width: 'calc(100% + 2 * var(--page-padding, 1rem))'
-                    }}
-                >
+                {/* Kanban Board - Grid on large screens so all 5 columns (including Đã huỷ) are visible */}
+                <div className="pb-6">
                     <DragDropContext onDragEnd={handleDragEnd}>
-                        <div
-                            className="flex gap-4 overflow-x-auto pb-4"
-                            style={{ paddingLeft: 'var(--page-padding, 1rem)', paddingRight: 'var(--page-padding, 1rem)' }}
-                        >
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                             {columns.map((column) => (
-                                <div key={column.id} className="shrink-0 w-72 lg:flex-1 lg:min-w-0">
-                                    <Card className={`${column.bgColor} border ${column.borderColor}`}>
+                                <div key={column.id} className="min-w-0">
+                                    <Card className={`${column.bgColor} border ${column.borderColor} h-full`}>
                                         <CardHeader className="p-3 pb-2">
                                             <CardTitle className={`text-sm font-semibold flex items-center justify-between ${column.color}`}>
                                                 <span>{column.title}</span>
@@ -239,7 +229,7 @@ export function OrdersPage() {
                                                     <div
                                                         ref={provided.innerRef}
                                                         {...provided.droppableProps}
-                                                        className={`kanban-column space-y-3 min-h-100 p-1 rounded-lg transition-colors ${snapshot.isDraggingOver ? 'bg-white/50' : ''
+                                                        className={`kanban-column space-y-3 min-h-[100px] lg:min-h-[calc(100vh-300px)] p-1 rounded-lg transition-colors ${snapshot.isDraggingOver ? 'bg-white/50' : ''
                                                             }`}
                                                     >
                                                         {getOrdersByStatus(column.id).map((order, index) => (
@@ -253,7 +243,7 @@ export function OrdersPage() {
                                                         {provided.placeholder}
 
                                                         {getOrdersByStatus(column.id).length === 0 && (
-                                                            <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">
+                                                            <div className="flex items-center justify-center h-20 lg:h-32 text-muted-foreground text-sm">
                                                                 Không có đơn hàng
                                                             </div>
                                                         )}
