@@ -185,6 +185,13 @@ export function OrderDetailPage() {
 
     const [activeTab, setActiveTab] = useState('detail');
 
+    // Khi đơn chuyển sang Đã hoàn thiện kỹ thuật thì ẩn tab Tiến trình/Quy trình; nếu đang mở tab đó thì chuyển về Chi tiết
+    useEffect(() => {
+        if (order?.status === 'tech_completed' && activeTab === 'workflow') {
+            setActiveTab('detail');
+        }
+    }, [order?.status, activeTab]);
+
     // Kanban logs (lịch sử chuyển trạng thái từng tab)
     const [salesLogs, setSalesLogs] = useState<any[]>([]);
     const [workflowLogs, setWorkflowLogs] = useState<any[]>([]);
@@ -712,10 +719,12 @@ export function OrderDetailPage() {
                                 Lên đơn (Sales)
                             </TabsTrigger>
                         )}
-                        <TabsTrigger value="workflow" className="gap-2 flex-shrink-0">
-                            <Layers className="h-4 w-4" />
-                            Tiến trình / Quy trình
-                        </TabsTrigger>
+                        {order?.status !== 'tech_completed' && (
+                            <TabsTrigger value="workflow" className="gap-2 flex-shrink-0">
+                                <Layers className="h-4 w-4" />
+                                Tiến trình / Quy trình
+                            </TabsTrigger>
+                        )}
                         <TabsTrigger value="aftersale" className="gap-2 flex-shrink-0">
                             <RefreshCcw className="h-4 w-4" />
                             After sale
@@ -1402,7 +1411,8 @@ export function OrderDetailPage() {
                     </TabsContent>
                     )}
 
-                    {/* Tiến trình / Quy trình - Kanban 3 phòng + Chi tiết bước */}
+                    {/* Tiến trình / Quy trình - Kanban 3 phòng + Chi tiết bước (ẩn khi đơn đã hoàn thiện kỹ thuật) */}
+                    {order?.status !== 'tech_completed' && (
                     <TabsContent value="workflow">
                         <Card>
                             <CardHeader>
@@ -1636,6 +1646,7 @@ export function OrderDetailPage() {
                             </CardContent>
                         </Card>
                     </TabsContent>
+                    )}
 
                     {/* After sale – dựa theo WorkflowKanbanBoardPage (C. After-sale) */}
                     <TabsContent value="aftersale">

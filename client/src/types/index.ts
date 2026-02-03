@@ -37,7 +37,7 @@ export interface LeadHistoryItem {
     createdBy: User;
 }
 
-export type OrderStatus = 'pending' | 'confirmed' | 'processing' | 'completed' | 'cancelled' | 'step1' | 'step2' | 'step3' | 'step4' | 'step5';
+export type OrderStatus = 'pending' | 'confirmed' | 'processing' | 'tech_completed' | 'completed' | 'cancelled' | 'step1' | 'step2' | 'step3' | 'step4' | 'step5';
 
 export interface Order {
     id: string;

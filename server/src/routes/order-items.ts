@@ -651,6 +651,39 @@ router.patch('/steps/:stepId/complete', authenticate, async (req: AuthenticatedR
                     })
                     .eq('id', step.order_item_id);
             }
+
+            // Nếu vừa xong hết bước của một item/service, kiểm tra toàn đơn: nếu mọi bước quy trình trong đơn đã xong thì chuyển đơn sang tech_completed
+            let orderId: string | null = null;
+            if (step.order_item_id) {
+                const { data: oi } = await supabaseAdmin.from('order_items').select('order_id').eq('id', step.order_item_id).single();
+                orderId = (oi as { order_id?: string } | null)?.order_id ?? null;
+            } else if (step.order_product_service_id) {
+                const { data: ops } = await supabaseAdmin.from('order_product_services').select('order_product_id').eq('id', step.order_product_service_id).single();
+                const opId = (ops as { order_product_id?: string } | null)?.order_product_id;
+                if (opId) {
+                    const { data: op } = await supabaseAdmin.from('order_products').select('order_id').eq('id', opId).single();
+                    orderId = (op as { order_id?: string } | null)?.order_id ?? null;
+                }
+            }
+            if (orderId) {
+                const { data: stepsV1 } = await supabaseAdmin.from('order_items').select('id').eq('order_id', orderId);
+                const orderItemIds = ((stepsV1 as { id: string }[] | null) || []).map(r => r.id);
+                const { data: orderProducts } = await supabaseAdmin.from('order_products').select('id').eq('order_id', orderId);
+                const opIds = ((orderProducts as { id: string }[] | null) || []).map(r => r.id);
+                const { data: services } = opIds.length ? await supabaseAdmin.from('order_product_services').select('id').in('order_product_id', opIds) : { data: [] };
+                const serviceIds = ((services as { id: string }[] | null) || []).map(r => r.id);
+                const { data: stepsV1Rows } = orderItemIds.length ? await supabaseAdmin.from('order_item_steps').select('id, status').in('order_item_id', orderItemIds) : { data: [] };
+                const { data: stepsV2Rows } = serviceIds.length ? await supabaseAdmin.from('order_item_steps').select('id, status').in('order_product_service_id', serviceIds) : { data: [] };
+                const allOrderSteps = [...((stepsV1Rows as { id: string; status: string }[] | null) || []), ...((stepsV2Rows as { id: string; status: string }[] | null) || [])];
+                const allDone = allOrderSteps.length > 0 && allOrderSteps.every(s => s.status === 'completed' || s.status === 'skipped');
+                if (allDone) {
+                    const { data: ord } = await supabaseAdmin.from('orders').select('status').eq('id', orderId).single();
+                    const currentStatus = (ord as { status?: string } | null)?.status;
+                    if (currentStatus && currentStatus !== 'completed' && currentStatus !== 'cancelled') {
+                        await supabaseAdmin.from('orders').update({ status: 'tech_completed', updated_at: new Date().toISOString() }).eq('id', orderId);
+                    }
+                }
+            }
         } else {
             const nextStepRow = allSteps.find(s => s.status !== 'completed' && s.status !== 'skipped');
             if (nextStepRow) {
@@ -702,6 +735,39 @@ router.patch('/steps/:stepId/skip', authenticate, async (req: AuthenticatedReque
             });
         } catch (logErr) {
             console.error('order_workflow_step_log insert error:', logErr);
+        }
+
+        // Sau khi skip, kiểm tra toàn đơn: nếu mọi bước quy trình đã xong thì chuyển đơn sang tech_completed
+        let orderId: string | null = null;
+        if (step?.order_item_id) {
+            const { data: oi } = await supabaseAdmin.from('order_items').select('order_id').eq('id', step.order_item_id).single();
+            orderId = (oi as { order_id?: string } | null)?.order_id ?? null;
+        } else if (step?.order_product_service_id) {
+            const { data: ops } = await supabaseAdmin.from('order_product_services').select('order_product_id').eq('id', step.order_product_service_id).single();
+            const opId = (ops as { order_product_id?: string } | null)?.order_product_id;
+            if (opId) {
+                const { data: op } = await supabaseAdmin.from('order_products').select('order_id').eq('id', opId).single();
+                orderId = (op as { order_id?: string } | null)?.order_id ?? null;
+            }
+        }
+        if (orderId) {
+            const { data: stepsV1 } = await supabaseAdmin.from('order_items').select('id').eq('order_id', orderId);
+            const orderItemIds = ((stepsV1 as { id: string }[] | null) || []).map(r => r.id);
+            const { data: orderProducts } = await supabaseAdmin.from('order_products').select('id').eq('order_id', orderId);
+            const opIds = ((orderProducts as { id: string }[] | null) || []).map(r => r.id);
+            const { data: services } = opIds.length ? await supabaseAdmin.from('order_product_services').select('id').in('order_product_id', opIds) : { data: [] };
+            const serviceIds = ((services as { id: string }[] | null) || []).map(r => r.id);
+            const { data: stepsV1Rows } = orderItemIds.length ? await supabaseAdmin.from('order_item_steps').select('id, status').in('order_item_id', orderItemIds) : { data: [] };
+            const { data: stepsV2Rows } = serviceIds.length ? await supabaseAdmin.from('order_item_steps').select('id, status').in('order_product_service_id', serviceIds) : { data: [] };
+            const allOrderSteps = [...((stepsV1Rows as { id: string; status: string }[] | null) || []), ...((stepsV2Rows as { id: string; status: string }[] | null) || [])];
+            const allDone = allOrderSteps.length > 0 && allOrderSteps.every(s => s.status === 'completed' || s.status === 'skipped');
+            if (allDone) {
+                const { data: ord } = await supabaseAdmin.from('orders').select('status').eq('id', orderId).single();
+                const currentStatus = (ord as { status?: string } | null)?.status;
+                if (currentStatus && currentStatus !== 'completed' && currentStatus !== 'cancelled') {
+                    await supabaseAdmin.from('orders').update({ status: 'tech_completed', updated_at: new Date().toISOString() }).eq('id', orderId);
+                }
+            }
         }
 
         res.json({

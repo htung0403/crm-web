@@ -1216,7 +1216,7 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
         const { id } = req.params;
         const { status } = req.body;
 
-        const validStatuses = ['pending', 'confirmed', 'processing', 'completed', 'cancelled'];
+        const validStatuses = ['pending', 'confirmed', 'processing', 'tech_completed', 'completed', 'cancelled'];
         if (!validStatuses.includes(status)) {
             throw new ApiError('Trạng thái không hợp lệ', 400);
         }
