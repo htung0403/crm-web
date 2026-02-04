@@ -155,6 +155,7 @@ export const ordersApi = {
         }>;
         paid_amount?: number;
         status?: 'pending' | 'confirmed';
+        due_at?: string;
     }) => api.post<ApiResponse<{ order: any; products: any[] }>>('/orders/v2', data),
 
     update: (id: string, data: any) =>

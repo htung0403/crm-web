@@ -85,7 +85,7 @@ export function CreateWorkflowPage() {
             department_id: '',
             name: '',
             description: '',
-            estimated_duration: 60,
+            estimated_duration: 1, // ngày
             is_required: true,
         }]);
     };
@@ -280,8 +280,10 @@ export function CreateWorkflowPage() {
                                             <p className="text-xs text-gray-500">Số bước</p>
                                         </div>
                                         <div className="bg-gray-50 rounded-lg p-3 text-center">
-                                            <p className="text-2xl font-bold text-primary">{totalDuration}</p>
-                                            <p className="text-xs text-gray-500">Phút</p>
+                                            <p className="text-2xl font-bold text-primary">
+                                                {totalDuration.toFixed(1)}
+                                            </p>
+                                            <p className="text-xs text-gray-500">Ngày</p>
                                         </div>
                                     </div>
                                 </div>
@@ -305,7 +307,7 @@ export function CreateWorkflowPage() {
                                     {formSteps.length > 0 && (
                                         <div className="flex items-center gap-1 text-sm text-gray-500 bg-gray-100 px-3 py-1.5 rounded-full">
                                             <Clock className="h-4 w-4" />
-                                            <span>{totalDuration} phút</span>
+                                            <span>{totalDuration.toFixed(1)} ngày</span>
                                         </div>
                                     )}
                                     <Button onClick={handleAddStep} className="gap-2">
@@ -401,12 +403,17 @@ export function CreateWorkflowPage() {
                                                     <div className="space-y-1.5">
                                                         <Label className="text-xs flex items-center gap-1">
                                                             <Clock className="h-3 w-3" />
-                                                            Thời gian (phút)
+                                                            Thời gian (ngày)
                                                         </Label>
                                                         <Input
                                                             type="number"
+                                                            min={0}
+                                                            step={0.5}
                                                             value={step.estimated_duration}
-                                                            onChange={(e) => handleUpdateStep(index, 'estimated_duration', parseInt(e.target.value) || 0)}
+                                                            onChange={(e) => {
+                                                                const days = parseFloat(e.target.value);
+                                                                handleUpdateStep(index, 'estimated_duration', Number.isNaN(days) || days < 0 ? 0 : days);
+                                                            }}
                                                             className="h-9"
                                                         />
                                                     </div>

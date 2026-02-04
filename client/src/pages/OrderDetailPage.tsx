@@ -185,6 +185,9 @@ export function OrderDetailPage() {
 
     const [activeTab, setActiveTab] = useState('detail');
 
+    // Dialog xem ảnh (bảng chi tiết sản phẩm/dịch vụ)
+    const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+
     // Khi đơn chuyển sang Đã hoàn thiện kỹ thuật thì ẩn tab Tiến trình/Quy trình; nếu đang mở tab đó thì chuyển về Chi tiết
     useEffect(() => {
         if (order?.status === 'tech_completed' && activeTab === 'workflow') {
@@ -383,12 +386,30 @@ export function OrderDetailPage() {
         }
     };
 
-    // SLA display for Kanban Kỹ thuật: còn X ngày / trễ X ngày (from order.due_at)
+    // SLA display: còn X ngày / trễ X ngày (từ thời điểm due)
     const getSLADisplay = (dueAt: string | undefined) => {
         if (!dueAt) return 'N/A';
         const diff = Math.ceil((new Date(dueAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
         return diff < 0 ? `Trễ ${Math.abs(diff)} ngày` : `Còn ${diff} ngày`;
     };
+
+    // Hạn hoàn thành bước dịch vụ: từ started_at + estimated_duration (ngày) của bước hiện tại
+    const getStepDeadlineDisplay = useCallback((itemId: string): { label: string; dueAt: Date | null } => {
+        const steps = allWorkflowSteps.filter((s: any) => s.item_id === itemId || s.order_item_id === itemId || s.order_product_service_id === itemId);
+        const inProgress = steps.find((s: any) => s.status === 'in_progress');
+        const firstPending = steps.find((s: any) => s.status === 'pending' || s.status === 'assigned');
+        const step = inProgress || firstPending;
+        if (!step) return { label: 'N/A', dueAt: null };
+        const days = Number(step.estimated_duration) || 0;
+        const baseAt = step.started_at || order?.confirmed_at || order?.created_at;
+        if (!baseAt || days <= 0) return { label: 'Chưa có hạn', dueAt: null };
+        const base = new Date(baseAt);
+        const dueAt = new Date(base);
+        dueAt.setDate(dueAt.getDate() + days);
+        const diff = Math.ceil((dueAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+        const label = diff < 0 ? `Trễ ${Math.abs(diff)} ngày` : `Còn ${diff} ngày`;
+        return { label, dueAt };
+    }, [allWorkflowSteps, order?.confirmed_at, order?.created_at]);
 
     // Compute current tech room per order item from workflow steps (step_order 1→Phòng Mạ, 2→Dán đế, 3→Phòng Da)
     const getItemCurrentTechRoom = useCallback((itemId: string): 'phong_ma' | 'phong_dan_de' | 'phong_da' => {
@@ -399,6 +420,46 @@ export function OrderDetailPage() {
         const order = step?.step_order ?? 1;
         return getTechRoomByStepOrder(order);
     }, [allWorkflowSteps]);
+
+    // Nhóm theo sản phẩm (product + các dịch vụ) cho Kanban Tiến trình/Quy trình
+    type WorkflowKanbanGroup = { product: OrderItem | null; services: OrderItem[] };
+    const workflowKanbanGroups = React.useMemo((): WorkflowKanbanGroup[] => {
+        const items = order?.items || [];
+        const groups: WorkflowKanbanGroup[] = [];
+        let i = 0;
+        while (i < items.length) {
+            const item = items[i] as OrderItem & { is_v2_product?: boolean };
+            if (item.is_v2_product && item.item_type === 'product') {
+                const services: OrderItem[] = [];
+                let j = i + 1;
+                while (j < items.length) {
+                    const next = items[j] as OrderItem & { is_v2_product?: boolean };
+                    if (next.is_v2_product && next.item_type === 'product') break;
+                    if (next.item_type === 'service' || next.item_type === 'package') services.push(items[j]);
+                    j++;
+                }
+                if (services.length > 0) groups.push({ product: item, services });
+                i = j;
+            } else if (item.item_type === 'service' || item.item_type === 'package') {
+                groups.push({ product: null, services: [item] });
+                i++;
+            } else {
+                i++;
+            }
+        }
+        return groups;
+    }, [order?.items]);
+
+    // Phòng hiện tại của cả nhóm = phòng sớm nhất trong các dịch vụ (trái nhất trên kanban)
+    const getGroupCurrentTechRoom = useCallback((group: WorkflowKanbanGroup): 'phong_ma' | 'phong_dan_de' | 'phong_da' => {
+        let minOrder = 99;
+        for (const svc of group.services) {
+            const roomId = getItemCurrentTechRoom(svc.id);
+            const ro = TECH_ROOMS.find(r => r.id === roomId)?.stepOrder ?? 1;
+            if (ro < minOrder) minOrder = ro;
+        }
+        return (TECH_ROOMS.find(r => r.stepOrder === minOrder) ?? TECH_ROOMS[0]).id;
+    }, [getItemCurrentTechRoom]);
 
     // Current step for an item (in_progress or first pending/assigned) for "Xác nhận hoàn thành bước"
     const getItemCurrentStep = useCallback((itemId: string): { id: string; step_name: string; status: string } | null => {
@@ -803,10 +864,10 @@ export function OrderDetailPage() {
                                         </CardHeader>
                                         <CardContent className="p-0">
                                             <div className="overflow-x-auto">
-                                                <table className="w-full text-sm">
+                                                <table className="w-full text-sm table-fixed">
                                                     <thead className="bg-muted/50">
                                                         <tr>
-                                                            <th className="text-left p-4 font-medium w-16">Ảnh</th>
+                                                            <th className="text-left p-4 font-medium w-[72px] min-w-[72px]">Ảnh</th>
                                                             <th className="text-left p-4 font-medium">Loại</th>
                                                             <th className="text-left p-4 font-medium">Tên</th>
                                                             <th className="text-center p-4 font-medium">SL</th>
@@ -822,11 +883,17 @@ export function OrderDetailPage() {
                                                                 return (
                                                                     <React.Fragment key={gi}>
                                                                         <tr className="bg-muted/20 hover:bg-muted/30 border-l-2 border-l-primary">
-                                                                            <td className="p-4 align-top">
+                                                                            <td className="p-4 align-top w-[72px]">
                                                                                 {(product.product?.image || (product as any).product?.image) ? (
-                                                                                    <img src={(product.product?.image || (product as any).product?.image) as string} alt={product.item_name} className="w-12 h-12 rounded-lg object-cover border" />
+                                                                                    <button
+                                                                                        type="button"
+                                                                                        onClick={() => setImagePreviewUrl((product.product?.image || (product as any).product?.image) as string)}
+                                                                                        className="w-12 h-12 shrink-0 rounded-lg overflow-hidden border bg-muted flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
+                                                                                    >
+                                                                                        <img src={(product.product?.image || (product as any).product?.image) as string} alt={product.item_name} className="w-full h-full object-contain" />
+                                                                                    </button>
                                                                                 ) : (
-                                                                                    <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center">
+                                                                                    <div className="w-12 h-12 shrink-0 rounded-lg bg-muted flex items-center justify-center">
                                                                                         <ShoppingBag className="h-5 w-5 text-muted-foreground" />
                                                                                     </div>
                                                                                 )}
@@ -845,11 +912,17 @@ export function OrderDetailPage() {
                                                                         </tr>
                                                                         {group.services.map((svc, si) => (
                                                                             <tr key={`${gi}-s-${si}`} className="hover:bg-muted/30">
-                                                                                <td className="p-4 pl-8 w-16">
+                                                                                <td className="p-4 pl-8 w-[72px]">
                                                                                     {(svc.service?.image || svc.product?.image || (svc as any).product?.image) ? (
-                                                                                        <img src={(svc.service?.image || svc.product?.image || (svc as any).product?.image) as string} alt={svc.item_name} className="w-10 h-10 rounded-lg object-cover border" />
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() => setImagePreviewUrl((svc.service?.image || svc.product?.image || (svc as any).product?.image) as string)}
+                                                                                            className="w-10 h-10 shrink-0 rounded-lg overflow-hidden border bg-muted flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
+                                                                                        >
+                                                                                            <img src={(svc.service?.image || svc.product?.image || (svc as any).product?.image) as string} alt={svc.item_name} className="w-full h-full object-contain" />
+                                                                                        </button>
                                                                                     ) : (
-                                                                                        <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
+                                                                                        <div className="w-10 h-10 shrink-0 rounded-lg bg-muted flex items-center justify-center">
                                                                                             <Wrench className="h-4 w-4 text-muted-foreground" />
                                                                                         </div>
                                                                                     )}
@@ -871,11 +944,17 @@ export function OrderDetailPage() {
                                                             const item = group.services[0];
                                                             return (
                                                                 <tr key={gi} className="hover:bg-muted/30">
-                                                                    <td className="p-4">
+                                                                    <td className="p-4 w-[72px]">
                                                                         {(item.product?.image || item.service?.image) ? (
-                                                                            <img src={item.product?.image || item.service?.image as string} alt={item.item_name} className="w-12 h-12 rounded-lg object-cover border" />
+                                                                            <button
+                                                                                type="button"
+                                                                                onClick={() => setImagePreviewUrl((item.product?.image || item.service?.image) as string)}
+                                                                                className="w-12 h-12 shrink-0 rounded-lg overflow-hidden border bg-muted flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
+                                                                            >
+                                                                                <img src={item.product?.image || item.service?.image as string} alt={item.item_name} className="w-full h-full object-contain" />
+                                                                            </button>
                                                                         ) : (
-                                                                            <div className="w-12 h-12 rounded-lg bg-muted flex items-center justify-center">
+                                                                            <div className="w-12 h-12 shrink-0 rounded-lg bg-muted flex items-center justify-center">
                                                                                 {item.item_type === 'product' ? <ShoppingBag className="h-5 w-5 text-muted-foreground" /> :
                                                                                     item.item_type === 'service' ? <Wrench className="h-5 w-5 text-muted-foreground" /> :
                                                                                         item.item_type === 'package' ? <Gift className="h-5 w-5 text-muted-foreground" /> :
@@ -902,6 +981,26 @@ export function OrderDetailPage() {
                                     </Card>
                                     );
                                 })()}
+
+                                {/* Dialog xem ảnh sản phẩm/dịch vụ */}
+                                <Dialog open={!!imagePreviewUrl} onOpenChange={(open) => !open && setImagePreviewUrl(null)}>
+                                    <DialogContent className="max-w-4xl p-0 overflow-hidden">
+                                        <div className="relative">
+                                            {imagePreviewUrl && (
+                                                <img src={imagePreviewUrl} alt="Xem ảnh" className="w-full h-auto max-h-[85vh] object-contain" />
+                                            )}
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="icon"
+                                                className="absolute top-2 right-2 rounded-full bg-black/50 hover:bg-black/70 text-white"
+                                                onClick={() => setImagePreviewUrl(null)}
+                                            >
+                                                <X className="h-5 w-5" />
+                                            </Button>
+                                        </div>
+                                    </DialogContent>
+                                </Dialog>
 
                                 {/* Notes */}
                                 {order.notes && (
@@ -1437,15 +1536,10 @@ export function OrderDetailPage() {
                                     </div>
                                 ) : (
                                     <div className="pb-4">
-                                        {/* 3 cột cố định: Phòng Mạ, Phòng Dán đế, Phòng Da */}
+                                        {/* 3 cột cố định: Phòng Mạ, Phòng Dán đế, Phòng Da — Card chủ thể = Sản phẩm, trên cùng tên SP, dưới là các dịch vụ + còn X ngày hết hạn */}
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 overflow-x-auto">
                                             {TECH_ROOMS.map((room) => {
-                                                const itemsInRoom = (order?.items || []).filter((item: OrderItem) => {
-                                                    // Chỉ hiển thị dịch vụ (service / package), không hiển thị sản phẩm
-                                                    if (item.item_type !== 'service' && item.item_type !== 'package') return false;
-                                                    const roomId = getItemCurrentTechRoom(item.id);
-                                                    return roomId === room.id;
-                                                });
+                                                const groupsInRoom = workflowKanbanGroups.filter((g) => getGroupCurrentTechRoom(g) === room.id);
                                                 return (
                                                     <div key={room.id} className="flex flex-col min-w-[280px]">
                                                         <div className="flex justify-between items-center mb-4 px-2">
@@ -1453,31 +1547,55 @@ export function OrderDetailPage() {
                                                                 {room.title}
                                                             </h2>
                                                             <span className="bg-gray-200 text-gray-700 text-xs px-2.5 py-1 rounded-full">
-                                                                {itemsInRoom.length}
+                                                                {groupsInRoom.length}
                                                             </span>
                                                         </div>
                                                         <div className="min-h-[200px] bg-gray-100 p-2 rounded-xl flex-1 border-2 border-dashed border-transparent transition-colors">
-                                                            {itemsInRoom.map((item: OrderItem) => {
-                                                                const slaLabel = getSLADisplay(order?.due_at);
+                                                            {groupsInRoom.map((group, gIdx) => {
+                                                                const productName = group.product?.item_name ?? group.services[0]?.item_name ?? '—';
+                                                                const productType = (group.product as any)?.product_type ?? (group.services[0] as any)?.product_type;
+                                                                const productTypeLabel = getCustomerProductTypeLabel(productType);
+                                                                const leadItem = group.services.find((s) => getItemCurrentStep(s.id)) ?? group.services[0];
+                                                                const stepDeadline = leadItem ? getStepDeadlineDisplay(leadItem.id) : { label: 'N/A', dueAt: null };
                                                                 const saleName = order?.sales_user?.name || 'N/A';
-                                                                const techName = (item.technician as { name?: string })?.name || (item as any).technician?.name || 'N/A';
-                                                                const itemLate = order?.due_at ? new Date(order.due_at) < new Date() : false;
-                                                                const currentStep = getItemCurrentStep(item.id);
+                                                                const techName = (leadItem?.technician as { name?: string })?.name ?? (leadItem as any)?.technician?.name ?? 'N/A';
+                                                                const itemLate = stepDeadline.dueAt ? stepDeadline.dueAt < new Date() : false;
+                                                                const currentStep = leadItem ? getItemCurrentStep(leadItem.id) : null;
                                                                 const canCompleteStep = currentStep && (currentStep.status === 'in_progress' || currentStep.status === 'assigned');
+                                                                const cardKey = group.product?.id ?? group.services.map((s) => s.id).join('-');
                                                                 return (
                                                                     <div
-                                                                        key={item.id}
+                                                                        key={cardKey}
                                                                         className={cn(
                                                                             "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all",
                                                                             itemLate ? "border-red-500 bg-red-50/30" : "border-blue-400"
                                                                         )}
                                                                     >
-                                                                        <div className="flex justify-between items-start mb-2">
-                                                                            <span className="text-xs font-semibold text-gray-400">#{order?.order_code || item.id?.slice(0, 8)}</span>
+                                                                        <div className="flex justify-between items-start mb-1">
+                                                                            <span className="text-xs font-semibold text-gray-400">#{order?.order_code ?? cardKey?.slice(0, 8)}</span>
                                                                         </div>
-                                                                        <h3 className="font-bold text-gray-800 text-sm truncate">{item.item_name}</h3>
-                                                                        <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
-                                                                            <span>SLA: {slaLabel}</span>
+                                                                        {/* Trên cùng: Loại (trong ngoặc) + Sản phẩm */}
+                                                                        <h3 className="font-bold text-gray-800 text-sm flex items-center gap-1.5 flex-wrap">
+                                                                            <ShoppingBag className="h-4 w-4 shrink-0 text-primary" />
+                                                                            {productTypeLabel && productTypeLabel !== 'Sản phẩm của khách' ? (
+                                                                                <span className="truncate"><span className="text-muted-foreground font-medium">({productTypeLabel})</span> {productName}</span>
+                                                                            ) : (
+                                                                                <span className="truncate">{productName}</span>
+                                                                            )}
+                                                                        </h3>
+                                                                        {/* Bên dưới: Các dịch vụ cần làm cho sản phẩm */}
+                                                                        <ul className="mt-2 space-y-0.5 pl-5 text-xs text-muted-foreground">
+                                                                            {group.services.map((svc) => (
+                                                                                <li key={svc.id} className="flex items-center gap-1.5 truncate">
+                                                                                    <Wrench className="h-3 w-3 shrink-0 text-gray-400" />
+                                                                                    <span className="truncate">{svc.item_name}{svc.quantity > 1 ? ` (${svc.quantity})` : ''}</span>
+                                                                                </li>
+                                                                            ))}
+                                                                        </ul>
+                                                                        {/* Hạn hoàn thành bước dịch vụ (từ started_at + estimated_duration) */}
+                                                                        <div className="mt-2 flex items-center justify-between text-xs">
+                                                                            <span className="font-medium text-gray-600">Hết hạn bước:</span>
+                                                                            <span className={cn("font-semibold", itemLate ? "text-red-600" : stepDeadline.dueAt ? "text-emerald-600" : "text-gray-500")}>{stepDeadline.label}</span>
                                                                         </div>
                                                                         <div className="mt-2 flex items-center gap-1.5 text-xs text-gray-500">
                                                                             <UserIcon className="h-4 w-4 shrink-0" />
@@ -1487,7 +1605,6 @@ export function OrderDetailPage() {
                                                                             <Wrench className="h-4 w-4 shrink-0" />
                                                                             <span className="truncate">KT: {techName}</span>
                                                                         </div>
-                                                                        {/* Bước hiện tại + Xác nhận hoàn thành bước */}
                                                                         {currentStep && (
                                                                             <div className="mt-2 pt-2 border-t border-gray-100">
                                                                                 <p className="text-xs text-muted-foreground">Bước: {currentStep.step_name}</p>
@@ -1505,35 +1622,34 @@ export function OrderDetailPage() {
                                                                                 )}
                                                                             </div>
                                                                         )}
-                                                                        {/* Yêu cầu: Mua phụ kiện, Gửi Đối Tác, Xin gia hạn — rõ ràng, dễ chú ý */}
                                                                         <div className="mt-3 pt-2 border-t border-gray-200">
                                                                             <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Yêu cầu</p>
                                                                             <div className="flex flex-wrap gap-2">
                                                                                 <button
                                                                                     type="button"
-                                                                                    onClick={() => handleOpenAccessory(item)}
+                                                                                    onClick={() => leadItem && handleOpenAccessory(leadItem)}
                                                                                     className={cn(
                                                                                         'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-all shadow-sm',
-                                                                                        (item as any).accessory?.status
+                                                                                        (leadItem as any)?.accessory?.status
                                                                                             ? 'bg-blue-600 text-white hover:bg-blue-700'
                                                                                             : 'bg-blue-50 text-blue-700 border border-blue-300 hover:bg-blue-100'
                                                                                     )}
                                                                                 >
                                                                                     <Package className="h-4 w-4 shrink-0" />
-                                                                                    <span>{(item as any).accessory?.status ? ACCESSORY_LABELS[(item as any).accessory.status] ?? (item as any).accessory.status : 'Mua phụ kiện'}</span>
+                                                                                    <span>{(leadItem as any)?.accessory?.status ? ACCESSORY_LABELS[(leadItem as any).accessory.status] ?? (leadItem as any).accessory.status : 'Mua phụ kiện'}</span>
                                                                                 </button>
                                                                                 <button
                                                                                     type="button"
-                                                                                    onClick={() => handleOpenPartner(item)}
+                                                                                    onClick={() => leadItem && handleOpenPartner(leadItem)}
                                                                                     className={cn(
                                                                                         'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-all shadow-sm',
-                                                                                        (item as any).partner?.status
+                                                                                        (leadItem as any)?.partner?.status
                                                                                             ? 'bg-amber-600 text-white hover:bg-amber-700'
                                                                                             : 'bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100'
                                                                                     )}
                                                                                 >
                                                                                     <Truck className="h-4 w-4 shrink-0" />
-                                                                                    <span>{(item as any).partner?.status ? PARTNER_LABELS[(item as any).partner.status] ?? (item as any).partner.status : 'Gửi Đối Tác'}</span>
+                                                                                    <span>{(leadItem as any)?.partner?.status ? PARTNER_LABELS[(leadItem as any).partner.status] ?? (leadItem as any).partner.status : 'Gửi Đối Tác'}</span>
                                                                                 </button>
                                                                                 <button
                                                                                     type="button"
@@ -1553,7 +1669,7 @@ export function OrderDetailPage() {
                                                                     </div>
                                                                 );
                                                             })}
-                                                            {itemsInRoom.length === 0 && (
+                                                            {groupsInRoom.length === 0 && (
                                                                 <div className="flex items-center justify-center h-20 text-muted-foreground text-sm">
                                                                     Không có dịch vụ
                                                                 </div>

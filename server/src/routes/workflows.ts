@@ -152,7 +152,7 @@ router.post('/', async (req: Request, res: Response, next: NextFunction): Promis
                 step_order: index + 1,
                 name: step.name || null,
                 description: step.description || null,
-                estimated_duration: step.estimated_duration || 60,
+                estimated_duration: step.estimated_duration ?? 1,
                 is_required: step.is_required !== false
             }));
 
@@ -237,7 +237,7 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction): Prom
                     step_order: index + 1,
                     name: step.name || null,
                     description: step.description || null,
-                    estimated_duration: step.estimated_duration || 60,
+                    estimated_duration: step.estimated_duration ?? 1,
                     is_required: step.is_required !== false
                 }));
 
@@ -344,7 +344,7 @@ router.post('/:id/steps', async (req: Request, res: Response, next: NextFunction
                 step_order: nextOrder,
                 name: name || null,
                 description: description || null,
-                estimated_duration: estimated_duration || 60,
+                estimated_duration: estimated_duration ?? 1,
                 is_required: is_required !== false
             })
             .select(`
@@ -409,7 +409,7 @@ router.put('/:id/steps/:stepId', async (req: Request, res: Response, next: NextF
         if (department_id !== undefined) updateData.department_id = department_id;
         if (name !== undefined) updateData.name = name;
         if (description !== undefined) updateData.description = description;
-        if (estimated_duration !== undefined) updateData.estimated_duration = estimated_duration;
+        if (estimated_duration !== undefined) updateData.estimated_duration = Number(estimated_duration);
         if (is_required !== undefined) updateData.is_required = is_required;
 
         const { data, error } = await supabase

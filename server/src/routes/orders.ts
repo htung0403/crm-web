@@ -104,7 +104,13 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                     *,
                     customer:customers(id, name, phone, email),
                     sales_user:users!orders_sales_id_fkey(id, name),
-                    items:order_items(id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id)
+                    items:order_items(
+                        id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id,
+                        product:products(id, image, code),
+                        service:services(id, image, code),
+                        technician:users!order_product_services_technician_id_fkey(id, name),
+                        order_item_steps(id, started_at, estimated_duration, status, step_order)
+                    )
                 `, { count: 'exact' })
                 .in('id', orderIds)
                 .order('created_at', { ascending: false })
@@ -112,6 +118,97 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
 
             if (error) {
                 throw new ApiError('Lỗi khi lấy danh sách đơn hàng', 500);
+            }
+
+            // Merge V2 order_products into items for each order
+            const orderIdsList = (orders || []).map((o: { id: string }) => o.id);
+            if (orderIdsList.length > 0) {
+                const { data: v2Products } = await supabaseAdmin
+                    .from('order_products')
+                    .select(`
+                        id, order_id, product_code, name, type, images, status,
+                        services:order_product_services(
+                            id, item_name, item_type, unit_price, technician_id,
+                            service:services(id, image, code),
+                            technician:users(id, name),
+                            order_item_steps(id, started_at, estimated_duration, status, step_order)
+                        )
+                    `)
+                    .in('order_id', orderIdsList);
+
+                const allServiceIds: string[] = [];
+                for (const p of v2Products || []) {
+                    for (const s of p.services || []) {
+                        if (s?.id) allServiceIds.push(s.id);
+                    }
+                }
+                let techniciansByService: Record<string, Array<{ technician_id: string; technician: { id: string; name: string } }>> = {};
+                if (allServiceIds.length > 0) {
+                    const { data: techRows } = await supabaseAdmin
+                        .from('order_product_service_technicians')
+                        .select('order_product_service_id, technician_id, technician:users!order_product_service_technicians_technician_id_fkey(id, name)')
+                        .in('order_product_service_id', allServiceIds);
+                    for (const row of techRows || []) {
+                        const svcId = (row as any).order_product_service_id;
+                        const tech = (row as any).technician;
+                        if (!techniciansByService[svcId]) techniciansByService[svcId] = [];
+                        techniciansByService[svcId].push({
+                            technician_id: (row as any).technician_id,
+                            technician: tech ? { id: tech.id, name: tech.name } : { id: (row as any).technician_id, name: 'N/A' },
+                        });
+                    }
+                }
+
+                for (const order of orders || []) {
+                    const opList = (v2Products || []).filter((p: { order_id: string }) => p.order_id === order.id);
+                    if (opList.length > 0) {
+                        const v2Items: any[] = [];
+                        for (const product of opList) {
+                            v2Items.push({
+                                id: product.id,
+                                order_id: order.id,
+                                item_name: product.name,
+                                item_type: 'product',
+                                quantity: 1,
+                                unit_price: 0,
+                                total_price: 0,
+                                status: product.status || 'pending',
+                                item_code: product.product_code,
+                                product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
+                                is_v2_product: true,
+                            });
+                            if (product.services?.length) {
+                                for (const s of product.services as any[]) {
+                                    const svc = s.service;
+                                    const techList = techniciansByService[s.id] || [];
+                                    const tech = s.technician || (techList[0]?.technician);
+                                    const techListFinal = techList.length > 0
+                                        ? techList
+                                        : tech ? [{ technician_id: tech.id, technician: { id: tech.id, name: tech.name } }] : [];
+                                    v2Items.push({
+                                        id: s.id,
+                                        order_id: order.id,
+                                        item_name: `${s.item_name} (${product.name})`,
+                                        item_type: s.item_type,
+                                        quantity: 1,
+                                        unit_price: s.unit_price,
+                                        total_price: s.unit_price,
+                                        status: s.status,
+                                        technician_id: s.technician_id,
+                                        technician: tech ? { id: tech.id, name: tech.name } : null,
+                                        technicians: techListFinal.length ? techListFinal : undefined,
+                                        service: svc ? { id: svc.id, image: svc.image, code: svc.code } : null,
+                                        package: s.package,
+                                        product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
+                                        is_v2_product: true,
+                                        order_item_steps: s.order_item_steps || [],
+                                    });
+                                }
+                            }
+                        }
+                        order.items = [...(order.items || []), ...v2Items];
+                    }
+                }
             }
 
             return res.json({
@@ -134,7 +231,13 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
         *,
         customer:customers(id, name, phone, email),
         sales_user:users!orders_sales_id_fkey(id, name),
-        items:order_items(id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id)
+        items:order_items(
+            id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id,
+            product:products(id, image, code),
+            service:services(id, image, code),
+            technician:users!order_items_technician_id_fkey(id, name),
+            order_item_steps(id, started_at, estimated_duration, status, step_order)
+        )
       `, { count: 'exact' })
             .order('created_at', { ascending: false })
             .range(offset, offset + Number(limit) - 1);
@@ -148,6 +251,98 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
 
         if (error) {
             throw new ApiError('Lỗi khi lấy danh sách đơn hàng', 500);
+        }
+
+        // Merge V2 order_products into items for each order
+        const orderIdsList = (orders || []).map((o: { id: string }) => o.id);
+        if (orderIdsList.length > 0) {
+            const { data: v2Products } = await supabaseAdmin
+                .from('order_products')
+                .select(`
+                    id, order_id, product_code, name, type, images, status,
+                    services:order_product_services(
+                        id, item_name, item_type, unit_price, technician_id,
+                        service:services(id, image, code),
+                        technician:users(id, name),
+                        order_item_steps(id, started_at, estimated_duration, status, step_order)
+                    )
+                `)
+                .in('order_id', orderIdsList);
+
+            // Fetch all technicians from order_product_service_technicians (separate query - reliable)
+            const allServiceIds: string[] = [];
+            for (const p of v2Products || []) {
+                for (const s of p.services || []) {
+                    if (s?.id) allServiceIds.push(s.id);
+                }
+            }
+            let techniciansByService: Record<string, Array<{ technician_id: string; technician: { id: string; name: string } }>> = {};
+            if (allServiceIds.length > 0) {
+                const { data: techRows } = await supabaseAdmin
+                    .from('order_product_service_technicians')
+                    .select('order_product_service_id, technician_id, technician:users!order_product_service_technicians_technician_id_fkey(id, name)')
+                    .in('order_product_service_id', allServiceIds);
+                for (const row of techRows || []) {
+                    const svcId = (row as any).order_product_service_id;
+                    const tech = (row as any).technician;
+                    if (!techniciansByService[svcId]) techniciansByService[svcId] = [];
+                    techniciansByService[svcId].push({
+                        technician_id: (row as any).technician_id,
+                        technician: tech ? { id: tech.id, name: tech.name } : { id: (row as any).technician_id, name: 'N/A' },
+                    });
+                }
+            }
+
+            for (const order of orders || []) {
+                const opList = (v2Products || []).filter((p: { order_id: string }) => p.order_id === order.id);
+                if (opList.length > 0) {
+                    const v2Items: any[] = [];
+                    for (const product of opList) {
+                        v2Items.push({
+                            id: product.id,
+                            order_id: order.id,
+                            item_name: product.name,
+                            item_type: 'product',
+                            quantity: 1,
+                            unit_price: 0,
+                            total_price: 0,
+                            status: product.status || 'pending',
+                            item_code: product.product_code,
+                            product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
+                            is_v2_product: true,
+                        });
+                        if (product.services?.length) {
+                            for (const s of product.services as any[]) {
+                                const svc = s.service;
+                                const techList = techniciansByService[s.id] || [];
+                                const tech = s.technician || (techList[0]?.technician);
+                                const techListFinal = techList.length > 0
+                                    ? techList
+                                    : tech ? [{ technician_id: tech.id, technician: { id: tech.id, name: tech.name } }] : [];
+                                v2Items.push({
+                                    id: s.id,
+                                    order_id: order.id,
+                                    item_name: `${s.item_name} (${product.name})`,
+                                    item_type: s.item_type,
+                                    quantity: 1,
+                                    unit_price: s.unit_price,
+                                    total_price: s.unit_price,
+                                    status: s.status,
+                                    technician_id: s.technician_id,
+                                    technician: tech ? { id: tech.id, name: tech.name } : null,
+                                    technicians: techListFinal.length ? techListFinal : undefined,
+                                    service: svc ? { id: svc.id, image: svc.image, code: svc.code } : null,
+                                    package: s.package,
+                                    product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
+                                    is_v2_product: true,
+                                    order_item_steps: s.order_item_steps || [],
+                                });
+                            }
+                        }
+                    }
+                    order.items = [...(order.items || []), ...v2Items];
+                }
+            }
         }
 
         res.json({
@@ -644,7 +839,7 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
 // Create order with customer products (shoes, bags, etc.)
 router.post('/v2', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { customer_id, products, add_on_products, notes, discount, discount_type, discount_value, surcharges, paid_amount, status } = req.body;
+        const { customer_id, products, add_on_products, notes, discount, discount_type, discount_value, surcharges, paid_amount, status, due_at } = req.body;
 
         if (!customer_id || !products || products.length === 0) {
             throw new ApiError('Khách hàng và sản phẩm là bắt buộc', 400);
@@ -711,6 +906,7 @@ router.post('/v2', authenticate, requireSale, async (req: AuthenticatedRequest, 
                 payment_status: remainingDebt <= 0 ? 'paid' : (paidAmountValue > 0 ? 'partial' : 'unpaid'),
                 status: status || 'pending',
                 notes,
+                due_at: due_at || null,
                 created_by: req.user!.id,
             })
             .select()

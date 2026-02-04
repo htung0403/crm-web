@@ -14,9 +14,7 @@ import {
     ArrowLeft,
     Loader2,
     AlertCircle,
-    QrCode,
-    Pause,
-    StopCircle
+    ListTodo,
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -266,7 +264,7 @@ export function TaskQRPage() {
             const response = await api.get(`/technician-tasks/by-code/${code}`);
             setTask(response.data);
         } catch (err: any) {
-            setError(err.response?.data?.message || 'Không tìm thấy mã QR này');
+            setError(err.response?.data?.message || 'Không tìm thấy công việc');
         } finally {
             setLoading(false);
         }
@@ -410,11 +408,11 @@ export function TaskQRPage() {
                     <CardContent className="p-6 text-center">
                         <AlertCircle className="h-16 w-16 text-red-500 mx-auto mb-4" />
                         <h2 className="text-xl font-bold mb-2">Không tìm thấy</h2>
-                        <p className="text-muted-foreground mb-4">{error || 'Mã QR không hợp lệ hoặc đã hết hạn'}</p>
+                        <p className="text-muted-foreground mb-4">{error || 'Không tìm thấy công việc'}</p>
                         <div className="flex gap-2">
-                            <Button onClick={() => navigate('/scan')} className="flex-1 gap-2">
-                                <QrCode className="h-4 w-4" />
-                                Quét lại
+                            <Button onClick={() => navigate('/tasks')} className="flex-1 gap-2">
+                                <ListTodo className="h-4 w-4" />
+                                Làm dịch vụ khác
                             </Button>
                             <Button variant="outline" onClick={() => navigate(-1)} className="flex-1 gap-2">
                                 <ArrowLeft className="h-4 w-4" />
@@ -473,7 +471,7 @@ export function TaskQRPage() {
                             </Button>
                             <div className="flex-1">
                                 <div className="flex items-center gap-2">
-                                    <QrCode className="h-5 w-5 text-primary" />
+                                    <Package className="h-5 w-5 text-primary" />
                                     <span className="font-mono text-sm text-muted-foreground">{task.item_code}</span>
                                 </div>
                                 {task.task_code && (
@@ -786,14 +784,14 @@ export function TaskQRPage() {
                         </Card>
                     )}
 
-                    {/* Scan another QR button */}
+                    {/* Làm dịch vụ khác - về trang tasks */}
                     <Button
                         variant="outline"
                         className="w-full gap-2"
-                        onClick={() => navigate('/scan')}
+                        onClick={() => navigate('/tasks')}
                     >
-                        <QrCode className="h-4 w-4" />
-                        Quét mã QR khác
+                        <ListTodo className="h-4 w-4" />
+                        Làm dịch vụ khác
                     </Button>
                 </div>
             </div>

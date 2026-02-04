@@ -24,7 +24,7 @@ interface WorkflowStep {
     };
     started_at?: string;
     completed_at?: string;
-    estimated_duration?: number; // minutes
+    estimated_duration?: number; // ngày
 }
 
 interface WorkflowStepsTimelineProps {

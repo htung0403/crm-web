@@ -8,6 +8,7 @@ export { PaymentDialog } from './PaymentDialog';
 export {
     columns,
     calculateSLAProgress,
+    getRoomDeadlineDisplay,
     getItemTypeLabel,
     getItemTypeColor,
     type KanbanColumn,

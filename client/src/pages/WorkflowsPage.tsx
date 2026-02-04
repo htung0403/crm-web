@@ -219,9 +219,10 @@ export function WorkflowsPage() {
                                 <Badge variant={workflow.status === 'active' ? 'default' : 'secondary'}>
                                     {workflow.status === 'active' ? 'Đang dùng' : 'Tạm dừng'}
                                 </Badge>
-                                <div className="flex items-center gap-1 text-xs text-gray-500">
+                                <div className="flex items-center gap-1 text-xs text-gray-500" title="Hạn hoàn thành dịch vụ">
                                     <Clock className="h-3 w-3" />
-                                    {workflow.steps.reduce((sum, s) => sum + s.estimated_duration, 0)} phút
+                                    <span>Hạn hoàn thành dịch vụ:</span>
+                                    {(workflow.steps.reduce((sum, s) => sum + Number(s.estimated_duration), 0)).toFixed(1)} ngày
                                 </div>
                             </div>
                         </div>

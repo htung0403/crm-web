@@ -81,12 +81,12 @@ export function CreateServicePage() {
         setFormData(prev => {
             const updates: any = { workflow_id: workflowId };
 
-            // Auto-fill duration from workflow
+            // Auto-fill duration from workflow (quy trình lưu ngày → đổi sang phút cho thời lượng dịch vụ)
             if (workflowId) {
                 const workflow = workflows.find(w => w.id === workflowId);
                 if (workflow && workflow.steps.length > 0) {
-                    const totalMinutes = workflow.steps.reduce((sum, s) => sum + s.estimated_duration, 0);
-                    updates.duration = totalMinutes;
+                    const totalDays = workflow.steps.reduce((sum, s) => sum + Number(s.estimated_duration), 0);
+                    updates.duration = Math.round(totalDays * 1440);
                 }
             }
 
@@ -275,13 +275,13 @@ export function CreateServicePage() {
                                             <span className="text-muted-foreground">Không áp dụng quy trình</span>
                                         </SelectItem>
                                         {activeWorkflows.map(workflow => {
-                                            const totalMinutes = workflow.steps.reduce((sum, s) => sum + s.estimated_duration, 0);
+                                            const totalDays = workflow.steps.reduce((sum, s) => sum + Number(s.estimated_duration), 0);
                                             return (
                                                 <SelectItem key={workflow.id} value={workflow.id}>
                                                     <div className="flex items-center gap-2">
                                                         <span>{workflow.name}</span>
                                                         <Badge variant="secondary" className="text-xs">
-                                                            {workflow.steps.length} bước
+                                                            {workflow.steps.length} bước, {totalDays.toFixed(1)} ngày
                                                         </Badge>
                                                     </div>
                                                 </SelectItem>
@@ -307,8 +307,8 @@ export function CreateServicePage() {
                                             <p className="text-xs text-muted-foreground mt-1">Bước thực hiện</p>
                                         </div>
                                         <div className="bg-primary/5 rounded-xl p-4 text-center border border-primary/10">
-                                            <p className="text-3xl font-bold text-primary">{formData.duration}</p>
-                                            <p className="text-xs text-muted-foreground mt-1">Phút ước tính</p>
+                                            <p className="text-3xl font-bold text-primary">{(formData.duration / 1440).toFixed(1)}</p>
+                                            <p className="text-xs text-muted-foreground mt-1">Ngày ước tính (từ quy trình)</p>
                                         </div>
                                     </div>
                                 </div>
@@ -394,7 +394,7 @@ export function CreateServicePage() {
                                                         </div>
                                                         <Badge variant="secondary" className="gap-1 px-2.5 py-1">
                                                             <Clock className="h-3.5 w-3.5" />
-                                                            {step.estimated_duration} phút
+                                                            {Number(step.estimated_duration)} ngày
                                                         </Badge>
                                                     </div>
                                                     {step.description && (
@@ -412,7 +412,7 @@ export function CreateServicePage() {
                                         <span className="text-sm text-muted-foreground">Tổng thời gian thực hiện:</span>
                                         <Badge className="gap-1.5 px-3 py-1.5 text-sm">
                                             <Clock className="h-4 w-4" />
-                                            {selectedWorkflow.steps.reduce((sum, s) => sum + s.estimated_duration, 0)} phút
+                                            {selectedWorkflow.steps.reduce((sum, s) => sum + Number(s.estimated_duration), 0).toFixed(1)} ngày
                                         </Badge>
                                     </div>
                                 </div>

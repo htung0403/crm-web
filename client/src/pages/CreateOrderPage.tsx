@@ -5,7 +5,7 @@ import {
     ArrowLeft, ArrowRight, Plus, Trash2, Camera, Package, Sparkles,
     Loader2, User, Search, CheckCircle, ShoppingBag, QrCode, Image as ImageIcon,
     Tag, Palette, Layers, FileText, Check, Wrench, UserCheck, X, UserPlus,
-    Percent, DollarSign, ChevronDown, CreditCard
+    Percent, DollarSign, ChevronDown, CreditCard, Calendar
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Button } from '@/components/ui/button';
@@ -24,6 +24,7 @@ import { usePackages } from '@/hooks/usePackages';
 import { useUsers } from '@/hooks/useUsers';
 import { ordersApi } from '@/lib/api';
 import { CreateCustomerDialog } from '@/components/customers/CreateCustomerDialog';
+import { ImageUpload } from '@/components/products/ImageUpload';
 import { useAuth } from '@/contexts/AuthContext';
 
 // Product types for cleaning services
@@ -111,6 +112,7 @@ export function CreateOrderPage() {
     const [discountType, setDiscountType] = useState<'amount' | 'percent'>('amount');
     const [surcharges, setSurcharges] = useState<Surcharge[]>([]);
     const [paidAmount, setPaidAmount] = useState(0);
+    const [dueAt, setDueAt] = useState<string>('');
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [createdOrder, setCreatedOrder] = useState<any>(null);
@@ -639,7 +641,8 @@ export function CreateOrderPage() {
                     is_percent: s.isPercent,
                     amount: s.isPercent ? Math.round(subtotal * s.value / 100) : s.value
                 })) : undefined,
-                paid_amount: paidAmount > 0 ? paidAmount : undefined
+                paid_amount: paidAmount > 0 ? paidAmount : undefined,
+                due_at: dueAt ? new Date(dueAt + 'T17:00:00').toISOString() : undefined
             });
 
             setCreatedOrder(response.data.data);
@@ -981,6 +984,16 @@ export function CreateOrderPage() {
                                                         value={product.condition_before}
                                                         onChange={(e) => handleUpdateProduct(index, 'condition_before', e.target.value)}
                                                         rows={2}
+                                                    />
+                                                </div>
+
+                                                <div className="space-y-2">
+                                                    <Label>Ảnh sản phẩm</Label>
+                                                    <ImageUpload
+                                                        value={product.images[0] ?? null}
+                                                        onChange={(url) => handleUpdateProduct(index, 'images', url ? [url] : [])}
+                                                        bucket="products"
+                                                        folder="images"
                                                     />
                                                 </div>
 
@@ -1369,6 +1382,24 @@ export function CreateOrderPage() {
                                         <p className="text-sm text-muted-foreground">{selectedCustomer?.phone}</p>
                                     </div>
                                 </div>
+                            </CardContent>
+                        </Card>
+
+                        {/* Ngày hẹn trả */}
+                        <Card>
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-sm flex items-center gap-2">
+                                    <Calendar className="h-4 w-4" />
+                                    Ngày hẹn trả
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <Input
+                                    type="date"
+                                    value={dueAt}
+                                    onChange={(e) => setDueAt(e.target.value)}
+                                    className="w-full"
+                                />
                             </CardContent>
                         </Card>
 

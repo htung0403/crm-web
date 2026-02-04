@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Package,
@@ -9,6 +9,8 @@ import {
     FileText,
     RefreshCw,
 } from 'lucide-react';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
+import type { DropResult } from '@hello-pangea/dnd';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -29,12 +31,16 @@ const ACCESSORY_LABELS: Record<string, string> = {
     delivered_to_tech: 'Giao KT',
 };
 
+const ACCESSORY_COLUMNS = Object.entries(ACCESSORY_LABELS).map(([id, label]) => ({ id, label }));
+
 const PARTNER_LABELS: Record<string, string> = {
     ship_to_partner: 'Ship Đối tác',
     partner_doing: 'Đối tác làm',
     ship_back: 'Ship về Shop',
     done: 'Done',
 };
+
+const PARTNER_COLUMNS = Object.entries(PARTNER_LABELS).map(([id, label]) => ({ id, label }));
 
 const EXTENSION_LABELS: Record<string, string> = {
     requested: 'Đã yêu cầu',
@@ -43,6 +49,8 @@ const EXTENSION_LABELS: Record<string, string> = {
     notified_tech: 'Đã báo KT',
     kpi_recorded: 'Đã ghi KPI',
 };
+
+const EXTENSION_COLUMNS = Object.entries(EXTENSION_LABELS).map(([id, label]) => ({ id, label }));
 
 // Chờ duyệt = cần Admin/QL xử lý
 function isPendingAccessory(row: any) {
@@ -53,6 +61,312 @@ function isPendingPartner(row: any) {
 }
 function isPendingExtension(row: any) {
     return row?.status === 'requested' || row?.status === 'sale_contacted';
+}
+
+function groupByStatus<T extends { status: string }>(items: T[], columnIds: string[]): Record<string, T[]> {
+    const map: Record<string, T[]> = {};
+    columnIds.forEach((id) => (map[id] = []));
+    items.forEach((item) => {
+        if (map[item.status]) map[item.status].push(item);
+    });
+    return map;
+}
+
+type KanbanCardProps = {
+    row: any;
+    isPending: boolean;
+    onOpenDialog: (row: any) => void;
+    onNavigateOrder: (id: string) => void;
+    getOrder: (row: any) => { id?: string; order_code?: string };
+    getProductCode?: (row: any) => string;
+    getItemName: (row: any) => string;
+    getProductImage?: (row: any) => string | null;
+    extra?: React.ReactNode;
+};
+
+function AccessoryKanbanCard({ row, isPending, onOpenDialog, onNavigateOrder, getOrder, getProductCode, getItemName, getProductImage, extra }: KanbanCardProps) {
+    const order = getOrder(row);
+    const productCode = getProductCode?.(row) ?? '—';
+    const productImage = getProductImage?.(row) ?? null;
+    return (
+        <div
+            className={`rounded-lg border bg-card text-sm shadow-sm transition-shadow hover:shadow-md overflow-hidden ${isPending ? 'border-amber-300 bg-amber-50/50' : ''}`}
+        >
+            <div className="w-full aspect-square bg-muted flex items-center justify-center">
+                {productImage ? (
+                    <img src={productImage} alt="" className="w-full h-full object-cover" />
+                ) : (
+                    <Package className="h-12 w-12 text-muted-foreground" />
+                )}
+            </div>
+            <div className="p-3 min-w-0">
+                <div className="font-medium font-mono text-primary truncate" title={productCode}>
+                    Mã SP: {productCode || '—'}
+                </div>
+                <p className="mt-0.5 truncate text-muted-foreground" title={getItemName(row)}>{getItemName(row)}</p>
+                {row.notes && <p className="mt-1 truncate text-xs text-muted-foreground" title={row.notes}>{row.notes}</p>}
+                {extra}
+                <Button variant="outline" size="sm" className="mt-2 w-full h-7 text-xs" onClick={() => onOpenDialog(row)}>Duyệt</Button>
+            </div>
+        </div>
+    );
+}
+
+function PartnerKanbanCard(props: KanbanCardProps) {
+    return <AccessoryKanbanCard {...props} />;
+}
+
+function ExtensionKanbanCard({ row, isPending, onOpenDialog, onNavigateOrder, getOrder, extra }: Omit<KanbanCardProps, 'getItemName'> & { getItemName?: (row: any) => string }) {
+    const order = getOrder(row);
+    return (
+        <div
+            className={`rounded-lg border bg-card text-sm shadow-sm transition-shadow hover:shadow-md overflow-hidden ${isPending ? 'border-amber-300 bg-amber-50/50' : ''}`}
+        >
+            <div className="w-full aspect-square bg-muted flex items-center justify-center">
+                <Clock className="h-12 w-12 text-muted-foreground" />
+            </div>
+            <div className="p-3 min-w-0">
+                <div className="font-medium font-mono text-primary truncate">
+                    {order.id ? (
+                        <Button variant="link" className="p-0 h-auto font-mono text-primary text-xs truncate max-w-full" onClick={() => onNavigateOrder(order.id!)}>
+                            Đơn #{order.order_code}
+                            <ExternalLink className="ml-0.5 h-3 w-3 inline shrink-0" />
+                        </Button>
+                    ) : (
+                        <span className="text-muted-foreground">Đơn #{order.order_code || '—'}</span>
+                    )}
+                </div>
+                {row.reason && <p className="mt-0.5 truncate text-xs text-muted-foreground" title={row.reason}>{row.reason}</p>}
+                {row.customer_result && <p className="mt-1 truncate text-xs text-muted-foreground" title={row.customer_result}>Kết quả: {row.customer_result}</p>}
+                {extra}
+                <Button variant="outline" size="sm" className="mt-2 w-full h-7 text-xs" onClick={() => onOpenDialog(row)}>Duyệt gia hạn</Button>
+            </div>
+        </div>
+    );
+}
+
+function AccessoryKanban({
+    items,
+    updatingId,
+    onDragEnd,
+    onOpenDialog,
+    onNavigateOrder,
+}: {
+    items: any[];
+    updatingId: string | null;
+    onDragEnd: (result: DropResult) => void;
+    onOpenDialog: (row: any) => void;
+    onNavigateOrder: (id: string) => void;
+}) {
+    const columns = ACCESSORY_COLUMNS;
+    const byStatus = useMemo(() => groupByStatus(items, columns.map((c) => c.id)), [items, columns]);
+    const isUpdating = !!updatingId;
+    return (
+        <DragDropContext onDragEnd={onDragEnd}>
+            <div className="flex gap-4 overflow-x-auto pb-2 min-h-[320px]">
+                {columns.map((col) => (
+                    <Droppable key={col.id} droppableId={col.id}>
+                        {(provided, snapshot) => (
+                            <div
+                                ref={provided.innerRef}
+                                {...provided.droppableProps}
+                                className={`shrink-0 w-[280px] rounded-lg border bg-muted/30 p-3 transition-colors ${snapshot.isDraggingOver ? 'bg-primary/10 border-primary/30' : ''}`}
+                            >
+                                <div className="mb-2 flex items-center justify-between">
+                                    <span className="font-medium text-sm">{col.label}</span>
+                                    <Badge variant="secondary" className="text-xs">{byStatus[col.id]?.length ?? 0}</Badge>
+                                </div>
+                                <div className="space-y-2 min-h-[200px]">
+                                    {(byStatus[col.id] || []).map((row: any, index: number) => {
+                                        const order = row.order_item?.order ?? row.order_product_service?.order_product?.order;
+                                        return (
+                                            <Draggable key={row.id} draggableId={row.id} index={index} isDragDisabled={isUpdating}>
+                                                {(provided, snapshot) => (
+                                                    <div
+                                                        ref={provided.innerRef}
+                                                        {...provided.draggableProps}
+                                                        {...provided.dragHandleProps}
+                                                        className={snapshot.isDragging ? 'opacity-90' : ''}
+                                                    >
+                                                        <AccessoryKanbanCard
+                                                            row={row}
+                                                            isPending={isPendingAccessory(row)}
+                                                            onOpenDialog={onOpenDialog}
+                                                            onNavigateOrder={onNavigateOrder}
+                                                            getOrder={() => order || {}}
+                                                            getProductCode={(r) => r.order_item?.item_code ?? r.order_product_service?.order_product?.product_code ?? '—'}
+                                                            getItemName={(r) => r.order_item?.item_name ?? r.order_product_service?.order_product?.name ?? '—'}
+                                                            getProductImage={(r) => {
+                                                                const v1 = r.order_item?.product?.image;
+                                                                if (v1) return v1;
+                                                                const op = r.order_product_service?.order_product;
+                                                                const imgs = op?.images;
+                                                                if (Array.isArray(imgs) && imgs[0]) return imgs[0];
+                                                                if (typeof imgs === 'string') {
+                                                                    try { const arr = JSON.parse(imgs); return Array.isArray(arr) && arr[0] ? arr[0] : null; } catch { return null; }
+                                                                }
+                                                                return null;
+                                                            }}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </Draggable>
+                                        );
+                                    })}
+                                </div>
+                                {provided.placeholder}
+                            </div>
+                        )}
+                    </Droppable>
+                ))}
+            </div>
+        </DragDropContext>
+    );
+}
+
+function PartnerKanban({
+    items,
+    updatingId,
+    onDragEnd,
+    onOpenDialog,
+    onNavigateOrder,
+}: {
+    items: any[];
+    updatingId: string | null;
+    onDragEnd: (result: DropResult) => void;
+    onOpenDialog: (row: any) => void;
+    onNavigateOrder: (id: string) => void;
+}) {
+    const columns = PARTNER_COLUMNS;
+    const byStatus = useMemo(() => groupByStatus(items, columns.map((c) => c.id)), [items, columns]);
+    const isUpdating = !!updatingId;
+    return (
+        <DragDropContext onDragEnd={onDragEnd}>
+            <div className="flex gap-4 overflow-x-auto pb-2 min-h-[320px]">
+                {columns.map((col) => (
+                    <Droppable key={col.id} droppableId={col.id}>
+                        {(provided, snapshot) => (
+                            <div
+                                ref={provided.innerRef}
+                                {...provided.droppableProps}
+                                className={`shrink-0 w-[280px] rounded-lg border bg-muted/30 p-3 transition-colors ${snapshot.isDraggingOver ? 'bg-primary/10 border-primary/30' : ''}`}
+                            >
+                                <div className="mb-2 flex items-center justify-between">
+                                    <span className="font-medium text-sm">{col.label}</span>
+                                    <Badge variant="secondary" className="text-xs">{byStatus[col.id]?.length ?? 0}</Badge>
+                                </div>
+                                <div className="space-y-2 min-h-[200px]">
+                                    {(byStatus[col.id] || []).map((row: any, index: number) => {
+                                        const order = row.order_item?.order ?? row.order_product_service?.order_product?.order;
+                                        return (
+                                            <Draggable key={row.id} draggableId={row.id} index={index} isDragDisabled={isUpdating}>
+                                                {(provided, snapshot) => (
+                                                    <div
+                                                        ref={provided.innerRef}
+                                                        {...provided.draggableProps}
+                                                        {...provided.dragHandleProps}
+                                                        className={snapshot.isDragging ? 'opacity-90' : ''}
+                                                    >
+                                                        <PartnerKanbanCard
+                                                            row={row}
+                                                            isPending={isPendingPartner(row)}
+                                                            onOpenDialog={onOpenDialog}
+                                                            onNavigateOrder={onNavigateOrder}
+                                                            getOrder={() => order || {}}
+                                                            getProductCode={(r) => r.order_item?.item_code ?? r.order_product_service?.order_product?.product_code ?? '—'}
+                                                            getItemName={(r) => r.order_item?.item_name ?? r.order_product_service?.order_product?.name ?? '—'}
+                                                            getProductImage={(r) => {
+                                                                const v1 = r.order_item?.product?.image;
+                                                                if (v1) return v1;
+                                                                const op = r.order_product_service?.order_product;
+                                                                const imgs = op?.images;
+                                                                if (Array.isArray(imgs) && imgs[0]) return imgs[0];
+                                                                if (typeof imgs === 'string') {
+                                                                    try { const arr = JSON.parse(imgs); return Array.isArray(arr) && arr[0] ? arr[0] : null; } catch { return null; }
+                                                                }
+                                                                return null;
+                                                            }}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </Draggable>
+                                        );
+                                    })}
+                                </div>
+                                {provided.placeholder}
+                            </div>
+                        )}
+                    </Droppable>
+                ))}
+            </div>
+        </DragDropContext>
+    );
+}
+
+function ExtensionKanban({
+    items,
+    updatingId,
+    onDragEnd,
+    onOpenDialog,
+    onNavigateOrder,
+}: {
+    items: any[];
+    updatingId: string | null;
+    onDragEnd: (result: DropResult) => void;
+    onOpenDialog: (row: any) => void;
+    onNavigateOrder: (id: string) => void;
+}) {
+    const columns = EXTENSION_COLUMNS;
+    const byStatus = useMemo(() => groupByStatus(items, columns.map((c) => c.id)), [items, columns]);
+    const isUpdating = !!updatingId;
+    return (
+        <DragDropContext onDragEnd={onDragEnd}>
+            <div className="flex gap-4 overflow-x-auto pb-2 min-h-[320px]">
+                {columns.map((col) => (
+                    <Droppable key={col.id} droppableId={col.id}>
+                        {(provided, snapshot) => (
+                            <div
+                                ref={provided.innerRef}
+                                {...provided.droppableProps}
+                                className={`shrink-0 w-[280px] rounded-lg border bg-muted/30 p-3 transition-colors ${snapshot.isDraggingOver ? 'bg-primary/10 border-primary/30' : ''}`}
+                            >
+                                <div className="mb-2 flex items-center justify-between">
+                                    <span className="font-medium text-sm">{col.label}</span>
+                                    <Badge variant="secondary" className="text-xs">{byStatus[col.id]?.length ?? 0}</Badge>
+                                </div>
+                                <div className="space-y-2 min-h-[200px]">
+                                    {(byStatus[col.id] || []).map((row: any, index: number) => {
+                                        const order = row.order as any;
+                                        return (
+                                            <Draggable key={row.id} draggableId={row.id} index={index} isDragDisabled={isUpdating}>
+                                                {(provided, snapshot) => (
+                                                    <div
+                                                        ref={provided.innerRef}
+                                                        {...provided.draggableProps}
+                                                        {...provided.dragHandleProps}
+                                                        className={snapshot.isDragging ? 'opacity-90' : ''}
+                                                    >
+                                                        <ExtensionKanbanCard
+                                                            row={row}
+                                                            isPending={isPendingExtension(row)}
+                                                            onOpenDialog={onOpenDialog}
+                                                            onNavigateOrder={onNavigateOrder}
+                                                            getOrder={() => ({ id: order?.id ?? row.order_id, order_code: order?.order_code || '—' })}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </Draggable>
+                                        );
+                                    })}
+                                </div>
+                                {provided.placeholder}
+                            </div>
+                        )}
+                    </Droppable>
+                ))}
+            </div>
+        </DragDropContext>
+    );
 }
 
 export function RequestsPage() {
@@ -159,6 +473,53 @@ export function RequestsPage() {
         } finally {
             setUpdatingId(null);
         }
+    };
+
+    const handleAccessoryDragEnd = (result: DropResult) => {
+        if (!result.destination || result.source.droppableId === result.destination.droppableId) return;
+        const row = accessories.find((r: any) => r.id === result.draggableId);
+        if (!row) return;
+        const newStatus = result.destination.droppableId;
+        const itemId = row.order_item_id ?? row.order_product_service_id;
+        const prevStatus = row.status;
+        setAccessories((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: newStatus } : r)));
+        orderItemsApi.updateAccessory(itemId, { status: newStatus }).then(() => {
+            toast.success('Đã cập nhật trạng thái mua phụ kiện');
+        }).catch((e: any) => {
+            setAccessories((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: prevStatus } : r)));
+            toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
+        });
+    };
+
+    const handlePartnerDragEnd = (result: DropResult) => {
+        if (!result.destination || result.source.droppableId === result.destination.droppableId) return;
+        const row = partners.find((r: any) => r.id === result.draggableId);
+        if (!row) return;
+        const newStatus = result.destination.droppableId;
+        const itemId = row.order_item_id ?? row.order_product_service_id;
+        const prevStatus = row.status;
+        setPartners((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: newStatus } : r)));
+        orderItemsApi.updatePartner(itemId, { status: newStatus }).then(() => {
+            toast.success('Đã cập nhật trạng thái gửi đối tác');
+        }).catch((e: any) => {
+            setPartners((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: prevStatus } : r)));
+            toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
+        });
+    };
+
+    const handleExtensionDragEnd = (result: DropResult) => {
+        if (!result.destination || result.source.droppableId === result.destination.droppableId) return;
+        const row = extensions.find((r: any) => r.id === result.draggableId);
+        if (!row?.order_id) return;
+        const newStatus = result.destination.droppableId;
+        const prevStatus = row.status;
+        setExtensions((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: newStatus } : r)));
+        ordersApi.updateExtensionRequest(row.order_id, { status: newStatus }).then(() => {
+            toast.success('Đã cập nhật yêu cầu gia hạn');
+        }).catch((e: any) => {
+            setExtensions((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: prevStatus } : r)));
+            toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
+        });
     };
 
     const openAccessoryDialog = (row: any) => {
@@ -291,7 +652,7 @@ export function RequestsPage() {
                             <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div>
                                     <CardTitle className="text-base">Yêu cầu Mua phụ kiện</CardTitle>
-                                    <p className="text-sm text-muted-foreground">Cập nhật trạng thái và xem đơn hàng liên quan.</p>
+                                    <p className="text-sm text-muted-foreground">Kéo thả thẻ giữa các cột để chuyển trạng thái.</p>
                                 </div>
                                 <div className="flex gap-2">
                                     <Button variant={filter === 'all' ? 'default' : 'outline'} size="sm" onClick={() => setFilter('all')}>Tất cả</Button>
@@ -305,73 +666,13 @@ export function RequestsPage() {
                             ) : filteredAccessories.length === 0 ? (
                                 <p className="text-sm text-muted-foreground text-center py-8">Không có yêu cầu chờ duyệt.</p>
                             ) : (
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-sm">
-                                        <thead className="bg-muted/50">
-                                            <tr>
-                                                <th className="text-left p-3 font-medium">Đơn hàng</th>
-                                                <th className="text-left p-3 font-medium">Hạng mục</th>
-                                                <th className="text-left p-3 font-medium">Trạng thái</th>
-                                                <th className="text-left p-3 font-medium">Ghi chú</th>
-                                                <th className="text-left p-3 font-medium">Cập nhật</th>
-                                                <th className="text-right p-3 font-medium">Thao tác</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y">
-                                            {filteredAccessories.map((row: any) => {
-                                                const order = row.order_item?.order ?? row.order_product_service?.order_product?.order;
-                                                const orderId = order?.id;
-                                                const orderCode = order?.order_code || '—';
-                                                const itemName = row.order_item?.item_name ?? row.order_product_service?.order_product?.name ?? '—';
-                                                const itemId = row.order_item_id ?? row.order_product_service_id;
-                                                const pending = isPendingAccessory(row);
-                                                return (
-                                                    <tr
-                                                        key={row.id}
-                                                        className={`hover:bg-muted/30 ${filter === 'all' && pending ? 'bg-amber-50' : ''}`}
-                                                    >
-                                                        <td className="p-3 align-middle">
-                                                            {orderId ? (
-                                                                <Button variant="link" className="p-0 h-auto font-mono text-primary" onClick={() => navigate(`/orders/${orderId}`)}>
-                                                                    #{orderCode}
-                                                                    <ExternalLink className="ml-1 h-3 w-3 inline" />
-                                                                </Button>
-                                                            ) : orderCode}
-                                                        </td>
-                                                        <td className="p-3 align-middle">{itemName}</td>
-                                                        <td className="p-3 align-middle">
-                                                            {filter === 'all' && pending && (
-                                                                <Badge variant="outline" className="mr-1 text-amber-700 border-amber-300">Chờ duyệt</Badge>
-                                                            )}
-                                                            <Badge variant="secondary">{ACCESSORY_LABELS[row.status] || row.status}</Badge>
-                                                        </td>
-                                                        <td className="p-3 align-middle max-w-[160px] truncate text-muted-foreground" title={row.notes ?? ''}>{row.notes ?? '—'}</td>
-                                                        <td className="p-3 align-middle text-muted-foreground">{formatDateTime(row.updated_at)}</td>
-                                                        <td className="p-3 align-middle">
-                                                            <div className="flex items-center justify-end gap-2">
-                                                                <Select
-                                                                    value={row.status}
-                                                                    onValueChange={(v) => handleUpdateAccessory(itemId, v)}
-                                                                    disabled={!!updatingId}
-                                                                >
-                                                                    <SelectTrigger className="w-[160px] h-8">
-                                                                        <SelectValue />
-                                                                    </SelectTrigger>
-                                                                    <SelectContent>
-                                                                        {Object.entries(ACCESSORY_LABELS).map(([value, label]) => (
-                                                                            <SelectItem key={value} value={value}>{label}</SelectItem>
-                                                                        ))}
-                                                                    </SelectContent>
-                                                                </Select>
-                                                                <Button variant="outline" size="sm" className="h-8 shrink-0" onClick={() => openAccessoryDialog(row)}>Duyệt</Button>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                </div>
+                                <AccessoryKanban
+                                    items={filteredAccessories}
+                                    updatingId={updatingId}
+                                    onDragEnd={handleAccessoryDragEnd}
+                                    onOpenDialog={openAccessoryDialog}
+                                    onNavigateOrder={(id) => navigate(`/orders/${id}`)}
+                                />
                             )}
                         </CardContent>
                     </Card>
@@ -383,7 +684,7 @@ export function RequestsPage() {
                             <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div>
                                     <CardTitle className="text-base">Yêu cầu Gửi Đối Tác</CardTitle>
-                                    <p className="text-sm text-muted-foreground">Cập nhật trạng thái và xem đơn hàng liên quan.</p>
+                                    <p className="text-sm text-muted-foreground">Kéo thả thẻ giữa các cột để chuyển trạng thái.</p>
                                 </div>
                                 <div className="flex gap-2">
                                     <Button variant={filter === 'all' ? 'default' : 'outline'} size="sm" onClick={() => setFilter('all')}>Tất cả</Button>
@@ -397,73 +698,13 @@ export function RequestsPage() {
                             ) : filteredPartners.length === 0 ? (
                                 <p className="text-sm text-muted-foreground text-center py-8">Không có yêu cầu chờ duyệt.</p>
                             ) : (
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-sm">
-                                        <thead className="bg-muted/50">
-                                            <tr>
-                                                <th className="text-left p-3 font-medium">Đơn hàng</th>
-                                                <th className="text-left p-3 font-medium">Hạng mục</th>
-                                                <th className="text-left p-3 font-medium">Trạng thái</th>
-                                                <th className="text-left p-3 font-medium">Ghi chú</th>
-                                                <th className="text-left p-3 font-medium">Cập nhật</th>
-                                                <th className="text-right p-3 font-medium">Thao tác</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y">
-                                            {filteredPartners.map((row: any) => {
-                                                const order = row.order_item?.order ?? row.order_product_service?.order_product?.order;
-                                                const orderId = order?.id;
-                                                const orderCode = order?.order_code || '—';
-                                                const itemName = row.order_item?.item_name ?? row.order_product_service?.order_product?.name ?? '—';
-                                                const itemId = row.order_item_id ?? row.order_product_service_id;
-                                                const pending = isPendingPartner(row);
-                                                return (
-                                                    <tr
-                                                        key={row.id}
-                                                        className={`hover:bg-muted/30 ${filter === 'all' && pending ? 'bg-amber-50' : ''}`}
-                                                    >
-                                                        <td className="p-3">
-                                                            {orderId ? (
-                                                                <Button variant="link" className="p-0 h-auto font-mono text-primary" onClick={() => navigate(`/orders/${orderId}`)}>
-                                                                    #{orderCode}
-                                                                    <ExternalLink className="ml-1 h-3 w-3 inline" />
-                                                                </Button>
-                                                            ) : orderCode}
-                                                        </td>
-                                                        <td className="p-3">{itemName}</td>
-                                                        <td className="p-3">
-                                                            {filter === 'all' && pending && (
-                                                                <Badge variant="outline" className="mr-1 text-amber-700 border-amber-300">Chờ duyệt</Badge>
-                                                            )}
-                                                            <Badge variant="secondary">{PARTNER_LABELS[row.status] || row.status}</Badge>
-                                                        </td>
-                                                        <td className="p-3 max-w-[160px] truncate text-muted-foreground" title={row.notes ?? ''}>{row.notes ?? '—'}</td>
-                                                        <td className="p-3 text-muted-foreground">{formatDateTime(row.updated_at)}</td>
-                                                        <td className="p-3 align-middle">
-                                                            <div className="flex items-center justify-end gap-2">
-                                                                <Select
-                                                                    value={row.status}
-                                                                    onValueChange={(v) => handleUpdatePartner(itemId, v)}
-                                                                    disabled={!!updatingId}
-                                                                >
-                                                                    <SelectTrigger className="w-[160px] h-8">
-                                                                        <SelectValue />
-                                                                    </SelectTrigger>
-                                                                    <SelectContent>
-                                                                        {Object.entries(PARTNER_LABELS).map(([value, label]) => (
-                                                                            <SelectItem key={value} value={value}>{label}</SelectItem>
-                                                                        ))}
-                                                                    </SelectContent>
-                                                                </Select>
-                                                                <Button variant="outline" size="sm" className="h-8 shrink-0" onClick={() => openPartnerDialog(row)}>Duyệt</Button>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                </div>
+                                <PartnerKanban
+                                    items={filteredPartners}
+                                    updatingId={updatingId}
+                                    onDragEnd={handlePartnerDragEnd}
+                                    onOpenDialog={openPartnerDialog}
+                                    onNavigateOrder={(id) => navigate(`/orders/${id}`)}
+                                />
                             )}
                         </CardContent>
                     </Card>
@@ -475,7 +716,7 @@ export function RequestsPage() {
                             <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div>
                                     <CardTitle className="text-base">Yêu cầu Xin gia hạn</CardTitle>
-                                    <p className="text-sm text-muted-foreground">Xem lý do, kết quả liên hệ khách và duyệt gia hạn (chốt ngày mới).</p>
+                                    <p className="text-sm text-muted-foreground">Kéo thả thẻ giữa các cột để chuyển trạng thái.</p>
                                 </div>
                                 <div className="flex gap-2">
                                     <Button variant={filter === 'all' ? 'default' : 'outline'} size="sm" onClick={() => setFilter('all')}>Tất cả</Button>
@@ -489,73 +730,13 @@ export function RequestsPage() {
                             ) : filteredExtensions.length === 0 ? (
                                 <p className="text-sm text-muted-foreground text-center py-8">Không có yêu cầu chờ duyệt.</p>
                             ) : (
-                                <div className="overflow-x-auto">
-                                    <table className="w-full text-sm">
-                                        <thead className="bg-muted/50">
-                                            <tr>
-                                                <th className="text-left p-3 font-medium">Đơn hàng</th>
-                                                <th className="text-left p-3 font-medium">Lý do / Kết quả</th>
-                                                <th className="text-left p-3 font-medium">Trạng thái</th>
-                                                <th className="text-left p-3 font-medium">Ngày tạo</th>
-                                                <th className="text-right p-3 font-medium">Thao tác</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y">
-                                            {filteredExtensions.map((row: any) => {
-                                                const orderId = row.order_id || (row.order as any)?.id;
-                                                const orderCode = (row.order as any)?.order_code || '—';
-                                                const pending = isPendingExtension(row);
-                                                return (
-                                                    <tr
-                                                        key={row.id}
-                                                        className={`hover:bg-muted/30 ${filter === 'all' && pending ? 'bg-amber-50' : ''}`}
-                                                    >
-                                                        <td className="p-3">
-                                                            {orderId ? (
-                                                                <Button variant="link" className="p-0 h-auto font-mono text-primary" onClick={() => navigate(`/orders/${orderId}`)}>
-                                                                    #{orderCode}
-                                                                    <ExternalLink className="ml-1 h-3 w-3 inline" />
-                                                                </Button>
-                                                            ) : orderCode}
-                                                        </td>
-                                                        <td className="p-3 max-w-[280px]">
-                                                            <span className="text-muted-foreground block truncate" title={row.reason}>{row.reason}</span>
-                                                            {row.customer_result && (
-                                                                <span className="text-xs text-muted-foreground block mt-1">Kết quả: {row.customer_result}</span>
-                                                            )}
-                                                        </td>
-                                                        <td className="p-3">
-                                                            {filter === 'all' && pending && (
-                                                                <Badge variant="outline" className="mr-1 text-amber-700 border-amber-300">Chờ duyệt</Badge>
-                                                            )}
-                                                            <Badge variant="secondary">{EXTENSION_LABELS[row.status] || row.status}</Badge>
-                                                        </td>
-                                                        <td className="p-3 text-muted-foreground">{formatDateTime(row.created_at)}</td>
-                                                        <td className="p-3 align-middle">
-                                                            <div className="flex items-center justify-end gap-2">
-                                                                <Select
-                                                                    value={row.status}
-                                                                    onValueChange={(v) => handleUpdateExtension(row.order_id, v)}
-                                                                    disabled={!!updatingId}
-                                                                >
-                                                                    <SelectTrigger className="w-[180px] h-8">
-                                                                        <SelectValue />
-                                                                    </SelectTrigger>
-                                                                    <SelectContent>
-                                                                        {Object.entries(EXTENSION_LABELS).map(([value, label]) => (
-                                                                            <SelectItem key={value} value={value}>{label}</SelectItem>
-                                                                        ))}
-                                                                    </SelectContent>
-                                                                </Select>
-                                                                <Button variant="outline" size="sm" className="h-8 shrink-0" onClick={() => openExtensionDialog(row)}>Duyệt gia hạn</Button>
-                                                            </div>
-                                                        </td>
-                                                    </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
-                                </div>
+                                <ExtensionKanban
+                                    items={filteredExtensions}
+                                    updatingId={updatingId}
+                                    onDragEnd={handleExtensionDragEnd}
+                                    onOpenDialog={openExtensionDialog}
+                                    onNavigateOrder={(id) => navigate(`/orders/${id}`)}
+                                />
                             )}
                         </CardContent>
                     </Card>

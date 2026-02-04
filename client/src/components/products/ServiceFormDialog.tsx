@@ -251,8 +251,8 @@ export function ServiceFormDialog({
                                 if (newWorkflowId) {
                                     const workflow = workflows.find(w => w.id === newWorkflowId);
                                     if (workflow && workflow.steps.length > 0) {
-                                        const totalMinutes = workflow.steps.reduce((sum, s) => sum + s.estimated_duration, 0);
-                                        setDuration(totalMinutes);
+                                        const totalDays = workflow.steps.reduce((sum, s) => sum + Number(s.estimated_duration), 0);
+                                        setDuration(Math.round(totalDays * 1440));
                                     }
                                 }
                             }}
@@ -263,10 +263,10 @@ export function ServiceFormDialog({
                             <SelectContent>
                                 <SelectItem value="none">Không áp dụng quy trình</SelectItem>
                                 {workflows.filter(w => w.status === 'active').map(workflow => {
-                                    const totalMinutes = workflow.steps.reduce((sum, s) => sum + s.estimated_duration, 0);
+                                    const totalDays = workflow.steps.reduce((sum, s) => sum + Number(s.estimated_duration), 0);
                                     return (
                                         <SelectItem key={workflow.id} value={workflow.id}>
-                                            {workflow.name} ({workflow.steps.length} bước, {totalMinutes} phút)
+                                            {workflow.name} ({workflow.steps.length} bước, {totalDays.toFixed(1)} ngày)
                                         </SelectItem>
                                     );
                                 })}

@@ -1,101 +1,154 @@
 import { Draggable } from '@hello-pangea/dnd';
-import { Clock, User, MoreHorizontal } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Calendar, User, Wrench } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { formatCurrency } from '@/lib/utils';
-import type { Order } from '@/hooks/useOrders';
-import { calculateSLAProgress } from './constants';
+import type { Order, OrderItem } from '@/hooks/useOrders';
+import { columns, getRoomDeadlineDisplay } from './constants';
+import { formatDate } from '@/lib/utils';
+
+export interface ProductGroup {
+    product: OrderItem | null;
+    services: OrderItem[];
+}
 
 interface OrderCardProps {
+    draggableId: string;
     order: Order;
+    productGroup: ProductGroup;
+    columnId: string;
     index: number;
     onClick: () => void;
 }
 
-export function OrderCard({ order, index, onClick }: OrderCardProps) {
-    const sla = calculateSLAProgress(order.completed_at, order.created_at);
+export function OrderCard({ draggableId, order, productGroup, columnId, index, onClick }: OrderCardProps) {
+    const { product, services } = productGroup;
+    const column = columns.find((c) => c.id === columnId);
+    const columnTitle = column?.title ?? columnId;
+
+    const allItems = order?.items || [];
+    const effectiveProduct = product;
+    const effectiveServices = services.length > 0 ? services : allItems.filter((it) => it.item_name);
+
+    const productImage =
+        effectiveProduct?.product?.image ||
+        effectiveProduct?.service?.image ||
+        effectiveServices[0]?.product?.image ||
+        effectiveServices[0]?.service?.image;
+
+    const productCode =
+        effectiveProduct?.item_code ||
+        effectiveProduct?.product?.code ||
+        effectiveProduct?.service?.code ||
+        effectiveServices[0]?.item_code ||
+        effectiveServices[0]?.service?.code ||
+        order?.order_code ||
+        'N/A';
+
+    const technicianNames = (() => {
+        const names = new Set<string>();
+        for (const s of effectiveServices) {
+            if (s.technicians?.length) {
+                for (const t of s.technicians) {
+                    if (t.technician?.name) names.add(t.technician.name);
+                }
+            } else if (s.technician?.name) {
+                names.add(s.technician.name);
+            }
+        }
+        return names.size > 0 ? [...names].join(', ') : 'N/A';
+    })();
+
+    const roomDeadline = getRoomDeadlineDisplay(effectiveServices);
+    const showRoomDeadline =
+        order.status !== 'completed' &&
+        order.status !== 'cancelled' &&
+        roomDeadline.label !== 'N/A';
+
+    const receiveDate = order.confirmed_at || order.created_at;
+    const dueDate = order.due_at;
 
     return (
-        <Draggable draggableId={order.id} index={index}>
+        <Draggable draggableId={draggableId} index={index}>
             {(provided, snapshot) => (
                 <div
                     ref={provided.innerRef}
                     {...provided.draggableProps}
                     {...provided.dragHandleProps}
                     onClick={onClick}
-                    className={`kanban-card p-3 rounded-xl bg-white border shadow-sm cursor-pointer text-sm ${snapshot.isDragging ? 'shadow-lg ring-2 ring-primary/20' : ''
-                        }`}
+                    className={`kanban-card p-3 rounded-xl bg-white border shadow-sm cursor-pointer text-sm ${snapshot.isDragging ? 'shadow-lg ring-2 ring-primary/20' : ''}`}
                 >
-                    {/* Order Code */}
-                    <div className="flex items-center justify-between mb-2">
-                        <span className="font-bold text-sm text-foreground">{order.order_code}</span>
-                        <Button variant="ghost" size="icon" className="h-6 w-6 -m-1" onClick={(e) => e.stopPropagation()}>
-                            <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                    </div>
-
-                    {/* Customer */}
-                    <div className="flex items-center gap-1.5 mb-2">
-                        <Avatar className="h-7 w-7">
-                            <AvatarFallback className="text-xs bg-primary/10 text-primary">
-                                {order.customer?.name?.charAt(0) || 'C'}
-                            </AvatarFallback>
+                    {/* Header: Ảnh + Mã SP + Trạng thái */}
+                    <div className="flex gap-2 mb-2">
+                        <Avatar className="h-12 w-12 shrink-0 rounded-lg overflow-hidden bg-muted">
+                            {productImage ? (
+                                <img
+                                    src={productImage}
+                                    alt=""
+                                    className="h-full w-full object-cover"
+                                />
+                            ) : (
+                                <AvatarFallback className="rounded-lg text-xs bg-primary/10 text-primary">
+                                    {effectiveProduct?.item_name?.charAt(0) || effectiveServices[0]?.item_name?.charAt(0) || order?.order_code?.charAt(0) || 'SP'}
+                                </AvatarFallback>
+                            )}
                         </Avatar>
-                        <span className="text-xs font-medium truncate">{order.customer?.name || 'N/A'}</span>
+                        <div className="min-w-0 flex-1">
+                            <span className="font-mono text-xs font-medium text-foreground block truncate">
+                                {productCode}
+                            </span>
+                            <Badge variant="secondary" className="text-[10px] mt-0.5">
+                                {columnTitle}
+                            </Badge>
+                        </div>
                     </div>
 
-                    {/* Amount */}
-                    <div className="mb-2">
-                        <span className="text-sm font-bold text-primary">{formatCurrency(order.total_amount)}</span>
-                    </div>
-
-                    {/* Tags */}
+                    {/* Dịch vụ sử dụng */}
                     <div className="flex flex-wrap gap-1 mb-2">
-                        {order.items?.slice(0, 3).map((item, i) => (
-                            <Badge key={i} variant={item.item_type === 'service' ? 'secondary' : 'outline'} className="text-[10px] truncate max-w-25">
-                                {item.item_name}
-                            </Badge>
-                        ))}
-                        {(order.items?.length || 0) > 3 && (
-                            <Badge variant="secondary" className="text-[10px]">
-                                +{(order.items?.length || 0) - 3}
-                            </Badge>
-                        )}
-                    </div>
-
-                    {/* SLA Progress - always reserve space for consistent card height across columns */}
-                    <div className="mb-2 min-h-[32px]">
-                        {order.status !== 'completed' && order.status !== 'cancelled' ? (
-                            <>
-                                <div className="flex items-center justify-between text-xs mb-0.5">
-                                    <span className="text-muted-foreground flex items-center gap-1">
-                                        <Clock className="h-3.5 w-3.5" />
-                                        SLA
-                                    </span>
-                                    <span className={`font-medium ${sla.color === 'bg-red-500' ? 'text-red-600' : sla.color === 'bg-amber-500' ? 'text-amber-600' : 'text-emerald-600'}`}>
-                                        {sla.label}
-                                    </span>
-                                </div>
-                                <div className="h-1 bg-muted rounded-full overflow-hidden">
-                                    <div
-                                        className={`h-full ${sla.color} transition-all duration-300`}
-                                        style={{ width: `${sla.percentage}%` }}
-                                    />
-                                </div>
-                            </>
+                        {effectiveServices.length > 0 ? (
+                            effectiveServices.slice(0, 3).map((s, i) => (
+                                <Badge
+                                    key={i}
+                                    variant="outline"
+                                    className="text-[10px] truncate max-w-[120px]"
+                                >
+                                    {s.item_name}
+                                </Badge>
+                            ))
                         ) : (
-                            <div className="flex items-center text-xs text-muted-foreground">
-                                <Clock className="h-3.5 w-3.5 mr-1" />
-                                {order.status === 'completed' ? 'Đã hoàn thành' : 'Đã huỷ'}
-                            </div>
+                            <span className="text-xs text-muted-foreground">N/A</span>
+                        )}
+                        {effectiveServices.length > 3 && (
+                            <Badge variant="secondary" className="text-[10px]">
+                                +{effectiveServices.length - 3}
+                            </Badge>
                         )}
                     </div>
 
-                    {/* Assigned Employee */}
-                    <div className="flex items-center gap-1.5 pt-1.5 border-t text-xs text-muted-foreground">
-                        <User className="h-3.5 w-3.5" />
-                        <span>{order.sales_user?.name || 'N/A'}</span>
+                    {/* Ngày nhận - Ngày hẹn trả */}
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
+                        <Calendar className="h-3.5 w-3.5 shrink-0" />
+                        <span>
+                            {receiveDate ? formatDate(receiveDate) : 'N/A'} - {dueDate ? formatDate(dueDate) : 'N/A'}
+                        </span>
+                    </div>
+
+                    {/* Hạn phòng */}
+                    {showRoomDeadline && (
+                        <div className={`text-xs font-medium mb-2 ${roomDeadline.color}`}>
+                            Hạn phòng: {roomDeadline.label}
+                        </div>
+                    )}
+
+                    {/* Footer: Kỹ thuật và Sale - mỗi dòng riêng, nhiều KTV có thể wrap */}
+                    <div className="space-y-1.5 pt-2 border-t text-xs text-muted-foreground">
+                        <div className="flex items-start gap-1 min-w-0">
+                            <Wrench className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                            <span className="break-words line-clamp-2">{technicianNames}</span>
+                        </div>
+                        <div className="flex items-center gap-1 truncate">
+                            <User className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{order.sales_user?.name || 'N/A'}</span>
+                        </div>
                     </div>
                 </div>
             )}

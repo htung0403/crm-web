@@ -90,7 +90,7 @@ CREATE TABLE workflow_steps (
     step_order INTEGER NOT NULL,                -- 1, 2, 3...
     name VARCHAR(255),
     description TEXT,
-    estimated_duration INTEGER DEFAULT 60,      -- minutes
+    estimated_duration NUMERIC(10,2) DEFAULT 1,  -- ngày
     is_required BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(workflow_id, step_order)
@@ -520,7 +520,7 @@ CREATE TABLE order_item_steps (
     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'assigned', 'in_progress', 'completed', 'skipped')),
     technician_id UUID REFERENCES users(id),
     
-    estimated_duration INTEGER DEFAULT 60,
+    estimated_duration NUMERIC(10,2) DEFAULT 1,  -- ngày
     assigned_at TIMESTAMPTZ,
     started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,

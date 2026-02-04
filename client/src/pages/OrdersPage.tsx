@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useOrders } from '@/hooks/useOrders';
-import type { Order } from '@/hooks/useOrders';
+import type { Order, OrderItem } from '@/hooks/useOrders';
 import { useCustomers } from '@/hooks/useCustomers';
 import { useProducts } from '@/hooks/useProducts';
 import { usePackages } from '@/hooks/usePackages';
@@ -70,18 +70,18 @@ export function OrdersPage() {
         if (destination.droppableId === source.droppableId && destination.index === source.index) return;
 
         const newStatus = destination.droppableId;
-        const order = orders.find(o => o.id === draggableId);
+        const orderId = draggableId.includes('__') ? draggableId.split('__')[0] : draggableId;
+        const order = orders.find(o => o.id === orderId);
 
         // If dropping to completed, show payment dialog
         if (newStatus === 'completed' && order) {
-            setPendingDrop({ orderId: draggableId, targetStatus: newStatus });
+            setPendingDrop({ orderId, targetStatus: newStatus });
             setPayingOrder(order);
             return;
         }
 
-        // Otherwise, update status normally
         try {
-            await updateOrderStatus(draggableId, newStatus);
+            await updateOrderStatus(orderId, newStatus);
             toast.success('Đã cập nhật trạng thái đơn hàng');
             await fetchOrders();
         } catch (error) {
@@ -92,6 +92,44 @@ export function OrdersPage() {
 
     const getOrdersByStatus = (status: OrderStatus) => {
         return orders.filter(order => order.status === status);
+    };
+
+    /** Nhóm items theo product + services (giống OrderDetailPage workflowKanbanGroups) */
+    const getOrderProductGroups = (order: Order): { product: OrderItem | null; services: OrderItem[] }[] => {
+        const items = order?.items || [];
+        const groups: { product: OrderItem | null; services: OrderItem[] }[] = [];
+        let i = 0;
+        while (i < items.length) {
+            const item = items[i] as OrderItem & { is_v2_product?: boolean };
+            if (item.is_v2_product && item.item_type === 'product') {
+                const services: OrderItem[] = [];
+                let j = i + 1;
+                while (j < items.length) {
+                    const next = items[j] as OrderItem & { is_v2_product?: boolean };
+                    if (next.is_v2_product && next.item_type === 'product') break;
+                    if (next.item_type === 'service' || next.item_type === 'package') services.push(items[j] as OrderItem);
+                    j++;
+                }
+                groups.push({ product: item, services });
+                i = j;
+            } else if (item.item_type === 'service' || item.item_type === 'package') {
+                groups.push({ product: null, services: [item] });
+                i++;
+            } else if (item.item_type === 'product' && item.product_id) {
+                groups.push({ product: item, services: [] });
+                i++;
+            } else if (item.item_name) {
+                groups.push({ product: null, services: [item] });
+                i++;
+            } else {
+                i++;
+            }
+        }
+        if (groups.length === 0 && items.length > 0) {
+            return [{ product: items[0] as OrderItem, services: items.slice(1).filter((it: OrderItem) => it.item_name) as OrderItem[] }];
+        }
+        if (groups.length === 0) return [{ product: null, services: [] }];
+        return groups;
     };
 
     const handleCreateOrder = async (data: {
@@ -225,30 +263,43 @@ export function OrdersPage() {
                                         </CardHeader>
                                         <CardContent className="p-2">
                                             <Droppable droppableId={column.id}>
-                                                {(provided, snapshot) => (
-                                                    <div
-                                                        ref={provided.innerRef}
-                                                        {...provided.droppableProps}
-                                                        className={`kanban-column space-y-3 min-h-[100px] lg:min-h-[calc(100vh-300px)] p-1 rounded-lg transition-colors ${snapshot.isDraggingOver ? 'bg-white/50' : ''
-                                                            }`}
-                                                    >
-                                                        {getOrdersByStatus(column.id).map((order, index) => (
-                                                            <OrderCard
-                                                                key={order.id}
-                                                                order={order}
-                                                                index={index}
-                                                                onClick={() => navigate(`/orders/${order.id}`)}
-                                                            />
-                                                        ))}
-                                                        {provided.placeholder}
+                                                {(provided, snapshot) => {
+                                                    const columnOrders = getOrdersByStatus(column.id);
+                                                    const cards: { order: Order; group: { product: OrderItem | null; services: OrderItem[] }; groupIndex: number }[] = [];
+                                                    columnOrders.forEach((order) => {
+                                                        const groups = getOrderProductGroups(order);
+                                                        groups.forEach((group, groupIndex) => {
+                                                            cards.push({ order, group, groupIndex });
+                                                        });
+                                                    });
+                                                    return (
+                                                        <div
+                                                            ref={provided.innerRef}
+                                                            {...provided.droppableProps}
+                                                            className={`kanban-column space-y-3 min-h-[100px] lg:min-h-[calc(100vh-300px)] p-1 rounded-lg transition-colors ${snapshot.isDraggingOver ? 'bg-white/50' : ''
+                                                                }`}
+                                                        >
+                                                            {cards.map(({ order, group, groupIndex }, index) => (
+                                                                <OrderCard
+                                                                    key={`${order.id}__${groupIndex}`}
+                                                                    draggableId={`${order.id}__${groupIndex}`}
+                                                                    order={order}
+                                                                    productGroup={group}
+                                                                    columnId={column.id}
+                                                                    index={index}
+                                                                    onClick={() => navigate(`/orders/${order.id}`)}
+                                                                />
+                                                            ))}
+                                                            {provided.placeholder}
 
-                                                        {getOrdersByStatus(column.id).length === 0 && (
-                                                            <div className="flex items-center justify-center h-20 lg:h-32 text-muted-foreground text-sm">
-                                                                Không có đơn hàng
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                )}
+                                                            {cards.length === 0 && (
+                                                                <div className="flex items-center justify-center h-20 lg:h-32 text-muted-foreground text-sm">
+                                                                    Không có đơn hàng
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                }}
                                             </Droppable>
                                         </CardContent>
                                     </Card>

@@ -86,6 +86,32 @@ export function getItemTypeColor(type: string): string {
     }
 }
 
+/** Hạn còn lại phòng: từ order_item_steps (started_at + estimated_duration ngày) */
+export function getRoomDeadlineDisplay(
+    items: Array<{ order_item_steps?: Array<{ started_at?: string; estimated_duration?: number; status: string }> }>
+): { label: string; color: string } {
+    let earliestDueAt: Date | null = null;
+    for (const item of items || []) {
+        const steps = item.order_item_steps || [];
+        for (const step of steps) {
+            if (step.status !== 'in_progress' && step.status !== 'pending' && step.status !== 'assigned') continue;
+            const days = Number(step.estimated_duration) || 0;
+            const baseAt = step.started_at;
+            if (!baseAt || days <= 0) continue;
+            const base = new Date(baseAt);
+            const dueAt = new Date(base);
+            dueAt.setDate(dueAt.getDate() + days);
+            if (!earliestDueAt || dueAt.getTime() < earliestDueAt.getTime()) {
+                earliestDueAt = dueAt;
+            }
+        }
+    }
+    if (!earliestDueAt) return { label: 'N/A', color: 'text-muted-foreground' };
+    const diff = Math.ceil((earliestDueAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+    if (diff < 0) return { label: `Trễ ${Math.abs(diff)} ngày`, color: 'text-red-600' };
+    return { label: `Còn ${diff} ngày`, color: diff <= 2 ? 'text-amber-600' : 'text-emerald-600' };
+}
+
 // Shared types for dialogs
 export interface TechnicianAssignment {
     technician_id: string;

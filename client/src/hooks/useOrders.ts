@@ -1,6 +1,14 @@
 import { useState, useCallback } from 'react';
 import { ordersApi } from '@/lib/api';
 
+export interface OrderItemStep {
+    id: string;
+    started_at?: string;
+    estimated_duration?: number;
+    status: string;
+    step_order: number;
+}
+
 export interface OrderItem {
     id: string;
     order_id: string;
@@ -16,13 +24,19 @@ export interface OrderItem {
     status?: string;
     technician_id?: string;
     technician?: { id: string; name: string; avatar?: string };
+    /** V2: multiple technicians from order_product_service_technicians */
+    technicians?: Array<{ technician_id?: string; technician?: { id: string; name: string; avatar?: string } }>;
     started_at?: string;
     completed_at?: string;
+    /** V2 flag: product item from order_products */
+    is_v2_product?: boolean;
     // Nested objects from API join
-    product?: { id: string; name: string; image?: string; price?: number };
-    service?: { id: string; name: string; image?: string; price?: number };
+    product?: { id: string; name?: string; image?: string; code?: string; price?: number };
+    service?: { id: string; name?: string; image?: string; code?: string; price?: number };
     accessory?: { id: string; order_item_id: string; status: string; notes?: string; updated_at: string } | null;
     partner?: { id: string; order_item_id: string; status: string; notes?: string; updated_at: string } | null;
+    /** Workflow steps for room deadline calculation */
+    order_item_steps?: OrderItemStep[];
 }
 
 export interface Order {

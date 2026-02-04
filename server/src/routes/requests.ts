@@ -33,11 +33,12 @@ router.get('/accessories', async (req: AuthenticatedRequest, res: Response, next
                     id,
                     item_name,
                     item_code,
-                    order:orders(id, order_code)
+                    order:orders(id, order_code),
+                    product:products(id, image)
                 ),
                 order_product_service:order_product_services(
                     id,
-                    order_product:order_products(name, product_code, order:orders(id, order_code))
+                    order_product:order_products(name, product_code, images, order:orders(id, order_code))
                 )
             `)
             .order('created_at', { ascending: false });
@@ -67,11 +68,12 @@ router.get('/partners', async (req: AuthenticatedRequest, res: Response, next: N
                     id,
                     item_name,
                     item_code,
-                    order:orders(id, order_code)
+                    order:orders(id, order_code),
+                    product:products(id, image)
                 ),
                 order_product_service:order_product_services(
                     id,
-                    order_product:order_products(name, product_code, order:orders(id, order_code))
+                    order_product:order_products(name, product_code, images, order:orders(id, order_code))
                 )
             `)
             .order('created_at', { ascending: false });
