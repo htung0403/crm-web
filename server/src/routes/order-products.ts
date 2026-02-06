@@ -245,4 +245,165 @@ router.patch('/services/:serviceId/complete', authenticate, async (req: Authenti
     }
 });
 
+// Get product status summary with unified timeline
+router.get('/:id/status-summary', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+
+        // Get product with all services and their steps
+        const { data: product, error: productError } = await supabaseAdmin
+            .from('order_products')
+            .select(`
+                id,
+                name,
+                product_code,
+                completion_percentage,
+                overall_status,
+                total_workflow_steps,
+                completed_workflow_steps,
+                earliest_started_at,
+                latest_completed_at,
+                product_total_duration_minutes,
+                product_estimated_duration_minutes,
+                services:order_product_services(
+                    id,
+                    item_name,
+                    status,
+                    started_at,
+                    completed_at,
+                    service:services(id, name),
+                    steps:order_item_steps(
+                        id,
+                        step_order,
+                        step_name,
+                        status,
+                        department:departments(id, name),
+                        technician:users!order_item_steps_technician_id_fkey(id, name),
+                        estimated_duration,
+                        started_at,
+                        completed_at,
+                        notes
+                    )
+                )
+            `)
+            .eq('id', id)
+            .single();
+
+        if (productError || !product) {
+            throw new ApiError('Không tìm thấy sản phẩm', 404);
+        }
+
+        // Build services array with completion percentage
+        const services = (product.services || []).map((service: any) => {
+            const steps = service.steps || [];
+            const totalSteps = steps.length;
+            const completedSteps = steps.filter((s: any) => 
+                s.status === 'completed' || s.status === 'skipped'
+            ).length;
+            const serviceCompletionPct = totalSteps > 0 
+                ? Math.round((completedSteps * 100) / totalSteps)
+                : 0;
+
+            return {
+                id: service.id,
+                name: service.item_name,
+                status: service.status,
+                completion_percentage: serviceCompletionPct,
+                started_at: service.started_at,
+                completed_at: service.completed_at,
+                steps: steps.sort((a: any, b: any) => a.step_order - b.step_order)
+            };
+        });
+
+        // Build unified timeline (all steps from all services, sorted chronologically)
+        const allSteps: any[] = [];
+        (product.services || []).forEach((service: any) => {
+            (service.steps || []).forEach((step: any) => {
+                allSteps.push({
+                    step_id: step.id,
+                    step_order: step.step_order,
+                    step_name: step.step_name,
+                    service_id: service.id,
+                    service_name: service.item_name,
+                    department_id: step.department?.id,
+                    department_name: step.department?.name,
+                    technician_id: step.technician?.id,
+                    technician_name: step.technician?.name,
+                    status: step.status,
+                    estimated_duration: step.estimated_duration,
+                    started_at: step.started_at,
+                    completed_at: step.completed_at,
+                    notes: step.notes
+                });
+            });
+        });
+
+        // Sort timeline by step_order, then by started_at if available
+        allSteps.sort((a, b) => {
+            if (a.step_order !== b.step_order) {
+                return a.step_order - b.step_order;
+            }
+            if (a.started_at && b.started_at) {
+                return new Date(a.started_at).getTime() - new Date(b.started_at).getTime();
+            }
+            return 0;
+        });
+
+        res.json({
+            status: 'success',
+            data: {
+                product_id: product.id,
+                product_name: product.name,
+                product_code: product.product_code,
+                completion_percentage: product.completion_percentage || 0,
+                overall_status: product.overall_status || 'pending',
+                total_steps: product.total_workflow_steps || 0,
+                completed_steps: product.completed_workflow_steps || 0,
+                earliest_started_at: product.earliest_started_at,
+                latest_completed_at: product.latest_completed_at,
+                total_duration_minutes: product.product_total_duration_minutes,
+                estimated_duration_minutes: product.product_estimated_duration_minutes,
+                services,
+                timeline: allSteps
+            }
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Recalculate product status manually
+router.post('/:id/recalculate-status', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+
+        // Trigger recalculation by updating a dummy field (triggers will fire)
+        const { data: product, error } = await supabaseAdmin
+            .from('order_products')
+            .update({ updated_at: new Date().toISOString() })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) {
+            throw new ApiError('Không thể tính toán lại trạng thái', 500);
+        }
+
+        // Fetch updated product with calculated fields
+        const { data: updatedProduct } = await supabaseAdmin
+            .from('order_products')
+            .select('completion_percentage, overall_status, total_workflow_steps, completed_workflow_steps')
+            .eq('id', id)
+            .single();
+
+        res.json({
+            status: 'success',
+            data: updatedProduct,
+            message: 'Đã tính toán lại trạng thái sản phẩm'
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 export default router;

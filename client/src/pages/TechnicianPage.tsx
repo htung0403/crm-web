@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 
 const statusConfig: Record<string, { label: string; variant: 'default' | 'secondary' | 'success' | 'destructive' | 'warning' | 'outline'; bgColor: string; headerColor: string }> = {
     assigned: { label: 'Đã phân công', variant: 'warning', bgColor: 'bg-orange-50', headerColor: 'bg-orange-500' },
+    partially_completed: { label: 'Một phần', variant: 'warning', bgColor: 'bg-yellow-50', headerColor: 'bg-yellow-500' },
     in_progress: { label: 'Đang thực hiện', variant: 'default', bgColor: 'bg-blue-50', headerColor: 'bg-blue-500' },
     completed: { label: 'Hoàn thành', variant: 'success', bgColor: 'bg-green-50', headerColor: 'bg-green-500' },
     cancelled: { label: 'Đã hủy', variant: 'destructive', bgColor: 'bg-red-50', headerColor: 'bg-red-500' },
@@ -103,7 +104,7 @@ export function TechnicianPage() {
 
     // Group tasks by status
     const tasksByStatus = {
-        assigned: tasks.filter(t => t.status === 'assigned'),
+        assigned: tasks.filter(t => t.status === 'assigned' || t.status === 'partially_completed'),
         in_progress: tasks.filter(t => t.status === 'in_progress'),
         completed: tasks.filter(t => t.status === 'completed'),
         cancelled: tasks.filter(t => t.status === 'cancelled'),
@@ -277,21 +278,26 @@ function KanbanTaskCard({ task, onStart, onComplete }: KanbanTaskCardProps) {
         }
     };
 
+    // For V2 products, show product info; for others, show service info
+    const isProduct = task.type === 'v2_product';
+    const displayName = isProduct ? (task.product_name || task.service_name) : task.service_name;
+    const servicesCount = isProduct ? (task.services_count || task.services?.length || 0) : 0;
+
     return (
         <Card
             className="cursor-pointer hover:shadow-md transition-shadow bg-white"
             onClick={handleCardClick}
         >
             <CardContent className="p-3 space-y-2">
-                {/* Service Name & Priority */}
+                {/* Product/Service Name & Priority */}
                 <div>
                     <div className="flex items-start justify-between gap-2">
-                        <h4 className="font-medium text-sm line-clamp-2">{task.service_name}</h4>
+                        <h4 className="font-medium text-sm line-clamp-2">{displayName}</h4>
                         <span className={cn("text-xs font-medium shrink-0", priority.color)}>
                             {priority.label}
                         </span>
                     </div>
-                    <div className="flex items-center gap-2 mt-1">
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
                         <p className="text-xs text-muted-foreground font-mono">
                             {task.task_code || task.item_code}
                         </p>
@@ -300,13 +306,46 @@ function KanbanTaskCard({ task, onStart, onComplete }: KanbanTaskCardProps) {
                                 Quy trình
                             </Badge>
                         )}
+                        {task.type === 'v2_product' && (
+                            <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 bg-green-50 text-green-700 border-green-200">
+                                Sản phẩm
+                            </Badge>
+                        )}
                         {task.type === 'v2_service' && (
                             <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 bg-blue-50 text-blue-700 border-blue-200">
                                 Dịch vụ
                             </Badge>
                         )}
+                        {isProduct && servicesCount > 0 && (
+                            <Badge variant="outline" className="text-[10px] px-1 py-0 h-4 bg-orange-50 text-orange-700 border-orange-200">
+                                {servicesCount} dịch vụ
+                            </Badge>
+                        )}
                     </div>
                 </div>
+
+                {/* Services list for products */}
+                {isProduct && task.services && task.services.length > 0 && (
+                    <div className="text-xs space-y-1">
+                        <p className="font-medium text-muted-foreground">Dịch vụ:</p>
+                        <div className="space-y-0.5">
+                            {task.services.slice(0, 2).map((service) => (
+                                <div key={service.id} className="flex items-center gap-1">
+                                    <div className={cn(
+                                        "w-1.5 h-1.5 rounded-full",
+                                        service.status === 'completed' ? 'bg-green-500' :
+                                        service.status === 'in_progress' ? 'bg-blue-500' :
+                                        'bg-gray-400'
+                                    )} />
+                                    <span className="text-muted-foreground truncate">{service.name}</span>
+                                </div>
+                            ))}
+                            {task.services.length > 2 && (
+                                <p className="text-muted-foreground pl-2.5">+{task.services.length - 2} dịch vụ khác</p>
+                            )}
+                        </div>
+                    </div>
+                )}
 
                 {/* Customer Info */}
                 {(task.customer || task.order?.customer) && (
@@ -337,7 +376,7 @@ function KanbanTaskCard({ task, onStart, onComplete }: KanbanTaskCardProps) {
 
                 {/* Actions */}
                 <div className="pt-2 flex gap-2" onClick={(e) => e.stopPropagation()}>
-                    {task.status === 'assigned' && (
+                    {(task.status === 'assigned' || task.status === 'partially_completed') && (
                         <Button size="sm" className="w-full h-7 text-xs" onClick={onStart}>
                             <Play className="h-3 w-3 mr-1" />
                             Bắt đầu

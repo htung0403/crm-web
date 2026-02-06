@@ -23,6 +23,16 @@ export function getTechRoomByStepOrder(stepOrder: number): TechRoomId {
     return 'phong_da';
 }
 
+/** Ánh xạ tên bộ phận (department) sang phòng – dùng khi bước có department thay vì chỉ step_order */
+export function getTechRoomByDepartmentName(departmentName: string | undefined | null): TechRoomId | null {
+    if (!departmentName || typeof departmentName !== 'string') return null;
+    const n = departmentName.toLowerCase().trim();
+    if (n.includes('dán đế') || n.includes('dan de')) return 'phong_dan_de';
+    if (n.includes('mạ') || n === 'ma') return 'phong_ma';
+    if (n.includes('da') && !n.includes('dán')) return 'phong_da';
+    return null;
+}
+
 export const columns: KanbanColumn[] = [
     { id: 'pending', title: 'Đơn nháp', color: 'text-blue-600', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
     { id: 'confirmed', title: 'Đã xác nhận', color: 'text-purple-600', bgColor: 'bg-purple-50', borderColor: 'border-purple-200' },

@@ -5,14 +5,18 @@ export interface TechnicianTask {
     id: string;
     task_code: string;
     item_code?: string;
-    order_id: string;
-    order_item_id: string;
-    service_id: string;
-    customer_id: string;
+    order_id?: string;
+    order_item_id?: string;
+    order_product_id?: string;
+    service_id?: string;
+    customer_id?: string;
     technician_id: string | null;
     service_name: string;
+    product_name?: string;
+    product_type?: string;
+    product_images?: string[];
     quantity: number;
-    status: 'pending' | 'assigned' | 'in_progress' | 'completed' | 'cancelled';
+    status: 'pending' | 'assigned' | 'in_progress' | 'completed' | 'cancelled' | 'partially_completed';
     priority: 'low' | 'normal' | 'high' | 'urgent';
     scheduled_date: string | null;
     scheduled_time: string | null;
@@ -26,9 +30,28 @@ export interface TechnicianTask {
     assigned_at: string | null;
     created_at: string;
     updated_at: string;
-    type?: 'v1_service' | 'v2_service' | 'workflow_step';
+    type?: 'v1_service' | 'v2_service' | 'v2_product' | 'workflow_step';
     is_step?: boolean;
     step_id?: string;
+    services?: Array<{
+        id: string;
+        name: string;
+        status: string;
+        unit_price?: number;
+        started_at?: string | null;
+        completed_at?: string | null;
+        assigned_at?: string | null;
+        technicians?: Array<{
+            technician_id: string;
+            technician?: {
+                id: string;
+                name: string;
+                phone?: string;
+                avatar?: string;
+            };
+        }>;
+    }>;
+    services_count?: number;
     // Joined data
     order?: {
         order_code: string;

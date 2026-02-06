@@ -234,6 +234,51 @@ export const orderProductsApi = {
     // Complete a service
     completeService: (serviceId: string, notes?: string) =>
         api.patch<ApiResponse<{ allServicesCompleted: boolean }>>(`/order-products/services/${serviceId}/complete`, { notes }),
+
+    // Get status summary with unified timeline
+    getStatusSummary: (id: string) =>
+        api.get<ApiResponse<{
+            product_id: string;
+            product_name: string;
+            product_code: string;
+            completion_percentage: number;
+            overall_status: string;
+            total_steps: number;
+            completed_steps: number;
+            earliest_started_at?: string;
+            latest_completed_at?: string;
+            total_duration_minutes?: number;
+            estimated_duration_minutes?: number;
+            services: Array<{
+                id: string;
+                name: string;
+                status: string;
+                completion_percentage: number;
+                started_at?: string;
+                completed_at?: string;
+                steps: any[];
+            }>;
+            timeline: Array<{
+                step_id: string;
+                step_order: number;
+                step_name: string;
+                service_id: string;
+                service_name: string;
+                department_id?: string;
+                department_name?: string;
+                technician_id?: string;
+                technician_name?: string;
+                status: string;
+                estimated_duration?: number;
+                started_at?: string;
+                completed_at?: string;
+                notes?: string;
+            }>;
+        }>>(`/order-products/${id}/status-summary`),
+
+    // Recalculate product status manually
+    recalculateStatus: (id: string) =>
+        api.post<ApiResponse<any>>(`/order-products/${id}/recalculate-status`),
 };
 
 // Order Items API

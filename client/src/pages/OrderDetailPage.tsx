@@ -5,7 +5,8 @@ import {
     Wrench, Loader2, Calendar, User as UserIcon, FileText, Clock, CheckCircle, XCircle,
     ArrowRight, Building2, Users, Phone, CircleDot, UserPlus, Timer, Layers,
     RotateCw, Bot, Copy, ThumbsUp, ThumbsDown, Check, History,
-    Truck, CalendarClock, RefreshCcw, Camera, Upload, X, Heart
+    Truck, CalendarClock, RefreshCcw, Camera, Upload, X, Heart,
+    Tag, Palette, Ruler, AlertCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -20,13 +21,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils';
 import { uploadFile } from '@/lib/supabase';
-import { ordersApi, orderItemsApi } from '@/lib/api';
+import { ordersApi, orderItemsApi, orderProductsApi } from '@/lib/api';
+import { ProductStatusCard } from '@/components/orders/ProductStatusCard';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import type { User } from '@/types';
 import { useOrders } from '@/hooks/useOrders';
 import { useUsers } from '@/hooks/useUsers';
-import { columns, TECH_ROOMS, getTechRoomByStepOrder } from '@/components/orders/constants';
-import { WorkflowStepsTimeline } from "@/components/orders/WorkflowStepsTimeline";
+import { columns, TECH_ROOMS, getTechRoomByStepOrder, getTechRoomByDepartmentName } from '@/components/orders/constants';
 import { PrintQRDialog } from '@/components/orders/PrintQRDialog';
 import { EditOrderDialog } from '@/components/orders/EditOrderDialog';
 import { PaymentDialog } from '@/components/orders/PaymentDialog';
@@ -138,6 +139,10 @@ export function OrderDetailPage() {
     // Workflow steps for department kanban
     const [allWorkflowSteps, setAllWorkflowSteps] = useState<any[]>([]);
     const [stepsLoading, setStepsLoading] = useState(false);
+
+    // Product status summary for V2 products
+    const [productStatusSummary, setProductStatusSummary] = useState<any>(null);
+    const [statusSummaryLoading, setStatusSummaryLoading] = useState(false);
 
     // Mua phụ kiện dialog
     const [showAccessoryDialog, setShowAccessoryDialog] = useState(false);
@@ -332,6 +337,35 @@ export function OrderDetailPage() {
         fetchAllSteps();
     }, [order?.items]);
 
+    // Fetch product status summary for V2 products
+    useEffect(() => {
+        const fetchProductStatusSummary = async () => {
+            if (!order?.items) return;
+
+            // Find first V2 product - the product item itself has the order_product.id as its id
+            const v2Product = order.items.find((item: any) =>
+                item.is_v2_product && item.item_type === 'product'
+            );
+
+            if (!v2Product || !v2Product.id) return;
+
+            setStatusSummaryLoading(true);
+            try {
+                const response = await orderProductsApi.getStatusSummary(v2Product.id);
+                if (response.data?.data) {
+                    setProductStatusSummary(response.data.data);
+                }
+            } catch (error) {
+                console.error('Error fetching product status summary:', error);
+                // Don't show error if product doesn't have status summary yet
+            } finally {
+                setStatusSummaryLoading(false);
+            }
+        };
+
+        fetchProductStatusSummary();
+    }, [order?.items]);
+
     // Auto-refresh when window regains focus (e.g., after completing task in another tab)
     useEffect(() => {
         const handleFocus = () => {
@@ -411,12 +445,14 @@ export function OrderDetailPage() {
         return { label, dueAt };
     }, [allWorkflowSteps, order?.confirmed_at, order?.created_at]);
 
-    // Compute current tech room per order item from workflow steps (step_order 1→Phòng Mạ, 2→Dán đế, 3→Phòng Da)
+    // Compute current tech room: ưu tiên department của bước (Bộ phận: Dán đế → Phòng Dán đế), fallback step_order
     const getItemCurrentTechRoom = useCallback((itemId: string): 'phong_ma' | 'phong_dan_de' | 'phong_da' => {
         const steps = allWorkflowSteps.filter((s: any) => s.item_id === itemId || s.order_item_id === itemId || s.order_product_service_id === itemId);
         const inProgress = steps.find((s: any) => s.status === 'in_progress');
         const firstPending = steps.find((s: any) => s.status === 'pending' || s.status === 'assigned');
         const step = inProgress || firstPending;
+        const roomByDept = getTechRoomByDepartmentName(step?.department?.name);
+        if (roomByDept) return roomByDept;
         const order = step?.step_order ?? 1;
         return getTechRoomByStepOrder(order);
     }, [allWorkflowSteps]);
@@ -450,25 +486,21 @@ export function OrderDetailPage() {
         return groups;
     }, [order?.items]);
 
-    // Phòng hiện tại của cả nhóm = phòng sớm nhất trong các dịch vụ (trái nhất trên kanban)
-    const getGroupCurrentTechRoom = useCallback((group: WorkflowKanbanGroup): 'phong_ma' | 'phong_dan_de' | 'phong_da' => {
-        let minOrder = 99;
-        for (const svc of group.services) {
-            const roomId = getItemCurrentTechRoom(svc.id);
-            const ro = TECH_ROOMS.find(r => r.id === roomId)?.stepOrder ?? 1;
-            if (ro < minOrder) minOrder = ro;
-        }
-        return (TECH_ROOMS.find(r => r.stepOrder === minOrder) ?? TECH_ROOMS[0]).id;
-    }, [getItemCurrentTechRoom]);
-
     // Current step for an item (in_progress or first pending/assigned) for "Xác nhận hoàn thành bước"
-    const getItemCurrentStep = useCallback((itemId: string): { id: string; step_name: string; status: string } | null => {
+    const getItemCurrentStep = useCallback((itemId: string): { id: string; step_name: string; status: string; department?: { id: string; name: string } } | null => {
         const steps = allWorkflowSteps.filter((s: any) => s.item_id === itemId || s.order_item_id === itemId || s.order_product_service_id === itemId);
         const inProgress = steps.find((s: any) => s.status === 'in_progress');
         const firstPending = steps.find((s: any) => s.status === 'pending' || s.status === 'assigned');
         const step = inProgress || firstPending;
-        return step ? { id: step.id, step_name: step.step_name, status: step.status } : null;
+        return step ? { id: step.id, step_name: step.step_name, status: step.status, department: step.department } : null;
     }, [allWorkflowSteps]);
+
+    // Phòng hiện tại = phòng của dịch vụ đang có bước hiện tại (lead), để card nằm đúng cột với bước đang hiển thị
+    const getGroupCurrentTechRoom = useCallback((group: WorkflowKanbanGroup): 'phong_ma' | 'phong_dan_de' | 'phong_da' => {
+        const leadItem = group.services.find((s) => getItemCurrentStep(s.id)) ?? group.services[0];
+        if (!leadItem) return 'phong_ma';
+        return getItemCurrentTechRoom(leadItem.id);
+    }, [getItemCurrentTechRoom, getItemCurrentStep]);
 
     // Format elapsed time for timer display
     const formatElapsedTime = (startTime: string | undefined) => {
@@ -855,130 +887,130 @@ export function OrderDetailPage() {
                                     }
                                     if (groups.length === 0) return null;
                                     return (
-                                    <Card>
-                                        <CardHeader className="pb-3">
-                                            <CardTitle className="text-base flex items-center gap-2">
-                                                <Package className="h-4 w-4 text-primary" />
-                                                Chi tiết sản phẩm/dịch vụ
-                                            </CardTitle>
-                                        </CardHeader>
-                                        <CardContent className="p-0">
-                                            <div className="overflow-x-auto">
-                                                <table className="w-full text-sm table-fixed">
-                                                    <thead className="bg-muted/50">
-                                                        <tr>
-                                                            <th className="text-left p-4 font-medium w-[72px] min-w-[72px]">Ảnh</th>
-                                                            <th className="text-left p-4 font-medium">Loại</th>
-                                                            <th className="text-left p-4 font-medium">Tên</th>
-                                                            <th className="text-center p-4 font-medium">SL</th>
-                                                            <th className="text-right p-4 font-medium">Đơn giá</th>
-                                                            <th className="text-right p-4 font-medium">Thành tiền</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y">
-                                                        {groups.map((group, gi) => {
-                                                            if (group.product) {
-                                                                const product = group.product;
-                                                                const servicesTotal = group.services.reduce((sum, s) => sum + (s.total_price || 0), 0);
-                                                                return (
-                                                                    <React.Fragment key={gi}>
-                                                                        <tr className="bg-muted/20 hover:bg-muted/30 border-l-2 border-l-primary">
-                                                                            <td className="p-4 align-top w-[72px]">
-                                                                                {(product.product?.image || (product as any).product?.image) ? (
-                                                                                    <button
-                                                                                        type="button"
-                                                                                        onClick={() => setImagePreviewUrl((product.product?.image || (product as any).product?.image) as string)}
-                                                                                        className="w-12 h-12 shrink-0 rounded-lg overflow-hidden border bg-muted flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
-                                                                                    >
-                                                                                        <img src={(product.product?.image || (product as any).product?.image) as string} alt={product.item_name} className="w-full h-full object-contain" />
-                                                                                    </button>
-                                                                                ) : (
-                                                                                    <div className="w-12 h-12 shrink-0 rounded-lg bg-muted flex items-center justify-center">
-                                                                                        <ShoppingBag className="h-5 w-5 text-muted-foreground" />
-                                                                                    </div>
-                                                                                )}
-                                                                            </td>
-                                                                            <td className="p-4 align-top">
-                                                                                <Badge className={getItemTypeColor('product')}>
-                                                                                    {getCustomerProductTypeLabel((product as any).product_type)}
-                                                                                </Badge>
-                                                                            </td>
-                                                                            <td className="p-4 font-medium align-top">{product.item_name}</td>
-                                                                            <td className="p-4 text-center align-top">{product.quantity}</td>
-                                                                            <td className="p-4 text-right text-muted-foreground align-top">—</td>
-                                                                            <td className="p-4 text-right font-semibold align-top">
-                                                                                {group.services.length > 0 ? formatCurrency(servicesTotal) : '—'}
-                                                                            </td>
-                                                                        </tr>
-                                                                        {group.services.map((svc, si) => (
-                                                                            <tr key={`${gi}-s-${si}`} className="hover:bg-muted/30">
-                                                                                <td className="p-4 pl-8 w-[72px]">
-                                                                                    {(svc.service?.image || svc.product?.image || (svc as any).product?.image) ? (
+                                        <Card>
+                                            <CardHeader className="pb-3">
+                                                <CardTitle className="text-base flex items-center gap-2">
+                                                    <Package className="h-4 w-4 text-primary" />
+                                                    Chi tiết sản phẩm/dịch vụ
+                                                </CardTitle>
+                                            </CardHeader>
+                                            <CardContent className="p-0">
+                                                <div className="overflow-x-auto">
+                                                    <table className="w-full text-sm table-fixed">
+                                                        <thead className="bg-muted/50">
+                                                            <tr>
+                                                                <th className="text-left p-4 font-medium w-[72px] min-w-[72px]">Ảnh</th>
+                                                                <th className="text-left p-4 font-medium">Loại</th>
+                                                                <th className="text-left p-4 font-medium">Tên</th>
+                                                                <th className="text-center p-4 font-medium">SL</th>
+                                                                <th className="text-right p-4 font-medium">Đơn giá</th>
+                                                                <th className="text-right p-4 font-medium">Thành tiền</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody className="divide-y">
+                                                            {groups.map((group, gi) => {
+                                                                if (group.product) {
+                                                                    const product = group.product;
+                                                                    const servicesTotal = group.services.reduce((sum, s) => sum + (s.total_price || 0), 0);
+                                                                    return (
+                                                                        <React.Fragment key={gi}>
+                                                                            <tr className="bg-muted/20 hover:bg-muted/30 border-l-2 border-l-primary">
+                                                                                <td className="p-4 align-top w-[72px]">
+                                                                                    {(product.product?.image || (product as any).product?.image) ? (
                                                                                         <button
                                                                                             type="button"
-                                                                                            onClick={() => setImagePreviewUrl((svc.service?.image || svc.product?.image || (svc as any).product?.image) as string)}
-                                                                                            className="w-10 h-10 shrink-0 rounded-lg overflow-hidden border bg-muted flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
+                                                                                            onClick={() => setImagePreviewUrl((product.product?.image || (product as any).product?.image) as string)}
+                                                                                            className="w-12 h-12 shrink-0 rounded-lg overflow-hidden border bg-muted flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
                                                                                         >
-                                                                                            <img src={(svc.service?.image || svc.product?.image || (svc as any).product?.image) as string} alt={svc.item_name} className="w-full h-full object-contain" />
+                                                                                            <img src={(product.product?.image || (product as any).product?.image) as string} alt={product.item_name} className="w-full h-full object-contain" />
                                                                                         </button>
                                                                                     ) : (
-                                                                                        <div className="w-10 h-10 shrink-0 rounded-lg bg-muted flex items-center justify-center">
-                                                                                            <Wrench className="h-4 w-4 text-muted-foreground" />
+                                                                                        <div className="w-12 h-12 shrink-0 rounded-lg bg-muted flex items-center justify-center">
+                                                                                            <ShoppingBag className="h-5 w-5 text-muted-foreground" />
                                                                                         </div>
                                                                                     )}
                                                                                 </td>
-                                                                                <td className="p-4 pl-8">
-                                                                                    <Badge className={getItemTypeColor(svc.item_type)}>
-                                                                                        {getItemTypeLabel(svc.item_type)}
+                                                                                <td className="p-4 align-top">
+                                                                                    <Badge className={getItemTypeColor('product')}>
+                                                                                        {getCustomerProductTypeLabel((product as any).product_type)}
                                                                                     </Badge>
                                                                                 </td>
-                                                                                <td className="p-4 pl-8 text-muted-foreground">{svc.item_name}</td>
-                                                                                <td className="p-4 text-center">{svc.quantity}</td>
-                                                                                <td className="p-4 text-right text-muted-foreground">{formatCurrency(svc.unit_price)}</td>
-                                                                                <td className="p-4 text-right font-semibold">{formatCurrency(svc.total_price)}</td>
+                                                                                <td className="p-4 font-medium align-top">{product.item_name}</td>
+                                                                                <td className="p-4 text-center align-top">{product.quantity}</td>
+                                                                                <td className="p-4 text-right text-muted-foreground align-top">—</td>
+                                                                                <td className="p-4 text-right font-semibold align-top">
+                                                                                    {group.services.length > 0 ? formatCurrency(servicesTotal) : '—'}
+                                                                                </td>
                                                                             </tr>
-                                                                        ))}
-                                                                    </React.Fragment>
+                                                                            {group.services.map((svc, si) => (
+                                                                                <tr key={`${gi}-s-${si}`} className="hover:bg-muted/30">
+                                                                                    <td className="p-4 pl-8 w-[72px]">
+                                                                                        {(svc.service?.image || svc.product?.image || (svc as any).product?.image) ? (
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                onClick={() => setImagePreviewUrl((svc.service?.image || svc.product?.image || (svc as any).product?.image) as string)}
+                                                                                                className="w-10 h-10 shrink-0 rounded-lg overflow-hidden border bg-muted flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
+                                                                                            >
+                                                                                                <img src={(svc.service?.image || svc.product?.image || (svc as any).product?.image) as string} alt={svc.item_name} className="w-full h-full object-contain" />
+                                                                                            </button>
+                                                                                        ) : (
+                                                                                            <div className="w-10 h-10 shrink-0 rounded-lg bg-muted flex items-center justify-center">
+                                                                                                <Wrench className="h-4 w-4 text-muted-foreground" />
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </td>
+                                                                                    <td className="p-4 pl-8">
+                                                                                        <Badge className={getItemTypeColor(svc.item_type)}>
+                                                                                            {getItemTypeLabel(svc.item_type)}
+                                                                                        </Badge>
+                                                                                    </td>
+                                                                                    <td className="p-4 pl-8 text-muted-foreground">{svc.item_name}</td>
+                                                                                    <td className="p-4 text-center">{svc.quantity}</td>
+                                                                                    <td className="p-4 text-right text-muted-foreground">{formatCurrency(svc.unit_price)}</td>
+                                                                                    <td className="p-4 text-right font-semibold">{formatCurrency(svc.total_price)}</td>
+                                                                                </tr>
+                                                                            ))}
+                                                                        </React.Fragment>
+                                                                    );
+                                                                }
+                                                                const item = group.services[0];
+                                                                return (
+                                                                    <tr key={gi} className="hover:bg-muted/30">
+                                                                        <td className="p-4 w-[72px]">
+                                                                            {(item.product?.image || item.service?.image) ? (
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => setImagePreviewUrl((item.product?.image || item.service?.image) as string)}
+                                                                                    className="w-12 h-12 shrink-0 rounded-lg overflow-hidden border bg-muted flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
+                                                                                >
+                                                                                    <img src={item.product?.image || item.service?.image as string} alt={item.item_name} className="w-full h-full object-contain" />
+                                                                                </button>
+                                                                            ) : (
+                                                                                <div className="w-12 h-12 shrink-0 rounded-lg bg-muted flex items-center justify-center">
+                                                                                    {item.item_type === 'product' ? <ShoppingBag className="h-5 w-5 text-muted-foreground" /> :
+                                                                                        item.item_type === 'service' ? <Wrench className="h-5 w-5 text-muted-foreground" /> :
+                                                                                            item.item_type === 'package' ? <Gift className="h-5 w-5 text-muted-foreground" /> :
+                                                                                                <CreditCard className="h-5 w-5 text-muted-foreground" />}
+                                                                                </div>
+                                                                            )}
+                                                                        </td>
+                                                                        <td className="p-4">
+                                                                            <Badge className={getItemTypeColor(item.item_type)}>
+                                                                                {getItemTypeLabel(item.item_type)}
+                                                                            </Badge>
+                                                                        </td>
+                                                                        <td className="p-4 font-medium">{item.item_name}</td>
+                                                                        <td className="p-4 text-center">{item.quantity}</td>
+                                                                        <td className="p-4 text-right text-muted-foreground">{formatCurrency(item.unit_price)}</td>
+                                                                        <td className="p-4 text-right font-semibold">{formatCurrency(item.total_price)}</td>
+                                                                    </tr>
                                                                 );
-                                                            }
-                                                            const item = group.services[0];
-                                                            return (
-                                                                <tr key={gi} className="hover:bg-muted/30">
-                                                                    <td className="p-4 w-[72px]">
-                                                                        {(item.product?.image || item.service?.image) ? (
-                                                                            <button
-                                                                                type="button"
-                                                                                onClick={() => setImagePreviewUrl((item.product?.image || item.service?.image) as string)}
-                                                                                className="w-12 h-12 shrink-0 rounded-lg overflow-hidden border bg-muted flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
-                                                                            >
-                                                                                <img src={item.product?.image || item.service?.image as string} alt={item.item_name} className="w-full h-full object-contain" />
-                                                                            </button>
-                                                                        ) : (
-                                                                            <div className="w-12 h-12 shrink-0 rounded-lg bg-muted flex items-center justify-center">
-                                                                                {item.item_type === 'product' ? <ShoppingBag className="h-5 w-5 text-muted-foreground" /> :
-                                                                                    item.item_type === 'service' ? <Wrench className="h-5 w-5 text-muted-foreground" /> :
-                                                                                        item.item_type === 'package' ? <Gift className="h-5 w-5 text-muted-foreground" /> :
-                                                                                            <CreditCard className="h-5 w-5 text-muted-foreground" />}
-                                                                            </div>
-                                                                        )}
-                                                                    </td>
-                                                                    <td className="p-4">
-                                                                        <Badge className={getItemTypeColor(item.item_type)}>
-                                                                            {getItemTypeLabel(item.item_type)}
-                                                                        </Badge>
-                                                                    </td>
-                                                                    <td className="p-4 font-medium">{item.item_name}</td>
-                                                                    <td className="p-4 text-center">{item.quantity}</td>
-                                                                    <td className="p-4 text-right text-muted-foreground">{formatCurrency(item.unit_price)}</td>
-                                                                    <td className="p-4 text-right font-semibold">{formatCurrency(item.total_price)}</td>
-                                                                </tr>
-                                                            );
-                                                        })}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </CardContent>
+                                        </Card>
                                     );
                                 })()}
 
@@ -1149,6 +1181,22 @@ export function OrderDetailPage() {
                                     </CardContent>
                                 </Card>
 
+                                {/* Product Status Summary for V2 Products */}
+                                {productStatusSummary && (
+                                    <>
+                                        <ProductStatusCard
+                                            completionPercentage={productStatusSummary.completion_percentage || 0}
+                                            overallStatus={productStatusSummary.overall_status || 'pending'}
+                                            totalSteps={productStatusSummary.total_steps || 0}
+                                            completedSteps={productStatusSummary.completed_steps || 0}
+                                            totalDurationMinutes={productStatusSummary.total_duration_minutes}
+                                            estimatedDurationMinutes={productStatusSummary.estimated_duration_minutes}
+                                            earliestStartedAt={productStatusSummary.earliest_started_at}
+                                            latestCompletedAt={productStatusSummary.latest_completed_at}
+                                        />
+                                    </>
+                                )}
+
                                 {/* Quick Actions */}
                                 <Card>
                                     <CardHeader className="pb-3">
@@ -1186,582 +1234,590 @@ export function OrderDetailPage() {
                                 </Card>
                             </div>
                         </div>
+
                     </TabsContent>
 
                     {/* Sales Tab - Item Kanban Board (chỉ hiện khi đơn nháp) */}
                     {order?.status === 'pending' && (
-                    <TabsContent value="sales">
-                        <div className="space-y-6">
-                            {/* Kanban Board Header */}
-                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                                <div>
-                                    <h2 className="text-xl font-bold flex items-center gap-2">
-                                        <RotateCw className="h-5 w-5 text-primary" />
-                                        Quy trình Lên đơn (Sales Kanban)
-                                    </h2>
-                                    <p className="text-sm text-muted-foreground">
-                                        Kéo thả thẻ hạng mục vào cột hoặc nhấn nút mũi tên để chuyển bước
-                                    </p>
-                                </div>
-                                <div className="flex items-center gap-2 bg-muted/50 p-2 rounded-lg">
-                                    <span className="text-sm font-bold px-2.5 py-1 rounded bg-blue-100 text-blue-700">1-3: Chuẩn bị</span>
-                                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                                    <span className="text-sm font-bold px-2.5 py-1 rounded bg-red-100 text-red-700">4: Phê duyệt</span>
-                                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                                    <span className="text-sm font-bold px-2.5 py-1 rounded bg-green-100 text-green-700">5: Chốt đơn</span>
-                                </div>
-                            </div>
-
-                            {/* Kanban Board Layout – kéo thả + font lớn hơn */}
-                            <div className="overflow-x-auto pb-4 -mx-1 px-1">
-                                <DragDropContext
-                                    onDragEnd={(result: DropResult) => {
-                                        if (!result.destination || result.destination.droppableId === result.source.droppableId) return;
-                                        const itemId = result.draggableId;
-                                        const newStatus = result.destination.droppableId;
-                                        const stepLabel = SALES_STEPS.find((s) => s.id === newStatus)?.label || newStatus;
-                                        updateOrderItemStatus(itemId, newStatus);
-                                        toast.success(`Đã chuyển sang: ${stepLabel}`);
-                                        orderItemsApi.updateStatus(itemId, newStatus).then(() => { if (order?.id) fetchKanbanLogs(order.id); }).catch(() => {
-                                            reloadOrder();
-                                            toast.error('Lỗi khi cập nhật trạng thái');
-                                        });
-                                    }}
-                                >
-                                <div className="flex gap-4 min-w-[1200px]">
-                                    {SALES_STEPS.map((column, colIdx) => {
-                                        const columnItems = order.items?.filter(item => {
-                                            const hasV2Products = order.items?.some(i => (i as any).is_v2_product);
-                                            if (hasV2Products && !(item as any).is_v2_product) return false;
-                                            const status = item.status || 'step1';
-                                            if (status === 'pending' && column.id === 'step1') return true;
-                                            return status === column.id;
-                                        }) || [];
-
-                                        return (
-                                            <div key={column.id} className="flex-1 min-w-[220px]">
-                                                <div className={cn(
-                                                    "rounded-xl border-t-4 p-3 h-full mb-4 shadow-sm",
-                                                    column.id === 'step4' ? "bg-red-50/30 border-t-red-500" :
-                                                        column.id === 'step5' ? "bg-green-50/30 border-t-green-500" :
-                                                            "bg-blue-50/30 border-t-blue-500"
-                                                )}>
-                                                    {/* Column Header */}
-                                                    <div className="flex items-center justify-between mb-4 pb-2 border-b">
-                                                        <div className="flex items-center gap-2">
-                                                            <div className={cn("w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white",
-                                                                column.id === 'step4' ? "bg-red-500" :
-                                                                    column.id === 'step5' ? "bg-green-500" :
-                                                                        "bg-blue-500"
-                                                            )}>
-                                                                {colIdx + 1}
-                                                            </div>
-                                                            <h3 className="font-bold text-sm uppercase tracking-tight">{column.title}</h3>
-                                                        </div>
-                                                        <Badge variant="outline" className="text-xs bg-white">
-                                                            {columnItems.length}
-                                                        </Badge>
-                                                    </div>
-
-                                                    {/* Column Items – Droppable */}
-                                                    <Droppable droppableId={column.id}>
-                                                        {(provided) => (
-                                                    <div
-                                                        ref={provided.innerRef}
-                                                        {...provided.droppableProps}
-                                                        className="space-y-3 min-h-[150px]"
-                                                    >
-                                                        {columnItems.map((item, itemIdx) => (
-                                                            <Draggable key={item.id} draggableId={item.id} index={itemIdx}>
-                                                                {(provided) => (
-                                                            <div
-                                                                ref={provided.innerRef}
-                                                                {...provided.draggableProps}
-                                                                {...provided.dragHandleProps}
-                                                                className="bg-white p-3 rounded-lg border shadow-sm group hover:border-primary hover:shadow-md transition-all cursor-grab active:cursor-grabbing"
-                                                            >
-                                                                <div className="flex items-start gap-2 mb-2">
-                                                                    <div className="w-9 h-9 rounded bg-muted flex items-center justify-center shrink-0">
-                                                                        {item.item_type === 'product' ? <ShoppingBag className="h-5 w-5 text-muted-foreground" /> :
-                                                                            item.item_type === 'service' ? <Wrench className="h-5 w-5 text-muted-foreground" /> :
-                                                                                <Gift className="h-5 w-5 text-muted-foreground" />}
-                                                                    </div>
-                                                                    <div className="flex-1 min-w-0">
-                                                                        <p className="font-bold text-sm truncate leading-tight">{item.item_name}</p>
-                                                                        <Badge className={cn("text-xs px-1.5 h-5 mt-1", getItemTypeColor(item.item_type))}>
-                                                                            {getItemTypeLabel(item.item_type)}
-                                                                        </Badge>
-                                                                    </div>
-                                                                </div>
-
-                                                                {/* Task Controls – nút lùi/tiến + mã item */}
-                                                                <div className="flex items-center justify-between mt-3 pt-2 border-t border-dashed">
-                                                                    <Button
-                                                                        variant="ghost"
-                                                                        size="icon"
-                                                                        className="h-8 w-8 rounded-full"
-                                                                        disabled={colIdx === 0}
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            const prevStep = SALES_STEPS[colIdx - 1].id;
-                                                                            updateOrderItemStatus(item.id, prevStep);
-                                                                            toast.success(`Đã lùi về: ${SALES_STEPS[colIdx - 1].label}`);
-                                                                            orderItemsApi.updateStatus(item.id, prevStep).then(() => { if (order?.id) fetchKanbanLogs(order.id); }).catch(() => {
-                                                                                reloadOrder();
-                                                                                toast.error('Lỗi khi cập nhật trạng thái');
-                                                                            });
-                                                                        }}
-                                                                    >
-                                                                        <ArrowLeft className="h-4 w-4" />
-                                                                    </Button>
-                                                                    <span className="text-xs font-bold text-muted-foreground">
-                                                                        #{item.item_code?.slice(-4) || 'Item'}
-                                                                    </span>
-                                                                    <Button
-                                                                        variant="ghost"
-                                                                        size="icon"
-                                                                        className="h-8 w-8 rounded-full text-primary hover:bg-primary hover:text-white"
-                                                                        disabled={colIdx === SALES_STEPS.length - 1}
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            const nextStep = SALES_STEPS[colIdx + 1].id;
-                                                                            updateOrderItemStatus(item.id, nextStep);
-                                                                            toast.success(`Đã chuyển sang: ${SALES_STEPS[colIdx + 1].label}`);
-                                                                            orderItemsApi.updateStatus(item.id, nextStep).then(() => { if (order?.id) fetchKanbanLogs(order.id); }).catch(() => {
-                                                                                reloadOrder();
-                                                                                toast.error('Lỗi khi cập nhật trạng thái');
-                                                                            });
-                                                                        }}
-                                                                    >
-                                                                        <ArrowRight className="h-4 w-4" />
-                                                                    </Button>
-                                                                </div>
-                                                            </div>
-                                                                )}
-                                                            </Draggable>
-                                                        ))}
-                                                        {columnItems.length === 0 && (
-                                                            <div className="py-8 text-center border-2 border-dashed rounded-lg bg-black/5">
-                                                                <p className="text-xs text-muted-foreground uppercase font-medium">Trống</p>
-                                                            </div>
-                                                        )}
-                                                        {provided.placeholder}
-                                                    </div>
-                                                        )}
-                                                    </Droppable>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                                </DragDropContext>
-                            </div>
-
-                            {/* Additional Tools Overlay */}
-                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                <div className="lg:col-span-2 space-y-6">
-
-                                    {/* AI Message Templates */}
-                                    <Card className="border-blue-100 bg-blue-50/30">
-                                        <CardHeader className="pb-3 border-b border-blue-100">
-                                            <CardTitle className="text-sm font-bold text-blue-800 flex items-center gap-2">
-                                                <Bot className="h-4 w-4" /> AI AGENT: MẪU TIN NHẮN CHĂM SÓC
-                                            </CardTitle>
-                                        </CardHeader>
-                                        <CardContent className="pt-6">
-                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                {[
-                                                    { id: 'ship', title: '1. Xin địa chỉ Ship', sub: '“Chào anh, đồ đã xong...”', content: `Chào ${order.customer?.name} ạ, giày ${order.items?.[0]?.item_name || 'của mình'} đã xong. Anh/chị cho shop xin địa chỉ ship nhé!` },
-                                                    { id: 'care', title: '2. HD Bảo quản', sub: '“Shop gửi HDSD...”', content: `Shop gửi ${order.customer?.name} HDSD: Tránh nước, lau bằng khăn mềm định kỳ ạ.` },
-                                                    { id: 'feedback', title: '3. Xin Feedback', sub: '“Bạn đã nhận được đồ chưa...”', content: `Dạ chào ${order.customer?.name}, mình nhận được đồ chưa ạ? Cho shop xin feedback nhé!` }
-                                                ].map(tmp => (
-                                                    <div
-                                                        key={tmp.id}
-                                                        className="bg-white p-4 rounded-xl border border-blue-200 hover:shadow-md transition-all group relative cursor-pointer"
-                                                        onClick={() => {
-                                                            navigator.clipboard.writeText(tmp.content);
-                                                            toast.success(`Đã copy mẫu: ${tmp.title}`);
-                                                        }}
-                                                    >
-                                                        <p className="text-xs font-black text-blue-600 uppercase mb-1">{tmp.title}</p>
-                                                        <p className="text-sm text-gray-500 line-clamp-2 italic">{tmp.sub}</p>
-                                                        <Copy className="absolute bottom-4 right-4 h-4 w-4 text-gray-300 group-hover:text-blue-500 transition-colors" />
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-
-                                    {/* Lịch sử chuyển bước Sales Kanban */}
-                                    <Card>
-                                        <CardHeader className="pb-3">
-                                            <CardTitle className="text-sm font-bold flex items-center gap-2">
-                                                <History className="h-4 w-4 text-primary" /> LỊCH SỬ CHUYỂN BƯỚC (LÊN ĐƠN)
-                                            </CardTitle>
-                                        </CardHeader>
-                                        <CardContent className="space-y-2">
-                                            {salesLogs.length === 0 ? (
-                                                <p className="text-xs text-muted-foreground italic py-2">Chưa có lịch sử chuyển bước.</p>
-                                            ) : (
-                                                <ul className="space-y-2 max-h-48 overflow-y-auto">
-                                                    {salesLogs.map((log: any) => (
-                                                        <li key={log.id} className="text-xs flex items-center gap-2 py-1.5 border-b border-dashed last:border-0">
-                                                            <span className="text-muted-foreground shrink-0">{formatDateTime(log.created_at)}</span>
-                                                            <span className="font-medium">{log.created_by_user?.name ?? 'Hệ thống'}</span>
-                                                            <span className="text-muted-foreground">
-                                                                {log.from_status ? `${getSalesStatusLabel(log.from_status)} → ` : ''}{getSalesStatusLabel(log.to_status)}
-                                                            </span>
-                                                        </li>
-                                                    ))}
-                                                </ul>
-                                            )}
-                                        </CardContent>
-                                    </Card>
-                                </div>
-
-                                {/* Right: Quick Tools */}
-                                <div className="lg:col-span-1 space-y-4">
-                                    <Card className="border-purple-100">
-                                        <CardHeader className="pb-3 bg-purple-50/50">
-                                            <CardTitle className="text-sm font-bold text-purple-800">CÔNG CỤ SALES</CardTitle>
-                                        </CardHeader>
-                                        <CardContent className="pt-4 space-y-3">
-                                            <Button variant="outline" className="w-full justify-start h-12 text-xs font-bold border-gray-200 hover:bg-purple-50 hover:text-purple-700">
-                                                <Sparkles className="h-4 w-4 mr-2 text-purple-500" />
-                                                Đề xuất gói VIP (Upsell)
-                                            </Button>
-                                            <Button variant="outline" className="w-full justify-start h-12 text-xs font-bold border-gray-200 hover:bg-orange-50 hover:text-orange-700">
-                                                <Clock className="h-4 w-4 mr-2 text-orange-500" />
-                                                Nhắc việc (Flow-up)
-                                            </Button>
-                                            <div className="mt-4 pt-4 border-t border-dashed">
-                                                <p className="text-[10px] font-bold text-gray-400 uppercase mb-3">Thông tin sale phụ trách</p>
-                                                <div className="flex items-center gap-3">
-                                                    <Avatar className="h-10 w-10">
-                                                        <AvatarFallback className="bg-orange-100 text-orange-600 font-bold">
-                                                            {order.sales_user?.name?.charAt(0) || 'S'}
-                                                        </AvatarFallback>
-                                                    </Avatar>
-                                                    <div>
-                                                        <p className="text-sm font-bold">{order.sales_user?.name || 'Chưa gán'}</p>
-                                                        <p className="text-[10px] text-muted-foreground uppercase">Saler Phụ Trách</p>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-
-                                    <Card>
-                                        <CardContent className="pt-6">
-                                            <div className="space-y-4">
-                                                {/* Global Progress Summary */}
-                                                <div className="pb-4 border-b border-dashed">
-                                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">Tiến độ tổng thể</p>
-                                                    <div className="flex items-center justify-between mb-1">
-                                                        <span className="text-xs font-bold">{order.items?.filter(i => (i.status || 'step1') === 'step5').length || 0}/{order.items?.length || 0} hạng mục</span>
-                                                        <span className="text-xs font-bold text-primary">
-                                                            {Math.round(((order.items?.filter(i => (i.status || 'step1') === 'step5').length || 0) / (order.items?.length || 1)) * 100)}%
-                                                        </span>
-                                                    </div>
-                                                    <div className="w-full bg-gray-100 rounded-full h-1.5">
-                                                        <div
-                                                            className="bg-primary h-1.5 rounded-full transition-all duration-500"
-                                                            style={{ width: `${((order.items?.filter(i => (i.status || 'step1') === 'step5').length || 0) / (order.items?.length || 1)) * 100}%` }}
-                                                        />
-                                                    </div>
-                                                </div>
-
-                                                <div className="p-4 rounded-xl bg-green-50 border border-green-100">
-                                                    <p className="text-[10px] font-bold text-green-700 uppercase mb-1">Doanh thu dự kiến</p>
-                                                    <p className="text-xl font-black text-green-700">{formatCurrency(order.total_amount)}</p>
-                                                </div>
-
-                                                {/* Chốt đơn button */}
-                                                {(order.status === 'pending' || (order.status as string).startsWith('step')) && (
-                                                    <Button
-                                                        className="w-full h-12 font-bold shadow-lg shadow-green-200 bg-green-600 hover:bg-green-700"
-                                                        disabled={!order.items?.every(i => (i.status || 'step1') === 'step5')}
-                                                        onClick={async () => {
-                                                            try {
-                                                                await updateOrderStatus(order.id, 'confirmed');
-                                                                toast.success('Đã xác nhận đơn hàng thành công!');
-                                                                await reloadOrder();
-                                                            } catch {
-                                                                toast.error('Lỗi khi chốt đơn hàng');
-                                                            }
-                                                        }}
-                                                    >
-                                                        <CheckCircle className="h-5 w-5 mr-2" />
-                                                        CHỐT ĐƠN HÀNG
-                                                    </Button>
-                                                )}
-
-                                                <div className="p-4 rounded-xl bg-blue-50 border border-blue-100">
-                                                    <p className="text-[10px] font-bold text-blue-700 uppercase mb-1">Hoa hồng ước tính</p>
-                                                    <p className="text-xl font-black text-blue-700">{formatCurrency(order.total_amount * 0.05)}</p>
-                                                    <p className="text-[9px] text-blue-500 mt-1 italic">* Tính dựa trên 5% doanh thu</p>
-                                                </div>
-                                            </div>
-                                        </CardContent>
-                                    </Card>
-                                </div>
-                            </div>
-                        </div>
-                    </TabsContent>
-                    )}
-
-                    {/* Tiến trình / Quy trình - Kanban 3 phòng + Chi tiết bước (ẩn khi đơn đã hoàn thiện kỹ thuật) */}
-                    {order?.status !== 'tech_completed' && (
-                    <TabsContent value="workflow">
-                        <Card>
-                            <CardHeader>
-                                <CardTitle className="flex items-center gap-2">
-                                    <Layers className="h-5 w-5 text-primary" />
-                                    Tiến trình / Quy trình – 3 phòng
-                                </CardTitle>
-                                <p className="text-sm text-muted-foreground">
-                                    Dịch vụ đi qua Phòng Mạ → Phòng Dán đế → Phòng Da. Xác nhận hoàn thành bước để chuyển sang phòng tiếp theo.
-                                </p>
-                            </CardHeader>
-                            <CardContent>
-                                {stepsLoading && !order?.items?.length ? (
-                                    <div className="flex items-center justify-center py-12">
-                                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                                        <span className="ml-3 text-muted-foreground">Đang tải...</span>
+                        <TabsContent value="sales">
+                            <div className="space-y-6">
+                                {/* Kanban Board Header */}
+                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                    <div>
+                                        <h2 className="text-xl font-bold flex items-center gap-2">
+                                            <RotateCw className="h-5 w-5 text-primary" />
+                                            Quy trình Lên đơn (Sales Kanban)
+                                        </h2>
+                                        <p className="text-sm text-muted-foreground">
+                                            Kéo thả thẻ hạng mục vào cột hoặc nhấn nút mũi tên để chuyển bước
+                                        </p>
                                     </div>
-                                ) : !order?.items?.length ? (
-                                    <div className="text-center py-12 text-muted-foreground">
-                                        <Layers className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                                        <p>Đơn hàng chưa có hạng mục nào.</p>
+                                    <div className="flex items-center gap-2 bg-muted/50 p-2 rounded-lg">
+                                        <span className="text-sm font-bold px-2.5 py-1 rounded bg-blue-100 text-blue-700">1-3: Chuẩn bị</span>
+                                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                                        <span className="text-sm font-bold px-2.5 py-1 rounded bg-red-100 text-red-700">4: Phê duyệt</span>
+                                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                                        <span className="text-sm font-bold px-2.5 py-1 rounded bg-green-100 text-green-700">5: Chốt đơn</span>
                                     </div>
-                                ) : (
-                                    <div className="pb-4">
-                                        {/* 3 cột cố định: Phòng Mạ, Phòng Dán đế, Phòng Da — Card chủ thể = Sản phẩm, trên cùng tên SP, dưới là các dịch vụ + còn X ngày hết hạn */}
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 overflow-x-auto">
-                                            {TECH_ROOMS.map((room) => {
-                                                const groupsInRoom = workflowKanbanGroups.filter((g) => getGroupCurrentTechRoom(g) === room.id);
+                                </div>
+
+                                {/* Kanban Board Layout – kéo thả + font lớn hơn */}
+                                <div className="overflow-x-auto pb-4 -mx-1 px-1">
+                                    <DragDropContext
+                                        onDragEnd={(result: DropResult) => {
+                                            if (!result.destination || result.destination.droppableId === result.source.droppableId) return;
+                                            const itemId = result.draggableId;
+                                            const newStatus = result.destination.droppableId;
+                                            const stepLabel = SALES_STEPS.find((s) => s.id === newStatus)?.label || newStatus;
+                                            updateOrderItemStatus(itemId, newStatus);
+                                            toast.success(`Đã chuyển sang: ${stepLabel}`);
+                                            orderItemsApi.updateStatus(itemId, newStatus).then(() => { if (order?.id) fetchKanbanLogs(order.id); }).catch(() => {
+                                                reloadOrder();
+                                                toast.error('Lỗi khi cập nhật trạng thái');
+                                            });
+                                        }}
+                                    >
+                                        <div className="flex gap-4 min-w-[1200px]">
+                                            {SALES_STEPS.map((column, colIdx) => {
+                                                const columnItems = order.items?.filter(item => {
+                                                    const hasV2Products = order.items?.some(i => (i as any).is_v2_product);
+                                                    if (hasV2Products && !(item as any).is_v2_product) return false;
+                                                    const status = item.status || 'step1';
+                                                    if (status === 'pending' && column.id === 'step1') return true;
+                                                    return status === column.id;
+                                                }) || [];
+
                                                 return (
-                                                    <div key={room.id} className="flex flex-col min-w-[280px]">
-                                                        <div className="flex justify-between items-center mb-4 px-2">
-                                                            <h2 className="font-bold uppercase text-xs tracking-widest text-blue-700">
-                                                                {room.title}
-                                                            </h2>
-                                                            <span className="bg-gray-200 text-gray-700 text-xs px-2.5 py-1 rounded-full">
-                                                                {groupsInRoom.length}
-                                                            </span>
-                                                        </div>
-                                                        <div className="min-h-[200px] bg-gray-100 p-2 rounded-xl flex-1 border-2 border-dashed border-transparent transition-colors">
-                                                            {groupsInRoom.map((group, gIdx) => {
-                                                                const productName = group.product?.item_name ?? group.services[0]?.item_name ?? '—';
-                                                                const productType = (group.product as any)?.product_type ?? (group.services[0] as any)?.product_type;
-                                                                const productTypeLabel = getCustomerProductTypeLabel(productType);
-                                                                const leadItem = group.services.find((s) => getItemCurrentStep(s.id)) ?? group.services[0];
-                                                                const stepDeadline = leadItem ? getStepDeadlineDisplay(leadItem.id) : { label: 'N/A', dueAt: null };
-                                                                const saleName = order?.sales_user?.name || 'N/A';
-                                                                const techName = (leadItem?.technician as { name?: string })?.name ?? (leadItem as any)?.technician?.name ?? 'N/A';
-                                                                const itemLate = stepDeadline.dueAt ? stepDeadline.dueAt < new Date() : false;
-                                                                const currentStep = leadItem ? getItemCurrentStep(leadItem.id) : null;
-                                                                const canCompleteStep = currentStep && (currentStep.status === 'in_progress' || currentStep.status === 'assigned');
-                                                                const cardKey = group.product?.id ?? group.services.map((s) => s.id).join('-');
-                                                                return (
-                                                                    <div
-                                                                        key={cardKey}
-                                                                        className={cn(
-                                                                            "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all",
-                                                                            itemLate ? "border-red-500 bg-red-50/30" : "border-blue-400"
-                                                                        )}
-                                                                    >
-                                                                        <div className="flex justify-between items-start mb-1">
-                                                                            <span className="text-xs font-semibold text-gray-400">#{order?.order_code ?? cardKey?.slice(0, 8)}</span>
-                                                                        </div>
-                                                                        {/* Trên cùng: Loại (trong ngoặc) + Sản phẩm */}
-                                                                        <h3 className="font-bold text-gray-800 text-sm flex items-center gap-1.5 flex-wrap">
-                                                                            <ShoppingBag className="h-4 w-4 shrink-0 text-primary" />
-                                                                            {productTypeLabel && productTypeLabel !== 'Sản phẩm của khách' ? (
-                                                                                <span className="truncate"><span className="text-muted-foreground font-medium">({productTypeLabel})</span> {productName}</span>
-                                                                            ) : (
-                                                                                <span className="truncate">{productName}</span>
-                                                                            )}
-                                                                        </h3>
-                                                                        {/* Bên dưới: Các dịch vụ cần làm cho sản phẩm */}
-                                                                        <ul className="mt-2 space-y-0.5 pl-5 text-xs text-muted-foreground">
-                                                                            {group.services.map((svc) => (
-                                                                                <li key={svc.id} className="flex items-center gap-1.5 truncate">
-                                                                                    <Wrench className="h-3 w-3 shrink-0 text-gray-400" />
-                                                                                    <span className="truncate">{svc.item_name}{svc.quantity > 1 ? ` (${svc.quantity})` : ''}</span>
-                                                                                </li>
-                                                                            ))}
-                                                                        </ul>
-                                                                        {/* Hạn hoàn thành bước dịch vụ (từ started_at + estimated_duration) */}
-                                                                        <div className="mt-2 flex items-center justify-between text-xs">
-                                                                            <span className="font-medium text-gray-600">Hết hạn bước:</span>
-                                                                            <span className={cn("font-semibold", itemLate ? "text-red-600" : stepDeadline.dueAt ? "text-emerald-600" : "text-gray-500")}>{stepDeadline.label}</span>
-                                                                        </div>
-                                                                        <div className="mt-2 flex items-center gap-1.5 text-xs text-gray-500">
-                                                                            <UserIcon className="h-4 w-4 shrink-0" />
-                                                                            <span className="truncate">Sale: {saleName}</span>
-                                                                        </div>
-                                                                        <div className="mt-1 flex items-center gap-1.5 text-xs text-gray-500">
-                                                                            <Wrench className="h-4 w-4 shrink-0" />
-                                                                            <span className="truncate">KT: {techName}</span>
-                                                                        </div>
-                                                                        {currentStep && (
-                                                                            <div className="mt-2 pt-2 border-t border-gray-100">
-                                                                                <p className="text-xs text-muted-foreground">Bước: {currentStep.step_name}</p>
-                                                                                <p className="text-xs text-muted-foreground">{currentStep.status === 'in_progress' ? 'Đang thực hiện' : currentStep.status === 'assigned' ? 'Đã phân công' : currentStep.status}</p>
-                                                                                {canCompleteStep && (
-                                                                                    <Button
-                                                                                        size="sm"
-                                                                                        className="mt-1.5 h-8 text-xs bg-green-600 hover:bg-green-700"
-                                                                                        disabled={stepCompleteLoading === currentStep.id}
-                                                                                        onClick={() => handleCompleteStep(currentStep.id)}
-                                                                                    >
-                                                                                        {stepCompleteLoading === currentStep.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-1" />}
-                                                                                        Xác nhận hoàn thành bước
-                                                                                    </Button>
-                                                                                )}
-                                                                            </div>
-                                                                        )}
-                                                                        <div className="mt-3 pt-2 border-t border-gray-200">
-                                                                            <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Yêu cầu</p>
-                                                                            <div className="flex flex-wrap gap-2">
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => leadItem && handleOpenAccessory(leadItem)}
-                                                                                    className={cn(
-                                                                                        'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-all shadow-sm',
-                                                                                        (leadItem as any)?.accessory?.status
-                                                                                            ? 'bg-blue-600 text-white hover:bg-blue-700'
-                                                                                            : 'bg-blue-50 text-blue-700 border border-blue-300 hover:bg-blue-100'
-                                                                                    )}
-                                                                                >
-                                                                                    <Package className="h-4 w-4 shrink-0" />
-                                                                                    <span>{(leadItem as any)?.accessory?.status ? ACCESSORY_LABELS[(leadItem as any).accessory.status] ?? (leadItem as any).accessory.status : 'Mua phụ kiện'}</span>
-                                                                                </button>
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => leadItem && handleOpenPartner(leadItem)}
-                                                                                    className={cn(
-                                                                                        'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-all shadow-sm',
-                                                                                        (leadItem as any)?.partner?.status
-                                                                                            ? 'bg-amber-600 text-white hover:bg-amber-700'
-                                                                                            : 'bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100'
-                                                                                    )}
-                                                                                >
-                                                                                    <Truck className="h-4 w-4 shrink-0" />
-                                                                                    <span>{(leadItem as any)?.partner?.status ? PARTNER_LABELS[(leadItem as any).partner.status] ?? (leadItem as any).partner.status : 'Gửi Đối Tác'}</span>
-                                                                                </button>
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={handleOpenExtension}
-                                                                                    className={cn(
-                                                                                        'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-all shadow-sm',
-                                                                                        order?.extension_request
-                                                                                            ? 'bg-violet-600 text-white hover:bg-violet-700'
-                                                                                            : 'bg-violet-50 text-violet-700 border border-violet-300 hover:bg-violet-100'
-                                                                                    )}
-                                                                                >
-                                                                                    <CalendarClock className="h-4 w-4 shrink-0" />
-                                                                                    <span>{order?.extension_request ? EXTENSION_LABELS[order.extension_request.status] ?? order.extension_request.status : 'Xin gia hạn'}</span>
-                                                                                </button>
-                                                                            </div>
-                                                                        </div>
+                                                    <div key={column.id} className="flex-1 min-w-[220px]">
+                                                        <div className={cn(
+                                                            "rounded-xl border-t-4 p-3 h-full mb-4 shadow-sm",
+                                                            column.id === 'step4' ? "bg-red-50/30 border-t-red-500" :
+                                                                column.id === 'step5' ? "bg-green-50/30 border-t-green-500" :
+                                                                    "bg-blue-50/30 border-t-blue-500"
+                                                        )}>
+                                                            {/* Column Header */}
+                                                            <div className="flex items-center justify-between mb-4 pb-2 border-b">
+                                                                <div className="flex items-center gap-2">
+                                                                    <div className={cn("w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white",
+                                                                        column.id === 'step4' ? "bg-red-500" :
+                                                                            column.id === 'step5' ? "bg-green-500" :
+                                                                                "bg-blue-500"
+                                                                    )}>
+                                                                        {colIdx + 1}
                                                                     </div>
-                                                                );
-                                                            })}
-                                                            {groupsInRoom.length === 0 && (
-                                                                <div className="flex items-center justify-center h-20 text-muted-foreground text-sm">
-                                                                    Không có dịch vụ
+                                                                    <h3 className="font-bold text-sm uppercase tracking-tight">{column.title}</h3>
                                                                 </div>
-                                                            )}
+                                                                <Badge variant="outline" className="text-xs bg-white">
+                                                                    {columnItems.length}
+                                                                </Badge>
+                                                            </div>
+
+                                                            {/* Column Items – Droppable */}
+                                                            <Droppable droppableId={column.id}>
+                                                                {(provided) => (
+                                                                    <div
+                                                                        ref={provided.innerRef}
+                                                                        {...provided.droppableProps}
+                                                                        className="space-y-3 min-h-[150px]"
+                                                                    >
+                                                                        {columnItems.map((item, itemIdx) => (
+                                                                            <Draggable key={item.id} draggableId={item.id} index={itemIdx}>
+                                                                                {(provided) => (
+                                                                                    <div
+                                                                                        ref={provided.innerRef}
+                                                                                        {...provided.draggableProps}
+                                                                                        {...provided.dragHandleProps}
+                                                                                        className="bg-white p-3 rounded-lg border shadow-sm group hover:border-primary hover:shadow-md transition-all cursor-grab active:cursor-grabbing"
+                                                                                    >
+                                                                                        <div className="flex items-start gap-2 mb-2">
+                                                                                            <div className="w-9 h-9 rounded bg-muted flex items-center justify-center shrink-0">
+                                                                                                {item.item_type === 'product' ? <ShoppingBag className="h-5 w-5 text-muted-foreground" /> :
+                                                                                                    item.item_type === 'service' ? <Wrench className="h-5 w-5 text-muted-foreground" /> :
+                                                                                                        <Gift className="h-5 w-5 text-muted-foreground" />}
+                                                                                            </div>
+                                                                                            <div className="flex-1 min-w-0">
+                                                                                                <p className="font-bold text-sm truncate leading-tight">{item.item_name}</p>
+                                                                                                <Badge className={cn("text-xs px-1.5 h-5 mt-1", getItemTypeColor(item.item_type))}>
+                                                                                                    {getItemTypeLabel(item.item_type)}
+                                                                                                </Badge>
+                                                                                            </div>
+                                                                                        </div>
+
+                                                                                        {/* Task Controls – nút lùi/tiến + mã item */}
+                                                                                        <div className="flex items-center justify-between mt-3 pt-2 border-t border-dashed">
+                                                                                            <Button
+                                                                                                variant="ghost"
+                                                                                                size="icon"
+                                                                                                className="h-8 w-8 rounded-full"
+                                                                                                disabled={colIdx === 0}
+                                                                                                onClick={(e) => {
+                                                                                                    e.stopPropagation();
+                                                                                                    const prevStep = SALES_STEPS[colIdx - 1].id;
+                                                                                                    updateOrderItemStatus(item.id, prevStep);
+                                                                                                    toast.success(`Đã lùi về: ${SALES_STEPS[colIdx - 1].label}`);
+                                                                                                    orderItemsApi.updateStatus(item.id, prevStep).then(() => { if (order?.id) fetchKanbanLogs(order.id); }).catch(() => {
+                                                                                                        reloadOrder();
+                                                                                                        toast.error('Lỗi khi cập nhật trạng thái');
+                                                                                                    });
+                                                                                                }}
+                                                                                            >
+                                                                                                <ArrowLeft className="h-4 w-4" />
+                                                                                            </Button>
+                                                                                            <span className="text-xs font-bold text-muted-foreground">
+                                                                                                #{item.item_code?.slice(-4) || 'Item'}
+                                                                                            </span>
+                                                                                            <Button
+                                                                                                variant="ghost"
+                                                                                                size="icon"
+                                                                                                className="h-8 w-8 rounded-full text-primary hover:bg-primary hover:text-white"
+                                                                                                disabled={colIdx === SALES_STEPS.length - 1}
+                                                                                                onClick={(e) => {
+                                                                                                    e.stopPropagation();
+                                                                                                    const nextStep = SALES_STEPS[colIdx + 1].id;
+                                                                                                    updateOrderItemStatus(item.id, nextStep);
+                                                                                                    toast.success(`Đã chuyển sang: ${SALES_STEPS[colIdx + 1].label}`);
+                                                                                                    orderItemsApi.updateStatus(item.id, nextStep).then(() => { if (order?.id) fetchKanbanLogs(order.id); }).catch(() => {
+                                                                                                        reloadOrder();
+                                                                                                        toast.error('Lỗi khi cập nhật trạng thái');
+                                                                                                    });
+                                                                                                }}
+                                                                                            >
+                                                                                                <ArrowRight className="h-4 w-4" />
+                                                                                            </Button>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                )}
+                                                                            </Draggable>
+                                                                        ))}
+                                                                        {columnItems.length === 0 && (
+                                                                            <div className="py-8 text-center border-2 border-dashed rounded-lg bg-black/5">
+                                                                                <p className="text-xs text-muted-foreground uppercase font-medium">Trống</p>
+                                                                            </div>
+                                                                        )}
+                                                                        {provided.placeholder}
+                                                                    </div>
+                                                                )}
+                                                            </Droppable>
                                                         </div>
                                                     </div>
                                                 );
                                             })}
                                         </div>
-                                        {/* Summary progress */}
-                                        {allWorkflowSteps.length > 0 && (
-                                            <div className="mt-6 p-4 bg-muted/30 rounded-lg">
-                                                <div className="flex items-center justify-between mb-2">
-                                                    <span className="text-sm font-medium">Tiến độ quy trình</span>
-                                                    <span className="text-sm text-muted-foreground">
-                                                        {allWorkflowSteps.filter((s: any) => s.status === 'completed').length} / {allWorkflowSteps.length} bước hoàn thành
-                                                    </span>
-                                                </div>
-                                                <div className="h-3 bg-muted rounded-full overflow-hidden">
-                                                    <div
-                                                        className="h-full bg-gradient-to-r from-green-400 to-green-500 transition-all duration-500"
-                                                        style={{
-                                                            width: allWorkflowSteps.length
-                                                                ? `${(allWorkflowSteps.filter((s: any) => s.status === 'completed').length / allWorkflowSteps.length) * 100}%`
-                                                                : '0%'
-                                                        }}
-                                                    />
-                                                </div>
-                                            </div>
-                                        )}
+                                    </DragDropContext>
+                                </div>
 
-                                        {/* Chi tiết các bước quy trình - dịch vụ & gói */}
-                                        {(order.items?.some(item => item.item_type === 'service' || item.item_type === 'package') && allWorkflowSteps.length > 0) && (
-                                            <div className="mt-6 border-t pt-6">
-                                                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                                                    <ArrowRight className="h-5 w-5 text-primary" />
-                                                    Chi tiết các bước quy trình
-                                                </h3>
-                                                <p className="text-sm text-muted-foreground mb-4">
-                                                    Các dịch vụ có quy trình hiển thị từng bước thực hiện. Có thể xác nhận hoàn thành bước tại đây.
-                                                </p>
-                                                <div className="space-y-4">
-                                                    {order.items?.filter(item => item.item_type === 'service' || item.item_type === 'package').map((item, idx) => (
-                                                        <div key={idx} className="border rounded-lg p-4 bg-gradient-to-r from-purple-50 to-blue-50">
-                                                            <div className="flex items-center gap-3 mb-3">
-                                                                <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
-                                                                    <Wrench className="h-5 w-5 text-purple-600" />
-                                                                </div>
-                                                                <div>
-                                                                    <h4 className="font-semibold">{item.item_name}</h4>
-                                                                    <p className="text-sm text-muted-foreground">
-                                                                        Trạng thái:
-                                                                        <Badge className={`ml-2 ${getItemTypeColor(item.item_type)}`}>
-                                                                            {item.status === 'completed' ? 'Hoàn thành' :
-                                                                                item.status === 'in_progress' ? 'Đang thực hiện' : 'Chờ xử lý'}
-                                                                        </Badge>
-                                                                    </p>
-                                                                </div>
-                                                            </div>
-                                                            <WorkflowStepsTimeline itemId={item.id} onStepCompleted={() => { reloadOrder(); if (order?.id) fetchKanbanLogs(order.id); }} />
+                                {/* Additional Tools Overlay */}
+                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                    <div className="lg:col-span-2 space-y-6">
+
+                                        {/* AI Message Templates */}
+                                        <Card className="border-blue-100 bg-blue-50/30">
+                                            <CardHeader className="pb-3 border-b border-blue-100">
+                                                <CardTitle className="text-sm font-bold text-blue-800 flex items-center gap-2">
+                                                    <Bot className="h-4 w-4" /> AI AGENT: MẪU TIN NHẮN CHĂM SÓC
+                                                </CardTitle>
+                                            </CardHeader>
+                                            <CardContent className="pt-6">
+                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                                    {[
+                                                        { id: 'ship', title: '1. Xin địa chỉ Ship', sub: '“Chào anh, đồ đã xong...”', content: `Chào ${order.customer?.name} ạ, giày ${order.items?.[0]?.item_name || 'của mình'} đã xong. Anh/chị cho shop xin địa chỉ ship nhé!` },
+                                                        { id: 'care', title: '2. HD Bảo quản', sub: '“Shop gửi HDSD...”', content: `Shop gửi ${order.customer?.name} HDSD: Tránh nước, lau bằng khăn mềm định kỳ ạ.` },
+                                                        { id: 'feedback', title: '3. Xin Feedback', sub: '“Bạn đã nhận được đồ chưa...”', content: `Dạ chào ${order.customer?.name}, mình nhận được đồ chưa ạ? Cho shop xin feedback nhé!` }
+                                                    ].map(tmp => (
+                                                        <div
+                                                            key={tmp.id}
+                                                            className="bg-white p-4 rounded-xl border border-blue-200 hover:shadow-md transition-all group relative cursor-pointer"
+                                                            onClick={() => {
+                                                                navigator.clipboard.writeText(tmp.content);
+                                                                toast.success(`Đã copy mẫu: ${tmp.title}`);
+                                                            }}
+                                                        >
+                                                            <p className="text-xs font-black text-blue-600 uppercase mb-1">{tmp.title}</p>
+                                                            <p className="text-sm text-gray-500 line-clamp-2 italic">{tmp.sub}</p>
+                                                            <Copy className="absolute bottom-4 right-4 h-4 w-4 text-gray-300 group-hover:text-blue-500 transition-colors" />
                                                         </div>
                                                     ))}
                                                 </div>
+                                            </CardContent>
+                                        </Card>
+
+                                        {/* Lịch sử chuyển bước Sales Kanban */}
+                                        <Card>
+                                            <CardHeader className="pb-3">
+                                                <CardTitle className="text-sm font-bold flex items-center gap-2">
+                                                    <History className="h-4 w-4 text-primary" /> LỊCH SỬ CHUYỂN BƯỚC (LÊN ĐƠN)
+                                                </CardTitle>
+                                            </CardHeader>
+                                            <CardContent className="space-y-2">
+                                                {salesLogs.length === 0 ? (
+                                                    <p className="text-xs text-muted-foreground italic py-2">Chưa có lịch sử chuyển bước.</p>
+                                                ) : (
+                                                    <ul className="space-y-2 max-h-48 overflow-y-auto">
+                                                        {salesLogs.map((log: any) => (
+                                                            <li key={log.id} className="text-xs flex items-center gap-2 py-1.5 border-b border-dashed last:border-0">
+                                                                <span className="text-muted-foreground shrink-0">{formatDateTime(log.created_at)}</span>
+                                                                <span className="font-medium">{log.created_by_user?.name ?? 'Hệ thống'}</span>
+                                                                <span className="text-muted-foreground">
+                                                                    {log.from_status ? `${getSalesStatusLabel(log.from_status)} → ` : ''}{getSalesStatusLabel(log.to_status)}
+                                                                </span>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                )}
+                                            </CardContent>
+                                        </Card>
+                                    </div>
+
+                                    {/* Right: Quick Tools */}
+                                    <div className="lg:col-span-1 space-y-4">
+                                        <Card className="border-purple-100">
+                                            <CardHeader className="pb-3 bg-purple-50/50">
+                                                <CardTitle className="text-sm font-bold text-purple-800">CÔNG CỤ SALES</CardTitle>
+                                            </CardHeader>
+                                            <CardContent className="pt-4 space-y-3">
+                                                <Button variant="outline" className="w-full justify-start h-12 text-xs font-bold border-gray-200 hover:bg-purple-50 hover:text-purple-700">
+                                                    <Sparkles className="h-4 w-4 mr-2 text-purple-500" />
+                                                    Đề xuất gói VIP (Upsell)
+                                                </Button>
+                                                <Button variant="outline" className="w-full justify-start h-12 text-xs font-bold border-gray-200 hover:bg-orange-50 hover:text-orange-700">
+                                                    <Clock className="h-4 w-4 mr-2 text-orange-500" />
+                                                    Nhắc việc (Flow-up)
+                                                </Button>
+                                                <div className="mt-4 pt-4 border-t border-dashed">
+                                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-3">Thông tin sale phụ trách</p>
+                                                    <div className="flex items-center gap-3">
+                                                        <Avatar className="h-10 w-10">
+                                                            <AvatarFallback className="bg-orange-100 text-orange-600 font-bold">
+                                                                {order.sales_user?.name?.charAt(0) || 'S'}
+                                                            </AvatarFallback>
+                                                        </Avatar>
+                                                        <div>
+                                                            <p className="text-sm font-bold">{order.sales_user?.name || 'Chưa gán'}</p>
+                                                            <p className="text-[10px] text-muted-foreground uppercase">Saler Phụ Trách</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+
+                                        <Card>
+                                            <CardContent className="pt-6">
+                                                <div className="space-y-4">
+                                                    {/* Global Progress Summary */}
+                                                    <div className="pb-4 border-b border-dashed">
+                                                        <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">Tiến độ tổng thể</p>
+                                                        <div className="flex items-center justify-between mb-1">
+                                                            <span className="text-xs font-bold">{order.items?.filter(i => (i.status || 'step1') === 'step5').length || 0}/{order.items?.length || 0} hạng mục</span>
+                                                            <span className="text-xs font-bold text-primary">
+                                                                {Math.round(((order.items?.filter(i => (i.status || 'step1') === 'step5').length || 0) / (order.items?.length || 1)) * 100)}%
+                                                            </span>
+                                                        </div>
+                                                        <div className="w-full bg-gray-100 rounded-full h-1.5">
+                                                            <div
+                                                                className="bg-primary h-1.5 rounded-full transition-all duration-500"
+                                                                style={{ width: `${((order.items?.filter(i => (i.status || 'step1') === 'step5').length || 0) / (order.items?.length || 1)) * 100}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="p-4 rounded-xl bg-green-50 border border-green-100">
+                                                        <p className="text-[10px] font-bold text-green-700 uppercase mb-1">Doanh thu dự kiến</p>
+                                                        <p className="text-xl font-black text-green-700">{formatCurrency(order.total_amount)}</p>
+                                                    </div>
+
+                                                    {/* Chốt đơn button */}
+                                                    {(order.status === 'pending' || (order.status as string).startsWith('step')) && (
+                                                        <Button
+                                                            className="w-full h-12 font-bold shadow-lg shadow-green-200 bg-green-600 hover:bg-green-700"
+                                                            disabled={!order.items?.every(i => (i.status || 'step1') === 'step5')}
+                                                            onClick={async () => {
+                                                                try {
+                                                                    await updateOrderStatus(order.id, 'confirmed');
+                                                                    toast.success('Đã xác nhận đơn hàng thành công!');
+                                                                    await reloadOrder();
+                                                                } catch {
+                                                                    toast.error('Lỗi khi chốt đơn hàng');
+                                                                }
+                                                            }}
+                                                        >
+                                                            <CheckCircle className="h-5 w-5 mr-2" />
+                                                            CHỐT ĐƠN HÀNG
+                                                        </Button>
+                                                    )}
+
+                                                    <div className="p-4 rounded-xl bg-blue-50 border border-blue-100">
+                                                        <p className="text-[10px] font-bold text-blue-700 uppercase mb-1">Hoa hồng ước tính</p>
+                                                        <p className="text-xl font-black text-blue-700">{formatCurrency(order.total_amount * 0.05)}</p>
+                                                        <p className="text-[9px] text-blue-500 mt-1 italic">* Tính dựa trên 5% doanh thu</p>
+                                                    </div>
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+                                    </div>
+                                </div>
+                            </div>
+                        </TabsContent>
+                    )}
+
+                    {/* Tiến trình / Quy trình - Kanban 3 phòng + Chi tiết bước (ẩn khi đơn đã hoàn thiện kỹ thuật) */}
+                    {order?.status !== 'tech_completed' && (
+                        <TabsContent value="workflow">
+                            <div className="space-y-6">
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle className="flex items-center gap-2">
+                                            <Layers className="h-5 w-5 text-primary" />
+                                            Tiến trình / Quy trình – 3 phòng
+                                        </CardTitle>
+                                        <p className="text-sm text-muted-foreground">
+                                            Dịch vụ theo quy trình gồm các phòng Mạ, Dán đế, Da. Sau khi KTV xác nhận hoàn thành bước, dịch vụ sẽ được chuyển sang phòng tiếp theo.
+                                        </p>
+                                    </CardHeader>
+                                    <CardContent>
+                                        {stepsLoading && !order?.items?.length ? (
+                                            <div className="flex items-center justify-center py-12">
+                                                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                                                <span className="ml-3 text-muted-foreground">Đang tải...</span>
+                                            </div>
+                                        ) : !order?.items?.length ? (
+                                            <div className="text-center py-12 text-muted-foreground">
+                                                <Layers className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                                                <p>Đơn hàng chưa có hạng mục nào.</p>
+                                            </div>
+                                        ) : (
+                                            <div className="pb-4">
+                                                {/* 3 cột cố định: Phòng Mạ, Phòng Dán đế, Phòng Da — Card chủ thể = Sản phẩm, trên cùng tên SP, dưới là các dịch vụ + còn X ngày hết hạn */}
+                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 overflow-x-auto">
+                                                    {TECH_ROOMS.map((room) => {
+                                                        const groupsInRoom = workflowKanbanGroups.filter((g) => getGroupCurrentTechRoom(g) === room.id);
+                                                        return (
+                                                            <div key={room.id} className="flex flex-col min-w-[280px]">
+                                                                <div className="flex justify-between items-center mb-4 px-2">
+                                                                    <h2 className="font-bold uppercase text-xs tracking-widest text-blue-700">
+                                                                        {room.title}
+                                                                    </h2>
+                                                                    <span className="bg-gray-200 text-gray-700 text-xs px-2.5 py-1 rounded-full">
+                                                                        {groupsInRoom.length}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="min-h-[200px] bg-gray-100 p-2 rounded-xl flex-1 border-2 border-dashed border-transparent transition-colors">
+                                                                    {groupsInRoom.map((group, gIdx) => {
+                                                                        const productName = group.product?.item_name ?? group.services[0]?.item_name ?? '—';
+                                                                        const productType = (group.product as any)?.product_type ?? (group.services[0] as any)?.product_type;
+                                                                        const productTypeLabel = getCustomerProductTypeLabel(productType);
+                                                                        const leadItem = group.services.find((s) => getItemCurrentStep(s.id)) ?? group.services[0];
+                                                                        const stepDeadline = leadItem ? getStepDeadlineDisplay(leadItem.id) : { label: 'N/A', dueAt: null };
+                                                                        const saleName = order?.sales_user?.name || 'N/A';
+                                                                        const itemLate = stepDeadline.dueAt ? stepDeadline.dueAt < new Date() : false;
+                                                                        const currentStep = leadItem ? getItemCurrentStep(leadItem.id) : null;
+                                                                        const canCompleteStep = currentStep && (currentStep.status === 'in_progress' || currentStep.status === 'assigned');
+                                                                        const cardKey = group.product?.id ?? group.services.map((s) => s.id).join('-');
+                                                                        const productItem = group.product as any;
+                                                                        const productImages = productItem?.product_images ?? (productItem?.product?.image ? [productItem.product.image] : []);
+                                                                        const hasProductDetails = group.product && (productItem?.product_type || productItem?.product_brand || productItem?.product_color || productItem?.product_size || productItem?.product_material || productItem?.product_condition_before || productItem?.product_notes);
+                                                                        return (
+                                                                            <div
+                                                                                key={cardKey}
+                                                                                className={cn(
+                                                                                    "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all",
+                                                                                    itemLate ? "border-red-500 bg-red-50/30" : "border-blue-400"
+                                                                                )}
+                                                                            >
+                                                                                <div className="flex justify-between items-start mb-2">
+                                                                                    <span className="text-xs font-semibold text-gray-400">#{order?.order_code ?? cardKey?.slice(0, 8)}</span>
+                                                                                </div>
+                                                                                {/* Ảnh + Thông tin sản phẩm */}
+                                                                                <div className="space-y-2 mb-3">
+                                                                                    {productImages?.length > 0 && (
+                                                                                        <div className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50 aspect-video w-full max-h-28">
+                                                                                            <img src={productImages[0]} alt={productName} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                                                                                        </div>
+                                                                                    )}
+                                                                                    <h3 className="font-bold text-gray-800 text-sm flex items-center gap-1.5 flex-wrap">
+                                                                                        <ShoppingBag className="h-4 w-4 shrink-0 text-primary" />
+                                                                                        <span className="truncate">{productName}</span>
+                                                                                    </h3>
+                                                                                    {hasProductDetails && (
+                                                                                        <div className="grid grid-cols-1 gap-1 text-xs text-gray-600">
+                                                                                            {productItem?.product_type && (
+                                                                                                <div className="flex items-center gap-1.5"><Tag className="h-3.5 w-3 shrink-0 text-muted-foreground" /><span>Loại: {productItem.product_type}</span></div>
+                                                                                            )}
+                                                                                            {productItem?.product_brand && (
+                                                                                                <div className="flex items-center gap-1.5"><Tag className="h-3.5 w-3 shrink-0 text-muted-foreground" /><span>Hãng: {productItem.product_brand}</span></div>
+                                                                                            )}
+                                                                                            {productItem?.product_color && (
+                                                                                                <div className="flex items-center gap-1.5"><Palette className="h-3.5 w-3 shrink-0 text-muted-foreground" /><span>Màu: {productItem.product_color}</span></div>
+                                                                                            )}
+                                                                                            {productItem?.product_size && (
+                                                                                                <div className="flex items-center gap-1.5"><Ruler className="h-3.5 w-3 shrink-0 text-muted-foreground" /><span>Size: {productItem.product_size}</span></div>
+                                                                                            )}
+                                                                                            {productItem?.product_material && (
+                                                                                                <div className="flex items-center gap-1.5"><Layers className="h-3.5 w-3 shrink-0 text-muted-foreground" /><span>Chất liệu: {productItem.product_material}</span></div>
+                                                                                            )}
+                                                                                            {productItem?.product_condition_before && (
+                                                                                                <div className="flex items-center gap-1.5"><AlertCircle className="h-3.5 w-3 shrink-0 text-muted-foreground" /><span className="line-clamp-2">Tình trạng: {productItem.product_condition_before}</span></div>
+                                                                                            )}
+                                                                                            {productItem?.product_notes && (
+                                                                                                <div className="flex items-center gap-1.5"><FileText className="h-3.5 w-3 shrink-0 text-muted-foreground" /><span className="line-clamp-2">Ghi chú: {productItem.product_notes}</span></div>
+                                                                                            )}
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
+                                                                                {/* Dịch vụ – highlight dịch vụ đang làm */}
+                                                                                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Dịch vụ</p>
+                                                                                <ul className="space-y-1">
+                                                                                    {group.services.map((svc) => {
+                                                                                        const isLeadService = leadItem?.id === svc.id;
+                                                                                        const svcTechnicians = (svc as any).technicians;
+                                                                                        const svcTechSingle = (svc as any).technician;
+                                                                                        const techNames = svcTechnicians?.length > 0
+                                                                                            ? svcTechnicians.map((t: any) => t.technician?.name).filter(Boolean).join(', ') || '—'
+                                                                                            : svcTechSingle?.name || '—';
+                                                                                        return (
+                                                                                            <li
+                                                                                                key={svc.id}
+                                                                                                className={cn(
+                                                                                                    "rounded-md px-2 py-1.5",
+                                                                                                    isLeadService ? "bg-primary/10 text-primary font-medium border border-primary/30" : "text-muted-foreground"
+                                                                                                )}
+                                                                                            >
+                                                                                                <div className="flex items-center gap-1.5 text-xs">
+                                                                                                    <Wrench className="h-3 w-3 shrink-0" />
+                                                                                                    <span className="truncate">{svc.item_name}{svc.quantity > 1 ? ` (${svc.quantity})` : ''}</span>
+                                                                                                    {isLeadService && <span className="text-[10px] ml-1">(đang làm)</span>}
+                                                                                                </div>
+                                                                                                <div className="flex items-center gap-1.5 text-[11px] text-gray-500 mt-0.5 pl-5">
+                                                                                                    <UserIcon className="h-3 w-3 shrink-0" />
+                                                                                                    <span className="truncate">KT: {techNames}</span>
+                                                                                                </div>
+                                                                                                {/* Bước hiện tại + nút hoàn thành: chỉ hiện dưới dịch vụ đang được thực hiện */}
+                                                                                                {isLeadService && currentStep && (
+                                                                                                    <div className="mt-2 pt-2 border-t border-primary/20">
+                                                                                                        <p className="text-xs text-muted-foreground">Bước: {currentStep.step_name}</p>
+                                                                                                        {currentStep.department?.name && (
+                                                                                                            <p className="text-xs font-medium text-primary">Bộ phận: {currentStep.department.name}</p>
+                                                                                                        )}
+                                                                                                        <p className="text-xs text-muted-foreground">{currentStep.status === 'in_progress' ? 'Đang thực hiện' : currentStep.status === 'assigned' ? 'Đã phân công' : currentStep.status}</p>
+                                                                                                    </div>
+                                                                                                )}
+                                                                                            </li>
+                                                                                        );
+                                                                                    })}
+                                                                                </ul>
+                                                                                <div className="mt-2 flex items-center justify-between text-xs">
+                                                                                    <span className="font-medium text-gray-600">Hết hạn bước:</span>
+                                                                                    <span className={cn("font-semibold", itemLate ? "text-red-600" : stepDeadline.dueAt ? "text-emerald-600" : "text-gray-500")}>{stepDeadline.label}</span>
+                                                                                </div>
+                                                                                <div className="mt-2 flex items-center gap-1.5 text-xs text-gray-500">
+                                                                                    <UserIcon className="h-4 w-4 shrink-0" />
+                                                                                    <span className="truncate">Sale: {saleName}</span>
+                                                                                </div>
+                                                                                <div className="mt-3 pt-2 border-t border-gray-200">
+                                                                                    <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Yêu cầu</p>
+                                                                                    <div className="flex flex-wrap gap-2">
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() => leadItem && handleOpenAccessory(leadItem)}
+                                                                                            className={cn(
+                                                                                                'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-all shadow-sm',
+                                                                                                (leadItem as any)?.accessory?.status
+                                                                                                    ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                                                                                    : 'bg-blue-50 text-blue-700 border border-blue-300 hover:bg-blue-100'
+                                                                                            )}
+                                                                                        >
+                                                                                            <Package className="h-4 w-4 shrink-0" />
+                                                                                            <span>{(leadItem as any)?.accessory?.status ? ACCESSORY_LABELS[(leadItem as any).accessory.status] ?? (leadItem as any).accessory.status : 'Mua phụ kiện'}</span>
+                                                                                        </button>
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={() => leadItem && handleOpenPartner(leadItem)}
+                                                                                            className={cn(
+                                                                                                'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-all shadow-sm',
+                                                                                                (leadItem as any)?.partner?.status
+                                                                                                    ? 'bg-amber-600 text-white hover:bg-amber-700'
+                                                                                                    : 'bg-amber-50 text-amber-700 border border-amber-300 hover:bg-amber-100'
+                                                                                            )}
+                                                                                        >
+                                                                                            <Truck className="h-4 w-4 shrink-0" />
+                                                                                            <span>{(leadItem as any)?.partner?.status ? PARTNER_LABELS[(leadItem as any).partner.status] ?? (leadItem as any).partner.status : 'Gửi Đối Tác'}</span>
+                                                                                        </button>
+                                                                                        <button
+                                                                                            type="button"
+                                                                                            onClick={handleOpenExtension}
+                                                                                            className={cn(
+                                                                                                'inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition-all shadow-sm',
+                                                                                                order?.extension_request
+                                                                                                    ? 'bg-violet-600 text-white hover:bg-violet-700'
+                                                                                                    : 'bg-violet-50 text-violet-700 border border-violet-300 hover:bg-violet-100'
+                                                                                            )}
+                                                                                        >
+                                                                                            <CalendarClock className="h-4 w-4 shrink-0" />
+                                                                                            <span>{order?.extension_request ? EXTENSION_LABELS[order.extension_request.status] ?? order.extension_request.status : 'Xin gia hạn'}</span>
+                                                                                        </button>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                    {groupsInRoom.length === 0 && (
+                                                                        <div className="flex items-center justify-center h-20 text-muted-foreground text-sm">
+                                                                            Không có dịch vụ
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                                {/* Summary progress */}
+                                                {allWorkflowSteps.length > 0 && (
+                                                    <div className="mt-6 p-4 bg-muted/30 rounded-lg">
+                                                        <div className="flex items-center justify-between mb-2">
+                                                            <span className="text-sm font-medium">Tiến độ quy trình</span>
+                                                            <span className="text-sm text-muted-foreground">
+                                                                {allWorkflowSteps.filter((s: any) => s.status === 'completed').length} / {allWorkflowSteps.length} bước hoàn thành
+                                                            </span>
+                                                        </div>
+                                                        <div className="h-3 bg-muted rounded-full overflow-hidden">
+                                                            <div
+                                                                className="h-full bg-gradient-to-r from-green-400 to-green-500 transition-all duration-500"
+                                                                style={{
+                                                                    width: allWorkflowSteps.length
+                                                                        ? `${(allWorkflowSteps.filter((s: any) => s.status === 'completed').length / allWorkflowSteps.length) * 100}%`
+                                                                        : '0%'
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                {/* Lịch sử chuyển bước Workflow (Quy trình) */}
+                                                <div className="mt-6 border-t pt-6">
+                                                    <h3 className="text-sm font-bold flex items-center gap-2 mb-3">
+                                                        <History className="h-4 w-4 text-primary" /> Lịch sử chuyển bước (Quy trình)
+                                                    </h3>
+                                                    {workflowLogs.length === 0 ? (
+                                                        <p className="text-xs text-muted-foreground italic py-2">Chưa có lịch sử.</p>
+                                                    ) : (
+                                                        <ul className="space-y-2 max-h-48 overflow-y-auto">
+                                                            {workflowLogs.map((log: any) => (
+                                                                <li key={log.id} className="text-xs flex items-center gap-2 py-1.5 border-b border-dashed last:border-0">
+                                                                    <span className="text-muted-foreground shrink-0">{formatDateTime(log.created_at)}</span>
+                                                                    <span className="font-medium">{log.created_by_user?.name ?? 'Hệ thống'}</span>
+                                                                    <span className="text-muted-foreground">
+                                                                        {log.step_name ? `${log.step_name}: ` : ''}{log.action === 'completed' ? 'Hoàn thành' : log.action === 'started' ? 'Bắt đầu' : 'Bỏ qua'}
+                                                                    </span>
+                                                                </li>
+                                                            ))}
+                                                        </ul>
+                                                    )}
+                                                </div>
                                             </div>
                                         )}
-
-                                        {/* Lịch sử chuyển bước Workflow (Quy trình) */}
-                                        <div className="mt-6 border-t pt-6">
-                                            <h3 className="text-sm font-bold flex items-center gap-2 mb-3">
-                                                <History className="h-4 w-4 text-primary" /> Lịch sử chuyển bước (Quy trình)
-                                            </h3>
-                                            {workflowLogs.length === 0 ? (
-                                                <p className="text-xs text-muted-foreground italic py-2">Chưa có lịch sử.</p>
-                                            ) : (
-                                                <ul className="space-y-2 max-h-48 overflow-y-auto">
-                                                    {workflowLogs.map((log: any) => (
-                                                        <li key={log.id} className="text-xs flex items-center gap-2 py-1.5 border-b border-dashed last:border-0">
-                                                            <span className="text-muted-foreground shrink-0">{formatDateTime(log.created_at)}</span>
-                                                            <span className="font-medium">{log.created_by_user?.name ?? 'Hệ thống'}</span>
-                                                            <span className="text-muted-foreground">
-                                                                {log.step_name ? `${log.step_name}: ` : ''}{log.action === 'completed' ? 'Hoàn thành' : log.action === 'started' ? 'Bắt đầu' : 'Bỏ qua'}
-                                                            </span>
-                                                        </li>
-                                                    ))}
-                                                </ul>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
-                    </TabsContent>
+                                    </CardContent>
+                                </Card>
+                            </div>
+                        </TabsContent>
                     )}
 
                     {/* After sale – dựa theo WorkflowKanbanBoardPage (C. After-sale) */}
@@ -1798,79 +1854,79 @@ export function OrderDetailPage() {
                                     };
 
                                     return (
-                                <DragDropContext onDragEnd={handleAfterSaleDragEnd}>
-                                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 overflow-x-auto pb-4">
-                                    {AFTER_COLS.map((col) => {
-                                        const hasOrder = order && col.id === currentStage;
-                                        return (
-                                        <div key={col.id} className="flex flex-col min-w-[280px]">
-                                            <div className="flex justify-between items-center mb-4 px-2">
-                                                <h2 className={cn('font-bold uppercase text-xs sm:text-sm tracking-widest', col.color)}>{col.title}</h2>
-                                                <span className="bg-gray-200 text-gray-700 text-xs px-2.5 py-1 rounded-full">
-                                                    {hasOrder ? 1 : 0}
-                                                </span>
-                                            </div>
-                                            <Droppable droppableId={col.id}>
-                                                {(provided) => (
-                                            <div
-                                                ref={provided.innerRef}
-                                                {...provided.droppableProps}
-                                                className="min-h-[200px] bg-gray-100 p-2 rounded-xl border-2 border-dashed border-transparent"
-                                            >
-                                                {hasOrder && order && (
-                                                    <Draggable draggableId={order.id} index={0}>
-                                                        {(provided) => (
-                                                    <div
-                                                        ref={provided.innerRef}
-                                                        {...provided.draggableProps}
-                                                        {...provided.dragHandleProps}
-                                                        className={cn(
-                                                            'bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all cursor-grab active:cursor-grabbing',
-                                                            order.due_at && new Date(order.due_at) < new Date() ? 'border-red-500 bg-red-50/30' : 'border-purple-400'
-                                                        )}
-                                                    >
-                                                        <div className="flex justify-between items-start mb-2">
-                                                            <span className="text-xs font-black text-gray-300">#{order.order_code}</span>
+                                        <DragDropContext onDragEnd={handleAfterSaleDragEnd}>
+                                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 overflow-x-auto pb-4">
+                                                {AFTER_COLS.map((col) => {
+                                                    const hasOrder = order && col.id === currentStage;
+                                                    return (
+                                                        <div key={col.id} className="flex flex-col min-w-[280px]">
+                                                            <div className="flex justify-between items-center mb-4 px-2">
+                                                                <h2 className={cn('font-bold uppercase text-xs sm:text-sm tracking-widest', col.color)}>{col.title}</h2>
+                                                                <span className="bg-gray-200 text-gray-700 text-xs px-2.5 py-1 rounded-full">
+                                                                    {hasOrder ? 1 : 0}
+                                                                </span>
+                                                            </div>
+                                                            <Droppable droppableId={col.id}>
+                                                                {(provided) => (
+                                                                    <div
+                                                                        ref={provided.innerRef}
+                                                                        {...provided.droppableProps}
+                                                                        className="min-h-[200px] bg-gray-100 p-2 rounded-xl border-2 border-dashed border-transparent"
+                                                                    >
+                                                                        {hasOrder && order && (
+                                                                            <Draggable draggableId={order.id} index={0}>
+                                                                                {(provided) => (
+                                                                                    <div
+                                                                                        ref={provided.innerRef}
+                                                                                        {...provided.draggableProps}
+                                                                                        {...provided.dragHandleProps}
+                                                                                        className={cn(
+                                                                                            'bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all cursor-grab active:cursor-grabbing',
+                                                                                            order.due_at && new Date(order.due_at) < new Date() ? 'border-red-500 bg-red-50/30' : 'border-purple-400'
+                                                                                        )}
+                                                                                    >
+                                                                                        <div className="flex justify-between items-start mb-2">
+                                                                                            <span className="text-xs font-black text-gray-300">#{order.order_code}</span>
+                                                                                        </div>
+                                                                                        <h3 className="font-bold text-gray-800 text-sm truncate">{order.customer?.name || 'Khách'}</h3>
+                                                                                        <p className="text-xs text-gray-400 mt-1">
+                                                                                            {order.items?.length ? (order.items[0] as OrderItem).item_name : 'Đơn hàng'}
+                                                                                            {(order.items?.length ?? 0) > 1 && ` +${(order.items?.length ?? 0) - 1}`}
+                                                                                        </p>
+                                                                                        <div className="mt-4 flex justify-between items-center">
+                                                                                            <Badge variant="secondary" className="text-xs font-bold text-purple-500 bg-purple-50 uppercase">
+                                                                                                {order.sales_user?.name || 'Sale'}
+                                                                                            </Badge>
+                                                                                            <span className="text-xs font-bold text-gray-400">{getSLADisplay(order.due_at)}</span>
+                                                                                        </div>
+                                                                                        {col.id === 'after1' && (
+                                                                                            <Button size="sm" variant="outline" className="mt-2 w-full h-9 text-sm" onClick={(e) => { e.stopPropagation(); setCompletionPhotos((order as any).completion_photos ?? []); setDebtChecked(!!(order as any).debt_checked); setDebtCheckedNotes((order as any).debt_checked_notes ?? ''); setAfter1JustSaved(false); setShowAfter1Dialog(true); }}>
+                                                                                                <Camera className="h-4 w-4 mr-1.5" /> Kiểm nợ & Ảnh hoàn thiện
+                                                                                            </Button>
+                                                                                        )}
+                                                                                        {col.id === 'after2' && (
+                                                                                            <Button size="sm" variant="outline" className="mt-2 w-full h-9 text-sm" onClick={(e) => { e.stopPropagation(); setPackagingPhotos((order as any).packaging_photos ?? []); setDeliveryCarrier((order as any).delivery_carrier ?? ''); setDeliveryAddress((order as any).delivery_address ?? ''); setDeliverySelfPickup(!!(order as any).delivery_self_pickup); setDeliveryNotes((order as any).delivery_notes ?? ''); setAfter2JustSaved(false); setShowAfter2Dialog(true); }}>
+                                                                                                <Upload className="h-4 w-4 mr-1.5" /> Đóng gói & Giao hàng
+                                                                                            </Button>
+                                                                                        )}
+                                                                                    </div>
+                                                                                )}
+                                                                            </Draggable>
+                                                                        )}
+                                                                        {!hasOrder && (
+                                                                            <div className="flex items-center justify-center h-20 text-muted-foreground text-base">
+                                                                                —
+                                                                            </div>
+                                                                        )}
+                                                                        {provided.placeholder}
+                                                                    </div>
+                                                                )}
+                                                            </Droppable>
                                                         </div>
-                                                        <h3 className="font-bold text-gray-800 text-sm truncate">{order.customer?.name || 'Khách'}</h3>
-                                                        <p className="text-xs text-gray-400 mt-1">
-                                                            {order.items?.length ? (order.items[0] as OrderItem).item_name : 'Đơn hàng'}
-                                                            {(order.items?.length ?? 0) > 1 && ` +${(order.items?.length ?? 0) - 1}`}
-                                                        </p>
-                                                        <div className="mt-4 flex justify-between items-center">
-                                                            <Badge variant="secondary" className="text-xs font-bold text-purple-500 bg-purple-50 uppercase">
-                                                                {order.sales_user?.name || 'Sale'}
-                                                            </Badge>
-                                                            <span className="text-xs font-bold text-gray-400">{getSLADisplay(order.due_at)}</span>
-                                                        </div>
-                                                        {col.id === 'after1' && (
-                                                            <Button size="sm" variant="outline" className="mt-2 w-full h-9 text-sm" onClick={(e) => { e.stopPropagation(); setCompletionPhotos((order as any).completion_photos ?? []); setDebtChecked(!!(order as any).debt_checked); setDebtCheckedNotes((order as any).debt_checked_notes ?? ''); setAfter1JustSaved(false); setShowAfter1Dialog(true); }}>
-                                                                <Camera className="h-4 w-4 mr-1.5" /> Kiểm nợ & Ảnh hoàn thiện
-                                                            </Button>
-                                                        )}
-                                                        {col.id === 'after2' && (
-                                                            <Button size="sm" variant="outline" className="mt-2 w-full h-9 text-sm" onClick={(e) => { e.stopPropagation(); setPackagingPhotos((order as any).packaging_photos ?? []); setDeliveryCarrier((order as any).delivery_carrier ?? ''); setDeliveryAddress((order as any).delivery_address ?? ''); setDeliverySelfPickup(!!(order as any).delivery_self_pickup); setDeliveryNotes((order as any).delivery_notes ?? ''); setAfter2JustSaved(false); setShowAfter2Dialog(true); }}>
-                                                                <Upload className="h-4 w-4 mr-1.5" /> Đóng gói & Giao hàng
-                                                            </Button>
-                                                        )}
-                                                    </div>
-                                                        )}
-                                                    </Draggable>
-                                                )}
-                                                {!hasOrder && (
-                                                    <div className="flex items-center justify-center h-20 text-muted-foreground text-base">
-                                                        —
-                                                    </div>
-                                                )}
-                                                {provided.placeholder}
+                                                    );
+                                                })}
                                             </div>
-                                                )}
-                                            </Droppable>
-                                        </div>
-                                        );
-                                    })}
-                                </div>
-                                </DragDropContext>
+                                        </DragDropContext>
                                     );
                                 })()}
                                 {/* Nhắn HD & Feedback – checkboxes khi đơn ở after3 */}
@@ -1916,44 +1972,44 @@ export function OrderDetailPage() {
                                             </div>
                                         </div>
                                         <div>
-                                        <h3 className="text-xs font-bold text-purple-800 uppercase mb-4 tracking-widest">Xử lý Feedback khách hàng</h3>
-                                        <div className="flex flex-wrap gap-4">
-                                            <Button
-                                                onClick={() => {
-                                                    const payload = { after_sale_stage: 'after4' as const, care_warranty_flow: 'care' as const, care_warranty_stage: 'care6' as const };
-                                                    updateOrderAfterSale(payload);
-                                                    toast.success('Đã chuyển sang Lưu trữ (Khách khen)');
-                                                    ordersApi.patch(order.id, payload).then(() => {
-                                                        fetchKanbanLogs(order.id);
-                                                        setActiveTab('care');
-                                                    }).catch((e: any) => {
-                                                        reloadOrder();
-                                                        toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
-                                                    });
-                                                }}
-                                                className="flex-1 min-w-[180px] bg-green-600 hover:bg-green-700 h-12 text-white font-bold rounded-xl"
-                                            >
-                                                <ThumbsUp className="mr-2 h-5 w-5" /> Khách khen (→ Lưu trữ)
-                                            </Button>
-                                            <Button
-                                                onClick={() => {
-                                                    const payload = { after_sale_stage: 'after4' as const, care_warranty_flow: 'warranty' as const, care_warranty_stage: 'war1' as const };
-                                                    updateOrderAfterSale(payload);
-                                                    toast.success('Đã ghi nhận – chuyển quy trình bảo hành');
-                                                    ordersApi.patch(order.id, payload).then(() => {
-                                                        fetchKanbanLogs(order.id);
-                                                        setActiveTab('care');
-                                                    }).catch((e: any) => {
-                                                        reloadOrder();
-                                                        toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
-                                                    });
-                                                }}
-                                                variant="destructive"
-                                                className="flex-1 min-w-[180px] h-12 font-bold rounded-xl"
-                                            >
-                                                <ThumbsDown className="mr-2 h-5 w-5" /> Khách chê (→ Bảo hành)
-                                            </Button>
-                                        </div>
+                                            <h3 className="text-xs font-bold text-purple-800 uppercase mb-4 tracking-widest">Xử lý Feedback khách hàng</h3>
+                                            <div className="flex flex-wrap gap-4">
+                                                <Button
+                                                    onClick={() => {
+                                                        const payload = { after_sale_stage: 'after4' as const, care_warranty_flow: 'care' as const, care_warranty_stage: 'care6' as const };
+                                                        updateOrderAfterSale(payload);
+                                                        toast.success('Đã chuyển sang Lưu trữ (Khách khen)');
+                                                        ordersApi.patch(order.id, payload).then(() => {
+                                                            fetchKanbanLogs(order.id);
+                                                            setActiveTab('care');
+                                                        }).catch((e: any) => {
+                                                            reloadOrder();
+                                                            toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
+                                                        });
+                                                    }}
+                                                    className="flex-1 min-w-[180px] bg-green-600 hover:bg-green-700 h-12 text-white font-bold rounded-xl"
+                                                >
+                                                    <ThumbsUp className="mr-2 h-5 w-5" /> Khách khen (→ Lưu trữ)
+                                                </Button>
+                                                <Button
+                                                    onClick={() => {
+                                                        const payload = { after_sale_stage: 'after4' as const, care_warranty_flow: 'warranty' as const, care_warranty_stage: 'war1' as const };
+                                                        updateOrderAfterSale(payload);
+                                                        toast.success('Đã ghi nhận – chuyển quy trình bảo hành');
+                                                        ordersApi.patch(order.id, payload).then(() => {
+                                                            fetchKanbanLogs(order.id);
+                                                            setActiveTab('care');
+                                                        }).catch((e: any) => {
+                                                            reloadOrder();
+                                                            toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
+                                                        });
+                                                    }}
+                                                    variant="destructive"
+                                                    className="flex-1 min-w-[180px] h-12 font-bold rounded-xl"
+                                                >
+                                                    <ThumbsDown className="mr-2 h-5 w-5" /> Khách chê (→ Bảo hành)
+                                                </Button>
+                                            </div>
                                         </div>
                                     </div>
                                 )}

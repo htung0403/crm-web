@@ -420,7 +420,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 
             // Map V2 structure to V1 items structure
             for (const product of v2Products) {
-                // ADD THE PRODUCT ITSELF AS AN ITEM (for Sales Kanban)
+                // ADD THE PRODUCT ITSELF AS AN ITEM (for Sales Kanban & Workflow card)
                 v2Items.push({
                     id: product.id,
                     order_id: order.id,
@@ -435,7 +435,14 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                         image: product.images?.[0] || null
                     },
                     is_v2_product: true, // Flag to distinguish
-                    product_type: product.type || null // Loại sản phẩm: giày, túi, ví, ...
+                    product_type: product.type || null,
+                    product_images: product.images || [],
+                    product_brand: product.brand || null,
+                    product_color: product.color || null,
+                    product_size: product.size || null,
+                    product_material: product.material || null,
+                    product_condition_before: product.condition_before || null,
+                    product_notes: product.notes || null
                 });
 
                 // If product has services, add them as items (for Workflow/Technician)
