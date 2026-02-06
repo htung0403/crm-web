@@ -715,13 +715,21 @@ router.get('/by-code/:itemCode', authenticate, async (req: AuthenticatedRequest,
             // Get earliest start and latest completion
             const startedServices = servicesData.filter((s: any) => s.started_at);
             const completedServices = servicesData.filter((s: any) => s.completed_at);
-            const earliestStart = startedServices.length > 0 
-                ? startedServices.reduce((earliest: string, s: any) => 
-                    !earliest || new Date(s.started_at) < new Date(earliest) ? s.started_at : earliest, null)
+            const earliestStart = startedServices.length > 0
+                ? startedServices.reduce<string | null>((acc, s: any) => {
+                    const t = s.started_at ?? null;
+                    if (!t) return acc;
+                    if (!acc) return t;
+                    return new Date(t) < new Date(acc) ? t : acc;
+                }, null)
                 : null;
             const latestComplete = completedServices.length > 0
-                ? completedServices.reduce((latest: string, s: any) => 
-                    !latest || new Date(s.completed_at) > new Date(latest) ? s.completed_at : latest, null)
+                ? completedServices.reduce<string | null>((acc, s: any) => {
+                    const t = s.completed_at ?? null;
+                    if (!t) return acc;
+                    if (!acc) return t;
+                    return new Date(t) > new Date(acc) ? t : acc;
+                }, null)
                 : null;
 
             return res.json({
@@ -1083,15 +1091,16 @@ router.put('/:id/start', authenticate, async (req: AuthenticatedRequest, res: Re
                 throw updateError;
             }
 
-            // Update order status if needed
-            if (v2Product.orders && v2Product.orders.status === 'confirmed') {
+            // Update order status if needed (orders relation may be single object or array per Supabase typings)
+            const orderRef = Array.isArray(v2Product.orders) ? (v2Product.orders as any)[0] : v2Product.orders;
+            if (orderRef?.status === 'confirmed' && orderRef?.id) {
                 await supabaseAdmin
                     .from('orders')
                     .update({
                         status: 'processing',
                         updated_at: new Date().toISOString()
                     })
-                    .eq('id', v2Product.orders.id);
+                    .eq('id', orderRef.id);
             }
 
             return res.json({
@@ -1333,15 +1342,16 @@ router.put('/:id/complete', authenticate, async (req: AuthenticatedRequest, res:
                 s.status === 'completed' || s.status === 'cancelled'
             );
 
-            // Update order status if all services completed
-            if (allServicesCompleted && v2Product.orders) {
+            // Update order status if all services completed (orders relation may be single object or array per Supabase typings)
+            const orderRefComplete = Array.isArray(v2Product.orders) ? (v2Product.orders as any)[0] : v2Product.orders;
+            if (allServicesCompleted && orderRefComplete?.id) {
                 await supabaseAdmin
                     .from('orders')
                     .update({
                         status: 'completed',
                         updated_at: new Date().toISOString()
                     })
-                    .eq('id', v2Product.orders.id)
+                    .eq('id', orderRefComplete.id)
                     .eq('status', 'processing');
             }
 
