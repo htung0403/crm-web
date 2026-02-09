@@ -326,7 +326,7 @@ export function CustomerDetailPage() {
         type: 'purchase' as InteractionType,
         subject: `Đơn hàng ${order.order_code}`,
         content: `${order.items?.length || 0} sản phẩm/dịch vụ - Tổng: ${formatCurrency(order.total_amount)}`,
-        result: order.status === 'completed' ? 'completed' :
+        result: order.status === 'after_sale' ? 'completed' :
             order.status === 'cancelled' ? 'cancelled' : 'pending',
         created_at: order.created_at,
         created_user: order.sales_user,
@@ -522,7 +522,7 @@ export function CustomerDetailPage() {
                                         </div>
                                         <div className="text-center sm:border-r border-b sm:border-b-0 pb-2 sm:pb-0">
                                             <p className="text-2xl font-bold text-emerald-600">
-                                                {customerOrders.filter(o => o.status === 'completed').length}
+                                                {customerOrders.filter(o => o.status === 'after_sale').length}
                                             </p>
                                             <p className="text-xs text-muted-foreground">Hoàn thành</p>
                                         </div>
@@ -553,10 +553,10 @@ export function CustomerDetailPage() {
                                     <div className="relative">
                                         {customerOrders.map((order, index) => {
                                             const statusConfig: Record<string, { label: string; color: string; bgColor: string }> = {
-                                                pending: { label: 'Chờ xử lý', color: 'text-gray-600', bgColor: 'bg-gray-100' },
-                                                confirmed: { label: 'Đã xác nhận', color: 'text-blue-600', bgColor: 'bg-blue-100' },
-                                                processing: { label: 'Đang xử lý', color: 'text-amber-600', bgColor: 'bg-amber-100' },
-                                                completed: { label: 'Hoàn thành', color: 'text-emerald-600', bgColor: 'bg-emerald-100' },
+                                                before_sale: { label: 'Đơn nháp', color: 'text-blue-600', bgColor: 'bg-blue-100' },
+                                                in_progress: { label: 'Đang thực hiện', color: 'text-amber-600', bgColor: 'bg-amber-100' },
+                                                done: { label: 'Đã hoàn thiện', color: 'text-cyan-600', bgColor: 'bg-cyan-100' },
+                                                after_sale: { label: 'After Sale', color: 'text-emerald-600', bgColor: 'bg-emerald-100' },
                                                 cancelled: { label: 'Đã hủy', color: 'text-red-600', bgColor: 'bg-red-100' },
                                             };
                                             const status = statusConfig[order.status] || statusConfig.pending;
@@ -588,10 +588,10 @@ export function CustomerDetailPage() {
                                                                     <div className="flex items-center gap-2 mb-1">
                                                                         <span className="font-bold text-primary">{order.order_code}</span>
                                                                         <Badge variant={
-                                                                            order.status === 'completed' ? 'success' :
+                                                                            order.status === 'after_sale' ? 'success' :
                                                                                 order.status === 'cancelled' ? 'danger' :
-                                                                                    order.status === 'processing' ? 'warning' :
-                                                                                        order.status === 'confirmed' ? 'info' : 'secondary'
+                                                                                    order.status === 'in_progress' ? 'warning' :
+                                                                                        order.status === 'done' ? 'info' : 'secondary'
                                                                         }>
                                                                             {status.label}
                                                                         </Badge>

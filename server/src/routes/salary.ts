@@ -161,7 +161,7 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
                 .from('orders')
                 .select('id')
                 .eq('sales_id', user_id)
-                .in('status', ['completed', 'delivered'])
+                .in('status', ['done', 'completed', 'delivered', 'after_sale'])
                 .gte('created_at', startDate)
                 .lte('created_at', endDate + 'T23:59:59');
 
@@ -180,7 +180,7 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
             const { data: completedOrders } = await supabaseAdmin
                 .from('orders')
                 .select('id')
-                .in('status', ['completed', 'delivered'])
+                .in('status', ['done', 'completed', 'delivered', 'after_sale'])
                 .gte('created_at', startDate)
                 .lte('created_at', endDate + 'T23:59:59');
 

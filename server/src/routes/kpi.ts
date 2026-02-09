@@ -67,6 +67,20 @@ router.get('/summary', authenticate, requireManager, async (req: AuthenticatedRe
             .select('id, order_id, technician_id, total_price, commission_tech_amount, status')
             .not('technician_id', 'is', null);
 
+        // Get V2 services with technician assignments
+        const { data: v2Services } = await supabaseAdmin
+            .from('order_product_service_technicians')
+            .select(`
+                technician_id,
+                commission,
+                service:order_product_services(
+                    id,
+                    order_id,
+                    unit_price,
+                    status
+                )
+            `);
+
         // Get commissions from commissions table (V2 - includes technician service commissions)
         const { data: commissionsData } = await supabaseAdmin
             .from('commissions')
@@ -88,9 +102,9 @@ router.get('/summary', authenticate, requireManager, async (req: AuthenticatedRe
             accountant: { orders: 50, revenue: 0, leads: 0, conversion: 0 }
         };
 
-        // Get completed order IDs
+        // Get completed order IDs (done, after_sale)
         const completedOrderIds = (orders || [])
-            .filter(o => o.status === 'completed')
+            .filter(o => o.status === 'done' || o.status === 'after_sale')
             .map(o => o.id);
 
         // Calculate KPI for each user
@@ -100,15 +114,32 @@ router.get('/summary', authenticate, requireManager, async (req: AuthenticatedRe
             let completedOrdersCount = 0;
 
             if (user.role === 'technician') {
-                // Technician: get commission from order_items (V1) they were assigned to
-                const techItems = (orderItems || []).filter(
-                    item => item.technician_id === user.id && completedOrderIds.includes(item.order_id)
+                const techItemsV1 = (orderItems || []).filter(
+                    item => item.technician_id === user.id && (completedOrderIds.includes(item.order_id) || item.status === 'completed')
                 );
-                completedOrdersCount = techItems.length;
-                const v1Commission = techItems.reduce((sum, item) => sum + (item.commission_tech_amount || 0), 0);
-                revenue = techItems.reduce((sum, item) => sum + (item.total_price || 0), 0);
+                const techItemsV2 = (v2Services || []).filter(
+                    (s: any) => {
+                        const service = Array.isArray(s.service) ? s.service[0] : s.service;
+                        return s.technician_id === user.id && service && (completedOrderIds.includes(service.order_id) || service.status === 'completed');
+                    }
+                );
 
-                // Also add V2 commissions from commissions table
+                const uniqueOrderIds = new Set([
+                    ...techItemsV1.map(i => i.order_id),
+                    ...techItemsV2.map((s: any) => {
+                        const service = Array.isArray(s.service) ? s.service[0] : s.service;
+                        return service.order_id;
+                    })
+                ]);
+
+                completedOrdersCount = uniqueOrderIds.size;
+                const v2Revenue = techItemsV2.reduce((sum, s: any) => {
+                    const service = Array.isArray(s.service) ? s.service[0] : s.service;
+                    return sum + (service.unit_price || 0);
+                }, 0);
+                revenue = techItemsV1.reduce((sum, item) => sum + (item.total_price || 0), 0) + v2Revenue;
+
+                const v1Commission = techItemsV1.reduce((sum, item) => sum + (item.commission_tech_amount || 0), 0);
                 const v2Commission = (commissionsData || [])
                     .filter(c => c.user_id === user.id && c.commission_type === 'service')
                     .reduce((sum, c) => sum + (c.amount || 0), 0);
@@ -117,7 +148,7 @@ router.get('/summary', authenticate, requireManager, async (req: AuthenticatedRe
             } else {
                 // Sale/Manager: get revenue from orders they created
                 const userOrders = (orders || []).filter(o => o.sales_id === user.id);
-                const completedOrders = userOrders.filter(o => o.status === 'completed');
+                const completedOrders = userOrders.filter(o => o.status === 'done' || o.status === 'after_sale');
                 completedOrdersCount = completedOrders.length;
                 revenue = completedOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
 

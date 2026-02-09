@@ -91,7 +91,7 @@ router.get('/sales', authenticate, requireManager, async (req: AuthenticatedRequ
                     bySalesperson[salesId] = { name: salesName, orders: 0, revenue: 0 };
                 }
                 bySalesperson[salesId].orders += 1;
-                if (order.status === 'completed') {
+                if (order.status === 'done' || order.status === 'completed' || order.status === 'after_sale') {
                     bySalesperson[salesId].revenue += order.total_amount;
                 }
             }
@@ -107,7 +107,7 @@ router.get('/sales', authenticate, requireManager, async (req: AuthenticatedRequ
             status: 'success',
             data: {
                 totalOrders: orders?.length || 0,
-                totalRevenue: orders?.filter(o => o.status === 'completed').reduce((sum, o) => sum + o.total_amount, 0) || 0,
+                totalRevenue: orders?.filter(o => o.status === 'done' || o.status === 'completed' || o.status === 'after_sale').reduce((sum, o) => sum + o.total_amount, 0) || 0,
                 bySalesperson: Object.entries(bySalesperson).map(([id, data]) => ({ id, ...data })),
                 byStatus,
             },
@@ -141,7 +141,7 @@ router.get('/customers', authenticate, requireManager, async (req: Authenticated
         const { data: orders } = await supabaseAdmin
             .from('orders')
             .select('customer_id, total_amount, customer:customers(id, name, email)')
-            .eq('status', 'completed');
+            .in('status', ['done', 'completed', 'after_sale']);
 
         const customerSpending: Record<string, { name: string; email: string; total: number; orders: number }> = {};
         orders?.forEach(order => {
@@ -269,7 +269,7 @@ router.get('/hr', authenticate, requireManager, async (req: AuthenticatedRequest
         const { data: completedOrders } = await supabaseAdmin
             .from('orders')
             .select('total_amount, sales_id')
-            .eq('status', 'completed');
+            .in('status', ['done', 'completed', 'after_sale']);
 
         // Calculate total commission (assume 5% default)
         const commissionBySales: Record<string, number> = {};
@@ -379,9 +379,9 @@ router.get('/summary', authenticate, async (req: AuthenticatedRequest, res, next
             .lt('created_at', previousToDate.toISOString());
 
         // Calculate revenue stats
-        const currentRevenue = currentOrders?.filter(o => o.status === 'completed')
+        const currentRevenue = currentOrders?.filter(o => o.status === 'done' || o.status === 'completed' || o.status === 'after_sale')
             .reduce((sum, o) => sum + o.total_amount, 0) || 0;
-        const previousRevenue = previousOrders?.filter(o => o.status === 'completed')
+        const previousRevenue = previousOrders?.filter(o => o.status === 'done' || o.status === 'completed' || o.status === 'after_sale')
             .reduce((sum, o) => sum + o.total_amount, 0) || 0;
         const growth = previousRevenue > 0 ? ((currentRevenue - previousRevenue) / previousRevenue) * 100 : 0;
 
@@ -398,7 +398,7 @@ router.get('/summary', authenticate, async (req: AuthenticatedRequest, res, next
 
         // Revenue by month (for year view)
         const byMonth: Record<string, number> = {};
-        currentOrders?.filter(o => o.status === 'completed').forEach(order => {
+        currentOrders?.filter(o => o.status === 'done' || o.status === 'completed' || o.status === 'after_sale').forEach(order => {
             const date = new Date(order.created_at);
             const monthKey = `T${date.getMonth() + 1}`;
             byMonth[monthKey] = (byMonth[monthKey] || 0) + order.total_amount;
@@ -416,7 +416,7 @@ router.get('/summary', authenticate, async (req: AuthenticatedRequest, res, next
                     bySalesperson[sales.id] = { name: sales.name, orders: 0, revenue: 0 };
                 }
                 bySalesperson[sales.id].orders += 1;
-                if (order.status === 'completed') {
+                if (order.status === 'done' || order.status === 'completed' || order.status === 'after_sale') {
                     bySalesperson[sales.id].revenue += order.total_amount;
                 }
             }

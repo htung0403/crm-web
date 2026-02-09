@@ -30,6 +30,7 @@ import workflowsRouter from './routes/workflows.js';
 import orderProductsRouter from './routes/order-products.js';
 import { transactionsRouter } from './routes/transactions.js';
 import { requestsRouter } from './routes/requests.js';
+import productTypesRouter from './routes/product-types.js';
 
 dotenv.config();
 
@@ -79,6 +80,7 @@ app.use('/api/workflows', workflowsRouter);
 app.use('/api/order-products', orderProductsRouter);
 app.use('/api/transactions', transactionsRouter);
 app.use('/api/requests', requestsRouter);
+app.use('/api/product-types', productTypesRouter);
 
 // Error handling
 app.use(errorHandler);

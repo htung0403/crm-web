@@ -66,6 +66,8 @@ const pagePermissions: Record<string, UserRole[]> = {
   services: ['admin', 'manager', 'accountant', 'sale', 'technician'],
   packages: ['admin', 'manager', 'accountant', 'sale', 'technician'],
   vouchers: ['admin', 'manager', 'accountant', 'sale', 'technician'],
+  'product-types': ['admin', 'manager', 'accountant', 'sale', 'technician'],
+  products: ['admin', 'manager', 'accountant', 'sale', 'technician'],
   tasks: ['admin', 'manager', 'technician'],
   departments: ['admin', 'manager'],
   workflows: ['admin', 'manager'],
@@ -118,7 +120,7 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode;
 }
 
 // Wrapper for ProductsPage with routing
-function ProductsPageWrapper({ initialTab }: { initialTab: 'products' | 'services' | 'packages' | 'vouchers' }) {
+function ProductsPageWrapper({ initialTab }: { initialTab: 'products' | 'services' | 'packages' | 'vouchers' | 'product-types' }) {
   const navigate = useNavigate();
 
   const handleTabChange = (tab: string) => {
@@ -302,6 +304,12 @@ function AppContent() {
               </ProtectedRoute>
             } />
 
+            <Route path="/orders/:id/edit" element={
+              <ProtectedRoute allowedRoles={pagePermissions.orders}>
+                <CreateOrderPage />
+              </ProtectedRoute>
+            } />
+
             <Route path="/orders/:id" element={
               <ProtectedRoute allowedRoles={pagePermissions.orders}>
                 <OrderDetailPage />
@@ -359,6 +367,12 @@ function AppContent() {
             <Route path="/vouchers" element={
               <ProtectedRoute allowedRoles={pagePermissions.vouchers}>
                 <ProductsPageWrapper initialTab="vouchers" />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/product-types" element={
+              <ProtectedRoute allowedRoles={pagePermissions['product-types']}>
+                <ProductsPageWrapper initialTab="product-types" />
               </ProtectedRoute>
             } />
 

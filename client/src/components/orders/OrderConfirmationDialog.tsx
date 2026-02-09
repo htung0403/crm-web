@@ -64,7 +64,7 @@ export function OrderConfirmationDialog({
     const handleConfirm = async () => {
         setConfirming(true);
         try {
-            await api.patch(`/orders/${order.id}/status`, { status: 'confirmed' });
+            await api.patch(`/orders/${order.id}/status`, { status: 'in_progress' });
             toast.success('Đơn hàng đã được xác nhận!');
             onConfirm();
             onClose();

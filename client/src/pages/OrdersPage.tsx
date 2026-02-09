@@ -18,7 +18,6 @@ import type { OrderStatus } from '@/types';
 
 import {
     OrderCard,
-    EditOrderDialog,
     OrderConfirmationDialog,
     PaymentDialog,
     columns
@@ -34,7 +33,6 @@ export function OrdersPage() {
     const { vouchers, fetchVouchers } = useVouchers();
     const { users: technicians, fetchTechnicians } = useUsers();
     const { departments, fetchDepartments } = useDepartments();
-    const [editingOrder, setEditingOrder] = useState<Order | null>(null);
     const [payingOrder, setPayingOrder] = useState<Order | null>(null);
     const [pendingDrop, setPendingDrop] = useState<{ orderId: string; targetStatus: string } | null>(null);
     const [newlyCreatedOrder, setNewlyCreatedOrder] = useState<Order | null>(null);
@@ -73,8 +71,8 @@ export function OrdersPage() {
         const orderId = draggableId.includes('__') ? draggableId.split('__')[0] : draggableId;
         const order = orders.find(o => o.id === orderId);
 
-        // If dropping to completed, show payment dialog
-        if (newStatus === 'completed' && order) {
+        // If dropping to after_sale, show payment dialog
+        if (newStatus === 'after_sale' && order) {
             setPendingDrop({ orderId, targetStatus: newStatus });
             setPayingOrder(order);
             return;
@@ -97,16 +95,19 @@ export function OrdersPage() {
     /** Nhóm items theo product + services (giống OrderDetailPage workflowKanbanGroups) */
     const getOrderProductGroups = (order: Order): { product: OrderItem | null; services: OrderItem[] }[] => {
         const items = order?.items || [];
+        // Check if this order has Customer Items (Sản phẩm khách gửi)
+        const hasCustomerItems = items.some((item: any) => item.is_customer_item);
+
         const groups: { product: OrderItem | null; services: OrderItem[] }[] = [];
         let i = 0;
         while (i < items.length) {
-            const item = items[i] as OrderItem & { is_v2_product?: boolean };
-            if (item.is_v2_product && item.item_type === 'product') {
+            const item = items[i] as OrderItem & { is_customer_item?: boolean };
+            if (item.is_customer_item && item.item_type === 'product') {
                 const services: OrderItem[] = [];
                 let j = i + 1;
                 while (j < items.length) {
-                    const next = items[j] as OrderItem & { is_v2_product?: boolean };
-                    if (next.is_v2_product && next.item_type === 'product') break;
+                    const next = items[j] as OrderItem & { is_customer_item?: boolean };
+                    if (next.is_customer_item && next.item_type === 'product') break;
                     if (next.item_type === 'service' || next.item_type === 'package') services.push(items[j] as OrderItem);
                     j++;
                 }
@@ -116,9 +117,19 @@ export function OrdersPage() {
                 groups.push({ product: null, services: [item] });
                 i++;
             } else if (item.item_type === 'product' && item.product_id) {
+                // If order has Customer Items, skip Sale Items (add-ons) to prevent duplicate cards
+                if (hasCustomerItems && !item.is_customer_item) {
+                    i++;
+                    continue;
+                }
                 groups.push({ product: item, services: [] });
                 i++;
             } else if (item.item_name) {
+                // Skip Sale Items that are product-type in orders with Customer Items
+                if (hasCustomerItems && item.item_type === 'product' && !item.is_customer_item) {
+                    i++;
+                    continue;
+                }
                 groups.push({ product: null, services: [item] });
                 i++;
             } else {
@@ -126,6 +137,9 @@ export function OrdersPage() {
             }
         }
         if (groups.length === 0 && items.length > 0) {
+            // If all items were filtered out (e.g. only add-ons?), show something?
+            // Customer Item orders should have at least one Customer Item, so this shouldn't happen unless data is corrupt.
+            // Fallback to showing everything if no groups found
             return [{ product: items[0] as OrderItem, services: items.slice(1).filter((it: OrderItem) => it.item_name) as OrderItem[] }];
         }
         if (groups.length === 0) return [{ product: null, services: [] }];
@@ -163,7 +177,6 @@ export function OrdersPage() {
             await updateOrder(orderId, data);
             toast.success('Đã cập nhật đơn hàng!');
             await fetchOrders();
-            setEditingOrder(null);
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Lỗi khi cập nhật đơn hàng';
             toast.error(message);
@@ -173,13 +186,9 @@ export function OrdersPage() {
 
     const handlePaymentSuccess = async () => {
         try {
-            // Update order status to completed after successful payment
-            if (pendingDrop) {
-                await updateOrderStatus(pendingDrop.orderId, 'completed');
-            } else if (payingOrder) {
-                await updateOrderStatus(payingOrder.id, 'completed');
-            }
-            toast.success('Thanh toán thành công! Đơn hàng đã hoàn thành.');
+            // Payment success. Backend will auto-complete order if all services are done.
+            // We just need to refetch to get the latest status.
+            toast.success('Thanh toán thành công!');
             await fetchOrders();
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Lỗi khi cập nhật trạng thái đơn hàng';
@@ -309,18 +318,6 @@ export function OrdersPage() {
                     </DragDropContext>
                 </div>
             </div>
-
-            {/* Edit Order Dialog */}
-            <EditOrderDialog
-                order={editingOrder}
-                open={!!editingOrder}
-                onClose={() => setEditingOrder(null)}
-                onSubmit={handleUpdateOrder}
-                products={products}
-                services={services}
-                packages={packages}
-                vouchers={vouchers}
-            />
 
             {/* Payment Dialog */}
             <PaymentDialog

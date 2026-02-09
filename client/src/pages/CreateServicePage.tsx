@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-    ArrowLeft, Save, Loader2, Wrench, GitBranch, Clock, Building2, Plus, ArrowRight
+    ArrowLeft, Save, Loader2, Wrench, GitBranch, Clock, Building2, Plus, ArrowRight, Check
 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,7 @@ import { useWorkflows } from '@/hooks/useWorkflows';
 import { useProducts } from '@/hooks/useProducts';
 import { ImageUpload } from '@/components/products/ImageUpload';
 import { formatNumber, parseNumber } from '@/components/products/utils';
+import { ProductTypeSelector } from '@/components/products/ProductTypeSelector';
 
 export function CreateServicePage() {
     const navigate = useNavigate();
@@ -40,6 +41,7 @@ export function CreateServicePage() {
         duration: 60,
         image: null as string | null,
         workflow_id: null as string | null,
+        applicable_product_types: [] as string[],
     });
 
     // Fetch workflows on mount
@@ -61,6 +63,7 @@ export function CreateServicePage() {
                     duration: service.duration || 60,
                     image: service.image || null,
                     workflow_id: service.workflow_id || null,
+                    applicable_product_types: service.applicable_product_types || [],
                 });
             }
             setLoading(false);
@@ -112,6 +115,7 @@ export function CreateServicePage() {
                 duration: formData.duration,
                 image: formData.image || undefined,
                 workflow_id: formData.workflow_id || undefined,
+                applicable_product_types: formData.applicable_product_types.length > 0 ? formData.applicable_product_types : undefined,
                 status: 'active' as const,
             };
 
@@ -123,7 +127,7 @@ export function CreateServicePage() {
                 toast.success('Tạo dịch vụ thành công!');
             }
 
-            navigate('/products');
+            navigate('/services');
         } catch (error) {
             console.error('Error saving service:', error);
             toast.error('Có lỗi xảy ra khi lưu dịch vụ');
@@ -156,7 +160,7 @@ export function CreateServicePage() {
                     <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => navigate('/products')}
+                        onClick={() => navigate('/services')}
                         className="hover:bg-muted h-8 w-8"
                     >
                         <ArrowLeft className="h-4 w-4" />
@@ -174,7 +178,7 @@ export function CreateServicePage() {
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={() => navigate('/products')}>
+                    <Button variant="outline" size="sm" onClick={() => navigate('/services')}>
                         Huỷ
                     </Button>
                     <Button onClick={handleSubmit} disabled={isSubmitting} size="sm" className="gap-2">
@@ -250,11 +254,20 @@ export function CreateServicePage() {
                                             disabled={!!formData.workflow_id}
                                             className="h-11 pr-14"
                                         />
-                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                                            phút
-                                        </span>
                                     </div>
                                 </div>
+                            </div>
+
+                            {/* Applicable Product Types */}
+                            <div className="space-y-2">
+                                <Label className="text-sm font-medium">Sản phẩm áp dụng</Label>
+                                <ProductTypeSelector
+                                    value={formData.applicable_product_types}
+                                    onChange={(types) => setFormData(prev => ({ ...prev, applicable_product_types: types }))}
+                                />
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    Chọn các loại sản phẩm có thể áp dụng dịch vụ này. Để trống nếu áp dụng cho tất cả.
+                                </p>
                             </div>
 
                             {/* Workflow Selection */}

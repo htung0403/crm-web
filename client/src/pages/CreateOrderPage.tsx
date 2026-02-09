@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
     ArrowLeft, ArrowRight, Plus, Trash2, Camera, Package, Sparkles,
@@ -25,18 +25,11 @@ import { useUsers } from '@/hooks/useUsers';
 import { ordersApi } from '@/lib/api';
 import { CreateCustomerDialog } from '@/components/customers/CreateCustomerDialog';
 import { ImageUpload } from '@/components/products/ImageUpload';
+import { useProductTypes } from '@/hooks/useProductTypes';
 import { useAuth } from '@/contexts/AuthContext';
+import { ServiceSelector } from '@/components/orders/ServiceSelector';
 
-// Product types for cleaning services
-const PRODUCT_TYPES = [
-    { value: 'giày', label: 'Giày' },
-    { value: 'túi', label: 'Túi xách' },
-    { value: 'ví', label: 'Ví' },
-    { value: 'thắt lưng', label: 'Thắt lưng' },
-    { value: 'dép', label: 'Dép' },
-    { value: 'mũ', label: 'Mũ/Nón' },
-    { value: 'khác', label: 'Khác' },
-];
+// Product types will be fetched from API
 
 // Common surcharge types
 const SURCHARGE_TYPES = [
@@ -91,6 +84,8 @@ const generateTempId = () => `temp_${Date.now()}_${Math.random().toString(36).su
 export function CreateOrderPage() {
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
+    const { id } = useParams();
+    const isEditMode = !!id;
     const { user } = useAuth();
 
     // Steps: 1 = Customer, 2 = Products (with Services), 3 = Review
@@ -101,6 +96,7 @@ export function CreateOrderPage() {
     const { products: catalogProducts, services, fetchProducts, fetchServices } = useProducts();
     const { packages, fetchPackages } = usePackages();
     const { users: technicians, fetchTechnicians } = useUsers();
+    const { productTypes, fetchProductTypes } = useProductTypes();
 
     // Form state
     const [customerId, setCustomerId] = useState('');
@@ -134,11 +130,6 @@ export function CreateOrderPage() {
     // Track confirmed products (products with info confirmed, ready for services)
     const [confirmedProducts, setConfirmedProducts] = useState<Set<number>>(new Set());
 
-    // Service dialog state for adding services to a product
-    const [showServiceDialog, setShowServiceDialog] = useState(false);
-    const [serviceDialogProductIndex, setServiceDialogProductIndex] = useState<number | null>(null);
-    const [serviceSearch, setServiceSearch] = useState('');
-
     // Next order code for QR preview
     const [nextOrderCode, setNextOrderCode] = useState<string>('');
 
@@ -162,8 +153,10 @@ export function CreateOrderPage() {
                     fetchCustomers({ status: 'active' }),
                     fetchProducts({ status: 'active' }),
                     fetchServices({ status: 'active' }),
+                    fetchServices({ status: 'active' }),
                     fetchPackages(),
-                    fetchTechnicians()
+                    fetchTechnicians(),
+                    fetchProductTypes()
                 ]);
             } catch {
                 toast.error('Lỗi khi tải dữ liệu');
@@ -172,7 +165,7 @@ export function CreateOrderPage() {
             }
         };
         fetchData();
-    }, [fetchCustomers, fetchProducts, fetchServices, fetchPackages, fetchTechnicians]);
+    }, [fetchCustomers, fetchProducts, fetchServices, fetchPackages, fetchTechnicians, fetchProductTypes]);
 
     // Fetch next order code separately (for QR preview)
     useEffect(() => {
@@ -198,6 +191,85 @@ export function CreateOrderPage() {
 
     // Flag to prevent duplicate lead processing
     const leadProcessedRef = useRef(false);
+    const orderFetchedRef = useRef(false);
+
+    // Fetch Order Data for Edit Mode
+    useEffect(() => {
+        if (isEditMode && id && !orderFetchedRef.current && !loading) {
+            const fetchOrderData = async () => {
+                try {
+                    const response = await ordersApi.getById(id);
+                    const order = response.data.data?.order;
+                    if (order) {
+                        setCustomerId(order.customer_id);
+                        setNotes(order.notes || '');
+                        setDiscount(order.discount_value || order.discount || 0);
+                        setDiscountType(order.discount_type || 'amount');
+                        setDueAt(order.due_at ? new Date(order.due_at).toISOString().split('T')[0] : '');
+
+                        // Map Customer Items (order_products + services)
+                        const customerItems: CustomerProduct[] = (order.customer_items || []).map((item: any) => ({
+                            id: item.id,
+                            name: item.name,
+                            type: item.type || 'giày',
+                            brand: item.brand || '',
+                            color: item.color || '',
+                            size: item.size || '',
+                            material: item.material || '',
+                            condition_before: item.condition_before || '',
+                            images: item.images || [],
+                            notes: item.notes || '',
+                            services: (item.services || []).map((s: any) => ({
+                                id: s.service_id || s.package_id || s.id,
+                                type: s.item_type,
+                                name: s.item_name,
+                                price: s.unit_price,
+                                technicians: (s.technicians || []).map((t: any) => ({
+                                    id: t.technician_id,
+                                    name: t.technician?.name || 'Unknown',
+                                    commission: t.commission || 0
+                                }))
+                            }))
+                        }));
+
+                        // Map Sale Items (add-on products)
+                        const saleItems: AddOnProduct[] = (order.sale_items || []).map((item: any) => ({
+                            id: item.product_id || item.id,
+                            name: item.item_name,
+                            price: item.unit_price,
+                            quantity: item.quantity
+                        }));
+
+                        setProducts(customerItems);
+                        setAddOnProducts(saleItems);
+
+                        // Set surcharges
+                        if (order.surcharges && Array.isArray(order.surcharges)) {
+                            setSurcharges(order.surcharges.map((s: any) => ({
+                                id: generateTempId(),
+                                type: s.type,
+                                label: s.label,
+                                value: s.value,
+                                isPercent: s.is_percent
+                            })));
+                        }
+
+                        // Mark all products as confirmed since it's an existing order
+                        const confirmed = new Set<number>();
+                        const totalProducts = customerItems.length;
+                        for (let i = 0; i < totalProducts; i++) confirmed.add(i);
+                        setConfirmedProducts(confirmed);
+
+                        orderFetchedRef.current = true;
+                    }
+                } catch (err) {
+                    console.error('Error fetching order for edit:', err);
+                    toast.error('Không thể tải dữ liệu đơn hàng để sửa');
+                }
+            };
+            fetchOrderData();
+        }
+    }, [isEditMode, id, loading]);
 
     // Handle lead info from URL params (when coming from Lead Detail page)
     useEffect(() => {
@@ -334,7 +406,10 @@ export function CreateOrderPage() {
                 ...p,
                 services: [...p.services, {
                     ...service,
-                    technicians: selectedTechnicians
+                    technicians: selectedTechnicians.map(t => ({
+                        ...t,
+                        commission: t.commission || (availableTechnicians.find(at => at.id === t.id)?.commission || 0)
+                    }))
                 }]
             };
         }));
@@ -363,7 +438,11 @@ export function CreateOrderPage() {
                     }
                     return {
                         ...s,
-                        technicians: [...s.technicians, { id: technician.id, name: technician.name, commission }]
+                        technicians: [...s.technicians, {
+                            id: technician.id,
+                            name: technician.name,
+                            commission: commission || technician.commission || 0
+                        }]
                     };
                 })
             };
@@ -579,7 +658,7 @@ export function CreateOrderPage() {
     );
 
     // Submit order
-    const handleSubmit = async (status: 'pending' | 'confirmed' = 'pending') => {
+    const handleSubmit = async (status: 'before_sale' | 'in_progress' | 'after_sale' = 'before_sale') => {
         if (!customerId) {
             toast.error('Vui lòng chọn khách hàng');
             return;
@@ -600,10 +679,11 @@ export function CreateOrderPage() {
         setSubmitting(true);
         setConfirmDialogOpen(false);
         try {
-            const response = await ordersApi.createV2({
+            const payload = {
                 customer_id: customerId,
-                status: status,
-                products: products.map(p => ({
+                status: isEditMode ? undefined : status, // keep status if editing, or handle separately
+                customer_items: products.map(p => ({
+                    id: p.id.startsWith('temp_') ? undefined : p.id,
                     name: p.name,
                     type: p.type,
                     brand: p.brand,
@@ -614,7 +694,7 @@ export function CreateOrderPage() {
                     images: p.images,
                     notes: p.notes,
                     services: p.services.map(s => ({
-                        id: s.id,
+                        id: s.id.startsWith('temp_') ? undefined : s.id,
                         type: s.type,
                         name: s.name,
                         price: s.price,
@@ -624,32 +704,36 @@ export function CreateOrderPage() {
                         }))
                     }))
                 })),
-                add_on_products: addOnProducts.length > 0 ? addOnProducts.map(a => ({
+                sale_items: addOnProducts.map(a => ({
                     product_id: a.id,
                     name: a.name,
                     unit_price: a.price,
                     quantity: a.quantity
-                })) : undefined,
-                notes: notes || undefined,
-                discount: discountAmount > 0 ? discountAmount : undefined,
+                })),
+                notes,
+                discount: discountAmount,
                 discount_type: discountType,
-                discount_value: discount > 0 ? discount : undefined,
-                surcharges: surcharges.length > 0 ? surcharges.map(s => ({
+                discount_value: discount,
+                surcharges: surcharges.map(s => ({
                     type: s.type,
                     label: s.label,
                     value: s.value,
                     is_percent: s.isPercent,
                     amount: s.isPercent ? Math.round(subtotal * s.value / 100) : s.value
-                })) : undefined,
-                paid_amount: paidAmount > 0 ? paidAmount : undefined,
+                })),
+                paid_amount: paidAmount,
                 due_at: dueAt ? new Date(dueAt + 'T17:00:00').toISOString() : undefined
-            });
+            };
+
+            const response = isEditMode && id
+                ? await ordersApi.updateFull(id, payload)
+                : await ordersApi.create(payload);
 
             setCreatedOrder(response.data.data);
             setStep(4); // Success step
-            toast.success('Đã tạo đơn hàng thành công!');
+            toast.success(isEditMode ? 'Đã cập nhật đơn hàng thành công!' : 'Đã tạo đơn hàng thành công!');
         } catch (error: any) {
-            toast.error(error.response?.data?.message || 'Lỗi khi tạo đơn hàng');
+            toast.error(error.response?.data?.message || (isEditMode ? 'Lỗi khi cập nhật đơn hàng' : 'Lỗi khi tạo đơn hàng'));
         } finally {
             setSubmitting(false);
         }
@@ -875,7 +959,7 @@ export function CreateOrderPage() {
 
                                                 <div className="flex items-center gap-2 flex-1 min-w-0">
                                                     <Badge variant="outline" className="shrink-0">
-                                                        {PRODUCT_TYPES.find(t => t.value === product.type)?.label || 'Khác'}
+                                                        {productTypes.find(t => t.code === product.type)?.name || 'Khác'}
                                                     </Badge>
                                                     <CardTitle className="text-base truncate">
                                                         {product.name || `Sản phẩm ${index + 1}`}
@@ -885,7 +969,19 @@ export function CreateOrderPage() {
                                                     <Button
                                                         variant="ghost"
                                                         size="sm"
-                                                        onClick={() => setCurrentProductIndex(currentProductIndex === index ? null : index)}
+                                                        onClick={() => {
+                                                            if (currentProductIndex === index) {
+                                                                setCurrentProductIndex(null);
+                                                            } else {
+                                                                setCurrentProductIndex(index);
+                                                                // If previously confirmed, un-confirm to allow editing
+                                                                if (confirmedProducts.has(index)) {
+                                                                    const next = new Set(confirmedProducts);
+                                                                    next.delete(index);
+                                                                    setConfirmedProducts(next);
+                                                                }
+                                                            }
+                                                        }}
                                                     >
                                                         {currentProductIndex === index ? 'Thu gọn' : 'Sửa'}
                                                     </Button>
@@ -923,9 +1019,9 @@ export function CreateOrderPage() {
                                                                 <SelectValue />
                                                             </SelectTrigger>
                                                             <SelectContent>
-                                                                {PRODUCT_TYPES.map(t => (
-                                                                    <SelectItem key={t.value} value={t.value}>
-                                                                        {t.label}
+                                                                {productTypes.map(t => (
+                                                                    <SelectItem key={t.code} value={t.code}>
+                                                                        {t.name}
                                                                     </SelectItem>
                                                                 ))}
                                                             </SelectContent>
@@ -1139,18 +1235,14 @@ export function CreateOrderPage() {
                                                         )}
 
                                                         {/* Add Service Button */}
-                                                        <Button
-                                                            variant="outline"
-                                                            size="sm"
-                                                            className="w-full border-dashed h-8"
-                                                            onClick={() => {
-                                                                setServiceDialogProductIndex(index);
-                                                                setShowServiceDialog(true);
-                                                            }}
-                                                        >
-                                                            <Plus className="h-3 w-3 mr-1" />
-                                                            Thêm dịch vụ
-                                                        </Button>
+                                                        <div className="w-full">
+                                                            <ServiceSelector
+                                                                services={services}
+                                                                packages={packages}
+                                                                productType={product.type}
+                                                                onSelect={(service) => handleServiceClick(index, service)}
+                                                            />
+                                                        </div>
                                                     </div>
                                                 )}
 
@@ -1264,7 +1356,7 @@ export function CreateOrderPage() {
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-2 mb-2">
                                                     <Badge className="bg-primary/10 text-primary border-0">
-                                                        {PRODUCT_TYPES.find(t => t.value === product.type)?.label || 'Khác'}
+                                                        {productTypes.find(t => t.code === product.type)?.name || 'Khác'}
                                                     </Badge>
                                                     {product.brand && (
                                                         <Badge variant="outline" className="text-xs bg-white">
@@ -1620,11 +1712,11 @@ export function CreateOrderPage() {
                         </p>
 
                         {/* QR Codes */}
-                        {createdOrder.products && createdOrder.products.length > 0 && (
+                        {createdOrder.customer_items && createdOrder.customer_items.length > 0 && (
                             <div className="mb-8">
                                 <h3 className="font-semibold mb-4">Mã QR sản phẩm</h3>
                                 <div className="flex flex-wrap justify-center gap-6">
-                                    {createdOrder.products.map((p: any, index: number) => (
+                                    {createdOrder.customer_items.map((p: any, index: number) => (
                                         <div key={index} className="p-4 border rounded-lg bg-white shadow-sm">
                                             <QRCodeSVG
                                                 value={p.product_code || p.qr_code || `Product-${index + 1}`}
@@ -1646,7 +1738,7 @@ export function CreateOrderPage() {
                                 onClick={() => {
                                     const printWindow = window.open('', '_blank');
                                     if (printWindow) {
-                                        const qrHtml = createdOrder.products?.map((p: any) => `
+                                        const qrHtml = createdOrder.customer_items?.map((p: any) => `
                                             <div style="display: inline-block; padding: 20px; margin: 10px; border: 1px solid #ccc; border-radius: 8px; text-align: center;">
                                                 <canvas id="qr-${p.product_code || p.qr_code}"></canvas>
                                                 <p style="font-family: monospace; font-size: 14px; margin-top: 10px;">${p.product_code || p.qr_code}</p>
@@ -1670,7 +1762,7 @@ export function CreateOrderPage() {
                                                     <h2>Mã QR sản phẩm - Đơn hàng ${createdOrder.order?.order_code}</h2>
                                                     <div class="qr-container">${qrHtml}</div>
                                                     <script>
-                                                        ${createdOrder.products?.map((p: any) => `
+                                                        ${createdOrder.customer_items?.map((p: any) => `
                                                             QRCode.toCanvas(document.getElementById('qr-${p.product_code || p.qr_code}'), 
                                                                 '${window.location.origin}/product/${p.product_code || p.qr_code}', 
                                                                 { width: 150 }, function(err) { if(err) console.error(err); });
@@ -1720,13 +1812,7 @@ export function CreateOrderPage() {
                         </Button>
                     ) : (
                         <Button
-                            onClick={() => {
-                                if (user?.role === 'sale') {
-                                    handleSubmit('pending');
-                                } else {
-                                    setConfirmDialogOpen(true);
-                                }
-                            }}
+                            onClick={() => handleSubmit('before_sale')}
                             disabled={submitting}
                             className="bg-green-600 hover:bg-green-700"
                         >
@@ -1743,40 +1829,11 @@ export function CreateOrderPage() {
                             )}
                         </Button>
                     )}
-                </div>
+                </div >
             )}
 
             {/* Confirmation Dialog */}
-            <Dialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>Xác nhận tạo đơn hàng</DialogTitle>
-                    </DialogHeader>
-                    <div className="py-4">
-                        <p>Bạn muốn tạo đơn hàng này với trạng thái nào?</p>
-                        <p className="text-sm text-muted-foreground mt-2">
-                            - <strong>Lưu nháp:</strong> Đơn hàng sẽ được lưu vào danh sách "Đơn nháp", bạn có thể chỉnh sửa sau.<br />
-                            - <strong>Xác nhận:</strong> Đơn hàng sẽ được chuyển sang trạng thái "Đã xác nhận" để xử lý ngay.
-                        </p>
-                    </div>
-                    <DialogFooter className="gap-2 sm:gap-0">
-                        <Button
-                            variant="outline"
-                            onClick={() => handleSubmit('pending')}
-                            disabled={submitting}
-                        >
-                            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Lưu nháp'}
-                        </Button>
-                        <Button
-                            onClick={() => handleSubmit('confirmed')}
-                            disabled={submitting}
-                            className="bg-green-600 hover:bg-green-700"
-                        >
-                            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Xác nhận ngay'}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+
 
             {/* Technician Selection Dialog */}
             <Dialog open={techDialogOpen} onOpenChange={setTechDialogOpen}>
@@ -1895,117 +1952,9 @@ export function CreateOrderPage() {
                 </DialogContent>
             </Dialog>
 
-            {/* Service Selection Dialog for confirmed products */}
-            <Dialog open={showServiceDialog} onOpenChange={setShowServiceDialog}>
-                <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <Sparkles className="h-5 w-5 text-primary" />
-                            Chọn dịch vụ cho sản phẩm
-                        </DialogTitle>
-                    </DialogHeader>
 
-                    <div className="space-y-4">
-                        {/* Search Input */}
-                        <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                            <Input
-                                placeholder="Tìm dịch vụ..."
-                                value={serviceSearch}
-                                onChange={(e) => setServiceSearch(e.target.value)}
-                                className="pl-10"
-                            />
-                        </div>
-
-                        {/* Services Grid */}
-                        <div>
-                            <h3 className="font-semibold mb-3 flex items-center gap-2">
-                                <Wrench className="h-4 w-4" />
-                                Dịch vụ đơn lẻ
-                            </h3>
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                                {services
-                                    .filter(s => s.status === 'active')
-                                    .filter(s => s.name.toLowerCase().includes(serviceSearch.toLowerCase()))
-                                    .map(service => (
-                                        <button
-                                            key={service.id}
-                                            onClick={() => {
-                                                if (serviceDialogProductIndex !== null) {
-                                                    handleServiceClick(serviceDialogProductIndex, {
-                                                        id: service.id,
-                                                        type: 'service',
-                                                        name: service.name,
-                                                        price: service.price
-                                                    });
-                                                    setShowServiceDialog(false);
-                                                    setServiceDialogProductIndex(null);
-                                                    setServiceSearch('');
-                                                }
-                                            }}
-                                            className="p-3 text-left border rounded-lg hover:border-primary hover:bg-primary/5 transition-colors"
-                                        >
-                                            <p className="font-medium text-sm truncate">{service.name}</p>
-                                            <p className="text-primary font-semibold text-sm">{formatCurrency(service.price)}</p>
-                                        </button>
-                                    ))}
-                            </div>
-                            {services.filter(s => s.status === 'active').filter(s => s.name.toLowerCase().includes(serviceSearch.toLowerCase())).length === 0 && (
-                                <p className="text-sm text-muted-foreground text-center py-4">Không tìm thấy dịch vụ</p>
-                            )}
-                        </div>
-
-                        {/* Packages Grid */}
-                        {packages.filter(p => p.status === 'active').filter(p => p.name.toLowerCase().includes(serviceSearch.toLowerCase())).length > 0 && (
-                            <div>
-                                <h3 className="font-semibold mb-3 flex items-center gap-2">
-                                    <Layers className="h-4 w-4" />
-                                    Gói dịch vụ
-                                </h3>
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                                    {packages
-                                        .filter(p => p.status === 'active')
-                                        .filter(p => p.name.toLowerCase().includes(serviceSearch.toLowerCase()))
-                                        .map(pkg => (
-                                            <button
-                                                key={pkg.id}
-                                                onClick={() => {
-                                                    if (serviceDialogProductIndex !== null) {
-                                                        handleServiceClick(serviceDialogProductIndex, {
-                                                            id: pkg.id,
-                                                            type: 'package',
-                                                            name: pkg.name,
-                                                            price: pkg.price
-                                                        });
-                                                        setShowServiceDialog(false);
-                                                        setServiceDialogProductIndex(null);
-                                                        setServiceSearch('');
-                                                    }
-                                                }}
-                                                className="p-3 text-left border rounded-lg hover:border-emerald-500 hover:bg-emerald-50 transition-colors"
-                                            >
-                                                <p className="font-medium text-sm truncate">{pkg.name}</p>
-                                                <p className="text-emerald-600 font-semibold text-sm">{formatCurrency(pkg.price)}</p>
-                                            </button>
-                                        ))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    <DialogFooter>
-                        <Button
-                            variant="outline"
-                            onClick={() => {
-                                setShowServiceDialog(false);
-                                setServiceDialogProductIndex(null);
-                            }}
-                        >
-                            Đóng
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-        </div>
+            {/* Service Selection Dialog for confirmed products - REMOVED */}
+        </div >
     );
 }
+

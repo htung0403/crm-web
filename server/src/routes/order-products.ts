@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
+import { checkAndCompleteOrder } from '../utils/orderHelper.js';
 
 const router = Router();
 
@@ -121,20 +122,32 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
 // ORDER PRODUCT SERVICES ROUTES
 // =====================================================
 
-// Assign technician to a service
+// Assign technician(s) to a service
 router.patch('/services/:serviceId/assign', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { serviceId } = req.params;
-        const { technician_id } = req.body;
+        const { technician_id, assignments } = req.body;
+        const userId = req.user?.id;
 
-        if (!technician_id) {
+        // Backward compatibility or new array format
+        // assignments: [{ technician_id, commission }]
+        let techAssignments: { technician_id: string; commission?: number }[] = [];
+
+        if (assignments && Array.isArray(assignments) && assignments.length > 0) {
+            techAssignments = assignments;
+        } else if (technician_id) {
+            techAssignments = [{ technician_id, commission: 0 }];
+        } else {
             throw new ApiError('Vui lòng chọn kỹ thuật viên', 400);
         }
 
+        const primaryTechId = techAssignments[0].technician_id;
+
+        // Update main service record
         const { data: service, error } = await supabaseAdmin
             .from('order_product_services')
             .update({
-                technician_id,
+                technician_id: primaryTechId,
                 status: 'assigned',
                 assigned_at: new Date().toISOString()
             })
@@ -144,6 +157,25 @@ router.patch('/services/:serviceId/assign', authenticate, async (req: Authentica
 
         if (error) {
             throw new ApiError('Không thể phân công kỹ thuật viên', 500);
+        }
+
+        // Handle junction table
+        // 1. Delete existing
+        await supabaseAdmin.from('order_product_service_technicians').delete().eq('order_product_service_id', serviceId);
+
+        // 2. Insert new
+        const junctionRows = techAssignments.map(t => ({
+            order_product_service_id: serviceId,
+            technician_id: t.technician_id,
+            commission: t.commission || 0,
+            assigned_by: userId,
+            assigned_at: new Date().toISOString(),
+            status: 'assigned'
+        }));
+
+        const { error: junctionError } = await supabaseAdmin.from('order_product_service_technicians').insert(junctionRows);
+        if (junctionError) {
+            console.error('Error inserting order_product_service_technicians:', junctionError);
         }
 
         res.json({
@@ -182,6 +214,23 @@ router.patch('/services/:serviceId/start', authenticate, async (req: Authenticat
                 .update({ status: 'processing' })
                 .eq('id', service.order_product_id)
                 .eq('status', 'pending');
+
+            // Also update parent order status to 'in_progress' if it's not already
+            const { data: op } = await supabaseAdmin
+                .from('order_products')
+                .select('order_id, order:orders(status)')
+                .eq('id', service.order_product_id)
+                .single();
+
+            if (op && op.order_id) {
+                const orderData = Array.isArray(op.order) ? op.order[0] : op.order;
+                if (orderData?.status !== 'in_progress' && orderData?.status !== 'completed' && orderData?.status !== 'cancelled') {
+                    await supabaseAdmin
+                        .from('orders')
+                        .update({ status: 'in_progress' })
+                        .eq('id', op.order_id);
+                }
+            }
         }
 
         res.json({
@@ -223,7 +272,7 @@ router.patch('/services/:serviceId/complete', authenticate, async (req: Authenti
 
         const allCompleted = allServices?.every(s => s.status === 'completed' || s.status === 'cancelled');
 
-        // If all services completed, update product status
+        // If all services completed, update product status and check parent order
         if (allCompleted) {
             await supabaseAdmin
                 .from('order_products')
@@ -232,6 +281,17 @@ router.patch('/services/:serviceId/complete', authenticate, async (req: Authenti
                     completed_at: new Date().toISOString()
                 })
                 .eq('id', service.order_product_id);
+
+            // Check if parent order can be completed
+            const { data: op } = await supabaseAdmin
+                .from('order_products')
+                .select('order_id')
+                .eq('id', service.order_product_id)
+                .single();
+
+            if (op && op.order_id) {
+                await checkAndCompleteOrder(op.order_id);
+            }
         }
 
         res.json({
@@ -297,10 +357,10 @@ router.get('/:id/status-summary', authenticate, async (req: AuthenticatedRequest
         const services = (product.services || []).map((service: any) => {
             const steps = service.steps || [];
             const totalSteps = steps.length;
-            const completedSteps = steps.filter((s: any) => 
+            const completedSteps = steps.filter((s: any) =>
                 s.status === 'completed' || s.status === 'skipped'
             ).length;
-            const serviceCompletionPct = totalSteps > 0 
+            const serviceCompletionPct = totalSteps > 0
                 ? Math.round((completedSteps * 100) / totalSteps)
                 : 0;
 

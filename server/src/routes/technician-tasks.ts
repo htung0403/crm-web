@@ -1,18 +1,19 @@
 import { Router, Response, NextFunction } from 'express';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
-import { AuthenticatedRequest, authenticate } from '../middleware/auth.js';
+import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
+import { checkAndCompleteOrder } from '../utils/orderHelper.js';
 
 const router = Router();
 
 // Generate task code
 const generateTaskCode = async (): Promise<string> => {
     const today = new Date();
-    const prefix = `CV${today.getFullYear().toString().slice(-2)}${(today.getMonth() + 1).toString().padStart(2, '0')}`;
+    const prefix = `CV${today.getFullYear().toString().slice(-2)}${(today.getMonth() + 1).toString().padStart(2, '0')} `;
 
     const { data } = await supabase
         .from('technician_tasks')
         .select('task_code')
-        .like('task_code', `${prefix}%`)
+        .like('task_code', `${prefix}% `)
         .order('task_code', { ascending: false })
         .limit(1);
 
@@ -23,7 +24,7 @@ const generateTaskCode = async (): Promise<string> => {
         nextNumber = lastNumber + 1;
     }
 
-    return `${prefix}${nextNumber.toString().padStart(4, '0')}`;
+    return `${prefix}${nextNumber.toString().padStart(4, '0')} `;
 };
 
 // Get all tasks (with filters)
@@ -34,12 +35,12 @@ router.get('/', async (req: AuthenticatedRequest, res: Response, next: NextFunct
         let query = supabase
             .from('technician_tasks')
             .select(`
-                *,
-                order:orders(order_code, customer:customers(name, phone, address)),
-                service:services(name, price, duration),
-                technician:users!technician_tasks_technician_id_fkey(name, phone, avatar, department, department_id),
-                customer:customers(name, phone, address)
-            `)
+    *,
+    order: orders(order_code, customer: customers(name, phone, address)),
+        service: services(name, price, duration),
+            technician: users!technician_tasks_technician_id_fkey(name, phone, avatar, department, department_id),
+                customer: customers(name, phone, address)
+                    `)
             .order('created_at', { ascending: false });
 
         if (status) {
@@ -89,10 +90,10 @@ router.get('/my-tasks', authenticate, async (req: AuthenticatedRequest, res: Res
                 .from('technician_tasks')
                 .select(`
                     *,
-                    order:orders(order_code, customer:customers(name, phone, address)),
-                    service:services(name, price, duration),
-                    customer:customers(name, phone, address)
-                `)
+                    order: orders(order_code, customer: customers(name, phone, address)),
+                        service: services(name, price, duration),
+                            customer: customers(name, phone, address)
+                                `)
                 .eq('technician_id', userId)
                 .order('scheduled_date', { ascending: true })
                 .order('scheduled_time', { ascending: true });
@@ -117,10 +118,10 @@ router.get('/my-tasks', authenticate, async (req: AuthenticatedRequest, res: Res
         const { data: orderItems, error: itemsError } = await supabase
             .from('order_items')
             .select(`
-                *,
-                order:orders(id, order_code, status, customer:customers(*)),
-                service:services(*)
-            `)
+                                *,
+                                order: orders(id, order_code, status, customer: customers(*)),
+                                    service: services(*)
+                                        `)
             .eq('technician_id', userId)
             .not('item_code', 'is', null);
 
@@ -128,47 +129,47 @@ router.get('/my-tasks', authenticate, async (req: AuthenticatedRequest, res: Res
         const { data: v2Services, error: v2Error } = await supabaseAdmin
             .from('order_product_services')
             .select(`
-                *,
-                order_products(
-                    id, 
-                    product_code,
-                    name,
-                    type,
-                    brand,
-                    color,
-                    size,
-                    material,
-                    condition_before,
-                    images,
-                    notes,
-                    orders(id, order_code, status, customer:customers(*))
-                )
-            `)
+                                        *,
+                                        order_products(
+                                            id,
+                                            product_code,
+                                            name,
+                                            type,
+                                            brand,
+                                            color,
+                                            size,
+                                            material,
+                                            condition_before,
+                                            images,
+                                            notes,
+                                            orders(id, order_code, status, customer: customers(*))
+                                        )
+                                            `)
             .eq('technician_id', userId);
 
         // Also get V2 services from junction table (new multi-technician assignments)
         const { data: v2JunctionServices } = await supabaseAdmin
             .from('order_product_service_technicians')
             .select(`
-                *,
-                order_product_services(
+                                        *,
+                                        order_product_services(
                     *,
-                    order_products(
-                        id, 
-                        product_code,
-                        name,
-                        type,
-                        brand,
-                        color,
-                        size,
-                        material,
-                        condition_before,
-                        images,
-                        notes,
-                        orders(id, order_code, status, customer:customers(*))
-                    )
-                )
-            `)
+                                            order_products(
+                                                id,
+                                                product_code,
+                                                name,
+                                                type,
+                                                brand,
+                                                color,
+                                                size,
+                                                material,
+                                                condition_before,
+                                                images,
+                                                notes,
+                                                orders(id, order_code, status, customer: customers(*))
+                                            )
+                                        )
+                                            `)
             .eq('technician_id', userId);
 
         // Combine V2 services (avoid duplicates)
@@ -186,20 +187,20 @@ router.get('/my-tasks', authenticate, async (req: AuthenticatedRequest, res: Res
         const { data: workflowSteps, error: stepsError } = await supabaseAdmin
             .from('order_item_steps')
             .select(`
-                *,
-                order_product_services(
-                    item_name,
-                    order_products(
-                        id,
-                        product_code,
-                        orders(id, order_code, status, customer:customers(*))
-                    )
-                ),
-                order_items(
-                    item_name,
-                    orders(id, order_code, status, customer:customers(*))
-                )
-            `)
+                                        *,
+                                        order_product_services(
+                                            item_name,
+                                            order_products(
+                                                id,
+                                                product_code,
+                                                orders(id, order_code, status, customer: customers(*))
+                                            )
+                                        ),
+                                        order_items(
+                                            item_name,
+                                            orders(id, order_code, status, customer: customers(*))
+                                        )
+                                            `)
             .eq('technician_id', userId);
 
         if (itemsError) {
@@ -257,20 +258,20 @@ router.get('/my-tasks', authenticate, async (req: AuthenticatedRequest, res: Res
             // Fetch technicians for all services from junction table
             const serviceIds = allV2Services.map(s => s.id).filter(Boolean);
             let techniciansByService: Record<string, any[]> = {};
-            
+
             if (serviceIds.length > 0) {
                 const { data: techAssignments } = await supabaseAdmin
                     .from('order_product_service_technicians')
                     .select(`
-                        order_product_service_id,
-                        technician_id,
-                        commission,
-                        status,
-                        assigned_at,
-                        technician:users!order_product_service_technicians_technician_id_fkey(id, name, phone, avatar)
+order_product_service_id,
+    technician_id,
+    commission,
+    status,
+    assigned_at,
+    technician: users!order_product_service_technicians_technician_id_fkey(id, name, phone, avatar)
                     `)
                     .in('order_product_service_id', serviceIds);
-                
+
                 if (techAssignments) {
                     techAssignments.forEach((ta: any) => {
                         const svcId = ta.order_product_service_id;
@@ -295,7 +296,7 @@ router.get('/my-tasks', authenticate, async (req: AuthenticatedRequest, res: Res
             allV2Services.forEach(item => {
                 const productId = item.order_products?.id;
                 const productCode = item.order_products?.product_code;
-                
+
                 if (!productId || !productCode) return;
 
                 if (!servicesByProduct.has(productId)) {
@@ -341,12 +342,12 @@ router.get('/my-tasks', authenticate, async (req: AuthenticatedRequest, res: Res
             // Create product-based tasks
             servicesByProduct.forEach((services, productId) => {
                 const productInfo = productInfoMap.get(productId)!;
-                
+
                 // Determine overall status: if any service is in_progress -> in_progress, else if all completed -> completed, else assigned
                 const hasInProgress = services.some((s: any) => s.status === 'in_progress');
                 const allCompleted = services.every((s: any) => s.status === 'completed' || s.status === 'cancelled');
                 const hasCompleted = services.some((s: any) => s.status === 'completed');
-                
+
                 let taskStatus = 'assigned';
                 if (hasInProgress) taskStatus = 'in_progress';
                 else if (allCompleted) taskStatus = 'completed';
@@ -355,12 +356,12 @@ router.get('/my-tasks', authenticate, async (req: AuthenticatedRequest, res: Res
                 // Get earliest start and latest completion
                 const startedServices = services.filter((s: any) => s.started_at);
                 const completedServices = services.filter((s: any) => s.completed_at);
-                const earliestStart = startedServices.length > 0 
-                    ? startedServices.reduce((earliest: string, s: any) => 
+                const earliestStart = startedServices.length > 0
+                    ? startedServices.reduce((earliest: string, s: any) =>
                         !earliest || new Date(s.started_at) < new Date(earliest) ? s.started_at : earliest, null)
                     : null;
                 const latestComplete = completedServices.length > 0
-                    ? completedServices.reduce((latest: string, s: any) => 
+                    ? completedServices.reduce((latest: string, s: any) =>
                         !latest || new Date(s.completed_at) > new Date(latest) ? s.completed_at : latest, null)
                     : null;
 
@@ -550,12 +551,12 @@ router.get('/by-code/:itemCode', authenticate, async (req: AuthenticatedRequest,
         const { data, error } = await supabase
             .from('technician_tasks')
             .select(`
-                *,
-                order:orders(order_code, customer:customers(*)),
-                service:services(*),
-                technician:users!technician_tasks_technician_id_fkey(id, name, phone, avatar),
-                customer:customers(*)
-            `)
+    *,
+    order: orders(order_code, customer: customers(*)),
+        service: services(*),
+            technician: users!technician_tasks_technician_id_fkey(id, name, phone, avatar),
+                customer: customers(*)
+                    `)
             .eq('item_code', itemCode)
             .single();
 
@@ -566,45 +567,45 @@ router.get('/by-code/:itemCode', authenticate, async (req: AuthenticatedRequest,
         const { data: orderItem, error: itemError } = await supabase
             .from('order_items')
             .select(`
-                *,
-                order:orders(id, order_code, status, customer:customers(*)),
-                service:services(*),
-                technician:users(id, name, phone, avatar)
-            `)
+                    *,
+                    order: orders(id, order_code, status, customer: customers(*)),
+                        service: services(*),
+                            technician: users(id, name, phone, avatar)
+                                `)
             .eq('item_code', itemCode)
             .single();
 
         // If V1 item not found, try V2 product (order_products)
         if (itemError || !orderItem) {
             const userId = req.user?.id;
-            
+
             const { data: v2Product, error: v2Error } = await supabaseAdmin
                 .from('order_products')
                 .select(`
-                    id,
-                    name,
-                    product_code,
-                    type,
-                    brand,
-                    color,
-                    size,
-                    material,
-                    condition_before,
-                    images,
-                    notes,
-                    orders (id, order_code, status, customer:customers(*)),
-                    order_product_services (
-                        id,
-                        item_name,
-                        status,
-                        technician_id,
-                        unit_price,
-                        started_at,
-                        completed_at,
-                        assigned_at,
-                        users (id, name, phone, avatar)
-                    )
-                `)
+id,
+    name,
+    product_code,
+    type,
+    brand,
+    color,
+    size,
+    material,
+    condition_before,
+    images,
+    notes,
+    orders(id, order_code, status, customer: customers(*)),
+    order_product_services(
+        id,
+        item_name,
+        status,
+        technician_id,
+        unit_price,
+        started_at,
+        completed_at,
+        assigned_at,
+        users(id, name, phone, avatar)
+    )
+        `)
                 .eq('product_code', itemCode)
                 .single();
 
@@ -615,20 +616,20 @@ router.get('/by-code/:itemCode', authenticate, async (req: AuthenticatedRequest,
             // Fetch technicians from junction table for all services
             const serviceIds = (v2Product.order_product_services || []).map((s: any) => s.id).filter(Boolean);
             let techniciansByService: Record<string, any[]> = {};
-            
+
             if (serviceIds.length > 0) {
                 const { data: techAssignments } = await supabaseAdmin
                     .from('order_product_service_technicians')
                     .select(`
-                        order_product_service_id,
-                        technician_id,
-                        commission,
-                        status,
-                        assigned_at,
-                        technician:users!order_product_service_technicians_technician_id_fkey(id, name, phone, avatar)
-                    `)
+order_product_service_id,
+    technician_id,
+    commission,
+    status,
+    assigned_at,
+    technician: users!order_product_service_technicians_technician_id_fkey(id, name, phone, avatar)
+        `)
                     .in('order_product_service_id', serviceIds);
-                
+
                 if (techAssignments) {
                     techAssignments.forEach((ta: any) => {
                         const svcId = ta.order_product_service_id;
@@ -706,7 +707,7 @@ router.get('/by-code/:itemCode', authenticate, async (req: AuthenticatedRequest,
             const hasInProgress = servicesData.some((s: any) => s.status === 'in_progress');
             const allCompleted = servicesData.every((s: any) => s.status === 'completed' || s.status === 'cancelled');
             const hasCompleted = servicesData.some((s: any) => s.status === 'completed');
-            
+
             let overallStatus = 'assigned';
             if (hasInProgress) overallStatus = 'in_progress';
             else if (allCompleted) overallStatus = 'completed';
@@ -785,12 +786,12 @@ router.get('/:id', async (req: AuthenticatedRequest, res: Response, next: NextFu
         const { data, error } = await supabase
             .from('technician_tasks')
             .select(`
-                *,
-                order:orders(order_code, customer:customers(*)),
-                service:services(*),
-                technician:users!technician_tasks_technician_id_fkey(name, phone, avatar, department),
-                customer:customers(*)
-            `)
+        *,
+        order: orders(order_code, customer: customers(*)),
+            service: services(*),
+                technician: users!technician_tasks_technician_id_fkey(name, phone, avatar, department),
+                    customer: customers(*)
+                        `)
             .eq('id', id)
             .single();
 
@@ -836,10 +837,10 @@ router.post('/from-order/:orderId', async (req: AuthenticatedRequest, res: Respo
         const { data: order, error: orderError } = await supabase
             .from('orders')
             .select(`
-                *,
-                customer:customers(id, name, phone, address),
-                items:order_items(*)
-            `)
+                        *,
+                        customer: customers(id, name, phone, address),
+                            items: order_items(*)
+                                `)
             .eq('id', orderId)
             .single();
 
@@ -997,18 +998,18 @@ router.put('/:id/start', authenticate, async (req: AuthenticatedRequest, res: Re
         const { data: v2Product, error: v2Error } = await supabaseAdmin
             .from('order_products')
             .select(`
-                id,
-                product_code,
-                name,
-                orders(id, order_code, status),
-                order_product_services(
-                    id,
-                    item_name,
-                    status,
-                    technician_id,
-                    started_at
-                )
-            `)
+id,
+    product_code,
+    name,
+    orders(id, order_code, status),
+    order_product_services(
+        id,
+        item_name,
+        status,
+        technician_id,
+        started_at
+    )
+        `)
             .eq('id', id)
             .single();
 
@@ -1016,13 +1017,13 @@ router.put('/:id/start', authenticate, async (req: AuthenticatedRequest, res: Re
             // Fetch technicians from junction table for all services
             const serviceIds = (v2Product.order_product_services || []).map((s: any) => s.id).filter(Boolean);
             let techniciansByService: Record<string, string[]> = {};
-            
+
             if (serviceIds.length > 0) {
                 const { data: techAssignments } = await supabaseAdmin
                     .from('order_product_service_technicians')
                     .select('order_product_service_id, technician_id')
                     .in('order_product_service_id', serviceIds);
-                
+
                 if (techAssignments) {
                     techAssignments.forEach((ta: any) => {
                         const svcId = ta.order_product_service_id;
@@ -1053,8 +1054,8 @@ router.put('/:id/start', authenticate, async (req: AuthenticatedRequest, res: Re
                         junction_technicians: techniciansByService[s.id]
                     }))
                 });
-                return res.status(403).json({ 
-                    message: 'Không có dịch vụ nào được phân công cho bạn' 
+                return res.status(403).json({
+                    message: 'Không có dịch vụ nào được phân công cho bạn'
                 });
             }
 
@@ -1131,12 +1132,12 @@ router.put('/:id/start', authenticate, async (req: AuthenticatedRequest, res: Re
                 })
                 .eq('id', id)
                 .select(`
-                    *,
-                    order_items:order_items(id, orders:orders(id, order_code)),
-                    order_product_services:order_product_services(
-                        id,
-                        order_products(id, orders(id, order_code))
-                    )
+    *,
+    order_items: order_items(id, orders: orders(id, order_code)),
+        order_product_services: order_product_services(
+            id,
+            order_products(id, orders(id, order_code))
+        )
                 `)
                 .single();
 
@@ -1150,8 +1151,8 @@ router.put('/:id/start', authenticate, async (req: AuthenticatedRequest, res: Re
         }
 
         // If nothing found, return 404
-        return res.status(404).json({ 
-            message: 'Không tìm thấy công việc' 
+        return res.status(404).json({
+            message: 'Không tìm thấy công việc'
         });
     } catch (error) {
         next(error);
@@ -1230,7 +1231,7 @@ router.put('/:id/complete', authenticate, async (req: AuthenticatedRequest, res:
                             user_id: order.created_by,
                             type: 'order_completed',
                             title: 'Tất cả dịch vụ đã hoàn thành',
-                            message: `Đơn hàng ${order.order_code} của ${customerName} đã hoàn thành. Vui lòng liên hệ khách hàng để thanh toán.`,
+                            message: `Đơn hàng ${order.order_code} của ${customerName} đã hoàn thành.Vui lòng liên hệ khách hàng để thanh toán.`,
                             data: { order_id: order.id, order_code: order.order_code },
                             is_read: false
                         });
@@ -1246,19 +1247,19 @@ router.put('/:id/complete', authenticate, async (req: AuthenticatedRequest, res:
         const { data: v2Product, error: v2Error } = await supabaseAdmin
             .from('order_products')
             .select(`
-                id,
-                product_code,
-                name,
-                orders(id, order_code, status),
-                order_product_services(
-                    id,
-                    item_name,
-                    status,
-                    technician_id,
-                    started_at,
-                    completed_at
-                )
-            `)
+id,
+    product_code,
+    name,
+    orders(id, order_code, status),
+    order_product_services(
+        id,
+        item_name,
+        status,
+        technician_id,
+        started_at,
+        completed_at
+    )
+        `)
             .eq('id', id)
             .single();
 
@@ -1266,13 +1267,13 @@ router.put('/:id/complete', authenticate, async (req: AuthenticatedRequest, res:
             // Fetch technicians from junction table for all services
             const serviceIds = (v2Product.order_product_services || []).map((s: any) => s.id).filter(Boolean);
             let techniciansByService: Record<string, string[]> = {};
-            
+
             if (serviceIds.length > 0) {
                 const { data: techAssignments } = await supabaseAdmin
                     .from('order_product_service_technicians')
                     .select('order_product_service_id, technician_id')
                     .in('order_product_service_id', serviceIds);
-                
+
                 if (techAssignments) {
                     techAssignments.forEach((ta: any) => {
                         const svcId = ta.order_product_service_id;
@@ -1294,8 +1295,8 @@ router.put('/:id/complete', authenticate, async (req: AuthenticatedRequest, res:
             }).filter((s: any) => s.status === 'in_progress');
 
             if (assignedServices.length === 0) {
-                return res.status(403).json({ 
-                    message: 'Không có dịch vụ nào đang thực hiện để hoàn thành' 
+                return res.status(403).json({
+                    message: 'Không có dịch vụ nào đang thực hiện để hoàn thành'
                 });
             }
 
@@ -1338,21 +1339,15 @@ router.put('/:id/complete', authenticate, async (req: AuthenticatedRequest, res:
                 .select('id, status')
                 .eq('order_product_id', v2Product.id);
 
-            const allServicesCompleted = allProductServices?.every((s: any) => 
+            const allServicesCompleted = allProductServices?.every((s: any) =>
                 s.status === 'completed' || s.status === 'cancelled'
             );
 
-            // Update order status if all services completed (orders relation may be single object or array per Supabase typings)
+            // Update order status if all services completed
             const orderRefComplete = Array.isArray(v2Product.orders) ? (v2Product.orders as any)[0] : v2Product.orders;
             if (allServicesCompleted && orderRefComplete?.id) {
-                await supabaseAdmin
-                    .from('orders')
-                    .update({
-                        status: 'completed',
-                        updated_at: new Date().toISOString()
-                    })
-                    .eq('id', orderRefComplete.id)
-                    .eq('status', 'processing');
+                // Use consolidated helper to check payment and update to 'done' (triggers commissions)
+                await checkAndCompleteOrder(orderRefComplete.id);
             }
 
             return res.json({
@@ -1528,7 +1523,7 @@ router.put('/:id/complete', authenticate, async (req: AuthenticatedRequest, res:
                         user_id: order.created_by,
                         type: 'order_completed',
                         title: 'Tất cả dịch vụ đã hoàn thành',
-                        message: `Đơn hàng ${order.order_code} của ${customerName} đã hoàn thành. Vui lòng liên hệ khách hàng để thanh toán.`,
+                        message: `Đơn hàng ${order.order_code} của ${customerName} đã hoàn thành.Vui lòng liên hệ khách hàng để thanh toán.`,
                         data: { order_id: order.id, order_code: order.order_code },
                         is_read: false
                     });

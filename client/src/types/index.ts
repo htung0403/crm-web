@@ -37,7 +37,7 @@ export interface LeadHistoryItem {
     createdBy: User;
 }
 
-export type OrderStatus = 'pending' | 'confirmed' | 'processing' | 'tech_completed' | 'completed' | 'cancelled' | 'step1' | 'step2' | 'step3' | 'step4' | 'step5';
+export type OrderStatus = 'before_sale' | 'in_progress' | 'done' | 'after_sale' | 'cancelled';
 
 export interface Order {
     id: string;
@@ -78,6 +78,7 @@ export interface Service {
     unit: string;
     image?: string;
     commission_rate?: number;
+    applicable_product_types?: string[];
 }
 
 export interface PackageItem {

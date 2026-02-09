@@ -194,9 +194,9 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
 
             setStats({
                 totalOrders: ordersData.length,
-                pendingOrders: ordersData.filter((o: Order) => o.status === 'pending' || o.status === 'confirmed').length,
-                processingOrders: ordersData.filter((o: Order) => o.status === 'processing').length,
-                completedOrders: ordersData.filter((o: Order) => o.status === 'completed').length,
+                pendingOrders: ordersData.filter((o: Order) => o.status === 'before_sale').length,
+                processingOrders: ordersData.filter((o: Order) => o.status === 'in_progress').length,
+                completedOrders: ordersData.filter((o: Order) => o.status === 'after_sale').length,
                 totalLeads: leadsData.length,
                 newLeads: leadsData.filter((l: Lead) => l.status === 'new').length,
                 nurturingLeads: leadsData.filter((l: Lead) => l.status === 'nurturing').length,
@@ -225,10 +225,10 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
 
     const getStatusLabel = (status: string) => {
         const labels: Record<string, string> = {
-            pending: 'Mới',
-            confirmed: 'Xác nhận',
-            processing: 'Đang làm',
-            completed: 'Hoàn thành',
+            before_sale: 'Đơn nháp',
+            in_progress: 'Đang làm',
+            done: 'Đã hoàn thiện',
+            after_sale: 'After Sale',
             cancelled: 'Đã hủy'
         };
         return labels[status] || status;
@@ -236,10 +236,10 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
 
     const getStatusVariant = (status: string) => {
         const variants: Record<string, 'success' | 'danger' | 'warning' | 'secondary' | 'info' | 'purple'> = {
-            pending: 'info',
-            confirmed: 'purple',
-            processing: 'warning',
-            completed: 'success',
+            before_sale: 'info',
+            in_progress: 'warning',
+            done: 'purple',
+            after_sale: 'success',
             cancelled: 'danger'
         };
         return variants[status] || 'secondary';

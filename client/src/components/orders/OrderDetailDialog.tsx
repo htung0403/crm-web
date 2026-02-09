@@ -57,10 +57,10 @@ export function OrderDetailDialog({
                             <ShoppingBag className="h-5 w-5 text-primary" />
                             <span className="font-bold">{order.order_code}</span>
                             <Badge variant={
-                                order.status === 'completed' ? 'success' :
+                                order.status === 'after_sale' ? 'success' :
                                     order.status === 'cancelled' ? 'danger' :
-                                        order.status === 'processing' ? 'warning' :
-                                            order.status === 'confirmed' ? 'purple' : 'info'
+                                        order.status === 'in_progress' ? 'warning' :
+                                            order.status === 'done' ? 'purple' : 'info'
                             }>
                                 {columns.find(c => c.id === order.status)?.title}
                             </Badge>
@@ -200,7 +200,7 @@ export function OrderDetailDialog({
                     </div>
 
                     <div className="flex gap-2 pt-4 border-t">
-                        {order.status !== 'completed' && order.status !== 'cancelled' && (
+                        {order.status !== 'after_sale' && order.status !== 'cancelled' && (
                             <Button
                                 variant="outline"
                                 className="flex-1"
@@ -215,7 +215,7 @@ export function OrderDetailDialog({
                                 Sửa đơn
                             </Button>
                         )}
-                        {order.status === 'processing' && onPayment && (
+                        {order.status === 'in_progress' && onPayment && (
                             <Button
                                 className="flex-1 bg-green-600 hover:bg-green-700"
                                 onClick={() => {

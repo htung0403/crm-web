@@ -60,7 +60,7 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
 
     const roomDeadline = getRoomDeadlineDisplay(effectiveServices);
     const showRoomDeadline =
-        order.status !== 'completed' &&
+        order.status !== 'after_sale' &&
         order.status !== 'cancelled' &&
         roomDeadline.label !== 'N/A';
 

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireSale } from '../middleware/auth.js';
+import { checkAndCompleteOrder } from '../utils/orderHelper.js';
 
 const router = Router();
 
@@ -175,7 +176,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                                 status: product.status || 'pending',
                                 item_code: product.product_code,
                                 product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
-                                is_v2_product: true,
+                                is_customer_item: true,
                             });
                             if (product.services?.length) {
                                 for (const s of product.services as any[]) {
@@ -200,7 +201,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                                         service: svc ? { id: svc.id, image: svc.image, code: svc.code } : null,
                                         package: s.package,
                                         product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
-                                        is_v2_product: true,
+                                        is_customer_item: true,
                                         order_item_steps: s.order_item_steps || [],
                                     });
                                 }
@@ -309,7 +310,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                             status: product.status || 'pending',
                             item_code: product.product_code,
                             product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
-                            is_v2_product: true,
+                            is_customer_item: true,
                         });
                         if (product.services?.length) {
                             for (const s of product.services as any[]) {
@@ -334,7 +335,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                                     service: svc ? { id: svc.id, image: svc.image, code: svc.code } : null,
                                     package: s.package,
                                     product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
-                                    is_v2_product: true,
+                                    is_customer_item: true,
                                     order_item_steps: s.order_item_steps || [],
                                 });
                             }
@@ -370,14 +371,26 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         // Determine if id is a UUID or order_code
         const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 
-        // Fetch order with V1 items
+        // Fetch order with Sale Items (order_items table)
         let query = supabaseAdmin
             .from('orders')
             .select(`
         *,
         customer:customers(id, name, phone, email, address),
         sales_user:users!orders_sales_id_fkey(id, name),
-        items:order_items(*, product:products(*), service:services(*))
+        sale_items:order_items(
+            *,
+            product:products(*),
+            service:services(*),
+            technicians:order_item_technicians(
+                id,
+                technician_id,
+                commission,
+                assigned_by,
+                assigned_at,
+                technician:users!order_item_technicians_technician_id_fkey(id, name)
+            )
+        )
       `);
 
         // Query by id (UUID) or order_code
@@ -393,8 +406,12 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             throw new ApiError('Không tìm thấy đơn hàng', 404);
         }
 
-        // Fetch V2 items (order_products and their services) - use order.id (UUID)
-        const { data: v2Products, error: v2Error } = await supabaseAdmin
+        // Rename sale_items for clarity in internal logic
+        const saleItems = order.sale_items || [];
+        delete order.sale_items; // We'll re-attach at the end
+
+        // Fetch Customer Items (order_products and their services) - use order.id (UUID)
+        const { data: customerItemsData, error: customerError } = await supabaseAdmin
             .from('order_products')
             .select(`
                 *,
@@ -415,17 +432,24 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             `)
             .eq('order_id', order.id);
 
-        if (!v2Error && v2Products && v2Products.length > 0) {
-            const v2Items: any[] = [];
+        const customerItems: any[] = [];
+        const flatItems: any[] = [...saleItems];
 
-            // Map V2 structure to V1 items structure
-            for (const product of v2Products) {
-                // ADD THE PRODUCT ITSELF AS AN ITEM (for Sales Kanban & Workflow card)
-                v2Items.push({
+        if (!customerError && customerItemsData && customerItemsData.length > 0) {
+            for (const product of customerItemsData) {
+                // Map to CustomerItem structure (includes product details and its services)
+                const cItem = {
+                    ...product,
+                    is_customer_item: true
+                };
+                customerItems.push(cItem);
+
+                // Add to flat items list for backward compatibility
+                flatItems.push({
                     id: product.id,
                     order_id: order.id,
                     item_name: product.name,
-                    item_type: 'product', // Treat as product in UI
+                    item_type: 'product',
                     quantity: 1,
                     unit_price: 0,
                     total_price: 0,
@@ -434,7 +458,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                     product: {
                         image: product.images?.[0] || null
                     },
-                    is_v2_product: true, // Flag to distinguish
+                    is_customer_item: true,
                     product_type: product.type || null,
                     product_images: product.images || [],
                     product_brand: product.brand || null,
@@ -445,13 +469,10 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                     product_notes: product.notes || null
                 });
 
-                // If product has services, add them as items (for Workflow/Technician)
                 if (product.services && product.services.length > 0) {
                     for (const s of product.services) {
-                        // Get all technicians from junction table (or fallback to single technician)
                         let technicians = s.technicians || [];
                         if (technicians.length === 0 && s.technician_id) {
-                            // Fallback for old data with single technician
                             technicians = [{
                                 technician_id: s.technician_id,
                                 technician: s.technician,
@@ -459,10 +480,9 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                             }];
                         }
 
-                        v2Items.push({
+                        flatItems.push({
                             id: s.id,
-                            order_id: id,
-                            // Show: Service Name (Product Name)
+                            order_id: order.id,
                             item_name: `${s.item_name} (${product.name})`,
                             item_type: s.item_type,
                             quantity: 1,
@@ -471,29 +491,28 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                             status: s.status,
                             technician_id: s.technician_id,
                             technician: s.technician,
-                            technicians: technicians, // Multiple technicians
+                            technicians: technicians,
                             service: s.service,
                             package: s.package,
                             started_at: s.started_at,
                             completed_at: s.completed_at,
                             assigned_at: s.assigned_at,
-                            // Use product image if available, otherwise service image
+                            is_customer_item: true, // Mark as customer item for grouping in OrderDetailPage
                             product: {
+                                id: product.id,
                                 image: product.images?.[0] || null
                             }
                         });
                     }
                 }
             }
-
-            // Combine items
-            order.items = [...(order.items || []), ...v2Items];
-            console.log(`[Order ${order.order_code}] V2 items added: ${v2Items.length}, Total items: ${order.items.length}`);
-        } else {
-            console.log(`[Order ${order.order_code}] No V2 products found. v2Products:`, v2Products?.length || 0, 'Error:', v2Error);
         }
 
-        // Attach latest extension request for this order (Phase 1 - Xin gia hạn)
+        order.customer_items = customerItems;
+        order.sale_items = saleItems;
+        order.items = flatItems;
+
+        // Attach latest extension request
         const { data: extRequest } = await supabaseAdmin
             .from('order_extension_requests')
             .select('*')
@@ -503,7 +522,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             .maybeSingle();
         (order as any).extension_request = extRequest || null;
 
-        // For each order item, attach latest accessory and partner (V1 = order_items, V2 = order_product_services)
+        // Attach accessories and partners for each flat item
         if (order.items) {
             for (const item of order.items) {
                 const itemId = item.id;
@@ -621,280 +640,71 @@ router.get('/:id/kanban-logs', authenticate, async (req: AuthenticatedRequest, r
     }
 });
 
-// Create order
+// Create order (Unified endpoint: Customer Items + Sale Items)
 router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { customer_id, items, notes, discount } = req.body;
+        const {
+            customer_id,
+            customer_items, // New name
+            products, // Deprecated name (alias for customer_items)
+            sale_items, // New name
+            add_on_products, // Deprecated name (alias for sale_items)
+            notes,
+            discount,
+            discount_type,
+            discount_value,
+            surcharges,
+            paid_amount,
+            status,
+            due_at
+        } = req.body;
 
-        if (!customer_id || !items || items.length === 0) {
+        const finalCustomerItems = customer_items || products;
+        const finalSaleItems = sale_items || add_on_products;
+
+        if (!customer_id || (!finalCustomerItems && !finalSaleItems)) {
             throw new ApiError('Khách hàng và sản phẩm là bắt buộc', 400);
         }
 
-        // Tính tổng tiền
-        let subtotal = 0;
-        for (const item of items) {
-            subtotal += item.quantity * item.unit_price;
-        }
-        const discountAmount = discount || 0;
-        const totalAmount = subtotal - discountAmount;
-
-        // Tạo mã đơn hàng
-        const orderCode = `DH${Date.now().toString().slice(-8)}`;
-
-        // Tạo đơn hàng
-        const { data: order, error: orderError } = await supabaseAdmin
-            .from('orders')
-            .insert({
-                order_code: orderCode,
-                customer_id,
-                sales_id: req.user!.id,
-                subtotal,
-                discount: discountAmount,
-                total_amount: totalAmount,
-                status: 'pending',
-                notes,
-                created_by: req.user!.id,
-            })
-            .select()
-            .single();
-
-        if (orderError) {
-            throw new ApiError('Lỗi khi tạo đơn hàng: ' + orderError.message, 500);
-        }
-
-        // Generate unique item codes for QR scanning
-        const generateItemCode = () => `IT${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`;
-
-        // Tạo order items (including technician_id, item_code, and commission)
-        const orderItems = items.map((item: any) => {
-            const totalPrice = item.quantity * item.unit_price;
-            // Get commission rates from item (passed from frontend) or default to 0
-            const commissionSaleRate = item.commission_sale || 0;
-            const commissionTechRate = item.commission_tech || 0;
-            // Calculate commission amounts
-            const commissionSaleAmount = Math.floor(totalPrice * commissionSaleRate / 100);
-            const commissionTechAmount = Math.floor(totalPrice * commissionTechRate / 100);
-
-            // Determine status based on technician assignment
-            // Support both technician_id (single) and technicians (array) formats
-            const technicianId = item.technician_id ||
-                (item.technicians && item.technicians.length > 0 ? item.technicians[0].technician_id : null);
-            const hasTechnician = !!technicianId;
-
-            return {
-                order_id: order.id,
-                product_id: item.type === 'product' ? item.item_id : null,
-                service_id: item.type === 'service' ? item.item_id : null,
-                item_type: item.type,
-                item_name: item.name,
-                quantity: item.quantity,
-                unit_price: item.unit_price,
-                total_price: totalPrice,
-                technician_id: technicianId,
-                item_code: generateItemCode(),
-                commission_sale_rate: commissionSaleRate,
-                commission_tech_rate: commissionTechRate,
-                commission_sale_amount: commissionSaleAmount,
-                commission_tech_amount: commissionTechAmount,
-                // Set status based on technician assignment
-                status: hasTechnician ? 'assigned' : 'pending',
-                assigned_at: hasTechnician ? new Date().toISOString() : null,
-            };
-        });
-
-        const { data: insertedItems, error: itemsError } = await supabaseAdmin
-            .from('order_items')
-            .insert(orderItems)
-            .select();
-
-        if (itemsError) {
-            // Rollback - xóa order nếu tạo items thất bại
-            await supabaseAdmin.from('orders').delete().eq('id', order.id);
-            throw new ApiError('Lỗi khi tạo chi tiết đơn hàng', 500);
-        }
-
-        // =====================================================
-        // AUTO-GENERATE WORKFLOW STEPS FOR SERVICE ITEMS
-        // =====================================================
-        const serviceItems = insertedItems?.filter((item: any) => item.item_type === 'service') || [];
-
-        if (serviceItems.length > 0) {
-            // Get service IDs to look up their workflows
-            const serviceIds = [...new Set(serviceItems.map((item: any) => item.service_id))];
-
-            // Fetch services with their workflow steps
-            const { data: servicesWithWorkflows } = await supabaseAdmin
-                .from('services')
-                .select(`
-                    id,
-                    workflow_id,
-                    workflow:workflows(
-                        id,
-                        name,
-                        steps:workflow_steps(
-                            id,
-                            step_order,
-                            name,
-                            department_id,
-                            estimated_duration,
-                            is_required
-                        )
-                    )
-                `)
-                .in('id', serviceIds)
-                .not('workflow_id', 'is', null);
-
-            // Create order_item_steps for each service item that has a workflow
-            const orderItemSteps: any[] = [];
-
-            for (const serviceItem of serviceItems) {
-                const serviceWithWorkflow = servicesWithWorkflows?.find(
-                    (s: any) => s.id === serviceItem.service_id
-                ) as any;
-
-                // Supabase returns workflow as object (not array) for single FK relation
-                const workflow = serviceWithWorkflow?.workflow;
-                const workflowSteps = workflow?.steps;
-
-                if (workflowSteps && workflowSteps.length > 0) {
-                    const sortedSteps = [...workflowSteps].sort(
-                        (a: any, b: any) => a.step_order - b.step_order
-                    );
-
-                    for (const step of sortedSteps) {
-                        orderItemSteps.push({
-                            order_item_id: serviceItem.id,
-                            workflow_step_id: step.id,
-                            step_order: step.step_order,
-                            step_name: step.name || `Bước ${step.step_order}`,
-                            department_id: step.department_id,
-                            estimated_duration: step.estimated_duration,
-                            status: 'pending'
-                        });
+        // 1. Calculate Subtotals
+        let subtotalFromCustomerItems = 0;
+        if (finalCustomerItems && Array.isArray(finalCustomerItems)) {
+            for (const item of finalCustomerItems) {
+                if (item.services && Array.isArray(item.services)) {
+                    for (const service of item.services) {
+                        subtotalFromCustomerItems += Number(service.price) || 0;
                     }
                 }
             }
+        }
 
-            if (orderItemSteps.length > 0) {
-                const { error: stepsError } = await supabaseAdmin
-                    .from('order_item_steps')
-                    .insert(orderItemSteps);
-
-                if (stepsError) {
-                    console.error('Error creating order item steps:', stepsError);
-                    // Don't fail the order creation, just log the error
-                } else {
-                    console.log(`Created ${orderItemSteps.length} workflow steps for order items`);
-                }
+        let subtotalFromSaleItems = 0;
+        if (finalSaleItems && Array.isArray(finalSaleItems)) {
+            for (const item of finalSaleItems) {
+                const qty = Math.max(1, Number(item.quantity) || 1);
+                const price = Number(item.unit_price || item.price) || 0;
+                subtotalFromSaleItems += price * qty;
             }
         }
 
-        // =====================================================
-        // CREATE TECHNICIAN TASKS
-        // =====================================================
-        console.log('Inserted items:', JSON.stringify(insertedItems, null, 2));
+        const subtotal = subtotalFromCustomerItems + subtotalFromSaleItems;
+        const discountAmount = Number(discount) || 0;
 
-        const serviceItemsWithTechnician = insertedItems?.filter(
-            (item: any) => item.item_type === 'service' && item.technician_id
-        ) || [];
-
-        console.log('Service items with technician:', serviceItemsWithTechnician.length);
-
-        if (serviceItemsWithTechnician.length > 0) {
-            const technicianTasks = serviceItemsWithTechnician.map((item: any) => ({
-                task_code: `TK${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 1000)}`,
-                order_id: order.id,
-                order_item_id: item.id,
-                service_id: item.service_id,
-                customer_id: customer_id,
-                technician_id: item.technician_id,
-                service_name: item.item_name,
-                quantity: item.quantity,
-                status: 'assigned',
-                priority: 'normal',
-                assigned_by: req.user!.id,
-                assigned_at: new Date().toISOString(),
-                item_code: item.item_code, // QR code reference
-            }));
-
-            console.log('Creating technician tasks:', JSON.stringify(technicianTasks, null, 2));
-
-            const { error: taskError } = await supabaseAdmin
-                .from('technician_tasks')
-                .insert(technicianTasks);
-
-            if (taskError) {
-                console.error('Error creating technician tasks:', taskError);
-                // Don't fail the order creation, just log the error
-            } else {
-                console.log('Technician tasks created successfully');
-            }
-        }
-
-        res.status(201).json({
-            status: 'success',
-            data: { order },
-        });
-    } catch (error) {
-        next(error);
-    }
-});
-
-// =====================================================
-// NEW ORDER CREATION (V2) - Product-based for cleaning services
-// =====================================================
-// Create order with customer products (shoes, bags, etc.)
-router.post('/v2', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
-    try {
-        const { customer_id, products, add_on_products, notes, discount, discount_type, discount_value, surcharges, paid_amount, status, due_at } = req.body;
-
-        if (!customer_id || !products || products.length === 0) {
-            throw new ApiError('Khách hàng và sản phẩm là bắt buộc', 400);
-        }
-
-        // Tính tổng tiền từ tất cả services của tất cả products (sản phẩm khách + dịch vụ)
-        let subtotalFromProducts = 0;
-        for (const product of products) {
-            if (product.services && product.services.length > 0) {
-                for (const service of product.services) {
-                    subtotalFromProducts += service.price || 0;
-                }
-            }
-        }
-
-        // Tổng tiền từ sản phẩm bán kèm
-        let subtotalFromAddOns = 0;
-        if (add_on_products && Array.isArray(add_on_products) && add_on_products.length > 0) {
-            for (const addOn of add_on_products) {
-                const qty = Math.max(1, Number(addOn.quantity) || 1);
-                const price = Number(addOn.unit_price) || 0;
-                subtotalFromAddOns += price * qty;
-            }
-        }
-
-        const subtotal = subtotalFromProducts + subtotalFromAddOns;
-
-        // Calculate discount amount (already calculated in frontend, but verify)
-        const discountAmount = discount || 0;
-
-        // Calculate total surcharges amount
         let totalSurchargesAmount = 0;
-        if (surcharges && surcharges.length > 0) {
+        if (surcharges && Array.isArray(surcharges)) {
             for (const surcharge of surcharges) {
-                totalSurchargesAmount += surcharge.amount || 0;
+                totalSurchargesAmount += Number(surcharge.amount) || 0;
             }
         }
 
         const totalAmount = Math.max(0, subtotal - discountAmount + totalSurchargesAmount);
-
-        // Calculate remaining debt
-        const paidAmountValue = paid_amount || 0;
+        const paidAmountValue = Number(paid_amount) || 0;
         const remainingDebt = Math.max(0, totalAmount - paidAmountValue);
 
-        // Tạo mã đơn hàng theo format A-1, A-2, ...
+        // 2. Generate Order Code
         const orderCode = await generateNextOrderCode();
 
-        // Tạo đơn hàng
+        // 3. Create Order
         const { data: order, error: orderError } = await supabaseAdmin
             .from('orders')
             .insert({
@@ -911,7 +721,7 @@ router.post('/v2', authenticate, requireSale, async (req: AuthenticatedRequest, 
                 paid_amount: paidAmountValue,
                 remaining_debt: remainingDebt,
                 payment_status: remainingDebt <= 0 ? 'paid' : (paidAmountValue > 0 ? 'partial' : 'unpaid'),
-                status: status || 'pending',
+                status: status || 'in_progress',
                 notes,
                 due_at: due_at || null,
                 created_by: req.user!.id,
@@ -923,244 +733,175 @@ router.post('/v2', authenticate, requireSale, async (req: AuthenticatedRequest, 
             throw new ApiError('Lỗi khi tạo đơn hàng: ' + orderError.message, 500);
         }
 
-        // Tạo order_products và order_product_services
-        const createdProducts = [];
+        // 4. Create Customer Items (order_products) and their services
+        const createdCustomerItems = [];
+        if (finalCustomerItems && Array.isArray(finalCustomerItems)) {
+            for (let i = 0; i < finalCustomerItems.length; i++) {
+                const item = finalCustomerItems[i];
+                const productCode = generateProductCode(orderCode, i);
 
-        for (let productIndex = 0; productIndex < products.length; productIndex++) {
-            const product = products[productIndex];
-            // Generate product code in format A-1-1, A-1-2, ...
-            const productCode = generateProductCode(orderCode, productIndex);
+                const { data: orderProduct, error: productError } = await supabaseAdmin
+                    .from('order_products')
+                    .insert({
+                        order_id: order.id,
+                        product_code: productCode,
+                        name: item.name,
+                        type: item.type,
+                        brand: item.brand,
+                        color: item.color,
+                        size: item.size,
+                        material: item.material,
+                        condition_before: item.condition_before,
+                        images: item.images || [],
+                        notes: item.notes,
+                        status: 'pending'
+                    })
+                    .select()
+                    .single();
 
-            // Create order_product
-            const { data: orderProduct, error: productError } = await supabaseAdmin
-                .from('order_products')
-                .insert({
-                    order_id: order.id,
-                    product_code: productCode,
-                    name: product.name,
-                    type: product.type,
-                    brand: product.brand,
-                    color: product.color,
-                    size: product.size,
-                    material: product.material,
-                    condition_before: product.condition_before,
-                    images: product.images || [],
-                    notes: product.notes,
-                    status: 'pending'
-                })
-                .select()
-                .single();
+                if (productError) {
+                    console.error('Error creating customer item:', productError);
+                    continue;
+                }
 
-            if (productError) {
-                console.error('Error creating order product:', productError);
-                continue;
-            }
+                if (item.services && Array.isArray(item.services)) {
+                    const servicesPayload = item.services.map((svc: any) => {
+                        const hasTechs = svc.technicians && svc.technicians.length > 0;
+                        const techId = svc.technician_id || (hasTechs ? svc.technicians[0].technician_id : null);
 
-            // Create order_product_services
-            if (product.services && product.services.length > 0) {
-                const productServices = product.services.map((service: any) => {
-                    // Check if any technicians are assigned
-                    const hasTechnicians = service.technicians && service.technicians.length > 0;
-                    // Keep the first technician_id for backward compatibility
-                    const technicianId = service.technician_id ||
-                        (hasTechnicians ? service.technicians[0].technician_id : null);
+                        return {
+                            order_product_id: orderProduct.id,
+                            service_id: svc.type === 'service' ? (svc.id || svc.service_id) : null,
+                            package_id: svc.type === 'package' ? (svc.id || svc.package_id) : null,
+                            item_name: svc.name,
+                            item_type: svc.type,
+                            unit_price: Number(svc.price) || 0,
+                            technician_id: techId,
+                            status: hasTechs ? 'assigned' : 'pending',
+                            assigned_at: hasTechs ? new Date().toISOString() : null,
+                            _technicians: svc.technicians || [] // temp metadata
+                        };
+                    });
 
-                    return {
-                        order_product_id: orderProduct.id,
-                        service_id: service.type === 'service' ? service.id : null,
-                        package_id: service.type === 'package' ? service.id : null,
-                        item_name: service.name,
-                        item_type: service.type,
-                        unit_price: service.price || 0,
-                        technician_id: technicianId,
-                        status: hasTechnicians ? 'assigned' : 'pending',
-                        assigned_at: hasTechnicians ? new Date().toISOString() : null,
-                        // Store original technicians data for later insertion
-                        _technicians: service.technicians || []
-                    };
-                });
+                    const { data: createdSvcs, error: svcsError } = await supabaseAdmin
+                        .from('order_product_services')
+                        .insert(servicesPayload.map((s: any) => {
+                            const { _technicians, ...data } = s;
+                            return data;
+                        }))
+                        .select();
 
-                const { data: createdServices, error: servicesError } = await supabaseAdmin
-                    .from('order_product_services')
-                    .insert(productServices.map((s: any) => {
-                        // Remove _technicians before insert (not a DB column)
-                        const { _technicians, ...serviceData } = s;
-                        return serviceData;
-                    }))
-                    .select(); // Select to get IDs for steps generation
-
-                if (servicesError) {
-                    console.error('Error creating product services:', servicesError);
-                } else if (createdServices) {
-                    // Insert multiple technicians into junction table
-                    const technicianAssignments: any[] = [];
-
-                    for (let i = 0; i < createdServices.length; i++) {
-                        const createdService = createdServices[i];
-                        const originalService = productServices[i];
-                        const technicians = originalService._technicians || [];
-
-                        for (const tech of technicians) {
-                            technicianAssignments.push({
-                                order_product_service_id: createdService.id,
-                                technician_id: tech.technician_id,
-                                commission: tech.commission || 0,
-                                assigned_by: req.user!.id,
-                                assigned_at: new Date().toISOString(),
-                                status: 'assigned'
-                            });
+                    if (!svcsError && createdSvcs) {
+                        // Handle multiple technicians
+                        const techAssignments: any[] = [];
+                        for (let j = 0; j < createdSvcs.length; j++) {
+                            const createdSvc = createdSvcs[j];
+                            const originalSvc = servicesPayload[j];
+                            const techs = originalSvc._technicians || [];
+                            for (const t of techs) {
+                                techAssignments.push({
+                                    order_product_service_id: createdSvc.id,
+                                    technician_id: t.technician_id,
+                                    commission: t.commission || 0,
+                                    assigned_by: req.user!.id,
+                                    assigned_at: new Date().toISOString(),
+                                    status: 'assigned'
+                                });
+                            }
                         }
-                    }
 
-                    if (technicianAssignments.length > 0) {
-                        const { error: techError } = await supabaseAdmin
-                            .from('order_product_service_technicians')
-                            .insert(technicianAssignments);
-
-                        if (techError) {
-                            console.error('Error creating technician assignments:', techError);
-                        } else {
-                            console.log(`Created ${technicianAssignments.length} technician assignments`);
+                        if (techAssignments.length > 0) {
+                            await supabaseAdmin.from('order_product_service_technicians').insert(techAssignments);
                         }
-                    }
 
-                    // Generate Workflow Steps for services if applicable
-                    const itemStepsToInsert: any[] = [];
-
-                    for (const createdService of createdServices) {
-                        // Only generate steps for 'service' type, check if service has workflow
-                        if (createdService.item_type === 'service' && createdService.service_id) {
-                            // Fetch service details to get workflow_id
-                            const { data: serviceData } = await supabaseAdmin
-                                .from('services')
-                                .select('workflow_id')
-                                .eq('id', createdService.service_id)
-                                .single();
-
-                            if (serviceData?.workflow_id) {
-                                // Fetch workflow steps
-                                const { data: workflowSteps } = await supabaseAdmin
-                                    .from('workflow_steps')
-                                    .select('*')
-                                    .eq('workflow_id', serviceData.workflow_id)
-                                    .order('step_order', { ascending: true });
-
-                                if (workflowSteps && workflowSteps.length > 0) {
-                                    // Map workflow steps to order item steps
-                                    workflowSteps.forEach(step => {
-                                        itemStepsToInsert.push({
-                                            order_product_service_id: createdService.id, // V2 link
-                                            workflow_step_id: step.id,
-                                            step_order: step.step_order,
-                                            step_name: step.name || `Bước ${step.step_order}`,
-                                            department_id: step.department_id,
-                                            status: 'pending',
-                                            estimated_duration: step.estimated_duration
+                        // Generate Workflow Steps for services
+                        const itemSteps: any[] = [];
+                        for (const createdSvc of createdSvcs) {
+                            if (createdSvc.item_type === 'service' && createdSvc.service_id) {
+                                const { data: sData } = await supabaseAdmin.from('services').select('workflow_id').eq('id', createdSvc.service_id).single();
+                                if (sData?.workflow_id) {
+                                    const { data: wSteps } = await supabaseAdmin.from('workflow_steps').select('*').eq('workflow_id', sData.workflow_id).order('step_order', { ascending: true });
+                                    if (wSteps) {
+                                        wSteps.forEach(ws => {
+                                            itemSteps.push({
+                                                order_product_service_id: createdSvc.id,
+                                                workflow_step_id: ws.id,
+                                                step_order: ws.step_order,
+                                                step_name: ws.name || `Bước ${ws.step_order}`,
+                                                department_id: ws.department_id,
+                                                status: 'pending',
+                                                estimated_duration: ws.estimated_duration
+                                            });
                                         });
-                                    });
+                                    }
                                 }
                             }
                         }
-                    }
-
-                    if (itemStepsToInsert.length > 0) {
-                        const { error: stepsError } = await supabaseAdmin
-                            .from('order_item_steps')
-                            .insert(itemStepsToInsert);
-
-                        if (stepsError) {
-                            console.error('Error creating V2 workflow steps:', stepsError);
-                        } else {
-                            console.log(`Created ${itemStepsToInsert.length} workflow steps for V2 services`);
+                        if (itemSteps.length > 0) {
+                            await supabaseAdmin.from('order_item_steps').insert(itemSteps);
                         }
                     }
                 }
-            }
 
-            createdProducts.push({
-                ...orderProduct,
-                qr_code: productCode
-            });
+                createdCustomerItems.push({ ...orderProduct, qr_code: productCode });
+            }
         }
 
-        // Tạo order_items cho sản phẩm bán kèm (V1 order_items, item_type = 'product')
-        if (add_on_products && Array.isArray(add_on_products) && add_on_products.length > 0) {
-            const base = Date.now().toString().slice(-8);
-            const addOnOrderItems = add_on_products.map((addOn: any, idx: number) => {
-                const qty = Math.max(1, Number(addOn.quantity) || 1);
-                const unitPrice = Number(addOn.unit_price) || 0;
-                const totalPrice = unitPrice * qty;
-                const uniqueSuffix = `${idx.toString().padStart(2, '0')}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`;
+        // 5. Create Sale Items (order_items table)
+        if (finalSaleItems && Array.isArray(finalSaleItems) && finalSaleItems.length > 0) {
+            const baseTime = Date.now().toString().slice(-8);
+            const saleItemsPayload = finalSaleItems.map((itemValue: any, idxValue: number) => {
+                const qValue = Math.max(1, Number(itemValue.quantity) || 1);
+                const pValue = Number(itemValue.unit_price || itemValue.price) || 0;
+                const totalValue = pValue * qValue;
                 return {
                     order_id: order.id,
-                    product_id: addOn.product_id || null,
+                    product_id: itemValue.product_id || itemValue.id || null, // Handle both catalog id and product_id
                     item_type: 'product',
-                    item_name: addOn.name || 'Sản phẩm bán kèm',
-                    quantity: qty,
-                    unit_price: unitPrice,
-                    total_price: totalPrice,
-                    item_code: `IT${base}${uniqueSuffix}`,
+                    item_name: itemValue.name || 'Sản phẩm bán kèm',
+                    quantity: qValue,
+                    unit_price: pValue,
+                    total_price: totalValue,
+                    item_code: `IT${baseTime}${idxValue.toString().padStart(2, '0')}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`,
                     status: 'pending'
                 };
             });
-            const { error: addOnItemsError } = await supabaseAdmin
-                .from('order_items')
-                .insert(addOnOrderItems);
-            if (addOnItemsError) {
-                console.error('Error creating add-on order items:', addOnItemsError);
-            } else {
-                console.log(`Created ${addOnOrderItems.length} add-on order items for order ${orderCode}`);
-            }
+            await supabaseAdmin.from('order_items').insert(saleItemsPayload);
         }
 
-        // Create transaction record if paid_amount > 0
+        // 6. Create Transaction record for payment
         if (paidAmountValue > 0) {
-            // Generate transaction code
-            const { data: lastTrans } = await supabaseAdmin
-                .from('transactions')
-                .select('code')
-                .like('code', 'PT%')
-                .order('created_at', { ascending: false })
-                .limit(1);
-
-            let transCode = 'PT000001';
+            const { data: lastTrans } = await supabaseAdmin.from('transactions').select('code').like('code', 'PT%').order('created_at', { ascending: false }).limit(1);
+            let tCodeValue = 'PT000001';
             if (lastTrans && lastTrans.length > 0) {
-                const lastNum = parseInt(lastTrans[0].code.replace('PT', ''), 10);
-                transCode = `PT${String(lastNum + 1).padStart(6, '0')}`;
+                const lNum = parseInt(lastTrans[0].code.replace('PT', ''), 10);
+                tCodeValue = `PT${String(lNum + 1).padStart(6, '0')}`;
             }
 
-            const { error: transError } = await supabaseAdmin
-                .from('transactions')
-                .insert({
-                    code: transCode,
-                    type: 'income',
-                    category: 'Thanh toán đơn hàng',
-                    amount: paidAmountValue,
-                    payment_method: 'cash',
-                    notes: `Thanh toán trước khi tạo đơn - ${orderCode}`,
-                    date: new Date().toISOString().split('T')[0],
-                    order_id: order.id,
-                    order_code: orderCode,
-                    status: 'approved',
-                    created_by: req.user!.id,
-                    approved_by: req.user!.id,
-                    approved_at: new Date().toISOString(),
-                });
-
-            if (transError) {
-                console.error('Error creating transaction for order payment:', transError);
-            } else {
-                console.log(`Created transaction ${transCode} for order ${orderCode} with amount ${paidAmountValue}`);
-            }
+            await supabaseAdmin.from('transactions').insert({
+                code: tCodeValue,
+                type: 'income',
+                category: 'Thanh toán đơn hàng',
+                amount: paidAmountValue,
+                payment_method: 'cash',
+                notes: `Thanh toán tại chỗ khi tạo đơn - ${orderCode}`,
+                date: new Date().toISOString().split('T')[0],
+                order_id: order.id,
+                order_code: orderCode,
+                status: 'approved',
+                created_by: req.user!.id,
+                approved_by: req.user!.id,
+                approved_at: new Date().toISOString(),
+            });
         }
 
         res.status(201).json({
             status: 'success',
             data: {
                 order,
-                products: createdProducts
+                customer_items: createdCustomerItems
             },
-            message: `Đã tạo đơn hàng với ${createdProducts.length} sản phẩm`
+            message: `Đã tạo đơn hàng thành công với ${createdCustomerItems.length} sản phẩm khách gửi.`
         });
     } catch (error) {
         next(error);
@@ -1184,16 +925,16 @@ router.put('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, 
             throw new ApiError('Không tìm thấy đơn hàng', 404);
         }
 
-        if (existingOrder.status === 'completed' || existingOrder.status === 'cancelled') {
+        if (existingOrder.status === 'after_sale' || existingOrder.status === 'cancelled') {
             throw new ApiError('Không thể cập nhật đơn hàng đã hoàn thành hoặc đã huỷ', 400);
         }
 
         // Recalculate totals
         let subtotal = 0;
         for (const item of items) {
-            subtotal += item.quantity * item.unit_price;
+            subtotal += (Number(item.quantity) || 0) * (Number(item.unit_price) || 0);
         }
-        const discountAmount = discount || 0;
+        const discountAmount = Number(discount) || 0;
         const totalAmount = subtotal - discountAmount;
 
         // Update order
@@ -1214,45 +955,58 @@ router.put('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, 
             throw new ApiError('Lỗi khi cập nhật đơn hàng: ' + orderError.message, 500);
         }
 
-        // Delete old items and insert new ones
-        await supabaseAdmin.from('order_items').delete().eq('order_id', id);
+        // Separate items
+        // items from EditOrderDialog currently might be a mix.
+        // We only want to manage order_items (Sale Items/V1 style) here.
+        // Customer Items (order_products) are managed elsewhere (or preserved for now).
+        const saleItemsToInsert = items
+            .filter((item: any) => !item.is_customer_item)
+            .map((item: any) => {
+                const totalPrice = (Number(item.quantity) || 1) * (Number(item.unit_price) || 0);
+                const commissionSaleRate = Number(item.commission_sale) || 0;
+                const commissionTechRate = Number(item.commission_tech) || 0;
+                const commissionSaleAmount = Math.floor(totalPrice * commissionSaleRate / 100);
+                const commissionTechAmount = Math.floor(totalPrice * commissionTechRate / 100);
 
-        // Generate unique item codes for QR scanning
-        const generateItemCode = () => `IT${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`;
+                // Ensure item_id is a valid UUID for products/services if needed
+                // If it's a random string or invalid, we should be careful.
+                const product_id = item.type === 'product' ? item.item_id : null;
+                const service_id = (item.type === 'service' || item.type === 'package') ? item.item_id : null;
 
-        const orderItems = items.map((item: any) => {
-            const totalPrice = item.quantity * item.unit_price;
-            // Get commission rates from item (passed from frontend) or default to 0
-            const commissionSaleRate = item.commission_sale || 0;
-            const commissionTechRate = item.commission_tech || 0;
-            // Calculate commission amounts
-            const commissionSaleAmount = Math.floor(totalPrice * commissionSaleRate / 100);
-            const commissionTechAmount = Math.floor(totalPrice * commissionTechRate / 100);
+                return {
+                    order_id: id,
+                    product_id,
+                    service_id,
+                    item_type: item.type,
+                    item_name: item.name,
+                    quantity: Number(item.quantity) || 1,
+                    unit_price: Number(item.unit_price) || 0,
+                    total_price: totalPrice,
+                    technician_id: item.technician_id || null,
+                    item_code: item.item_code || `IT${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`,
+                    commission_sale_rate: commissionSaleRate,
+                    commission_tech_rate: commissionTechRate,
+                    commission_sale_amount: commissionSaleAmount,
+                    commission_tech_amount: commissionTechAmount,
+                };
+            });
 
-            return {
-                order_id: id,
-                product_id: item.type === 'product' ? item.item_id : null,
-                service_id: item.type === 'service' ? item.item_id : null,
-                item_type: item.type,
-                item_name: item.name,
-                quantity: item.quantity,
-                unit_price: item.unit_price,
-                total_price: totalPrice,
-                technician_id: item.technician_id || null,
-                item_code: item.item_code || generateItemCode(),
-                commission_sale_rate: commissionSaleRate,
-                commission_tech_rate: commissionTechRate,
-                commission_sale_amount: commissionSaleAmount,
-                commission_tech_amount: commissionTechAmount,
-            };
-        });
-
-        const { error: itemsError } = await supabaseAdmin
+        // Delete only old Sale Items (those in order_items table)
+        // Note: order_products are in a different table and won't be deleted by this.
+        await supabaseAdmin
             .from('order_items')
-            .insert(orderItems);
+            .delete()
+            .eq('order_id', id);
 
-        if (itemsError) {
-            throw new ApiError('Lỗi khi cập nhật chi tiết đơn hàng', 500);
+        if (saleItemsToInsert.length > 0) {
+            const { error: itemsError } = await supabaseAdmin
+                .from('order_items')
+                .insert(saleItemsToInsert);
+
+            if (itemsError) {
+                console.error('Error updating sale items:', itemsError);
+                throw new ApiError('Lỗi khi cập nhật danh sách sản phẩm bán kèm', 500);
+            }
         }
 
         // Fetch updated order with items
@@ -1266,7 +1020,6 @@ router.put('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, 
             `)
             .eq('id', id)
             .single();
-
         res.json({
             status: 'success',
             data: { order: updatedOrder },
@@ -1276,21 +1029,208 @@ router.put('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, 
     }
 });
 
-const AFTER_SALE_STAGES = ['after1', 'after2', 'after3', 'after4'];
+router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { customer_id, customer_items, sale_items, notes, discount, discount_type, discount_value, surcharges, paid_amount, due_at } = req.body;
+
+        // 1. Check if order exists
+        const { data: existingOrder } = await supabaseAdmin
+            .from('orders')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (!existingOrder) {
+            throw new ApiError('Không tìm thấy đơn hàng', 404);
+        }
+
+        // 2. Calculate totals
+        let subtotal = 0;
+        if (customer_items && Array.isArray(customer_items)) {
+            for (const item of customer_items) {
+                if (item.services && Array.isArray(item.services)) {
+                    for (const svc of item.services) {
+                        subtotal += Number(svc.price) || 0;
+                    }
+                }
+            }
+        }
+        if (sale_items && Array.isArray(sale_items)) {
+            for (const item of sale_items) {
+                subtotal += (Number(item.quantity) || 1) * (Number(item.unit_price) || 0);
+            }
+        }
+
+        const discountAmount = Number(discount) || 0;
+        const totalAmount = subtotal - discountAmount;
+
+        // 3. Update main order record
+        const { data: order, error: orderError } = await supabaseAdmin
+            .from('orders')
+            .update({
+                customer_id,
+                subtotal,
+                discount: discountAmount,
+                discount_type,
+                discount_value,
+                total_amount: totalAmount,
+                notes,
+                paid_amount: Number(paid_amount) || 0,
+                remaining_amount: totalAmount - (Number(paid_amount) || 0),
+                due_at: due_at || null,
+                surcharges: surcharges || [],
+                updated_at: new Date().toISOString(),
+            })
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (orderError) {
+            throw new ApiError('Lỗi khi cập nhật đơn hàng: ' + orderError.message, 500);
+        }
+
+        // 4. Clean up old highly-dependent data
+        // Order of deletion to respect FKs
+        const { data: oldProducts } = await supabaseAdmin.from('order_products').select('id').eq('order_id', id);
+        if (oldProducts && oldProducts.length > 0) {
+            const productIds = oldProducts.map(p => p.id);
+            const { data: oldSvcs } = await supabaseAdmin.from('order_product_services').select('id').in('order_product_id', productIds);
+            if (oldSvcs && oldSvcs.length > 0) {
+                const svcIds = oldSvcs.map(s => s.id);
+                await supabaseAdmin.from('order_product_service_technicians').delete().in('order_product_service_id', svcIds);
+                await supabaseAdmin.from('order_item_steps').delete().in('order_product_service_id', svcIds);
+                await supabaseAdmin.from('order_product_services').delete().in('id', svcIds);
+            }
+            await supabaseAdmin.from('order_products').delete().eq('order_id', id);
+        }
+        await supabaseAdmin.from('order_items').delete().eq('order_id', id);
+
+        // 5. Re-insert Customer Items (logic similar to POST /orders)
+        if (customer_items && Array.isArray(customer_items)) {
+            const orderCode = order.order_code;
+            for (let i = 0; i < customer_items.length; i++) {
+                const item = customer_items[i];
+                const productCode = `${orderCode}-${i + 1}`;
+
+                const { data: orderProduct, error: pError } = await supabaseAdmin
+                    .from('order_products')
+                    .insert({
+                        order_id: id,
+                        product_code: productCode,
+                        name: item.name,
+                        type: item.type,
+                        brand: item.brand,
+                        color: item.color,
+                        size: item.size,
+                        material: item.material,
+                        condition_before: item.condition_before,
+                        images: item.images || [],
+                        notes: item.notes,
+                        status: 'pending'
+                    })
+                    .select()
+                    .single();
+
+                if (pError || !orderProduct) continue;
+
+                if (item.services && Array.isArray(item.services)) {
+                    for (const svc of item.services) {
+                        const hasTechs = svc.technicians && svc.technicians.length > 0;
+                        const techId = hasTechs ? svc.technicians[0].technician_id : null;
+
+                        const { data: createdSvc, error: sError } = await supabaseAdmin
+                            .from('order_product_services')
+                            .insert({
+                                order_product_id: orderProduct.id,
+                                service_id: svc.type === 'service' ? svc.id : null,
+                                package_id: svc.type === 'package' ? svc.id : null,
+                                item_name: svc.name,
+                                item_type: svc.type,
+                                unit_price: Number(svc.price) || 0,
+                                technician_id: techId,
+                                status: hasTechs ? 'assigned' : 'pending',
+                                assigned_at: hasTechs ? new Date().toISOString() : null,
+                            })
+                            .select()
+                            .single();
+
+                        if (!sError && createdSvc) {
+                            // Technicians
+                            if (hasTechs) {
+                                const techPayload = svc.technicians.map((t: any) => ({
+                                    order_product_service_id: createdSvc.id,
+                                    technician_id: t.technician_id,
+                                    commission: t.commission || 0,
+                                    assigned_by: req.user!.id,
+                                    assigned_at: new Date().toISOString(),
+                                    status: 'assigned'
+                                }));
+                                await supabaseAdmin.from('order_product_service_technicians').insert(techPayload);
+                            }
+
+                            // Workflow steps
+                            if (svc.type === 'service' && svc.id) {
+                                const { data: sData } = await supabaseAdmin.from('services').select('workflow_id').eq('id', svc.id).single();
+                                if (sData?.workflow_id) {
+                                    const { data: wSteps } = await supabaseAdmin.from('workflow_steps').select('*').eq('workflow_id', sData.workflow_id).order('step_order', { ascending: true });
+                                    if (wSteps) {
+                                        const itemSteps = wSteps.map(ws => ({
+                                            order_product_service_id: createdSvc.id,
+                                            workflow_step_id: ws.id,
+                                            step_order: ws.step_order,
+                                            step_name: ws.name || `Bước ${ws.step_order}`,
+                                            department_id: ws.department_id,
+                                            status: 'pending',
+                                            estimated_duration: ws.estimated_duration
+                                        }));
+                                        await supabaseAdmin.from('order_item_steps').insert(itemSteps);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 6. Re-insert Sale Items
+        if (sale_items && Array.isArray(sale_items) && sale_items.length > 0) {
+            const saleItemsPayload = sale_items.map(a => ({
+                order_id: id,
+                product_id: a.product_id,
+                item_type: 'product',
+                item_name: a.name,
+                quantity: Number(a.quantity) || 1,
+                unit_price: Number(a.unit_price) || 0,
+                total_price: (Number(a.quantity) || 1) * (Number(a.unit_price) || 0),
+                item_code: `IT${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`,
+            }));
+            await supabaseAdmin.from('order_items').insert(saleItemsPayload);
+        }
+
+        res.json({
+            status: 'success',
+            data: { order },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 const CARE_WARRANTY_FLOWS = ['warranty', 'care'];
 const CARE_WARRANTY_STAGES = ['war1', 'war2', 'war3', 'care6', 'care12', 'care-custom'];
 
-// Update order (partial: due_at, after_sale_stage, after-sale data, care_warranty)
+// Update order (partial: due_at, after-sale data, care_warranty)
 router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
         const userId = req.user?.id;
-        let oldAfterSaleStage: string | null | undefined;
         let oldCareFlow: string | null | undefined;
         let oldCareStage: string | null | undefined;
+        let oldAfterSaleStage: string | null | undefined;
         const {
             due_at,
-            after_sale_stage,
             completion_photos,
             debt_checked,
             debt_checked_notes,
@@ -1303,29 +1243,26 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
             feedback_requested,
             care_warranty_flow,
             care_warranty_stage,
+            after_sale_stage,
         } = req.body;
 
-        if (after_sale_stage !== undefined || care_warranty_flow !== undefined || care_warranty_stage !== undefined) {
+        if (care_warranty_flow !== undefined || care_warranty_stage !== undefined || after_sale_stage !== undefined) {
             const { data: current } = await supabaseAdmin
                 .from('orders')
-                .select('after_sale_stage, care_warranty_flow, care_warranty_stage')
+                .select('care_warranty_flow, care_warranty_stage, after_sale_stage')
                 .eq('id', id)
                 .single();
-            if (after_sale_stage !== undefined) oldAfterSaleStage = (current as any)?.after_sale_stage ?? null;
             if (care_warranty_flow !== undefined || care_warranty_stage !== undefined) {
                 oldCareFlow = (current as any)?.care_warranty_flow ?? null;
                 oldCareStage = (current as any)?.care_warranty_stage ?? null;
+            }
+            if (after_sale_stage !== undefined) {
+                oldAfterSaleStage = (current as any)?.after_sale_stage ?? null;
             }
         }
 
         const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() };
         if (due_at !== undefined) updatePayload.due_at = due_at || null;
-        if (after_sale_stage !== undefined) {
-            if (after_sale_stage !== null && !AFTER_SALE_STAGES.includes(after_sale_stage)) {
-                throw new ApiError('after_sale_stage không hợp lệ. Chọn: after1, after2, after3, after4', 400);
-            }
-            updatePayload.after_sale_stage = after_sale_stage || null;
-        }
         if (completion_photos !== undefined) updatePayload.completion_photos = Array.isArray(completion_photos) ? completion_photos : [];
         if (debt_checked !== undefined) {
             updatePayload.debt_checked = !!debt_checked;
@@ -1360,6 +1297,9 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
                 updatePayload.care_warranty_started_at = new Date().toISOString();
             }
         }
+        if (after_sale_stage !== undefined) {
+            updatePayload.after_sale_stage = after_sale_stage || null;
+        }
 
         const { data: order, error } = await supabaseAdmin
             .from('orders')
@@ -1370,19 +1310,6 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
 
         if (error) {
             throw new ApiError('Lỗi khi cập nhật đơn hàng', 500);
-        }
-
-        if (after_sale_stage !== undefined && oldAfterSaleStage !== after_sale_stage) {
-            try {
-                await supabaseAdmin.from('order_after_sale_stage_log').insert({
-                    order_id: id,
-                    from_stage: oldAfterSaleStage ?? null,
-                    to_stage: after_sale_stage ?? null,
-                    created_by: userId ?? null
-                });
-            } catch (logErr) {
-                console.error('order_after_sale_stage_log insert error:', logErr);
-            }
         }
 
         const newCareFlow = care_warranty_flow !== undefined ? (care_warranty_flow || null) : oldCareFlow ?? null;
@@ -1404,6 +1331,20 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
             }
         }
 
+        if (after_sale_stage !== undefined && oldAfterSaleStage !== after_sale_stage) {
+            try {
+                // Determine previous stage from log if needed, or just use oldAfterSaleStage
+                await supabaseAdmin.from('order_after_sale_stage_log').insert({
+                    order_id: id,
+                    from_stage: oldAfterSaleStage ?? null,
+                    to_stage: after_sale_stage,
+                    created_by: userId ?? null
+                });
+            } catch (logErr) {
+                console.error('order_after_sale_stage_log insert error:', logErr);
+            }
+        }
+
         res.json({
             status: 'success',
             data: { order },
@@ -1419,14 +1360,14 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
         const { id } = req.params;
         const { status } = req.body;
 
-        const validStatuses = ['pending', 'confirmed', 'processing', 'tech_completed', 'completed', 'cancelled'];
+        const validStatuses = ['before_sale', 'in_progress', 'done', 'after_sale', 'cancelled'];
         if (!validStatuses.includes(status)) {
             throw new ApiError('Trạng thái không hợp lệ', 400);
         }
 
-        // When confirming: set confirmed_at only on first confirmation (do not overwrite)
+        // When moving to in_progress: set confirmed_at only on first time (do not overwrite)
         let confirmedAtPayload: { confirmed_at?: string } = {};
-        if (status === 'confirmed') {
+        if (status === 'in_progress') {
             const { data: existing } = await supabaseAdmin
                 .from('orders')
                 .select('confirmed_at')
@@ -1442,7 +1383,7 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
             .update({
                 status,
                 updated_at: new Date().toISOString(),
-                ...(status === 'completed' && { completed_at: new Date().toISOString() }),
+                ...(status === 'after_sale' && { completed_at: new Date().toISOString() }),
                 ...confirmedAtPayload,
             })
             .eq('id', id)
@@ -1555,6 +1496,9 @@ router.post('/:id/payments', authenticate, async (req: AuthenticatedRequest, res
             console.error('Error updating order payment:', updateError);
             // Don't fail, payment was recorded
         }
+
+        // Check for auto-completion (Paid + All Services Done)
+        await checkAndCompleteOrder(id);
 
         // Also create a transaction record for Thu Chi
         const { data: lastTrans } = await supabaseAdmin
@@ -1726,8 +1670,8 @@ router.delete('/:id', authenticate, requireSale, async (req: AuthenticatedReques
             .eq('id', id)
             .single();
 
-        if (order?.status !== 'pending') {
-            throw new ApiError('Chỉ có thể xóa đơn hàng đang chờ xử lý', 400);
+        if (order?.status !== 'before_sale') {
+            throw new ApiError('Chỉ có thể xóa đơn hàng ở trạng thái Before Sale', 400);
         }
 
         // Xóa order items trước

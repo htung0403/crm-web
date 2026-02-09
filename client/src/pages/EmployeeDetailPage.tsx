@@ -77,10 +77,10 @@ const statusLabels = {
 };
 
 const orderStatusLabels: Record<string, { label: string; variant: 'default' | 'secondary' | 'success' | 'destructive' | 'warning' | 'outline' }> = {
-    pending: { label: 'Chờ xử lý', variant: 'secondary' },
-    confirmed: { label: 'Đã xác nhận', variant: 'default' },
-    processing: { label: 'Đang thực hiện', variant: 'warning' },
-    completed: { label: 'Hoàn thành', variant: 'success' },
+    before_sale: { label: 'Đơn nháp', variant: 'secondary' },
+    in_progress: { label: 'Đang thực hiện', variant: 'warning' },
+    done: { label: 'Đã hoàn thiện', variant: 'default' },
+    after_sale: { label: 'After Sale', variant: 'success' },
     cancelled: { label: 'Đã hủy', variant: 'destructive' },
 };
 
@@ -214,8 +214,8 @@ export function EmployeeDetailPage() {
 
             setOrders(ordersData);
 
-            const completed = ordersData.filter(o => o.status === 'completed' || o.status === 'delivered');
-            const pending = ordersData.filter(o => o.status === 'pending' || o.status === 'confirmed' || o.status === 'processing');
+            const completed = ordersData.filter(o => o.status === 'after_sale' || o.status === 'done');
+            const pending = ordersData.filter(o => o.status === 'before_sale' || o.status === 'in_progress');
             const totalRevenue = completed.reduce((sum, o) => sum + (o.total_amount || 0), 0);
             const commissionRate = employee.commission || 5;
 

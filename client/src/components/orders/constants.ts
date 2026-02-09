@@ -34,11 +34,10 @@ export function getTechRoomByDepartmentName(departmentName: string | undefined |
 }
 
 export const columns: KanbanColumn[] = [
-    { id: 'pending', title: 'Đơn nháp', color: 'text-blue-600', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
-    { id: 'confirmed', title: 'Đã xác nhận', color: 'text-purple-600', bgColor: 'bg-purple-50', borderColor: 'border-purple-200' },
-    { id: 'processing', title: 'Đang thực hiện', color: 'text-amber-600', bgColor: 'bg-amber-50', borderColor: 'border-amber-200' },
-    { id: 'tech_completed', title: 'Đã hoàn thiện kỹ thuật', color: 'text-cyan-600', bgColor: 'bg-cyan-50', borderColor: 'border-cyan-200' },
-    { id: 'completed', title: 'Hoàn thành', color: 'text-emerald-600', bgColor: 'bg-emerald-50', borderColor: 'border-emerald-200' },
+    { id: 'before_sale', title: 'Before Sale', color: 'text-blue-600', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
+    { id: 'in_progress', title: 'Đang thực hiện', color: 'text-amber-600', bgColor: 'bg-amber-50', borderColor: 'border-amber-200' },
+    { id: 'done', title: 'Đã hoàn thiện', color: 'text-cyan-600', bgColor: 'bg-cyan-50', borderColor: 'border-cyan-200' },
+    { id: 'after_sale', title: 'After sale', color: 'text-emerald-600', bgColor: 'bg-emerald-50', borderColor: 'border-emerald-200' },
     { id: 'cancelled', title: 'Đã huỷ', color: 'text-red-600', bgColor: 'bg-red-50', borderColor: 'border-red-200' }
 ];
 
@@ -140,6 +139,8 @@ export interface OrderItem {
     type: 'product' | 'service' | 'package';
     item_id: string;
     item_code?: string; // Temporary unique code for QR generation
+    is_customer_item?: boolean;
+    original_id?: string;
     name: string;
     quantity: number;
     unit_price: number;
@@ -172,6 +173,8 @@ export interface UpdateOrderData {
         quantity: number;
         unit_price: number;
         technicians?: TechnicianAssignment[];
+        is_customer_item?: boolean;
+        original_id?: string;
     }>;
     notes?: string;
     discount?: number;

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Package, Wrench, Gift, CreditCard } from 'lucide-react';
+import { Plus, Search, Package, Wrench, Gift, CreditCard, Tags } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,6 +11,7 @@ import { useProducts } from '@/hooks/useProducts';
 import { usePackages } from '@/hooks/usePackages';
 import { useVouchers } from '@/hooks/useVouchers';
 import { useDepartments } from '@/hooks/useDepartments';
+import { useProductTypes, type ProductType } from '@/hooks/useProductTypes';
 import { toast } from 'sonner';
 
 import {
@@ -18,10 +19,12 @@ import {
     ServiceFormDialog,
     PackageFormDialog,
     VoucherFormDialog,
+    ProductTypeFormDialog,
     ProductsTable,
     ServicesTable,
     PackagesTable,
     VouchersTable,
+    ProductTypesTable,
     type Product,
     type Service,
     type ServicePackage,
@@ -32,7 +35,7 @@ import api from '@/lib/api';
 
 // Main Page Component
 interface ProductsPageProps {
-    initialTab?: 'products' | 'services' | 'packages' | 'vouchers';
+    initialTab?: 'products' | 'services' | 'packages' | 'vouchers' | 'product-types';
     onTabChange?: (tab: string) => void;
 }
 
@@ -71,6 +74,14 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
         deleteVoucher,
     } = useVouchers();
 
+    const {
+        productTypes,
+        fetchProductTypes,
+        createProductType,
+        updateProductType,
+        deleteProductType,
+    } = useProductTypes();
+
     const { departments, fetchDepartments } = useDepartments();
 
     // Fetch data on mount
@@ -79,6 +90,7 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
         fetchServices();
         fetchPackages();
         fetchVouchers();
+        fetchProductTypes();
         fetchDepartments();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
@@ -90,16 +102,17 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
 
     // Handle tab change and notify parent
     const handleTabChange = (tab: string) => {
-        const typedTab = tab as 'products' | 'services' | 'packages' | 'vouchers';
+        const typedTab = tab as 'products' | 'services' | 'packages' | 'vouchers' | 'product-types';
         setActiveTab(typedTab);
         const tabToPageMap: Record<string, string> = {
             'products': 'product-list',
             'services': 'services',
             'packages': 'packages',
-            'vouchers': 'vouchers'
+            'vouchers': 'vouchers',
+            'product-types': 'product-types'
         };
         if (onTabChange) {
-            onTabChange(tabToPageMap[tab]);
+            onTabChange(tabToPageMap[tab] || tab);
         }
     };
 
@@ -108,7 +121,8 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
     const [showServiceForm, setShowServiceForm] = useState(false);
     const [showPackageForm, setShowPackageForm] = useState(false);
     const [showVoucherForm, setShowVoucherForm] = useState(false);
-    const [editingItem, setEditingItem] = useState<Product | Service | ServicePackage | APIVoucher | null>(null);
+    const [showProductTypeForm, setShowProductTypeForm] = useState(false);
+    const [editingItem, setEditingItem] = useState<Product | Service | ServicePackage | APIVoucher | ProductType | null>(null);
 
     // Filtered data
     const filteredProducts = products.filter(p =>
@@ -129,6 +143,11 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
     const filteredVouchers = vouchers.filter(v =>
         v.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         v.code.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+
+    const filteredProductTypes = productTypes.filter(t =>
+        t.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        t.code.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
     // Product handlers
@@ -277,13 +296,29 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
         }
     };
 
+    // Product Type handlers
+    const handleCreateProductType = async (data: any) => {
+        await createProductType(data);
+    };
+
+    const handleUpdateProductType = async (data: any) => {
+        if (!editingItem?.id) return;
+        await updateProductType(editingItem.id, data);
+    };
+
+    const handleDeleteProductType = async (id: string) => {
+        if (!confirm('Bạn có chắc muốn xóa loại sản phẩm này?')) return;
+        await deleteProductType(id);
+    };
+
     // Helper to open add dialog based on active tab
     const handleAddClick = () => {
         setEditingItem(null);
         if (activeTab === 'products') setShowProductForm(true);
         else if (activeTab === 'services') navigate('/services/new');
         else if (activeTab === 'packages') setShowPackageForm(true);
-        else setShowVoucherForm(true);
+        else if (activeTab === 'vouchers') setShowVoucherForm(true);
+        else if (activeTab === 'product-types') setShowProductTypeForm(true);
     };
 
     return (
@@ -321,6 +356,11 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
                                     <CreditCard className="h-4 w-4" />
                                     Thẻ/Voucher
                                     <Badge variant="secondary">{vouchers.length}</Badge>
+                                </TabsTrigger>
+                                <TabsTrigger value="product-types" className="gap-2">
+                                    <Tags className="h-4 w-4" />
+                                    Loại sản phẩm
+                                    <Badge variant="secondary">{productTypes.length}</Badge>
                                 </TabsTrigger>
                             </TabsList>
 
@@ -380,6 +420,16 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
                                 onDelete={handleDeleteVoucher}
                             />
                         </TabsContent>
+
+                        {/* Product Types Tab */}
+                        <TabsContent value="product-types" className="m-0">
+                            <ProductTypesTable
+                                productTypes={filteredProductTypes}
+                                loading={loading}
+                                onEdit={(type) => { setEditingItem(type); setShowProductTypeForm(true); }}
+                                onDelete={handleDeleteProductType}
+                            />
+                        </TabsContent>
                     </Tabs>
                 </CardContent>
             </Card>
@@ -410,6 +460,12 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
                 onClose={() => { setShowVoucherForm(false); setEditingItem(null); }}
                 voucher={editingItem as APIVoucher}
                 onSubmit={editingItem ? handleUpdateVoucher : handleCreateVoucher}
+            />
+            <ProductTypeFormDialog
+                open={showProductTypeForm}
+                onClose={() => { setShowProductTypeForm(false); setEditingItem(null); }}
+                productType={editingItem as ProductType}
+                onSubmit={editingItem ? handleUpdateProductType : handleCreateProductType}
             />
         </div>
     );

@@ -134,32 +134,28 @@ export const ordersApi = {
     getById: (id: string) =>
         api.get<ApiResponse<{ order: any }>>(`/orders/${id}`),
 
-    create: (data: any) =>
-        api.post<ApiResponse<{ order: any }>>('/orders', data),
-
-    // V2: Create order with customer products (shoes, bags, etc.) + optional add-on products
-    createV2: (data: {
+    create: (data: {
         customer_id: string;
-        products: any[];
-        add_on_products?: Array<{ product_id: string; name: string; unit_price: number; quantity: number }>;
+        customer_items?: any[];
+        sale_items?: any[];
         notes?: string;
         discount?: number;
         discount_type?: 'amount' | 'percent';
         discount_value?: number;
-        surcharges?: Array<{
-            type: string;
-            label: string;
-            value: number;
-            is_percent: boolean;
-            amount: number;
-        }>;
+        surcharges?: any[];
         paid_amount?: number;
-        status?: 'pending' | 'confirmed';
+        status?: string;
         due_at?: string;
-    }) => api.post<ApiResponse<{ order: any; products: any[] }>>('/orders/v2', data),
+    }) => api.post<ApiResponse<{ order: any }>>('/orders', data),
+
+    /** @deprecated Use create() with customer_items and sale_items */
+    createV2: (data: any) => api.post<ApiResponse<{ order: any; products: any[] }>>('/orders', data),
 
     update: (id: string, data: any) =>
         api.put<ApiResponse<{ order: any }>>(`/orders/${id}`, data),
+
+    updateFull: (id: string, data: any) =>
+        api.put<ApiResponse<{ order: any }>>(`/orders/${id}/full`, data),
 
     patch: (id: string, data: {
         due_at?: string | null;
@@ -286,8 +282,10 @@ export const orderItemsApi = {
     getById: (id: string) =>
         api.get<ApiResponse<any>>(`/order-items/${id}`),
 
-    assignTechnician: (id: string, technician_id: string) =>
-        api.patch<ApiResponse<any>>(`/order-items/${id}/assign`, { technician_id }),
+    assignTechnician: (id: string, data: string | { technician_id: string; commission: number }[]) => {
+        const payload = Array.isArray(data) ? { assignments: data } : { technician_id: data };
+        return api.patch<ApiResponse<any>>(`/order-items/${id}/assign`, payload);
+    },
 
     start: (id: string) =>
         api.patch<ApiResponse<any>>(`/order-items/${id}/start`),
@@ -319,6 +317,13 @@ export const orderItemsApi = {
 
     updatePartner: (orderItemId: string, data: { status: string; notes?: string }) =>
         api.patch<ApiResponse<any>>(`/order-items/${orderItemId}/partner`, data),
+
+    // New Kanban Actions
+    fail: (id: string, reason: string) =>
+        api.patch<ApiResponse<any>>(`/order-items/${id}/fail`, { reason }),
+
+    changeRoom: (id: string, data: { targetRoomId: string; reason: string; deadline_days: number }) =>
+        api.patch<ApiResponse<any>>(`/order-items/${id}/change-room`, data),
 };
 
 // Requests API (admin/manager - Mua phụ kiện, Gửi Đối Tác, Xin gia hạn)
@@ -570,6 +575,21 @@ export const transactionsApi = {
 
     delete: (id: string) =>
         api.delete<ApiResponse<null>>(`/transactions/${id}`),
+};
+
+// Product Types API
+export const productTypesApi = {
+    getAll: () =>
+        api.get<ApiResponse<any[]>>('/product-types'),
+
+    create: (data: any) =>
+        api.post<ApiResponse<any>>('/product-types', data),
+
+    update: (id: string, data: any) =>
+        api.put<ApiResponse<any>>(`/product-types/${id}`, data),
+
+    delete: (id: string) =>
+        api.delete<ApiResponse<null>>(`/product-types/${id}`),
 };
 
 export default api;

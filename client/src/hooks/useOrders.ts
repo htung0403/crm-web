@@ -24,12 +24,12 @@ export interface OrderItem {
     status?: string;
     technician_id?: string;
     technician?: { id: string; name: string; avatar?: string };
-    /** V2: multiple technicians from order_product_service_technicians */
-    technicians?: Array<{ technician_id?: string; technician?: { id: string; name: string; avatar?: string } }>;
+    /** Multiple technicians from order_product_service_technicians */
+    technicians?: Array<{ technician_id?: string; commission?: number; technician?: { id: string; name: string; avatar?: string } }>;
     started_at?: string;
     completed_at?: string;
-    /** V2 flag: product item from order_products */
-    is_v2_product?: boolean;
+    /** Flag: Customer Item (Sản phẩm khách gửi) from order_products table */
+    is_customer_item?: boolean;
     // Nested objects from API join
     product?: { id: string; name?: string; image?: string; code?: string; price?: number };
     service?: { id: string; name?: string; image?: string; code?: string; price?: number };
@@ -82,6 +82,8 @@ export interface Order {
     care_warranty_flow?: string | null;
     care_warranty_stage?: string | null;
     notes?: string;
+    customer_items?: any[];
+    sale_items?: OrderItem[];
     items?: OrderItem[];
     completed_at?: string;
     created_at: string;
@@ -158,9 +160,16 @@ export function useOrders() {
 
     const createOrder = useCallback(async (data: {
         customer_id: string;
-        items: Array<{ type: string; item_id: string; name: string; quantity: number; unit_price: number }>;
+        customer_items?: any[];
+        sale_items?: any[];
         notes?: string;
         discount?: number;
+        discount_type?: 'amount' | 'percent';
+        discount_value?: number;
+        surcharges?: any[];
+        paid_amount?: number;
+        status?: string;
+        due_at?: string;
     }): Promise<Order> => {
         setLoading(true);
         try {
