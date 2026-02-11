@@ -1,7 +1,7 @@
 import { Draggable } from '@hello-pangea/dnd';
 import { Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { formatTimeAgo } from '@/lib/utils';
 import type { Lead } from '@/hooks/useLeads';
 import { sourceLabels } from './constants';
@@ -32,6 +32,7 @@ export function LeadCard({ lead, index, onClick }: LeadCardProps) {
                     <div className="flex items-start justify-between gap-2 mb-2">
                         <div className="flex items-center gap-2 min-w-0">
                             <Avatar className="h-8 w-8 shrink-0">
+                                {lead.fb_profile_pic && <AvatarImage src={lead.fb_profile_pic} alt={lead.name} />}
                                 <AvatarFallback className="text-xs bg-primary/10 text-primary font-medium">
                                     {lead.name.charAt(0)}
                                 </AvatarFallback>

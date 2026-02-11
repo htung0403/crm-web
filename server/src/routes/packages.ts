@@ -17,7 +17,15 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                 package_items (
                     id,
                     quantity,
+                    service_id,
+                    product_id,
                     services (
+                        id,
+                        code,
+                        name,
+                        price
+                    ),
+                    products (
                         id,
                         code,
                         name,
@@ -57,7 +65,15 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                 package_items (
                     id,
                     quantity,
+                    service_id,
+                    product_id,
                     services (
+                        id,
+                        code,
+                        name,
+                        price
+                    ),
+                    products (
                         id,
                         code,
                         name,
@@ -132,7 +148,8 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
         if (items && Array.isArray(items) && items.length > 0) {
             const packageItems = items.map((item: any) => ({
                 package_id: pkg.id,
-                service_id: item.service_id,
+                service_id: item.service_id || null,
+                product_id: item.product_id || null,
                 quantity: item.quantity || 1,
             }));
 
@@ -155,7 +172,15 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
                 package_items (
                     id,
                     quantity,
+                    service_id,
+                    product_id,
                     services (
+                        id,
+                        code,
+                        name,
+                        price
+                    ),
+                    products (
                         id,
                         code,
                         name,
@@ -210,7 +235,8 @@ router.put('/:id', authenticate, requireManager, async (req: AuthenticatedReques
             if (items.length > 0) {
                 const packageItems = items.map((item: any) => ({
                     package_id: id,
-                    service_id: item.service_id,
+                    service_id: item.service_id || null,
+                    product_id: item.product_id || null,
                     quantity: item.quantity || 1,
                 }));
 
@@ -226,7 +252,15 @@ router.put('/:id', authenticate, requireManager, async (req: AuthenticatedReques
                 package_items (
                     id,
                     quantity,
+                    service_id,
+                    product_id,
                     services (
+                        id,
+                        code,
+                        name,
+                        price
+                    ),
+                    products (
                         id,
                         code,
                         name,

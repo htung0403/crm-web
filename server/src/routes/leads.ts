@@ -78,7 +78,11 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 // Create lead
 router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { name, phone, email, source, company, address, notes, assigned_to, dob } = req.body;
+        const {
+            name, phone, email, source, company, address, notes, assigned_to,
+            dob, fb_thread_id, fb_profile_pic, fb_link, link_message,
+            appointment_time, lead_type
+        } = req.body;
 
         if (!name || !phone) {
             throw new ApiError('Tên và số điện thoại là bắt buộc', 400);
@@ -98,6 +102,12 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                 assigned_to: assigned_to || req.user!.id,
                 created_by: req.user!.id,
                 dob: dob || null,
+                fb_thread_id,
+                fb_profile_pic,
+                fb_link,
+                link_message,
+                appointment_time: appointment_time || null,
+                lead_type: lead_type || 'individual',
             })
             .select()
             .single();

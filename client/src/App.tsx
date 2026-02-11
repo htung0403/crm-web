@@ -31,6 +31,8 @@ import { CreateServicePage } from '@/pages/CreateServicePage';
 import { ProductQRPage } from '@/pages/ProductQRPage';
 import { CreateOrderPage } from '@/pages/CreateOrderPage';
 import { RequestsPage } from '@/pages/RequestsPage';
+import { CreateLeadPage } from '@/pages/CreateLeadPage';
+import { CreatePackagePage } from '@/pages/CreatePackagePage';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import type { UserRole, User } from '@/types';
@@ -268,6 +270,12 @@ function AppContent() {
               </ProtectedRoute>
             } />
 
+            <Route path="/leads/new" element={
+              <ProtectedRoute allowedRoles={pagePermissions.leads}>
+                <CreateLeadPage />
+              </ProtectedRoute>
+            } />
+
             <Route path="/leads/:id" element={
               <ProtectedRoute allowedRoles={pagePermissions.leads}>
                 <LeadDetailPage />
@@ -361,6 +369,18 @@ function AppContent() {
             <Route path="/packages" element={
               <ProtectedRoute allowedRoles={pagePermissions.packages}>
                 <ProductsPageWrapper initialTab="packages" />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/packages/new" element={
+              <ProtectedRoute allowedRoles={pagePermissions.packages}>
+                <CreatePackagePage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/packages/:id/edit" element={
+              <ProtectedRoute allowedRoles={pagePermissions.packages}>
+                <CreatePackagePage />
               </ProtectedRoute>
             } />
 

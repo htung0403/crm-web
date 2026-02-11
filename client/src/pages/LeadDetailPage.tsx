@@ -1,24 +1,31 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
     ArrowLeft, Phone, MessageCircle, Copy, Check, ArrowRightLeft,
     Loader2, User, Building, Calendar, Tag, UserCheck, Mail,
     Clock, MessageSquare, TrendingUp, Timer, Facebook, ExternalLink, CalendarClock,
-    ShoppingBag
+    ShoppingBag, Globe,
+    Image as ImageIcon,
+    Smile,
+    Paperclip,
+    X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { leadsApi } from '@/lib/api';
+import { uploadFile } from '@/lib/supabase';
 import { formatDateTime } from '@/lib/utils';
 import type { Lead } from '@/hooks/useLeads';
 import { useLeads } from '@/hooks/useLeads';
 import { kanbanColumns, sourceLabels, getStatusLabel } from '@/components/leads/constants';
+import { format } from 'date-fns';
 
 export function LeadDetailPage() {
     const { id } = useParams<{ id: string }>();
@@ -30,6 +37,14 @@ export function LeadDetailPage() {
     const [error, setError] = useState<string | null>(null);
 
     const [newNote, setNewNote] = useState('');
+    const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null);
+    const [selectedSticker, setSelectedSticker] = useState<string | null>(null);
+    const [uploadingImage, setUploadingImage] = useState(false);
+    const [showMediaPicker, setShowMediaPicker] = useState(false);
+    const [pickerTab, setPickerTab] = useState<'emoji' | 'sticker'>('emoji');
+    const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
     const [selectedStatus, setSelectedStatus] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [phoneCopied, setPhoneCopied] = useState(false);
@@ -84,21 +99,21 @@ export function LeadDetailPage() {
     }, [lead]);
 
     // Fetch activities
+    const fetchActivities = async () => {
+        if (!id) return;
+
+        setLoadingActivities(true);
+        try {
+            const res = await leadsApi.getActivities(id);
+            setActivities(res.data.data?.activities || []);
+        } catch {
+            setActivities([]);
+        } finally {
+            setLoadingActivities(false);
+        }
+    };
+
     useEffect(() => {
-        const fetchActivities = async () => {
-            if (!id) return;
-
-            setLoadingActivities(true);
-            try {
-                const res = await leadsApi.getActivities(id);
-                setActivities(res.data.data?.activities || []);
-            } catch {
-                setActivities([]);
-            } finally {
-                setLoadingActivities(false);
-            }
-        };
-
         fetchActivities();
     }, [id]);
 
@@ -227,19 +242,72 @@ export function LeadDetailPage() {
         }
     };
 
+    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (!file.type.startsWith('image/')) {
+            toast.error('Vui lòng chọn file hình ảnh');
+            return;
+        }
+
+        setUploadingImage(true);
+        try {
+            const { url, error } = await uploadFile('products', `leads/notes/${lead!.id}`, file);
+            if (error) {
+                toast.error('Lỗi khi tải lên hình ảnh');
+                return;
+            }
+            setSelectedImageUrl(url);
+        } finally {
+            setUploadingImage(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+    };
+
     const handleAddNote = async () => {
-        if (!newNote.trim()) return;
+        if (!id || (!newNote.trim() && !selectedImageUrl)) return;
+
         setIsSaving(true);
         try {
-            const res = await leadsApi.addActivity(lead.id, {
+            const metadata: any = {};
+            if (selectedImageUrl) {
+                metadata.image_url = selectedImageUrl;
+            }
+
+            await leadsApi.addActivity(id, {
                 activity_type: 'note',
-                content: newNote.trim()
+                content: newNote.trim() || (selectedImageUrl ? 'Đã gửi một ảnh' : 'Ghi chú'),
+                metadata
             });
-            setActivities(prev => [res.data.data?.activity, ...prev]);
+
             setNewNote('');
+            setSelectedImageUrl(null);
+            fetchActivities();
             toast.success('Đã thêm ghi chú');
-        } catch {
+        } catch (err) {
             toast.error('Lỗi khi thêm ghi chú');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleAddSticker = async (sticker: string) => {
+        if (!id) return;
+
+        setIsSaving(true);
+        try {
+            await leadsApi.addActivity(id, {
+                activity_type: 'note',
+                content: 'Đã gửi một sticker',
+                metadata: { sticker_id: sticker }
+            });
+
+            setShowMediaPicker(false);
+            fetchActivities();
+            toast.success('Đã gửi sticker');
+        } catch (err) {
+            toast.error('Lỗi khi gửi sticker');
         } finally {
             setIsSaving(false);
         }
@@ -277,7 +345,10 @@ export function LeadDetailPage() {
                         <ArrowLeft className="h-5 w-5" />
                     </Button>
                     <div className="flex items-center gap-3 sm:gap-4 flex-1">
-                        <Avatar className="h-12 w-12 sm:h-14 sm:w-14 shrink-0">
+                        <Avatar className="h-12 w-12 sm:h-14 sm:w-14 shrink-0 border-2 border-slate-100">
+                            {lead.fb_profile_pic ? (
+                                <AvatarImage src={lead.fb_profile_pic} alt={lead.name} className="object-cover" />
+                            ) : null}
                             <AvatarFallback className={`${column.color} text-white text-lg sm:text-xl font-semibold`}>
                                 {lead.name.charAt(0)}
                             </AvatarFallback>
@@ -285,9 +356,6 @@ export function LeadDetailPage() {
                         <div className="flex-1 min-w-0">
                             <div className="flex flex-wrap items-center gap-2 mb-1">
                                 <h1 className="text-xl sm:text-2xl font-bold truncate pr-2">{lead.name}</h1>
-                                <Badge className={`${column.bgColor} ${column.textColor} whitespace-nowrap`}>
-                                    {column.label}
-                                </Badge>
                             </div>
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                                 <p className="text-muted-foreground text-sm sm:text-base">{lead.phone}</p>
@@ -303,7 +371,25 @@ export function LeadDetailPage() {
                 </div>
 
                 {/* Quick Actions */}
-                <div className="flex gap-2 w-full sm:w-auto mt-1 sm:mt-0">
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto mt-1 sm:mt-0">
+                    <Select value={selectedStatus} onValueChange={handleStatusChange} disabled={isSaving}>
+                        <SelectTrigger className="h-9 w-auto min-w-[150px] bg-white border-slate-200 shadow-sm transition-all hover:border-slate-300">
+                            <div className="flex items-center gap-2 pr-1">
+                                <div className={`w-2 h-2 rounded-full ${column.color} shadow-sm`} />
+                                <span className="text-xs font-semibold uppercase tracking-wider">{column.label}</span>
+                            </div>
+                        </SelectTrigger>
+                        <SelectContent>
+                            {kanbanColumns.map(col => (
+                                <SelectItem key={col.id} value={col.id}>
+                                    <div className="flex items-center gap-2">
+                                        <div className={`w-2 h-2 rounded-full ${col.color}`} />
+                                        {col.label}
+                                    </div>
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
                     <Button variant="outline" size="sm" onClick={handleCallPhone} className="flex-1 sm:flex-none">
                         <Phone className="h-4 w-4 mr-2" />
                         Gọi điện
@@ -419,11 +505,37 @@ export function LeadDetailPage() {
                                 <div className="p-2 rounded-lg bg-slate-100">
                                     <Calendar className="h-4 w-4 text-slate-600" />
                                 </div>
-                                <div>
+                                <div className="flex-1">
                                     <p className="text-xs text-muted-foreground">Ngày tạo</p>
                                     <p className="font-medium">{formatDateTime(lead.created_at)}</p>
                                 </div>
                             </div>
+
+                            {/* Date of Birth */}
+                            {lead.dob && (
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-lg bg-red-50 text-red-600">
+                                        <Calendar className="h-4 w-4" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <p className="text-xs text-muted-foreground">Ngày sinh</p>
+                                        <p className="font-medium">{new Date(lead.dob).toLocaleDateString('vi-VN')}</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Address */}
+                            {lead.address && (
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-lg bg-slate-100">
+                                        <Globe className="h-4 w-4 text-slate-600" />
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs text-muted-foreground">Địa chỉ</p>
+                                        <p className="font-medium text-sm leading-snug">{lead.address}</p>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Facebook Link */}
                             {(lead.fb_link || lead.link_message) && (
@@ -509,32 +621,6 @@ export function LeadDetailPage() {
                         </CardContent>
                     </Card>
 
-                    {/* Status Update Card */}
-                    <Card>
-                        <CardHeader className="pb-3">
-                            <CardTitle className="text-base flex items-center gap-2">
-                                <TrendingUp className="h-4 w-4 text-primary" />
-                                Cập nhật trạng thái
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent>
-                            <Select value={selectedStatus} onValueChange={handleStatusChange} disabled={isSaving}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {kanbanColumns.map(col => (
-                                        <SelectItem key={col.id} value={col.id}>
-                                            <div className="flex items-center gap-2">
-                                                <div className={`w-2 h-2 rounded-full ${col.color}`} />
-                                                {col.label}
-                                            </div>
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </CardContent>
-                    </Card>
 
                     {/* Edit Info Card */}
                     <Card>
@@ -587,6 +673,12 @@ export function LeadDetailPage() {
                                 )}
                             </div>
 
+                            {/* FB Thread ID */}
+                            <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Mã hội thoại (Thread ID)</Label>
+                                <p className="text-sm font-mono text-slate-600">{lead.fb_thread_id || '-'}</p>
+                            </div>
+
                             {/* Next Follow-up */}
                             <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Hẹn liên hệ tiếp</Label>
@@ -635,6 +727,27 @@ export function LeadDetailPage() {
                         </CardContent>
                     </Card>
 
+                    {/* Main Notes Card */}
+                    {lead.notes && (
+                        <Card className="bg-amber-50/30 border-amber-100">
+                            <CardHeader className="pb-2">
+                                <CardTitle className="text-sm font-bold flex items-center gap-2 text-amber-900">
+                                    <MessageSquare className="h-4 w-4" />
+                                    Ghi chú hệ thống
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                <p className="text-sm text-amber-900 whitespace-pre-wrap leading-relaxed italic">
+                                    "{lead.notes}"
+                                </p>
+                            </CardContent>
+                        </Card>
+                    )}
+
+                </div>
+
+                {/* Right Column - Activity Timeline (60%) */}
+                <div className="lg:col-span-3 space-y-4">
                     {/* Add Note Card */}
                     <Card>
                         <CardHeader className="pb-3">
@@ -645,28 +758,113 @@ export function LeadDetailPage() {
                         </CardHeader>
                         <CardContent>
                             <div className="space-y-3">
-                                <textarea
-                                    value={newNote}
-                                    onChange={(e) => setNewNote(e.target.value)}
-                                    placeholder="Nhập ghi chú mới..."
-                                    className="w-full min-h-24 px-3 py-2 text-sm rounded-lg border border-input bg-background resize-none focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
-                                />
-                                <Button
-                                    className="w-full"
-                                    disabled={!newNote.trim() || isSaving}
-                                    onClick={handleAddNote}
-                                >
-                                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                                    Thêm ghi chú
-                                </Button>
+                                {selectedImageUrl && (
+                                    <div className="relative w-24 h-24 rounded-lg overflow-hidden border">
+                                        <img src={selectedImageUrl} alt="Selected" className="w-full h-full object-cover" />
+                                        <button
+                                            onClick={() => setSelectedImageUrl(null)}
+                                            className="absolute top-1 right-1 p-1 bg-black/50 rounded-full text-white hover:bg-black/70"
+                                        >
+                                            <X className="h-3 w-3" />
+                                        </button>
+                                    </div>
+                                )}
+                                <div className="relative">
+                                    <textarea
+                                        value={newNote}
+                                        onChange={(e) => setNewNote(e.target.value)}
+                                        placeholder="Nhập ghi chú mới..."
+                                        className="w-full min-h-24 px-3 py-2 pb-10 text-sm rounded-lg border border-input bg-background resize-none focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
+                                    />
+                                    <div className="absolute bottom-2 left-2 flex items-center gap-1">
+                                        <input
+                                            type="file"
+                                            ref={fileInputRef}
+                                            onChange={handleImageUpload}
+                                            accept="image/*"
+                                            className="hidden"
+                                        />
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8 text-muted-foreground"
+                                            onClick={() => fileInputRef.current?.click()}
+                                            disabled={uploadingImage}
+                                        >
+                                            {uploadingImage ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8 text-muted-foreground"
+                                            onClick={() => setShowMediaPicker(!showMediaPicker)}
+                                        >
+                                            <Smile className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                    {showMediaPicker && (
+                                        <Card className="absolute bottom-full left-0 mb-2 p-0 w-64 shadow-xl z-50 overflow-hidden border-slate-200">
+                                            <div className="flex border-b bg-muted/50">
+                                                <button
+                                                    onClick={() => setPickerTab('emoji')}
+                                                    className={`flex-1 py-2 text-xs font-medium transition-colors ${pickerTab === 'emoji' ? 'bg-white text-primary border-b-2 border-primary' : 'text-muted-foreground hover:bg-muted'}`}
+                                                >
+                                                    Emoji
+                                                </button>
+                                                <button
+                                                    onClick={() => setPickerTab('sticker')}
+                                                    className={`flex-1 py-2 text-xs font-medium transition-colors ${pickerTab === 'sticker' ? 'bg-white text-primary border-b-2 border-primary' : 'text-muted-foreground hover:bg-muted'}`}
+                                                >
+                                                    Stickers
+                                                </button>
+                                            </div>
+                                            <div className="p-2 max-h-48 overflow-y-auto">
+                                                {pickerTab === 'emoji' ? (
+                                                    <div className="grid grid-cols-6 gap-1">
+                                                        {['😊', '👍', '❤️', '🔥', '👏', '🙌', '⭐', '📍', '📞', '💬', '💼', '💰', '✅', '❌', '⏰', '🚀', '🎁', '🎉'].map(emoji => (
+                                                            <button
+                                                                key={emoji}
+                                                                onClick={() => {
+                                                                    setNewNote(prev => prev + emoji);
+                                                                    setShowMediaPicker(false);
+                                                                }}
+                                                                className="w-8 h-8 flex items-center justify-center hover:bg-muted rounded text-lg"
+                                                            >
+                                                                {emoji}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <div className="grid grid-cols-3 gap-2 p-1">
+                                                        {['⭐', '🏆', '🚀', '💎', '🎯', '📢', '✅', '🆘', '🎉'].map(sticker => (
+                                                            <button
+                                                                key={sticker}
+                                                                onClick={() => handleAddSticker(sticker)}
+                                                                className="w-16 h-16 flex items-center justify-center hover:bg-primary/5 rounded-xl border border-transparent hover:border-primary/20 transition-all text-4xl"
+                                                            >
+                                                                {sticker}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </Card>
+                                    )}
+                                </div>
+                                <div className="flex justify-end">
+                                    <Button
+                                        className="w-full sm:w-auto min-w-[140px]"
+                                        disabled={(!newNote.trim() && !selectedImageUrl) || isSaving || uploadingImage}
+                                        onClick={handleAddNote}
+                                    >
+                                        {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                                        Thêm ghi chú
+                                    </Button>
+                                </div>
                             </div>
                         </CardContent>
                     </Card>
-                </div>
-
-                {/* Right Column - Activity Timeline (60%) */}
-                <div className="lg:col-span-3">
-                    <Card className="h-full">
+                    <Card>
                         <CardHeader className="pb-3 border-b sticky top-0 bg-card z-10">
                             <CardTitle className="text-base flex items-center gap-2">
                                 <Clock className="h-4 w-4 text-primary" />
@@ -679,7 +877,7 @@ export function LeadDetailPage() {
                             </CardTitle>
                         </CardHeader>
                         <CardContent className="p-0">
-                            <div className="max-h-[calc(100vh-320px)] overflow-y-auto">
+                            <div>
                                 {loadingActivities ? (
                                     <div className="flex items-center justify-center py-12">
                                         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -715,17 +913,16 @@ export function LeadDetailPage() {
 
                                                     {/* Content */}
                                                     <div className="flex-1 min-w-0 pb-2">
-                                                        <div className="flex items-center gap-2 mb-1">
-                                                            <span className="text-xs font-medium text-primary">
-                                                                {formatDateTime(activity.created_at)}
-                                                            </span>
-                                                            <Badge variant="outline" className="text-xs">
-                                                                {activity.activity_type === 'status_change' ? 'Đổi trạng thái' : 'Ghi chú'}
-                                                            </Badge>
-                                                        </div>
-
                                                         {activity.activity_type === 'status_change' ? (
                                                             <div className="space-y-2">
+                                                                <div className="flex items-center gap-2 mb-1">
+                                                                    <span className="text-xs font-medium text-primary">
+                                                                        {formatDateTime(activity.created_at)}
+                                                                    </span>
+                                                                    <Badge variant="outline" className="text-xs">
+                                                                        Đổi trạng thái
+                                                                    </Badge>
+                                                                </div>
                                                                 <p className="text-sm">
                                                                     <span className="font-medium">{activity.created_by_name || 'Hệ thống'}</span>
                                                                     <span className="text-muted-foreground"> đã chuyển trạng thái</span>
@@ -741,13 +938,40 @@ export function LeadDetailPage() {
                                                                 </div>
                                                             </div>
                                                         ) : (
-                                                            <div>
-                                                                <p className="text-sm font-medium">
-                                                                    {activity.created_by_name || 'Ẩn danh'}
-                                                                </p>
-                                                                <p className="text-sm text-muted-foreground mt-1 whitespace-pre-wrap">
-                                                                    {activity.content}
-                                                                </p>
+                                                            <div className="space-y-2">
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="font-semibold text-sm">
+                                                                        {activity.created_by_name || 'Ẩn danh'}
+                                                                    </span>
+                                                                    <span className="text-xs text-muted-foreground">
+                                                                        {format(new Date(activity.created_at), 'HH:mm dd/MM/yyyy')}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="text-sm bg-muted/30 rounded-lg py-2 px-3 border border-muted/50">
+                                                                    <p className={`text-sm whitespace-pre-wrap ${activity.metadata?.sticker_id ? 'text-4xl py-2' : 'text-muted-foreground'}`}>
+                                                                        {activity.metadata?.sticker_id || activity.content}
+                                                                    </p>
+                                                                    {activity.metadata?.image_url && (
+                                                                        <div className="mt-2 group relative w-fit max-w-full">
+                                                                            <img
+                                                                                src={activity.metadata.image_url}
+                                                                                alt="Activity"
+                                                                                className="max-h-48 w-auto min-w-[120px] rounded-lg border shadow-sm cursor-zoom-in hover:opacity-95 transition-all object-cover"
+                                                                                onClick={() => setImagePreviewUrl(activity.metadata.image_url)}
+                                                                            />
+                                                                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                                <Button
+                                                                                    size="icon"
+                                                                                    variant="secondary"
+                                                                                    className="h-8 w-8 rounded-full shadow-lg bg-white/80 backdrop-blur-sm hover:bg-white"
+                                                                                    onClick={() => setImagePreviewUrl(activity.metadata.image_url)}
+                                                                                >
+                                                                                    <ExternalLink className="h-4 w-4" />
+                                                                                </Button>
+                                                                            </div>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                         )}
                                                     </div>
@@ -761,6 +985,27 @@ export function LeadDetailPage() {
                     </Card>
                 </div>
             </div>
+
+            {/* Image Preview Dialog */}
+            <Dialog open={!!imagePreviewUrl} onOpenChange={(open: boolean) => !open && setImagePreviewUrl(null)}>
+                <DialogContent className="max-w-4xl p-0 overflow-hidden bg-black/90 border-none">
+                    <div className="relative w-full h-full min-h-[50vh] flex items-center justify-center p-4">
+                        <img
+                            src={imagePreviewUrl || ''}
+                            alt="Full Screen Preview"
+                            className="max-w-full max-h-[85vh] object-contain rounded-sm"
+                        />
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="absolute top-4 right-4 text-white hover:bg-white/20 rounded-full"
+                            onClick={() => setImagePreviewUrl(null)}
+                        >
+                            <X className="h-6 w-6" />
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

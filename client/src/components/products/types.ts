@@ -31,6 +31,7 @@ export interface ServicePackage extends APIPackage {
     commission_tech?: number;
     totalPrice?: number;
     discountedPrice?: number;
+    items?: any[];
 }
 
 export type { APIVoucher };

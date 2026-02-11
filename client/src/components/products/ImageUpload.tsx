@@ -9,6 +9,8 @@ interface ImageUploadProps {
     bucket?: string;
     folder?: string;
     disabled?: boolean;
+    className?: string;
+    hideInfo?: boolean;
 }
 
 export function ImageUpload({
@@ -16,10 +18,14 @@ export function ImageUpload({
     onChange,
     bucket = 'products',
     folder = 'images',
-    disabled = false
+    disabled = false,
+    className,
+    hideInfo = false
 }: ImageUploadProps) {
     const [uploading, setUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    const sizeClasses = className || "w-24 h-24";
 
     const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -60,7 +66,7 @@ export function ImageUpload({
 
     if (uploading) {
         return (
-            <div className="w-24 h-24 rounded-lg border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center gap-1">
+            <div className={`${sizeClasses} rounded-lg border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center gap-1`}>
                 <Loader2 className="h-5 w-5 text-primary animate-spin" />
                 <span className="text-xs text-muted-foreground">Đang tải...</span>
             </div>
@@ -68,9 +74,9 @@ export function ImageUpload({
     }
 
     return (
-        <div className="flex items-center gap-4">
+        <div className={`flex ${hideInfo ? 'flex-col' : 'items-center'} gap-4`}>
             {value ? (
-                <div className="relative w-24 h-24 rounded-lg overflow-hidden border">
+                <div className={`relative ${sizeClasses} rounded-lg overflow-hidden border`}>
                     <img src={value} alt="Preview" className="w-full h-full object-cover" />
                     {!disabled && (
                         <button
@@ -87,7 +93,7 @@ export function ImageUpload({
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={disabled}
-                    className="w-24 h-24 rounded-lg border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center gap-1 hover:border-primary/50 hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className={`${sizeClasses} rounded-lg border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center gap-1 hover:border-primary/50 hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                     <Upload className="h-5 w-5 text-muted-foreground" />
                     <span className="text-xs text-muted-foreground">Tải lên</span>
@@ -101,10 +107,12 @@ export function ImageUpload({
                 className="hidden"
                 disabled={disabled}
             />
-            <div className="text-xs text-muted-foreground">
-                <p>Định dạng: JPG, PNG, WebP</p>
-                <p>Tối đa: 5MB</p>
-            </div>
+            {!hideInfo && (
+                <div className="text-xs text-muted-foreground">
+                    <p>Định dạng: JPG, PNG, WebP</p>
+                    <p>Tối đa: 5MB</p>
+                </div>
+            )}
         </div>
     );
 }

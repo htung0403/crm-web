@@ -22,7 +22,6 @@ import { useVouchers } from '@/hooks/useVouchers';
 import { useOrders } from '@/hooks/useOrders';
 
 import {
-    CreateLeadDialog,
     KanbanColumn,
     kanbanColumns,
 } from '@/components/leads';
@@ -44,7 +43,6 @@ export function LeadsPage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedSource, setSelectedSource] = useState<string>('all');
     const [selectedEmployee, setSelectedEmployee] = useState<string>('all');
-    const [showCreateDialog, setShowCreateDialog] = useState(false);
 
     // State for CreateOrderDialog
     const [showOrderDialog, setShowOrderDialog] = useState(false);
@@ -188,7 +186,7 @@ export function LeadsPage() {
                             <h1 className="text-2xl font-bold text-foreground">Quản lý Leads</h1>
                             <p className="text-muted-foreground">Theo dõi và chăm sóc khách hàng tiềm năng</p>
                         </div>
-                        <Button onClick={() => setShowCreateDialog(true)} className="shadow-md w-full sm:w-auto">
+                        <Button onClick={() => navigate('/leads/new')} className="shadow-md w-full sm:w-auto">
                             <Plus className="h-4 w-4 mr-2" />
                             Thêm Lead
                         </Button>
@@ -322,13 +320,6 @@ export function LeadsPage() {
                     </DragDropContext>
                 </div>
 
-                {/* Create Lead Dialog */}
-                <CreateLeadDialog
-                    open={showCreateDialog}
-                    onClose={() => setShowCreateDialog(false)}
-                    onSubmit={handleCreateLead}
-                    employees={employees}
-                />
 
 
 

@@ -54,7 +54,7 @@ export interface Lead {
 
     // Facebook Profile (new)
     fb_profile_name?: string;
-    fb_profile_pic?: string;
+    fb_profile_pic?: string | null;
     fb_link?: string;
 
     // Follow-up (new)

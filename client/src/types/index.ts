@@ -84,9 +84,23 @@ export interface Service {
 
 export interface PackageItem {
     id?: string;
-    service_id: string;
+    service_id?: string;
+    product_id?: string;
     service_name?: string;
+    product_name?: string;
     quantity: number;
+    services?: {
+        id: string;
+        code: string;
+        name: string;
+        price: number;
+    };
+    products?: {
+        id: string;
+        code: string;
+        name: string;
+        price: number;
+    };
 }
 
 export interface Package {

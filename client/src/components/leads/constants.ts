@@ -110,5 +110,8 @@ export interface CreateLeadFormData {
     notes: string;
     fb_thread_id: string;
     link_message: string;
+    fb_profile_pic: string;
+    fb_link: string;
+    dob: string;
     appointment_time: string;
 }

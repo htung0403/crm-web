@@ -17,7 +17,6 @@ import { toast } from 'sonner';
 import {
     ProductFormDialog,
     ServiceFormDialog,
-    PackageFormDialog,
     VoucherFormDialog,
     ProductTypeFormDialog,
     ProductsTable,
@@ -119,10 +118,9 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
     // Dialog states
     const [showProductForm, setShowProductForm] = useState(false);
     const [showServiceForm, setShowServiceForm] = useState(false);
-    const [showPackageForm, setShowPackageForm] = useState(false);
     const [showVoucherForm, setShowVoucherForm] = useState(false);
     const [showProductTypeForm, setShowProductTypeForm] = useState(false);
-    const [editingItem, setEditingItem] = useState<Product | Service | ServicePackage | APIVoucher | ProductType | null>(null);
+    const [editingItem, setEditingItem] = useState<any>(null);
 
     // Filtered data
     const filteredProducts = products.filter(p =>
@@ -224,39 +222,14 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
         }
     };
 
-    // Package handlers
-    const handleCreatePackage = async (data: Partial<ServicePackage>) => {
-        try {
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const { code, ...packageData } = data;
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await createPackage(packageData as any);
-            toast.success('Đã tạo gói dịch vụ mới!');
-        } catch (error) {
-            const err = error as { response?: { data?: { message?: string } } };
-            toast.error(err.response?.data?.message || 'Lỗi khi tạo gói dịch vụ');
-        }
-    };
-
-    const handleUpdatePackage = async (data: Partial<ServicePackage>) => {
-        if (!editingItem?.id) return;
-        try {
-            await updatePackage(editingItem.id, data);
-            toast.success('Đã cập nhật gói dịch vụ!');
-        } catch (error) {
-            const err = error as { response?: { data?: { message?: string } } };
-            toast.error(err.response?.data?.message || 'Lỗi khi cập nhật gói dịch vụ');
-        }
-    };
-
     const handleDeletePackage = async (id: string) => {
-        if (!confirm('Bạn có chắc muốn xóa gói dịch vụ này?')) return;
+        const pkg = packages.find(p => p.id === id);
+        if (!confirm(`Bạn có chắc muốn xóa gói "${pkg?.name || 'này'}"?`)) return;
         try {
             await deletePackage(id);
-            toast.success('Đã xóa gói dịch vụ!');
+            toast.success('Xóa gói dịch vụ thành công');
         } catch (error) {
-            const err = error as { response?: { data?: { message?: string } } };
-            toast.error(err.response?.data?.message || 'Lỗi khi xóa gói dịch vụ');
+            toast.error('Lỗi khi xóa gói dịch vụ');
         }
     };
 
@@ -316,7 +289,7 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
         setEditingItem(null);
         if (activeTab === 'products') setShowProductForm(true);
         else if (activeTab === 'services') navigate('/services/new');
-        else if (activeTab === 'packages') setShowPackageForm(true);
+        else if (activeTab === 'packages') navigate('/packages/new');
         else if (activeTab === 'vouchers') setShowVoucherForm(true);
         else if (activeTab === 'product-types') setShowProductTypeForm(true);
     };
@@ -407,7 +380,7 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
                         <TabsContent value="packages" className="m-0">
                             <PackagesTable
                                 packages={filteredPackages}
-                                onEdit={(pkg) => { setEditingItem(pkg); setShowPackageForm(true); }}
+                                onEdit={(pkg) => navigate(`/packages/${pkg.id}/edit`)}
                                 onDelete={handleDeletePackage}
                             />
                         </TabsContent>
@@ -447,13 +420,6 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
                 service={editingItem as Service}
                 onSubmit={editingItem ? handleUpdateService : handleCreateService}
                 departments={departments}
-            />
-            <PackageFormDialog
-                open={showPackageForm}
-                onClose={() => { setShowPackageForm(false); setEditingItem(null); }}
-                pkg={editingItem as ServicePackage}
-                services={services}
-                onSubmit={editingItem ? handleUpdatePackage : handleCreatePackage}
             />
             <VoucherFormDialog
                 open={showVoucherForm}

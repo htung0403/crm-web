@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Plus, Loader2 } from 'lucide-react';
+import { Plus, Loader2, Globe, Facebook, MessageSquare } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import type { CreateLeadFormData } from './constants';
 
 interface CreateLeadDialogProps {
@@ -33,9 +34,46 @@ export function CreateLeadDialog({
         notes: '',
         fb_thread_id: '',
         link_message: '',
+        fb_profile_pic: '',
+        fb_link: '',
+        dob: '',
         appointment_time: ''
     });
     const [submitting, setSubmitting] = useState(false);
+
+    // Auto-fetch avatar from social link
+    const handleSocialLinkChange = (url: string) => {
+        setFormData(prev => ({ ...prev, fb_link: url }));
+
+        if (!url) return;
+
+        // Facebook parsing
+        if (formData.source === 'facebook') {
+            let identifier = '';
+            try {
+                const urlObj = new URL(url);
+                if (urlObj.hostname.includes('facebook.com')) {
+                    if (urlObj.pathname === '/profile.php') {
+                        identifier = urlObj.searchParams.get('id') || '';
+                    } else {
+                        // Remove leading slash and any trailing segments
+                        identifier = urlObj.pathname.split('/')[1];
+                    }
+                }
+            } catch {
+                // Not a valid URL, try simple regex for people who just paste "facebook.com/xxx"
+                const match = url.match(/facebook\.com\/([^/?#]+)/);
+                if (match) identifier = match[1];
+            }
+
+            if (identifier && identifier !== 'profile.php') {
+                setFormData(prev => ({
+                    ...prev,
+                    fb_profile_pic: `https://unavatar.io/facebook/${identifier}`
+                }));
+            }
+        }
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -59,6 +97,9 @@ export function CreateLeadDialog({
                 notes: '',
                 fb_thread_id: '',
                 link_message: '',
+                fb_profile_pic: '',
+                fb_link: '',
+                dob: '',
                 appointment_time: ''
             });
             onClose();
@@ -118,12 +159,33 @@ export function CreateLeadDialog({
                             />
                         </div>
                         <div className="space-y-2">
+                            <Label htmlFor="dob">Ngày sinh</Label>
+                            <Input
+                                id="dob"
+                                type="date"
+                                value={formData.dob || ''}
+                                onChange={(e) => setFormData(prev => ({ ...prev, dob: e.target.value }))}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
                             <Label htmlFor="company">Công ty</Label>
                             <Input
                                 id="company"
                                 value={formData.company}
                                 onChange={(e) => setFormData(prev => ({ ...prev, company: e.target.value }))}
                                 placeholder="Công ty ABC"
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="address">Địa chỉ</Label>
+                            <Input
+                                id="address"
+                                value={formData.address || ''}
+                                onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))}
+                                placeholder="Số nhà, đường, quận/huyện..."
                             />
                         </div>
                     </div>
@@ -185,39 +247,62 @@ export function CreateLeadDialog({
                         </div>
                     </div>
 
-                    {/* FB Integration Fields - Show only for Facebook channel */}
-                    {formData.source === 'facebook' && (
-                        <div className="grid grid-cols-2 gap-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-                            <div className="space-y-2">
-                                <Label htmlFor="fb_thread_id" className="text-blue-700">FB Thread ID</Label>
-                                <Input
-                                    id="fb_thread_id"
-                                    value={formData.fb_thread_id || ''}
-                                    onChange={(e) => setFormData(prev => ({ ...prev, fb_thread_id: e.target.value }))}
-                                    placeholder="t_xxx"
-                                />
+                    {/* Social Media Integration Fields - Show for FB/Zalo */}
+                    {(formData.source === 'facebook' || formData.source === 'zalo') && (
+                        <div className="space-y-4 p-3 bg-blue-50/50 rounded-lg border border-blue-100">
+                            <div className="flex items-center gap-4">
+                                <Avatar className="h-16 w-16 border-2 border-white shadow-sm">
+                                    {formData.fb_profile_pic && <AvatarImage src={formData.fb_profile_pic} alt="Preview" />}
+                                    <AvatarFallback className="bg-blue-100 text-blue-600">
+                                        {formData.source === 'facebook' ? <Facebook className="h-8 w-8 text-blue-600" /> : <MessageSquare className="h-8 w-8 text-sky-600" />}
+                                    </AvatarFallback>
+                                </Avatar>
+                                <div className="flex-1 space-y-1">
+                                    <h4 className="text-sm font-medium text-blue-900">Tích hợp mạng xã hội</h4>
+                                    <p className="text-xs text-blue-600/70">Nhập link trang cá nhân để tự động lấy ảnh đại diện.</p>
+                                </div>
                             </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="link_message" className="text-blue-700">Link conversation</Label>
-                                <Input
-                                    id="link_message"
-                                    value={formData.link_message || ''}
-                                    onChange={(e) => setFormData(prev => ({ ...prev, link_message: e.target.value }))}
-                                    placeholder="https://..."
-                                />
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="fb_thread_id" className="text-blue-700">Thread ID (FB/Zalo)</Label>
+                                    <Input
+                                        id="fb_thread_id"
+                                        value={formData.fb_thread_id || ''}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, fb_thread_id: e.target.value }))}
+                                        placeholder="t_xxx..."
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="link_message" className="text-blue-700">Link hội thoại</Label>
+                                    <Input
+                                        id="link_message"
+                                        value={formData.link_message || ''}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, link_message: e.target.value }))}
+                                        placeholder="https://..."
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="fb_profile_pic" className="text-blue-700">Link ảnh đại diện (Avatar)</Label>
+                                    <Input
+                                        id="fb_profile_pic"
+                                        value={formData.fb_profile_pic || ''}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, fb_profile_pic: e.target.value }))}
+                                        placeholder="https://..."
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="fb_link" className="text-blue-700">Link Profile MXH</Label>
+                                    <Input
+                                        id="fb_link"
+                                        value={formData.fb_link || ''}
+                                        onChange={(e) => handleSocialLinkChange(e.target.value)}
+                                        placeholder="https://..."
+                                    />
+                                </div>
                             </div>
                         </div>
                     )}
-
-                    <div className="space-y-2">
-                        <Label htmlFor="address">Địa chỉ</Label>
-                        <Input
-                            id="address"
-                            value={formData.address || ''}
-                            onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))}
-                            placeholder="Số nhà, đường, quận/huyện..."
-                        />
-                    </div>
 
                     <div className="space-y-2">
                         <Label htmlFor="notes">Ghi chú</Label>
