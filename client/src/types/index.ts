@@ -21,6 +21,7 @@ export interface Lead {
     id: string;
     customerName: string;
     phone: string;
+    dob?: string;
     source: 'Facebook' | 'Google' | 'Zalo' | 'Website' | 'Referral' | 'Walk-in';
     status: 'new' | 'nurturing' | 'closed' | 'cancelled';
     assignedTo: User;

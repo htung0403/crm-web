@@ -215,7 +215,7 @@ export function OrdersPage() {
     return (
         <>
             <Toaster position="top-right" richColors />
-            <div className="space-y-6 animate-fade-in max-w-screen-2xl mx-auto" style={{ contain: 'inline-size' }}>
+            <div className="space-y-6 animate-fade-in w-full px-2" style={{ contain: 'inline-size' }}>
                 {/* Page Header + Stats Container - Contained width */}
                 <div className="space-y-6">
                     {/* Page Header */}
@@ -238,7 +238,7 @@ export function OrdersPage() {
                     )}
 
                     {/* Stats */}
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
                         {columns.map((column) => {
                             const count = getOrdersByStatus(column.id).length;
                             return (
@@ -258,7 +258,7 @@ export function OrdersPage() {
                 {/* Kanban Board - Grid on large screens so all 6 columns (including Đã hoàn thiện kỹ thuật, Đã huỷ) are visible */}
                 <div className="pb-6">
                     <DragDropContext onDragEnd={handleDragEnd}>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                             {columns.map((column) => (
                                 <div key={column.id} className="min-w-0">
                                     <Card className={`${column.bgColor} border ${column.borderColor} h-full`}>

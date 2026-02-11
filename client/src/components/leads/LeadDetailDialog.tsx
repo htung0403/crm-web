@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Phone, MessageCircle, Copy, Check, ArrowRightLeft, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -30,6 +31,7 @@ export function LeadDetailDialog({
     const [notes, setNotes] = useState('');
     const [newNote, setNewNote] = useState('');
     const [selectedStatus, setSelectedStatus] = useState('');
+    const [dob, setDob] = useState('');
     const [isSaving, setIsSaving] = useState(false);
     const [phoneCopied, setPhoneCopied] = useState(false);
     const [emailCopied, setEmailCopied] = useState(false);
@@ -41,6 +43,7 @@ export function LeadDetailDialog({
         if (lead && open) {
             setNotes(lead.notes || '');
             setSelectedStatus(lead.pipeline_stage || lead.status);
+            setDob(lead.dob || '');
             setIsEditingNotes(false);
             setPhoneCopied(false);
             setEmailCopied(false);
@@ -205,6 +208,19 @@ export function LeadDetailDialog({
                     <div>
                         <p className="text-sm text-muted-foreground">Ngày tạo</p>
                         <p className="font-medium">{formatDateTime(lead.created_at)}</p>
+                    </div>
+                    <div>
+                        <p className="text-sm text-muted-foreground">Ngày sinh</p>
+                        <Input
+                            type="date"
+                            value={dob}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                                const newDob = e.target.value;
+                                setDob(newDob);
+                                onUpdate(lead.id, { dob: newDob });
+                            }}
+                            className="h-8 text-sm"
+                        />
                     </div>
                 </div>
 

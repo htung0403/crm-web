@@ -78,7 +78,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 // Create lead
 router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { name, phone, email, source, company, address, notes, assigned_to } = req.body;
+        const { name, phone, email, source, company, address, notes, assigned_to, dob } = req.body;
 
         if (!name || !phone) {
             throw new ApiError('Tên và số điện thoại là bắt buộc', 400);
@@ -97,6 +97,7 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                 status: 'new',
                 assigned_to: assigned_to || req.user!.id,
                 created_by: req.user!.id,
+                dob: dob || null,
             })
             .select()
             .single();
@@ -118,7 +119,7 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
 router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { name, phone, email, source, company, address, notes, status, assigned_to, pipeline_stage } = req.body;
+        const { name, phone, email, source, company, address, notes, status, assigned_to, pipeline_stage, dob } = req.body;
 
         // Get current lead to check for status change
         const { data: currentLead } = await supabaseAdmin
@@ -144,6 +145,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         if (status) updateData.status = status;
         if (pipeline_stage) updateData.pipeline_stage = pipeline_stage;
         if (assigned_to) updateData.assigned_to = assigned_to;
+        if (dob !== undefined) updateData.dob = dob;
 
         const { data: lead, error } = await supabaseAdmin
             .from('leads')
@@ -259,6 +261,7 @@ router.post('/:id/convert', authenticate, requireSale, async (req: Authenticated
                     assigned_to: lead.assigned_to,
                     created_by: req.user!.id,
                     lead_id: lead.id,
+                    dob: lead.dob,
                 })
                 .select()
                 .single();

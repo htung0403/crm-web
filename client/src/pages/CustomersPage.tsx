@@ -319,6 +319,13 @@ function CustomerDetailDialog({
                                     {customer.phone}
                                 </p>
                             </div>
+                            <div className="space-y-1">
+                                <p className="text-xs text-muted-foreground">Ngày sinh</p>
+                                <p className="font-medium flex items-center gap-2">
+                                    <Calendar className="h-4 w-4 text-muted-foreground" />
+                                    {customer.dob ? formatDate(customer.dob) : '-'}
+                                </p>
+                            </div>
                             <div className="space-y-1 col-span-2">
                                 <p className="text-xs text-muted-foreground">Địa chỉ</p>
                                 <p className="font-medium flex items-center gap-2">

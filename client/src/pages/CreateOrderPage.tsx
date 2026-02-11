@@ -1907,6 +1907,8 @@ export function CreateOrderPage() {
                 open={showCreateCustomerDialog}
                 onClose={() => setShowCreateCustomerDialog(false)}
                 onSubmit={handleCreateCustomer}
+                initialName={/^[a-zA-Z\sÀ-ỹ]+$/.test(customerSearch) ? customerSearch : ''}
+                initialPhone={/^[0-9\s.+]+$/.test(customerSearch) && customerSearch.replace(/[^0-9]/g, '').length >= 9 ? customerSearch : ''}
             />
 
             {/* Sản phẩm bán kèm Dialog */}

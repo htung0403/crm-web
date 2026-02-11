@@ -6,6 +6,7 @@ export interface Customer {
     code?: string;
     name: string;
     phone: string;
+    dob?: string;
     email?: string;
     type: 'individual' | 'company';
     company?: string;

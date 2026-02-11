@@ -16,6 +16,8 @@ export interface CreateCustomerDialogProps {
     customer?: Customer | null;
     onSubmit: (data: Partial<Customer>) => Promise<Customer | void>;
     employees?: { id: string; name: string }[];
+    initialName?: string;
+    initialPhone?: string;
 }
 
 export function CreateCustomerDialog({
@@ -23,7 +25,9 @@ export function CreateCustomerDialog({
     onClose,
     customer,
     onSubmit,
-    employees = []
+    employees = [],
+    initialName = '',
+    initialPhone = ''
 }: CreateCustomerDialogProps) {
     const [name, setName] = useState(customer?.name || '');
     const [email, setEmail] = useState(customer?.email || '');
@@ -32,6 +36,7 @@ export function CreateCustomerDialog({
     const [source, setSource] = useState(customer?.source || '');
     const [assignedTo, setAssignedTo] = useState(customer?.assigned_to || '');
     const [notes, setNotes] = useState(customer?.notes || '');
+    const [dob, setDob] = useState(customer?.dob || '');
     const [submitting, setSubmitting] = useState(false);
 
     // Reset form when customer changes
@@ -44,17 +49,19 @@ export function CreateCustomerDialog({
             setSource(customer.source || '');
             setAssignedTo(customer.assigned_to || '');
             setNotes(customer.notes || '');
+            setDob(customer.dob || '');
         } else {
             // Reset form for new customer
-            setName('');
+            setName(initialName || '');
             setEmail('');
-            setPhone('');
+            setPhone(initialPhone || '');
             setAddress('');
             setSource('');
             setAssignedTo('');
             setNotes('');
+            setDob('');
         }
-    }, [customer, open]);
+    }, [customer, open, initialName, initialPhone]);
 
     const handleSubmit = async () => {
         if (!name || !phone) {
@@ -73,6 +80,7 @@ export function CreateCustomerDialog({
                 source: source || undefined,
                 assigned_to: assignedTo || undefined,
                 notes: notes || undefined,
+                dob: dob || undefined,
             });
             onClose();
         } catch {
@@ -112,16 +120,10 @@ export function CreateCustomerDialog({
                             <Label>Email</Label>
                             <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" />
                         </div>
-                    </div>
-
-                    {/* Address */}
-                    <div className="space-y-2">
-                        <Label>Địa chỉ</Label>
-                        <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Nhập địa chỉ" />
-                    </div>
-
-                    {/* Source & Assigned */}
-                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <Label>Ngày sinh</Label>
+                            <Input type="date" value={dob} onChange={(e) => setDob(e.target.value)} />
+                        </div>
                         <div className="space-y-2">
                             <Label>Nguồn khách hàng</Label>
                             <Select value={source} onValueChange={setSource}>
@@ -134,6 +136,14 @@ export function CreateCustomerDialog({
                                     ))}
                                 </SelectContent>
                             </Select>
+                        </div>
+                    </div>
+
+                    {/* Address & Assigned */}
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <Label>Địa chỉ</Label>
+                            <Input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Nhập địa chỉ" />
                         </div>
                         {employees.length > 0 && (
                             <div className="space-y-2">
