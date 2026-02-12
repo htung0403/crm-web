@@ -158,14 +158,17 @@ export function CreateOrderDialog({
                 item = { id: pkg.id, name: pkg.name, price: pkg.price, commission_sale: pkg.commission_sale, commission_tech: pkg.commission_tech };
                 // Get services in package with their department info
                 if (pkg.items && pkg.items.length > 0) {
-                    packageServices = pkg.items.map(pkgItem => {
-                        const svc = services.find(s => s.id === pkgItem.service_id);
-                        return {
-                            service_id: pkgItem.service_id,
-                            service_name: svc?.name || pkgItem.service_name || 'Dịch vụ',
-                            department: svc?.department
-                        };
-                    }).filter(s => s.department); // Only include services with department
+                    packageServices = pkg.items
+                        .filter(pkgItem => pkgItem.service_id)
+                        .map(pkgItem => {
+                            const svc = services.find(s => s.id === pkgItem.service_id);
+                            return {
+                                service_id: pkgItem.service_id as string,
+                                service_name: svc?.name || pkgItem.service_name || 'Dịch vụ',
+                                department: svc?.department
+                            };
+                        })
+                        .filter(s => !!s.department); // Only include services with department
                 }
             }
         }

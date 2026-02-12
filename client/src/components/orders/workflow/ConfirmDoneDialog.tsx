@@ -14,7 +14,7 @@ import { toast } from 'sonner';
 interface ConfirmDoneDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
-    itemId: string;
+    itemIds: string[];
     isV2Service: boolean; // items vs services
     onSuccess: () => void;
 }
@@ -22,24 +22,22 @@ interface ConfirmDoneDialogProps {
 export function ConfirmDoneDialog({
     open,
     onOpenChange,
-    itemId,
+    itemIds,
     isV2Service,
     onSuccess,
 }: ConfirmDoneDialogProps) {
     const [loading, setLoading] = useState(false);
 
     const handleSubmit = async () => {
+        if (!itemIds || itemIds.length === 0) return;
         setLoading(true);
         try {
-            if (isV2Service) {
-                // For V2 services, we might use completeService from orderProductsApi or orderItemsApi.complete
-                // orderItemsApi.complete supports V2 items logic internally in our backend implementation!
-                await orderItemsApi.complete(itemId, 'Hoàn thành dịch vụ');
-            } else {
-                await orderItemsApi.complete(itemId, 'Hoàn thành hạng mục');
-            }
+            // Completing all items in the group
+            await Promise.all(itemIds.map(id =>
+                orderItemsApi.complete(id, isV2Service ? 'Hoàn thành dịch vụ' : 'Hoàn thành hạng mục')
+            ));
 
-            toast.success('Đã hoàn thành hạng mục');
+            toast.success(`Đã hoàn thành ${itemIds.length} hạng mục`);
             onSuccess();
             onOpenChange(false);
         } catch (error: any) {

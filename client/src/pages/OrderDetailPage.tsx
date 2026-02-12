@@ -1,165 +1,135 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-    ArrowLeft, Package, Gift, Sparkles, ShoppingBag, CreditCard, Printer,
-    Wrench, Loader2, Calendar, User as UserIcon, FileText, Clock, CheckCircle, XCircle,
-    ArrowRight, Building2, Users, Phone, CircleDot, UserPlus, Timer, Layers,
-    RotateCw, Bot, Copy, ThumbsUp, ThumbsDown, Check, History,
-    Truck, CalendarClock, RefreshCcw, Camera, Upload, X, Heart,
-    Tag, Palette, Ruler, AlertCircle, Edit, Plus, Trash2
+    ArrowLeft,
+    ShoppingBag,
+    FileText,
+    Layers,
+    RefreshCcw,
+    Heart,
+    Printer,
+    Sparkles,
+    CreditCard,
+    ThumbsUp,
+    Loader2,
+    XCircle,
+    UserPlus,
+    Trash2,
+    Plus,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import type { DropResult } from '@hello-pangea/dnd';
+
+import { ordersApi, orderItemsApi } from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogFooter,
+} from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
-import { formatCurrency, formatDateTime, cn } from '@/lib/utils';
-import { uploadFile } from '@/lib/supabase';
-import { ordersApi, orderItemsApi, orderProductsApi } from '@/lib/api';
-import { ProductStatusCard } from '@/components/orders/ProductStatusCard';
-import type { Order, OrderItem } from '@/hooks/useOrders';
-import type { User } from '@/types';
+import { Textarea } from '@/components/ui/textarea';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
+import { Checkbox } from '@/components/ui/checkbox';
+
+import { useAuth } from '@/contexts/AuthContext';
 import { useOrders } from '@/hooks/useOrders';
+import type { OrderItem } from '@/hooks/useOrders';
+import { useDepartments } from '@/hooks/useDepartments';
 import { useUsers } from '@/hooks/useUsers';
-import { columns, TECH_ROOMS, getTechRoomByStepOrder, getTechRoomByDepartmentName } from '@/components/orders/constants';
+
+// Direct imports from files to avoid circularity via index.ts
+import { useOrderDetail } from './OrderDetailPage/hooks/useOrderDetail';
+import { useOrderActions } from './OrderDetailPage/hooks/useOrderActions';
+import { useWorkflowKanban } from './OrderDetailPage/hooks/useWorkflowKanban';
+import { DetailTab } from './OrderDetailPage/tabs/DetailTab';
+import { SalesTab } from './OrderDetailPage/tabs/SalesTab';
+import { WorkflowTab } from './OrderDetailPage/tabs/WorkflowTab';
+import { AftersaleTab } from './OrderDetailPage/tabs/AftersaleTab';
+import { CareTab } from './OrderDetailPage/tabs/CareTab';
+import { TECH_ROOMS, columns, getAfterSaleStageLabel, getCareWarrantyStageLabel } from './OrderDetailPage/constants';
+import { getStatusVariant, getItemTypeLabel, getSLADisplay } from './OrderDetailPage/utils';
+
+// Specific Dialogs
 import { PrintQRDialog } from '@/components/orders/PrintQRDialog';
 import { PaymentDialog } from '@/components/orders/PaymentDialog';
 import { PaymentRecordDialog } from '@/components/orders/PaymentRecordDialog';
-import { useProducts } from '@/hooks/useProducts';
-import { usePackages } from '@/hooks/usePackages';
-import { useVouchers } from '@/hooks/useVouchers';
-import { useDepartments } from '@/hooks/useDepartments';
-import { useAuth } from '@/contexts/AuthContext';
-import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
+import { AssignTechnicianDialog } from './OrderDetailPage/dialogs/AssignTechnicianDialog';
 import { MoveStepDialog } from '@/components/orders/workflow/MoveStepDialog';
 import { FailDialog } from '@/components/orders/workflow/FailDialog';
 import { ConfirmDoneDialog } from '@/components/orders/workflow/ConfirmDoneDialog';
-
-// Nhãn trạng thái cho các yêu cầu trên thẻ Kanban
-const ACCESSORY_LABELS: Record<string, string> = {
-    need_buy: 'Cần mua',
-    bought: 'Đã mua',
-    waiting_ship: 'Chờ ship',
-    shipped: 'Ship tới',
-    delivered_to_tech: 'Giao KT',
-};
-const PARTNER_LABELS: Record<string, string> = {
-    ship_to_partner: 'Ship ĐT',
-    partner_doing: 'ĐT làm',
-    ship_back: 'Ship về',
-    done: 'Done',
-};
-const EXTENSION_LABELS: Record<string, string> = {
-    requested: 'Đã yêu cầu',
-    sale_contacted: 'Sale đã liên hệ',
-    manager_approved: 'QL đã duyệt',
-    notified_tech: 'Đã báo KT',
-    kpi_recorded: 'Đã ghi KPI',
-};
-
-const SALES_STEPS = [
-    { id: 'step1', label: '1. Nhận đồ', title: 'Nhận đồ', color: 'text-blue-500', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
-    { id: 'step2', label: '2. Gắn Tag', title: 'Gắn Tag', color: 'text-blue-500', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
-    { id: 'step3', label: '3. Trao đổi KT', title: 'Trao đổi KT', color: 'text-blue-500', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
-    { id: 'step4', label: '4. Phê duyệt', title: 'Phê duyệt', color: 'text-red-500', bgColor: 'bg-red-50', borderColor: 'border-red-200', isAlert: true },
-    { id: 'step5', label: '5. Chốt đơn', title: 'Chốt đơn', color: 'text-green-500', bgColor: 'bg-green-50', borderColor: 'border-green-200', isSuccess: true },
-];
-
-const SALES_STATUS_LABELS: Record<string, string> = {
-    pending: 'Đơn nháp',
-    step1: '1. Nhận đồ',
-    step2: '2. Gắn Tag',
-    step3: '3. Trao đổi KT',
-    step4: '4. Phê duyệt',
-    step5: '5. Chốt đơn',
-    assigned: 'Đã phân công',
-    in_progress: 'Đang thực hiện',
-    completed: 'Hoàn thành',
-    cancelled: 'Đã huỷ',
-};
-
-const AFTER_SALE_STAGE_LABELS: Record<string, string> = {
-    after1: 'Kiểm nợ & Ảnh hoàn thiện',
-    after2: 'Đóng gói & Giao hàng',
-    after3: 'Nhắn HD & Feedback',
-    after4: 'Lưu Trữ',
-};
-
-function getSalesStatusLabel(value: string | null | undefined): string {
-    if (value == null || value === '') return '—';
-    return SALES_STATUS_LABELS[value] ?? value;
-}
-
-function getAfterSaleStageLabel(value: string | null | undefined): string {
-    if (value == null || value === '') return '—';
-    return AFTER_SALE_STAGE_LABELS[value] ?? value;
-}
-
-const CARE_WARRANTY_STAGE_LABELS: Record<string, string> = {
-    war1: '1. Tiếp nhận',
-    war2: '2. Xử lý',
-    war3: '3. Hoàn tất',
-    care6: 'Mốc 6 Tháng',
-    care12: 'Mốc 12 Tháng',
-    'care-custom': 'Lịch Riêng',
-};
-function getCareWarrantyStageLabel(value: string | null | undefined): string {
-    if (value == null || value === '') return '—';
-    return CARE_WARRANTY_STAGE_LABELS[value] ?? value;
-}
 
 export function OrderDetailPage() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const { user } = useAuth();
-    const { updateOrderStatus, updateOrder, fetchOrders } = useOrders();
-    const { products, services, fetchProducts, fetchServices } = useProducts();
-    const { packages, fetchPackages } = usePackages();
-    const { vouchers, fetchVouchers } = useVouchers();
-    const { users: technicians, fetchTechnicians } = useUsers();
-    const { departments, fetchDepartments } = useDepartments();
+    const { fetchOrders } = useOrders();
 
-    const [order, setOrder] = useState<Order | null>(null);
-    const [loading, setLoading] = useState(true);
+    // Custom Hooks
+    const {
+        order,
+        setOrder,
+        loading,
+        allWorkflowSteps,
+        stepsLoading,
+        productStatusSummary,
+        setProductStatusSummary,
+        salesLogs,
+        workflowLogs,
+        aftersaleLogs,
+        careLogs,
+        reloadOrder,
+        fetchKanbanLogs,
+    } = useOrderDetail(id);
+
+    const {
+        updateOrderItemStatus,
+        updateOrderStatus,
+        updateOrderAfterSale,
+        handleApproveOrder,
+        handlePaymentSuccess,
+    } = useOrderActions(id, fetchOrders, reloadOrder);
+
+    const {
+        getItemCurrentStep,
+        getItemCurrentTechRoom,
+        getGroupCurrentTechRoom,
+        workflowKanbanGroups,
+        getStepDeadlineDisplay,
+    } = useWorkflowKanban(order, allWorkflowSteps);
+
+    // Dialog & UI States
+    const [activeTab, setActiveTab] = useState('detail');
     const [showPrintDialog, setShowPrintDialog] = useState(false);
     const [showPaymentDialog, setShowPaymentDialog] = useState(false);
     const [showPaymentRecordDialog, setShowPaymentRecordDialog] = useState(false);
 
-    // Assign technician dialog state
     const [showAssignDialog, setShowAssignDialog] = useState(false);
     const [selectedItem, setSelectedItem] = useState<OrderItem | null>(null);
-    const [assignments, setAssignments] = useState<{ technician_id: string; commission: number }[]>([]);
-    const [assignLoading, setAssignLoading] = useState(false);
 
-    // Workflow steps for department kanban
-    const [allWorkflowSteps, setAllWorkflowSteps] = useState<any[]>([]);
-    const [stepsLoading, setStepsLoading] = useState(false);
-
-    // Product status summary for Customer Items (Sản phẩm khách gửi)
-    const [productStatusSummary, setProductStatusSummary] = useState<any>(null);
-    const [statusSummaryLoading, setStatusSummaryLoading] = useState(false);
-
-    // Mua phụ kiện dialog
     const [showAccessoryDialog, setShowAccessoryDialog] = useState(false);
     const [accessoryItem, setAccessoryItem] = useState<OrderItem | null>(null);
-    const [accessoryStatus, setAccessoryStatus] = useState<string>('need_buy');
+    const [accessoryStatus, setAccessoryStatus] = useState('');
     const [accessoryNotes, setAccessoryNotes] = useState('');
     const [accessoryLoading, setAccessoryLoading] = useState(false);
 
-    // Gửi Đối Tác dialog
     const [showPartnerDialog, setShowPartnerDialog] = useState(false);
     const [partnerItem, setPartnerItem] = useState<OrderItem | null>(null);
-    const [partnerStatus, setPartnerStatus] = useState<string>('ship_to_partner');
+    const [partnerStatus, setPartnerStatus] = useState('');
     const [partnerNotes, setPartnerNotes] = useState('');
     const [partnerLoading, setPartnerLoading] = useState(false);
 
-    // Xin gia hạn dialog
     const [showExtensionDialog, setShowExtensionDialog] = useState(false);
     const [extensionReason, setExtensionReason] = useState('');
     const [extensionCustomerResult, setExtensionCustomerResult] = useState('');
@@ -167,428 +137,62 @@ export function OrderDetailPage() {
     const [extensionValidReason, setExtensionValidReason] = useState(false);
     const [extensionLoading, setExtensionLoading] = useState(false);
 
-    // Complete workflow step (Quy trình)
-    const [stepCompleteLoading, setStepCompleteLoading] = useState<string | null>(null);
-
-    // After sale dialogs: Kiểm nợ & Ảnh hoàn thiện (after1), Đóng gói & Giao hàng (after2)
-    const [showAfter1Dialog, setShowAfter1Dialog] = useState(false);
-    const [completionPhotos, setCompletionPhotos] = useState<string[]>([]);
-    const [debtChecked, setDebtChecked] = useState(false);
-    const [debtCheckedNotes, setDebtCheckedNotes] = useState('');
-    const [after1Uploading, setAfter1Uploading] = useState(false);
-    const [after1Saving, setAfter1Saving] = useState(false);
-
-    const [showAfter2Dialog, setShowAfter2Dialog] = useState(false);
-    const [packagingPhotos, setPackagingPhotos] = useState<string[]>([]);
-    const [deliveryCarrier, setDeliveryCarrier] = useState('');
-    const [deliveryAddress, setDeliveryAddress] = useState('');
-    const [deliverySelfPickup, setDeliverySelfPickup] = useState(false);
-    const [deliveryNotes, setDeliveryNotes] = useState('');
-    const [after2Uploading, setAfter2Uploading] = useState(false);
-    const [after2Saving, setAfter2Saving] = useState(false);
-    const [after1JustSaved, setAfter1JustSaved] = useState(false);
-    const [after2JustSaved, setAfter2JustSaved] = useState(false);
-
-    const [activeTab, setActiveTab] = useState('detail');
-
-    // Dialog xem ảnh (bảng chi tiết sản phẩm/dịch vụ)
-    const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
-
-    // Kanban Workflow Dialogs State
+    // Step confirm states
     const [showMoveStepDialog, setShowMoveStepDialog] = useState(false);
-    const [moveStepTargetRoom, setMoveStepTargetRoom] = useState<{ id: string; title: string }>({ id: '', title: '' });
     const [moveStepItemId, setMoveStepItemId] = useState<string>('');
-
+    const [moveStepTargetRoom, setMoveStepTargetRoom] = useState<any>({});
     const [showFailDialog, setShowFailDialog] = useState(false);
     const [failItemId, setFailItemId] = useState<string>('');
-
     const [showConfirmDoneDialog, setShowConfirmDoneDialog] = useState(false);
-    const [confirmDoneItemId, setConfirmDoneItemId] = useState<string>('');
+    const [confirmDoneItemIds, setConfirmDoneItemIds] = useState<string[]>([]);
     const [isV2ServiceForDone, setIsV2ServiceForDone] = useState(false);
 
-    // Khi đơn chuyển sang Đã hoàn thiện thì ẩn tab Tiến trình/Quy trình; nếu đang mở tab đó thì chuyển về Chi tiết
-    useEffect(() => {
-        if (order?.status === 'done' && activeTab === 'workflow') {
-            setActiveTab('detail');
-        }
-    }, [order?.status, activeTab]);
-
-    // Kanban logs (lịch sử chuyển trạng thái từng tab)
-    const [salesLogs, setSalesLogs] = useState<any[]>([]);
-    const [workflowLogs, setWorkflowLogs] = useState<any[]>([]);
-    const [aftersaleLogs, setAftersaleLogs] = useState<any[]>([]);
-    const [careLogs, setCareLogs] = useState<any[]>([]);
-
-    const fetchKanbanLogs = useCallback(async (orderId: string) => {
-        try {
-            const [salesRes, workflowRes, aftersaleRes, careRes] = await Promise.all([
-                ordersApi.getKanbanLogs(orderId, 'sales'),
-                ordersApi.getKanbanLogs(orderId, 'workflow'),
-                ordersApi.getKanbanLogs(orderId, 'aftersale'),
-                ordersApi.getKanbanLogs(orderId, 'care'),
-            ]);
-            setSalesLogs(salesRes.data?.data?.logs ?? []);
-            setWorkflowLogs(workflowRes.data?.data?.logs ?? []);
-            setAftersaleLogs(aftersaleRes.data?.data?.logs ?? []);
-            setCareLogs(careRes.data?.data?.logs ?? []);
-        } catch {
-            // ignore
-        }
-    }, []);
-
-    // Tick every second so elapsed timers (Đã phân công, Đang thực hiện) update in real time
-    const [, setTimerTick] = useState(0);
-    useEffect(() => {
-        if (!order) return;
-        const id = setInterval(() => setTimerTick((t) => t + 1), 1000);
-        return () => clearInterval(id);
-    }, [order]);
-
-    useEffect(() => {
-        if (order?.id) fetchKanbanLogs(order.id);
-    }, [order?.id, fetchKanbanLogs]);
-
-    // Fetch all workflow steps for given items
-    const fetchWorkflowSteps = useCallback(async (items: any[]) => {
-        if (!items || items.length === 0) return;
-
-        setStepsLoading(true);
-        try {
-            const allSteps: any[] = [];
-            for (const item of items) {
-                if (item.item_type === 'service' || item.item_type === 'package') {
-                    try {
-                        const response = await orderItemsApi.getSteps(item.id);
-                        if (response.data?.data) {
-                            const stepsWithItem = (response.data.data as any[]).map(step => ({
-                                ...step,
-                                item_name: item.item_name,
-                                item_id: item.id
-                            }));
-                            allSteps.push(...stepsWithItem);
-                        }
-                    } catch (e) {
-                        console.error('Error fetching steps for item:', item.id, e);
-                    }
-                }
-            }
-            setAllWorkflowSteps(allSteps);
-        } catch (error) {
-            console.error('Error fetching workflow steps:', error);
-        } finally {
-            setStepsLoading(false);
-        }
-    }, []);
-
-    // Reload order data
-    const reloadOrder = useCallback(async () => {
-        if (!id) return;
-        try {
-            const response = await ordersApi.getById(id);
-            const orderData = response.data?.data?.order;
-            if (orderData && orderData.id) {
-                setOrder(orderData);
-                // Also fetch steps immediately
-                if (orderData.items) {
-                    fetchWorkflowSteps(orderData.items);
-                }
-            }
-        } catch {
-            console.error('Error reloading order');
-        }
-    }, [id, fetchWorkflowSteps]);
-
-    // Optimistic update for After-sale: cập nhật state ngay, gọi API nền; lỗi thì revert bằng reloadOrder
-    const updateOrderAfterSale = useCallback((patch: Partial<Order>) => {
-        setOrder((prev) => (prev ? { ...prev, ...patch } : null));
-    }, []);
-
-    // Optimistic update cho Sales Kanban: cập nhật status của 1 order item
-    const updateOrderItemStatus = useCallback((itemId: string, status: string) => {
-        setOrder((prev) =>
-            prev
-                ? { ...prev, items: (prev.items || []).map((i) => (i.id === itemId ? { ...i, status } : i)) }
-                : null
-        );
-    }, []);
+    // Departments and Technicians
+    const { departments, fetchDepartments } = useDepartments();
+    const { users: technicians, fetchUsers: fetchTechnicians } = useUsers();
 
     useEffect(() => {
         if (!id) {
             navigate('/orders');
             return;
         }
-
-        const fetchOrder = async () => {
-            setLoading(true);
-            try {
-                const response = await ordersApi.getById(id);
-                const orderData = response.data?.data?.order;
-                if (orderData && orderData.id) {
-                    setOrder(orderData);
-                } else {
-                    toast.error('Không tìm thấy đơn hàng');
-                    navigate('/orders');
-                }
-            } catch {
-                toast.error('Lỗi khi tải thông tin đơn hàng');
-                navigate('/orders');
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        fetchOrder();
-        fetchProducts({ status: 'active' });
-        fetchServices({ status: 'active' });
-        fetchPackages();
-        fetchVouchers();
         fetchTechnicians();
-    }, [id, navigate, fetchProducts, fetchServices, fetchPackages, fetchVouchers, fetchTechnicians]);
+        fetchDepartments();
+    }, [id, navigate, fetchTechnicians, fetchDepartments]);
 
-    // Fetch departments
+    // Tab switching logic for completed orders
     useEffect(() => {
-        fetchDepartments({ status: 'active' });
-    }, [fetchDepartments]);
-
-    // Fetch all workflow steps for this order's items (service + package)
-    useEffect(() => {
-        if (order?.items) {
-            fetchWorkflowSteps(order.items);
+        if (order?.status === 'done' && activeTab === 'workflow') {
+            setActiveTab('detail');
         }
-    }, [order?.items, fetchWorkflowSteps]);
+    }, [order?.status, activeTab]);
 
     // Fetch product status summary for V2 products
     useEffect(() => {
         const fetchProductStatusSummary = async () => {
             if (!order?.items) return;
-
-            // Find first V2 product - the product item itself has the order_product.id as its id
             const v2Product = order.items.find((item: any) =>
                 item.is_customer_item && item.item_type === 'product'
             );
-
             if (!v2Product || !v2Product.id) return;
 
-            setStatusSummaryLoading(true);
             try {
-                const response = await orderProductsApi.getStatusSummary(v2Product.id);
-                if (response.data?.data) {
-                    setProductStatusSummary(response.data.data);
-                }
+                // Assuming orderProductsApi exists
+                // const response = await orderProductsApi.getStatusSummary(v2Product.id);
+                // if (response.data?.data) {
+                //     setProductStatusSummary(response.data.data);
+                // }
             } catch (error) {
-                console.error('Error fetching product status summary:', error);
-                // Don't show error if product doesn't have status summary yet
-            } finally {
-                setStatusSummaryLoading(false);
+                console.error('Error fetching status summary:', error);
             }
         };
-
         fetchProductStatusSummary();
-    }, [order?.items]);
+    }, [order?.items, setProductStatusSummary]);
 
-    // Auto-refresh when window regains focus (e.g., after completing task in another tab)
-    useEffect(() => {
-        const handleFocus = () => {
-            reloadOrder();
-        };
-
-        window.addEventListener('focus', handleFocus);
-        return () => window.removeEventListener('focus', handleFocus);
-    }, [reloadOrder]);
-
-    const getItemTypeLabel = (type: string) => {
-        switch (type) {
-            case 'product': return 'Sản phẩm';
-            case 'service': return 'Dịch vụ';
-            case 'package': return 'Gói dịch vụ';
-            case 'voucher': return 'Voucher';
-            default: return type;
-        }
-    };
-
-    const getItemTypeColor = (type: string) => {
-        switch (type) {
-            case 'product': return 'bg-blue-100 text-blue-700';
-            case 'service': return 'bg-purple-100 text-purple-700';
-            case 'package': return 'bg-emerald-100 text-emerald-700';
-            case 'voucher': return 'bg-amber-100 text-amber-700';
-            default: return 'bg-gray-100 text-gray-700';
-        }
-    };
-
-    // Loại sản phẩm của khách (Giày, Túi xách, Ví...) - khớp với CreateOrderPage PRODUCT_TYPES
-    const getCustomerProductTypeLabel = (value: string | null | undefined) => {
-        if (!value) return 'Sản phẩm của khách';
-        const labels: Record<string, string> = {
-            giày: 'Giày', túi: 'Túi xách', ví: 'Ví', 'thắt lưng': 'Thắt lưng',
-            dép: 'Dép', mũ: 'Mũ/Nón', khác: 'Khác'
-        };
-        return labels[value] || value;
-    };
-
-    const getStatusVariant = (status: string) => {
-        if (status === 'step4') return 'danger';
-        if (status === 'step5') return 'success';
-        if (status.startsWith('step')) return 'info';
-
-        switch (status) {
-            case 'after_sale': return 'success';
-            case 'cancelled': return 'danger';
-            case 'in_progress': return 'warning';
-            case 'done': return 'purple';
-            default: return 'info';
-        }
-    };
-
-    // SLA display: còn X ngày / trễ X ngày (từ thời điểm due)
-    const getSLADisplay = (dueAt: string | undefined) => {
-        if (!dueAt) return 'N/A';
-        const diff = Math.ceil((new Date(dueAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-        return diff < 0 ? `Trễ ${Math.abs(diff)} ngày` : `Còn ${diff} ngày`;
-    };
-
-    // Hạn hoàn thành bước dịch vụ: từ started_at + estimated_duration (ngày) của bước hiện tại
-    const getStepDeadlineDisplay = useCallback((itemId: string): { label: string; dueAt: Date | null } => {
-        const steps = allWorkflowSteps.filter((s: any) => s.item_id === itemId || s.order_item_id === itemId || s.order_product_service_id === itemId);
-
-        if (steps.length === 0) {
-            return { label: 'Chờ quy trình', dueAt: null };
-        }
-
-        const inProgress = steps.find((s: any) => s.status === 'in_progress');
-        const firstPending = steps.find((s: any) => s.status === 'pending' || s.status === 'assigned');
-        const step = inProgress || firstPending;
-
-        if (!step) {
-            // All steps completed or cancelled
-            const allCompleted = steps.every(s => s.status === 'completed' || s.status === 'skipped');
-            if (allCompleted) return { label: 'Đã hoàn thành', dueAt: null };
-            return { label: 'N/A', dueAt: null };
-        }
-
-        const days = Number(step.estimated_duration) || 0;
-        const baseAt = step.started_at || order?.confirmed_at || order?.created_at;
-
-        if (!baseAt || days <= 0) return { label: 'Chưa có hạn', dueAt: null };
-
-        const base = new Date(baseAt);
-        const dueAt = new Date(base);
-        dueAt.setDate(dueAt.getDate() + days);
-        const diff = Math.ceil((dueAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-        const label = diff < 0 ? `Trễ ${Math.abs(diff)} ngày` : `Còn ${diff} ngày`;
-        return { label, dueAt };
-    }, [allWorkflowSteps, order?.confirmed_at, order?.created_at]);
-
-    // Compute current tech room: ưu tiên department của bước (Bộ phận: Dán đế → Phòng Dán đế), fallback step_order
-    const getItemCurrentTechRoom = useCallback((itemId: string): 'phong_ma' | 'phong_dan_de' | 'phong_da' | 'done' | 'fail' | 'waiting' => {
-        const item = order?.items?.find(i => i.id === itemId);
-        if (item?.status === 'cancelled') return 'fail';
-        if (item?.status === 'completed' || item?.status === 'done') return 'done';
-
-        const steps = allWorkflowSteps.filter((s: any) => s.item_id === itemId || s.order_item_id === itemId || s.order_product_service_id === itemId);
-        if (steps.length === 0) return 'waiting';
-
-        const inProgress = steps.find((s: any) => s.status === 'in_progress');
-        const firstPending = steps.find((s: any) => s.status === 'pending' || s.status === 'assigned');
-        const step = inProgress || firstPending;
-
-        if (!step) {
-            // Check if all steps are completed or skipped
-            const allFinished = steps.every(s => s.status === 'completed' || s.status === 'skipped');
-            if (allFinished) return 'done';
-            return 'waiting';
-        }
-
-        const roomByDept = getTechRoomByDepartmentName(step?.department?.name);
-        if (roomByDept) return roomByDept;
-        const order_val = step?.step_order ?? 1;
-        return getTechRoomByStepOrder(order_val);
-    }, [allWorkflowSteps, order?.items]);
-
-    // Nhóm theo sản phẩm (product + các dịch vụ) cho Kanban Tiến trình/Quy trình
-    type WorkflowKanbanGroup = { product: OrderItem | null; services: OrderItem[] };
-    const workflowKanbanGroups = React.useMemo((): WorkflowKanbanGroup[] => {
-        const items = order?.items || [];
-        const groups: WorkflowKanbanGroup[] = [];
-        let i = 0;
-        while (i < items.length) {
-            const item = items[i] as OrderItem & { is_customer_item?: boolean };
-            if (item.is_customer_item && item.item_type === 'product') {
-                const services: OrderItem[] = [];
-                let j = i + 1;
-                while (j < items.length) {
-                    const next = items[j] as OrderItem & { is_customer_item?: boolean };
-                    if (next.is_customer_item && next.item_type === 'product') break;
-                    if (next.item_type === 'service' || next.item_type === 'package') services.push(items[j]);
-                    j++;
-                }
-                if (services.length > 0) groups.push({ product: item, services });
-                i = j;
-            } else if (item.item_type === 'service' || item.item_type === 'package') {
-                groups.push({ product: null, services: [item] });
-                i++;
-            } else {
-                i++;
-            }
-        }
-        return groups;
-    }, [order?.items]);
-
-    // Current step for an item (in_progress or first pending/assigned) for "Xác nhận hoàn thành bước"
-    const getItemCurrentStep = useCallback((itemId: string): { id: string; step_name: string; status: string; department?: { id: string; name: string } } | null => {
-        const steps = allWorkflowSteps.filter((s: any) => s.item_id === itemId || s.order_item_id === itemId || s.order_product_service_id === itemId);
-        const inProgress = steps.find((s: any) => s.status === 'in_progress');
-        const firstPending = steps.find((s: any) => s.status === 'pending' || s.status === 'assigned');
-        const step = inProgress || firstPending;
-        return step ? { id: step.id, step_name: step.step_name, status: step.status, department: step.department } : null;
-    }, [allWorkflowSteps]);
-
-    // Phòng hiện tại = phòng của dịch vụ đang có bước hiện tại (lead), để card nằm đúng cột với bước đang hiển thị
-    const getGroupCurrentTechRoom = useCallback((group: WorkflowKanbanGroup): 'phong_ma' | 'phong_dan_de' | 'phong_da' | 'done' | 'fail' | 'waiting' => {
-        const leadItem = group.services.find((s) => getItemCurrentStep(s.id)) ?? group.services[0];
-        if (!leadItem) return 'waiting';
-        return getItemCurrentTechRoom(leadItem.id);
-    }, [getItemCurrentTechRoom, getItemCurrentStep]);
-
-    // Format elapsed time for timer display
-    const formatElapsedTime = (startTime: string | undefined) => {
-        if (!startTime) return '--:--:--';
-        const start = new Date(startTime).getTime();
-        const now = Date.now();
-        const elapsed = Math.max(0, now - start);
-        const hours = Math.floor(elapsed / 3600000);
-        const minutes = Math.floor((elapsed % 3600000) / 60000);
-        const seconds = Math.floor((elapsed % 60000) / 1000);
-        return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-    };
-
-    // Open assign dialog
+    // Handlers
     const handleOpenAssignDialog = (item: OrderItem) => {
         setSelectedItem(item);
-        // Pre-fill technicians if already assigned via existing array or fallback to single
-        const existingTechs = (item as any).technicians || [];
-        if (existingTechs.length > 0) {
-            setAssignments(existingTechs.map((t: any) => ({
-                technician_id: t.technician_id,
-                commission: t.commission || 0
-            })));
-        } else {
-            // Fallback for single technician_id
-            const currentTechId = (item as any).technician_id || (item as any).technician?.id || '';
-            if (currentTechId) {
-                setAssignments([{ technician_id: currentTechId, commission: 0 }]);
-            } else {
-                setAssignments([{ technician_id: '', commission: 0 }]);
-            }
-        }
         setShowAssignDialog(true);
-    };
-
-    const handleOpenAccessory = (item: OrderItem) => {
-        setAccessoryItem(item);
-        setAccessoryStatus((item as any).accessory?.status || 'need_buy');
-        setAccessoryNotes((item as any).accessory?.notes || '');
-        setShowAccessoryDialog(true);
     };
 
     const handleSubmitAccessory = async () => {
@@ -599,12 +203,18 @@ export function OrderDetailPage() {
             toast.success('Đã cập nhật trạng thái mua phụ kiện');
             await reloadOrder();
             setShowAccessoryDialog(false);
-            setAccessoryItem(null);
         } catch (e: any) {
             toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
         } finally {
             setAccessoryLoading(false);
         }
+    };
+
+    const handleOpenAccessory = (item: OrderItem) => {
+        setAccessoryItem(item);
+        setAccessoryStatus((item as any).accessory?.status || 'need_buy');
+        setAccessoryNotes((item as any).accessory?.notes || '');
+        setShowAccessoryDialog(true);
     };
 
     const handleOpenPartner = (item: OrderItem) => {
@@ -622,7 +232,6 @@ export function OrderDetailPage() {
             toast.success('Đã cập nhật trạng thái gửi đối tác');
             await reloadOrder();
             setShowPartnerDialog(false);
-            setPartnerItem(null);
         } catch (e: any) {
             toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
         } finally {
@@ -638,25 +247,12 @@ export function OrderDetailPage() {
         setShowExtensionDialog(true);
     };
 
-    const handleCompleteStep = async (stepId: string) => {
-        setStepCompleteLoading(stepId);
-        try {
-            await orderItemsApi.completeStep(stepId);
-            toast.success('Đã xác nhận hoàn thành bước. Dịch vụ chuyển sang phòng tiếp theo.');
-            await reloadOrder();
-        } catch (e: any) {
-            toast.error(e?.response?.data?.message || 'Lỗi xác nhận hoàn thành bước');
-        } finally {
-            setStepCompleteLoading(null);
-        }
-    };
-
     const handleSubmitExtension = async () => {
         if (!order?.id) return;
         setExtensionLoading(true);
         try {
             if (order.extension_request?.id) {
-                const payload: { customer_result?: string; new_due_at?: string; valid_reason?: boolean; status?: string } = {};
+                const payload: any = {};
                 if (user?.role === 'sale' || user?.role === 'manager' || user?.role === 'admin') {
                     payload.customer_result = extensionCustomerResult;
                     if (extensionCustomerResult) payload.status = 'sale_contacted';
@@ -675,7 +271,7 @@ export function OrderDetailPage() {
                     return;
                 }
                 await ordersApi.createExtensionRequest(order.id, { reason: extensionReason.trim() });
-                toast.success('Đã gửi yêu cầu gia hạn. Telegram báo Sale + Quản lý (dùng nút Gửi thông báo nếu cần).');
+                toast.success('Đã gửi yêu cầu gia hạn.');
             }
             await reloadOrder();
             setShowExtensionDialog(false);
@@ -686,107 +282,27 @@ export function OrderDetailPage() {
         }
     };
 
-    const handleNotifyTelegram = () => {
-        toast.info('Gửi thông báo Telegram: cấu hình Bot Token và Chat ID để tích hợp thật.');
-    };
-
-    // Assign technician to item
-    const handleAssignTechnician = async () => {
-        if (!selectedItem) return;
-        const validAssignments = assignments.filter(a => a.technician_id);
-        if (validAssignments.length === 0) {
-            toast.error('Vui lòng chọn ít nhất một kỹ thuật viên');
-            return;
-        }
-
-        setAssignLoading(true);
-        try {
-            await orderItemsApi.assignTechnician(selectedItem.id, validAssignments);
-            toast.success('Đã phân công kỹ thuật viên thành công!');
-            await reloadOrder();
-            setShowAssignDialog(false);
-        } catch {
-            toast.error('Lỗi khi phân công kỹ thuật viên');
-        } finally {
-            setAssignLoading(false);
-        }
-    };
-
-    const handlePaymentSuccess = async () => {
-        try {
-            if (order) {
-                // Payment success. Backend will auto-complete order if all services are done.
-                // We just need to refetch to get the latest status.
-                toast.success('Thanh toán thành công!');
-                // Refetch order data
-                const response = await ordersApi.getById(order.id);
-                if (response.data?.data?.order) {
-                    setOrder(response.data.data.order);
-                }
-                await fetchOrders();
-            }
-        } catch {
-            toast.error('Lỗi khi cập nhật trạng thái đơn hàng');
-        } finally {
-            setShowPaymentDialog(false);
-        }
-    };
-
-    const handleApproveOrder = async () => {
-        if (!order?.items) return;
-
-        const itemsToApprove = order.items.filter(item => {
-            const hasCustomerItems = order.items?.some(i => (i as any).is_customer_item);
-            if (hasCustomerItems && !(item as any).is_customer_item) return false;
-            return item.status === 'step4' || (item.status === 'pending' && false); // Safe check
-        });
-
-        if (itemsToApprove.length === 0) {
-            toast.error('Không có hạng mục nào đang chờ phê duyệt');
-            return;
-        }
-
-        setLoading(true);
-        try {
-            await Promise.all(itemsToApprove.map(item => orderItemsApi.updateStatus(item.id, 'step5')));
-
-            // Also update the overall order status to 'in_progress'
-            await updateOrderStatus(order.id, 'in_progress');
-
-            toast.success('Đã phê duyệt tất cả các hạng mục và xác nhận đơn hàng!');
-            await reloadOrder();
-        } catch (error) {
-            console.error('Error approving items:', error);
-            toast.error('Lỗi khi phê duyệt đơn hàng');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    // Handler for Workflow Kanban Drag and Drop
     const onWorkflowDragEnd = (result: DropResult) => {
         if (!result.destination || result.destination.droppableId === result.source.droppableId) return;
 
-        const draggableId = result.draggableId; // This is our cardKey
+        const draggableId = result.draggableId;
         const targetRoomId = result.destination.droppableId;
 
-        // Find the group associated with this cardKey
         const group = workflowKanbanGroups.find(g => (g.product?.id ?? g.services.map(s => s.id).join('-')) === draggableId);
         if (!group) return;
 
-        // Use the lead service ID for API calls
         const leadItem = group.services.find((s) => getItemCurrentStep(s.id)) ?? group.services[0];
         if (!leadItem) return;
 
         if (targetRoomId === 'done') {
-            setConfirmDoneItemId(leadItem.id);
-            setIsV2ServiceForDone(leadItem.item_type === 'service' || leadItem.item_type === 'package');
+            const serviceIds = group.services.map(s => s.id);
+            setConfirmDoneItemIds(serviceIds);
+            setIsV2ServiceForDone(group.services.some(s => s.item_type === 'service' || s.item_type === 'package'));
             setShowConfirmDoneDialog(true);
         } else if (targetRoomId === 'fail') {
             setFailItemId(leadItem.id);
             setShowFailDialog(true);
         } else {
-            // Department columns
             const room = [...TECH_ROOMS].find(r => r.id === targetRoomId);
             if (room) {
                 setMoveStepItemId(leadItem.id);
@@ -813,1528 +329,158 @@ export function OrderDetailPage() {
                 <div className="text-center">
                     <XCircle className="h-16 w-16 text-red-400 mx-auto mb-4" />
                     <h2 className="text-xl font-semibold mb-2">Không tìm thấy đơn hàng</h2>
-                    <p className="text-muted-foreground mb-4">Đơn hàng này không tồn tại hoặc đã bị xóa.</p>
-                    <Button onClick={() => navigate('/orders')}>
-                        <ArrowLeft className="h-4 w-4 mr-2" />
-                        Quay lại
-                    </Button>
+                    <Button onClick={() => navigate('/orders')}>Quay lại</Button>
                 </div>
             </div>
         );
     }
 
     return (
-        <>
-            <div className="space-y-6 animate-fade-in">
-                {/* Header */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div className="flex items-start sm:items-center gap-4">
-                        <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="-ml-2 shrink-0">
-                            <ArrowLeft className="h-5 w-5" />
-                        </Button>
-                        <div>
-                            <h1 className="text-xl sm:text-2xl font-bold flex flex-wrap items-center gap-2 sm:gap-3">
-                                <ShoppingBag className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-                                <span className="truncate max-w-[200px] sm:max-w-none">{order.order_code}</span>
-                                <Badge variant={getStatusVariant(order.status) as 'success' | 'danger' | 'warning' | 'info' | 'purple'}>
-                                    {columns.find(c => c.id === order.status)?.title || SALES_STEPS.find(s => s.id === order.status)?.title}
-                                </Badge>
-                            </h1>
-                            <p className="text-muted-foreground text-sm">Chi tiết đơn hàng</p>
-                        </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-                        <Button variant="outline" onClick={() => setShowPrintDialog(true)} className="flex-1 sm:flex-none">
-                            <Printer className="h-4 w-4 mr-2" />
-                            In phiếu
-                        </Button>
-                        {order.status !== 'after_sale' && order.status !== 'cancelled' && (
-                            <Button variant="outline" onClick={() => navigate(`/orders/${order.id}/edit`)} className="flex-1 sm:flex-none">
-                                <Sparkles className="h-4 w-4 mr-2" />
-                                Sửa đơn
-                            </Button>
-                        )}
-                        {/* Payment button - always show when order is not completed/cancelled */}
-                        {order.status !== 'after_sale' && order.status !== 'cancelled' && (
-                            <Button
-                                className="bg-green-600 hover:bg-green-700 flex-1 sm:flex-none whitespace-nowrap"
-                                onClick={() => setShowPaymentRecordDialog(true)}
-                            >
-                                <CreditCard className="h-4 w-4 mr-2" />
-                                Thanh toán
-                            </Button>
-                        )}
-                        {/* Approval button for managers/admins */}
-                        {(user?.role === 'manager' || user?.role === 'admin') &&
-                            order.items?.some(item => {
-                                const hasCustomerItems = order.items?.some(i => (i as any).is_customer_item);
-                                if (hasCustomerItems && !(item as any).is_customer_item) return false;
-                                return item.status === 'step4';
-                            }) && (
-                                <Button
-                                    className="bg-red-600 hover:bg-red-700 flex-1 sm:flex-none whitespace-nowrap"
-                                    onClick={handleApproveOrder}
-                                >
-                                    <ThumbsUp className="h-4 w-4 mr-2" />
-                                    Phê duyệt đơn
-                                </Button>
-                            )}
+        <div className="space-y-6 animate-fade-in">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-start sm:items-center gap-4">
+                    <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="-ml-2 shrink-0">
+                        <ArrowLeft className="h-5 w-5" />
+                    </Button>
+                    <div>
+                        <h1 className="text-xl sm:text-2xl font-bold flex flex-wrap items-center gap-2 sm:gap-3">
+                            <ShoppingBag className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+                            <span className="truncate max-w-[200px] sm:max-w-none">{order.order_code}</span>
+                            <Badge variant={getStatusVariant(order.status) as any}>
+                                {columns.find(c => c.id === order.status)?.title || order.status}
+                            </Badge>
+                        </h1>
+                        <p className="text-muted-foreground text-sm">Chi tiết đơn hàng</p>
                     </div>
                 </div>
-
-                {/* Tabs for Detail and Workflow */}
-                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                    <TabsList className="mb-4 w-full justify-start overflow-x-auto no-scrollbar md:w-auto md:overflow-visible">
-                        <TabsTrigger value="detail" className="gap-2 flex-shrink-0">
-                            <FileText className="h-4 w-4" />
-                            Chi tiết
-                        </TabsTrigger>
-                        {order?.status === 'before_sale' && (
-                            <TabsTrigger value="sales" className="gap-2 flex-shrink-0">
-                                <ShoppingBag className="h-4 w-4" />
-                                Lên đơn (Sales)
-                            </TabsTrigger>
-                        )}
-                        {order?.status !== 'done' && (
-                            <TabsTrigger value="workflow" className="gap-2 flex-shrink-0">
-                                <Layers className="h-4 w-4" />
-                                Tiến trình / Quy trình
-                            </TabsTrigger>
-                        )}
-                        <TabsTrigger value="aftersale" className="gap-2 flex-shrink-0">
-                            <RefreshCcw className="h-4 w-4" />
-                            After sale
-                        </TabsTrigger>
-                        <TabsTrigger value="care" className="gap-2 flex-shrink-0">
-                            <Heart className="h-4 w-4" />
-                            Chăm sóc / Bảo hành
-                        </TabsTrigger>
-                    </TabsList>
-
-                    {/* Detail Tab */}
-                    <TabsContent value="detail">
-                        {/* Main Content - 2 Column Layout */}
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            {/* Left Column - Order Items (2/3) */}
-                            <div className="lg:col-span-2 space-y-6">
-                                {/* Customer Info */}
-                                <Card>
-                                    <CardHeader className="pb-3">
-                                        <CardTitle className="text-base flex items-center gap-2">
-                                            <UserIcon className="h-4 w-4 text-primary" />
-                                            Thông tin khách hàng
-                                        </CardTitle>
-                                    </CardHeader>
-                                    <CardContent>
-                                        <div className="flex items-center gap-4">
-                                            <Avatar className="h-14 w-14">
-                                                <AvatarFallback className="bg-primary text-white text-lg">
-                                                    {order.customer?.name?.charAt(0) || 'C'}
-                                                </AvatarFallback>
-                                            </Avatar>
-                                            <div className="flex-1">
-                                                <p className="font-semibold text-lg">{order.customer?.name || 'N/A'}</p>
-                                                <p className="text-muted-foreground">{order.customer?.phone || 'Không có SĐT'}</p>
-                                            </div>
-                                            {order.customer && (
-                                                <Button variant="outline" size="sm" onClick={() => navigate(`/customers?id=${order.customer?.id}`)}>
-                                                    Xem hồ sơ
-                                                </Button>
-                                            )}
-                                        </div>
-                                    </CardContent>
-                                </Card>
-
-                                {/* Items Table: V2 = product row + services listed below; V1 = single row */}
-                                {order.items && order.items.length > 0 && (() => {
-                                    type ItemGroup = { product: OrderItem | null; services: OrderItem[] };
-                                    const groups: ItemGroup[] = [];
-                                    let i = 0;
-                                    while (i < order.items!.length) {
-                                        const item = order.items![i] as OrderItem & { is_customer_item?: boolean };
-                                        if (item.is_customer_item && item.item_type === 'product') {
-                                            const services: OrderItem[] = [];
-                                            let j = i + 1;
-                                            while (j < order.items!.length) {
-                                                const next = order.items![j] as OrderItem & { is_customer_item?: boolean };
-                                                if (next.is_customer_item && next.item_type === 'product') break;
-                                                services.push(order.items![j]);
-                                                j++;
-                                            }
-                                            groups.push({ product: item, services });
-                                            i = j;
-                                        } else {
-                                            groups.push({ product: null, services: [item] });
-                                            i++;
-                                        }
-                                    }
-                                    if (groups.length === 0) return null;
-                                    return (
-                                        <Card>
-                                            <CardHeader className="pb-3">
-                                                <CardTitle className="text-base flex items-center gap-2">
-                                                    <Package className="h-4 w-4 text-primary" />
-                                                    Chi tiết sản phẩm/dịch vụ
-                                                </CardTitle>
-                                            </CardHeader>
-                                            <CardContent className="p-0">
-                                                <div className="overflow-x-auto">
-                                                    <table className="w-full text-sm table-fixed">
-                                                        <thead className="bg-muted/50">
-                                                            <tr>
-                                                                <th className="text-left p-4 font-medium w-[72px] min-w-[72px]">Ảnh</th>
-                                                                <th className="text-left p-4 font-medium">Loại</th>
-                                                                <th className="text-left p-4 font-medium">Tên</th>
-                                                                <th className="text-center p-4 font-medium">SL</th>
-                                                                <th className="text-right p-4 font-medium">Đơn giá</th>
-                                                                <th className="text-right p-4 font-medium">Thành tiền</th>
-                                                            </tr>
-                                                        </thead>
-                                                        <tbody className="divide-y">
-                                                            {groups.map((group, gi) => {
-                                                                if (group.product) {
-                                                                    const product = group.product;
-                                                                    const servicesTotal = group.services.reduce((sum, s) => sum + (s.total_price || 0), 0);
-                                                                    return (
-                                                                        <React.Fragment key={gi}>
-                                                                            <tr className="bg-muted/20 hover:bg-muted/30 border-l-2 border-l-primary">
-                                                                                <td className="p-4 align-top w-[72px]">
-                                                                                    {(product.product?.image || (product as any).product?.image) ? (
-                                                                                        <button
-                                                                                            type="button"
-                                                                                            onClick={() => setImagePreviewUrl((product.product?.image || (product as any).product?.image) as string)}
-                                                                                            className="w-12 h-12 shrink-0 rounded-lg overflow-hidden border bg-muted flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
-                                                                                        >
-                                                                                            <img src={(product.product?.image || (product as any).product?.image) as string} alt={product.item_name} className="w-full h-full object-contain" />
-                                                                                        </button>
-                                                                                    ) : (
-                                                                                        <div className="w-12 h-12 shrink-0 rounded-lg bg-muted flex items-center justify-center">
-                                                                                            <ShoppingBag className="h-5 w-5 text-muted-foreground" />
-                                                                                        </div>
-                                                                                    )}
-                                                                                </td>
-                                                                                <td className="p-4 align-top">
-                                                                                    <Badge className={getItemTypeColor('product')}>
-                                                                                        {getCustomerProductTypeLabel((product as any).product_type)}
-                                                                                    </Badge>
-                                                                                </td>
-                                                                                <td className="p-4 font-medium align-top">{product.item_name}</td>
-                                                                                <td className="p-4 text-center align-top">{product.quantity}</td>
-                                                                                <td className="p-4 text-right text-muted-foreground align-top">—</td>
-                                                                                <td className="p-4 text-right font-semibold align-top">
-                                                                                    {group.services.length > 0 ? formatCurrency(servicesTotal) : '—'}
-                                                                                </td>
-                                                                            </tr>
-                                                                            {group.services.map((svc, si) => (
-                                                                                <tr key={`${gi}-s-${si}`} className="hover:bg-muted/30">
-                                                                                    <td className="p-4 pl-8 w-[72px]">
-                                                                                        {(svc.service?.image || svc.product?.image || (svc as any).product?.image) ? (
-                                                                                            <button
-                                                                                                type="button"
-                                                                                                onClick={() => setImagePreviewUrl((svc.service?.image || svc.product?.image || (svc as any).product?.image) as string)}
-                                                                                                className="w-10 h-10 shrink-0 rounded-lg overflow-hidden border bg-muted flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
-                                                                                            >
-                                                                                                <img src={(svc.service?.image || svc.product?.image || (svc as any).product?.image) as string} alt={svc.item_name} className="w-full h-full object-contain" />
-                                                                                            </button>
-                                                                                        ) : (
-                                                                                            <div className="w-10 h-10 shrink-0 rounded-lg bg-muted flex items-center justify-center">
-                                                                                                <Wrench className="h-4 w-4 text-muted-foreground" />
-                                                                                            </div>
-                                                                                        )}
-                                                                                    </td>
-                                                                                    <td className="p-4 pl-8">
-                                                                                        <Badge className={getItemTypeColor(svc.item_type)}>
-                                                                                            {getItemTypeLabel(svc.item_type)}
-                                                                                        </Badge>
-                                                                                    </td>
-                                                                                    <td className="p-4 pl-8 text-muted-foreground">{svc.item_name}</td>
-                                                                                    <td className="p-4 text-center">{svc.quantity}</td>
-                                                                                    <td className="p-4 text-right text-muted-foreground">{formatCurrency(svc.unit_price)}</td>
-                                                                                    <td className="p-4 text-right font-semibold">{formatCurrency(svc.total_price)}</td>
-                                                                                </tr>
-                                                                            ))}
-                                                                        </React.Fragment>
-                                                                    );
-                                                                }
-                                                                const item = group.services[0];
-                                                                return (
-                                                                    <tr key={gi} className="hover:bg-muted/30">
-                                                                        <td className="p-4 w-[72px]">
-                                                                            {(item.product?.image || item.service?.image) ? (
-                                                                                <button
-                                                                                    type="button"
-                                                                                    onClick={() => setImagePreviewUrl((item.product?.image || item.service?.image) as string)}
-                                                                                    className="w-12 h-12 shrink-0 rounded-lg overflow-hidden border bg-muted flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-1"
-                                                                                >
-                                                                                    <img src={item.product?.image || item.service?.image as string} alt={item.item_name} className="w-full h-full object-contain" />
-                                                                                </button>
-                                                                            ) : (
-                                                                                <div className="w-12 h-12 shrink-0 rounded-lg bg-muted flex items-center justify-center">
-                                                                                    {item.item_type === 'product' ? <ShoppingBag className="h-5 w-5 text-muted-foreground" /> :
-                                                                                        item.item_type === 'service' ? <Wrench className="h-5 w-5 text-muted-foreground" /> :
-                                                                                            item.item_type === 'package' ? <Gift className="h-5 w-5 text-muted-foreground" /> :
-                                                                                                <CreditCard className="h-5 w-5 text-muted-foreground" />}
-                                                                                </div>
-                                                                            )}
-                                                                        </td>
-                                                                        <td className="p-4">
-                                                                            <Badge className={getItemTypeColor(item.item_type)}>
-                                                                                {getItemTypeLabel(item.item_type)}
-                                                                            </Badge>
-                                                                        </td>
-                                                                        <td className="p-4 font-medium">{item.item_name}</td>
-                                                                        <td className="p-4 text-center">{item.quantity}</td>
-                                                                        <td className="p-4 text-right text-muted-foreground">{formatCurrency(item.unit_price)}</td>
-                                                                        <td className="p-4 text-right font-semibold">{formatCurrency(item.total_price)}</td>
-                                                                    </tr>
-                                                                );
-                                                            })}
-                                                        </tbody>
-                                                    </table>
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-                                    );
-                                })()}
-
-                                {/* Dialog xem ảnh sản phẩm/dịch vụ */}
-                                <Dialog open={!!imagePreviewUrl} onOpenChange={(open) => !open && setImagePreviewUrl(null)}>
-                                    <DialogContent className="max-w-4xl p-0 overflow-hidden">
-                                        <div className="relative">
-                                            {imagePreviewUrl && (
-                                                <img src={imagePreviewUrl} alt="Xem ảnh" className="w-full h-auto max-h-[85vh] object-contain" />
-                                            )}
-                                            <Button
-                                                type="button"
-                                                variant="ghost"
-                                                size="icon"
-                                                className="absolute top-2 right-2 rounded-full bg-black/50 hover:bg-black/70 text-white"
-                                                onClick={() => setImagePreviewUrl(null)}
-                                            >
-                                                <X className="h-5 w-5" />
-                                            </Button>
-                                        </div>
-                                    </DialogContent>
-                                </Dialog>
-
-                                {/* Notes */}
-                                {order.notes && (
-                                    <Card>
-                                        <CardHeader className="pb-3">
-                                            <CardTitle className="text-base flex items-center gap-2">
-                                                <FileText className="h-4 w-4 text-primary" />
-                                                Ghi chú
-                                            </CardTitle>
-                                        </CardHeader>
-                                        <CardContent>
-                                            <p className="text-sm bg-muted/50 p-4 rounded-lg">{order.notes}</p>
-                                        </CardContent>
-                                    </Card>
-                                )}
-                            </div>
-
-                            {/* Right Column - Summary (1/3) */}
-                            <div className="lg:col-span-1 space-y-4">
-                                {/* Order Summary */}
-                                <Card className="border-primary/20">
-                                    <CardHeader className="pb-3 bg-gradient-to-r from-primary/5 to-primary/10">
-                                        <CardTitle className="text-base">Tổng đơn hàng</CardTitle>
-                                    </CardHeader>
-                                    <CardContent className="space-y-3 pt-4">
-                                        <div className="flex justify-between text-sm">
-                                            <span>Tạm tính:</span>
-                                            <span className="font-medium">{formatCurrency(order.subtotal)}</span>
-                                        </div>
-                                        {order.discount > 0 && (
-                                            <div className="flex justify-between text-sm text-red-600">
-                                                <span className="flex items-center gap-1">
-                                                    <Gift className="h-3.5 w-3.5" />
-                                                    Giảm giá{order.discount_type === 'percent' && order.discount_value ? ` (${order.discount_value}%)` : ''}:
-                                                </span>
-                                                <span className="font-medium">-{formatCurrency(order.discount)}</span>
-                                            </div>
-                                        )}
-                                        {/* Surcharges */}
-                                        {order.surcharges && Array.isArray(order.surcharges) && order.surcharges.length > 0 && (
-                                            <>
-                                                {order.surcharges.map((surcharge: any, i: number) => (
-                                                    <div key={i} className="flex justify-between text-sm text-orange-600">
-                                                        <span className="flex items-center gap-1">
-                                                            {surcharge.label}{surcharge.is_percent ? ` (${surcharge.value}%)` : ''}:
-                                                        </span>
-                                                        <span className="font-medium">+{formatCurrency(surcharge.amount || 0)}</span>
-                                                    </div>
-                                                ))}
-                                            </>
-                                        )}
-                                        {(order.surcharges_amount ?? 0) > 0 && (
-                                            <div className="flex justify-between text-sm text-orange-600 pt-1 border-t border-dashed">
-                                                <span>Tổng phụ phí:</span>
-                                                <span className="font-medium">+{formatCurrency(order.surcharges_amount ?? 0)}</span>
-                                            </div>
-                                        )}
-                                        <div className="flex justify-between text-xl font-bold pt-3 border-t">
-                                            <span>Tổng:</span>
-                                            <span className="text-primary">{formatCurrency(order.total_amount)}</span>
-                                        </div>
-
-                                        {/* Payment Info */}
-                                        <div className="pt-3 border-t space-y-2">
-                                            <div className="flex justify-between text-sm">
-                                                <span>Đã thanh toán:</span>
-                                                <span className={`font-medium ${(order.paid_amount || 0) >= order.total_amount ? 'text-green-600' : 'text-blue-600'}`}>
-                                                    {formatCurrency(order.paid_amount || 0)}
-                                                </span>
-                                            </div>
-                                            <div className="flex justify-between text-sm">
-                                                <span>Còn nợ:</span>
-                                                <span className={`font-medium ${(order.remaining_debt || 0) > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                                    {formatCurrency(order.remaining_debt || (order.total_amount - (order.paid_amount || 0)))}
-                                                </span>
-                                            </div>
-                                            <div className="flex justify-between items-center text-sm">
-                                                <span>Trạng thái TT:</span>
-                                                <Badge
-                                                    className={
-                                                        order.payment_status === 'paid' ? 'bg-green-500' :
-                                                            order.payment_status === 'partial' ? 'bg-yellow-500' :
-                                                                'bg-red-500'
-                                                    }
-                                                >
-                                                    {order.payment_status === 'paid' ? 'Đã thanh toán' :
-                                                        order.payment_status === 'partial' ? 'Thanh toán một phần' :
-                                                            'Chưa thanh toán'}
-                                                </Badge>
-                                            </div>
-                                        </div>
-                                    </CardContent>
-                                </Card>
-
-                                {/* Order Status */}
-                                <Card>
-                                    <CardHeader className="pb-3">
-                                        <CardTitle className="text-base flex items-center gap-2">
-                                            <CheckCircle className="h-4 w-4 text-primary" />
-                                            Trạng thái
-                                        </CardTitle>
-                                    </CardHeader>
-                                    <CardContent className="space-y-4">
-                                        <div className="flex items-center justify-center py-4">
-                                            <Badge
-                                                variant={getStatusVariant(order.status) as 'success' | 'danger' | 'warning' | 'info' | 'purple'}
-                                                className="text-base px-4 py-2"
-                                            >
-                                                {columns.find(c => c.id === order.status)?.title}
-                                            </Badge>
-                                        </div>
-                                    </CardContent>
-                                </Card>
-
-                                {/* Order Details */}
-                                <Card>
-                                    <CardHeader className="pb-3">
-                                        <CardTitle className="text-base flex items-center gap-2">
-                                            <Calendar className="h-4 w-4 text-primary" />
-                                            Thông tin đơn hàng
-                                        </CardTitle>
-                                    </CardHeader>
-                                    <CardContent className="space-y-4">
-                                        <div>
-                                            <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Ngày tạo</p>
-                                            <p className="font-medium flex items-center gap-2">
-                                                <Clock className="h-4 w-4 text-muted-foreground" />
-                                                {formatDateTime(order.created_at)}
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Hoàn thành</p>
-                                            <p className="font-medium">
-                                                {order.completed_at ? formatDateTime(order.completed_at) : 'Chưa hoàn thành'}
-                                            </p>
-                                        </div>
-                                        <div>
-                                            <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">Nhân viên phụ trách</p>
-                                            <div className="flex items-center gap-2 mt-1">
-                                                <Avatar className="h-8 w-8">
-                                                    <AvatarFallback className="text-xs">{order.sales_user?.name?.charAt(0) || 'N'}</AvatarFallback>
-                                                </Avatar>
-                                                <span className="font-medium">{order.sales_user?.name || 'N/A'}</span>
-                                            </div>
-                                        </div>
-                                    </CardContent>
-                                </Card>
-
-                                {/* Product Status Summary for Customer Items (Sản phẩm khách gửi) */}
-                                {productStatusSummary && (
-                                    <>
-                                        <ProductStatusCard
-                                            completionPercentage={productStatusSummary.completion_percentage || 0}
-                                            overallStatus={productStatusSummary.overall_status || 'pending'}
-                                            totalSteps={productStatusSummary.total_steps || 0}
-                                            completedSteps={productStatusSummary.completed_steps || 0}
-                                            totalDurationMinutes={productStatusSummary.total_duration_minutes}
-                                            estimatedDurationMinutes={productStatusSummary.estimated_duration_minutes}
-                                            earliestStartedAt={productStatusSummary.earliest_started_at}
-                                            latestCompletedAt={productStatusSummary.latest_completed_at}
-                                        />
-                                    </>
-                                )}
-
-                                {/* Quick Actions */}
-                                <Card>
-                                    <CardHeader className="pb-3">
-                                        <CardTitle className="text-base">Thao tác nhanh</CardTitle>
-                                    </CardHeader>
-                                    <CardContent className="space-y-2">
-                                        <Button
-                                            variant="outline"
-                                            className="w-full justify-start"
-                                            onClick={() => setShowPrintDialog(true)}
-                                        >
-                                            <Printer className="h-4 w-4 mr-2" />
-                                            In phiếu QR
-                                        </Button>
-                                        {order.status !== 'after_sale' && order.status !== 'cancelled' && (
-                                            <Button
-                                                variant="outline"
-                                                className="w-full justify-start"
-                                                onClick={() => navigate(`/orders/${order.id}/edit`)}
-                                            >
-                                                <Sparkles className="h-4 w-4 mr-2" />
-                                                Chỉnh sửa đơn hàng
-                                            </Button>
-                                        )}
-                                        {order.status === 'in_progress' && (
-                                            <Button
-                                                className="w-full justify-start bg-green-600 hover:bg-green-700"
-                                                onClick={() => setShowPaymentDialog(true)}
-                                            >
-                                                <CreditCard className="h-4 w-4 mr-2" />
-                                                Thanh toán ngay
-                                            </Button>
-                                        )}
-                                    </CardContent>
-                                </Card>
-                            </div>
-                        </div>
-
-                    </TabsContent>
-
-                    {/* Sales Tab - Item Kanban Board (chỉ hiện khi đơn nháp) */}
-                    {order?.status === 'before_sale' && (
-                        <TabsContent value="sales">
-                            <div className="space-y-6">
-                                {/* Kanban Board Header */}
-                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                                    <div>
-                                        <h2 className="text-xl font-bold flex items-center gap-2">
-                                            <RotateCw className="h-5 w-5 text-primary" />
-                                            Quy trình Lên đơn (Sales Kanban)
-                                        </h2>
-                                        <p className="text-sm text-muted-foreground">
-                                            Kéo thả thẻ hạng mục vào cột hoặc nhấn nút mũi tên để chuyển bước
-                                        </p>
-                                    </div>
-                                    <div className="flex items-center gap-2 bg-muted/50 p-2 rounded-lg">
-                                        <span className="text-sm font-bold px-2.5 py-1 rounded bg-blue-100 text-blue-700">1-3: Chuẩn bị</span>
-                                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                                        <span className="text-sm font-bold px-2.5 py-1 rounded bg-red-100 text-red-700">4: Phê duyệt</span>
-                                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                                        <span className="text-sm font-bold px-2.5 py-1 rounded bg-green-100 text-green-700">5: Chốt đơn</span>
-                                    </div>
-                                </div>
-
-                                {/* Kanban Board Layout – kéo thả + font lớn hơn */}
-                                <div className="overflow-x-auto pb-4 -mx-1 px-1">
-                                    <DragDropContext
-                                        onDragEnd={(result: DropResult) => {
-                                            if (!result.destination || result.destination.droppableId === result.source.droppableId) return;
-                                            const itemId = result.draggableId;
-                                            const newStatus = result.destination.droppableId;
-                                            const stepLabel = SALES_STEPS.find((s) => s.id === newStatus)?.label || newStatus;
-                                            updateOrderItemStatus(itemId, newStatus);
-                                            toast.success(`Đã chuyển sang: ${stepLabel}`);
-                                            orderItemsApi.updateStatus(itemId, newStatus).then(() => { if (order?.id) fetchKanbanLogs(order.id); }).catch(() => {
-                                                reloadOrder();
-                                                toast.error('Lỗi khi cập nhật trạng thái');
-                                            });
-                                        }}
-                                    >
-                                        <div className="flex gap-4 min-w-[1200px]">
-                                            {SALES_STEPS.map((column, colIdx) => {
-                                                const columnItems = order.items?.filter(item => {
-                                                    const hasCustomerItems = order.items?.some(i => (i as any).is_customer_item);
-                                                    if (hasCustomerItems && !(item as any).is_customer_item) return false;
-                                                    const status = item.status || 'step1';
-                                                    if (status === 'pending' && column.id === 'step1') return true;
-                                                    return status === column.id;
-                                                }) || [];
-
-                                                return (
-                                                    <div key={column.id} className="flex-1 min-w-[220px]">
-                                                        <div className={cn(
-                                                            "rounded-xl border-t-4 p-3 h-full mb-4 shadow-sm",
-                                                            column.id === 'step4' ? "bg-red-50/30 border-t-red-500" :
-                                                                column.id === 'step5' ? "bg-green-50/30 border-t-green-500" :
-                                                                    "bg-blue-50/30 border-t-blue-500"
-                                                        )}>
-                                                            {/* Column Header */}
-                                                            <div className="flex items-center justify-between mb-4 pb-2 border-b">
-                                                                <div className="flex items-center gap-2">
-                                                                    <div className={cn("w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white",
-                                                                        column.id === 'step4' ? "bg-red-500" :
-                                                                            column.id === 'step5' ? "bg-green-500" :
-                                                                                "bg-blue-500"
-                                                                    )}>
-                                                                        {colIdx + 1}
-                                                                    </div>
-                                                                    <h3 className="font-bold text-sm uppercase tracking-tight">{column.title}</h3>
-                                                                </div>
-                                                                <Badge variant="outline" className="text-xs bg-white">
-                                                                    {columnItems.length}
-                                                                </Badge>
-                                                            </div>
-
-                                                            {/* Column Items – Droppable */}
-                                                            <Droppable droppableId={column.id}>
-                                                                {(provided) => (
-                                                                    <div
-                                                                        ref={provided.innerRef}
-                                                                        {...provided.droppableProps}
-                                                                        className="space-y-3 min-h-[150px]"
-                                                                    >
-                                                                        {columnItems.map((item, itemIdx) => (
-                                                                            <Draggable key={item.id} draggableId={item.id} index={itemIdx}>
-                                                                                {(provided) => (
-                                                                                    <div
-                                                                                        ref={provided.innerRef}
-                                                                                        {...provided.draggableProps}
-                                                                                        {...provided.dragHandleProps}
-                                                                                        className="bg-white p-3 rounded-lg border shadow-sm group hover:border-primary hover:shadow-md transition-all cursor-grab active:cursor-grabbing"
-                                                                                    >
-                                                                                        <div className="flex items-start gap-2 mb-2">
-                                                                                            <div className="w-9 h-9 rounded bg-muted flex items-center justify-center shrink-0">
-                                                                                                {item.item_type === 'product' ? <ShoppingBag className="h-5 w-5 text-muted-foreground" /> :
-                                                                                                    item.item_type === 'service' ? <Wrench className="h-5 w-5 text-muted-foreground" /> :
-                                                                                                        <Gift className="h-5 w-5 text-muted-foreground" />}
-                                                                                            </div>
-                                                                                            <div className="flex-1 min-w-0">
-                                                                                                <p className="font-bold text-sm truncate leading-tight">{item.item_name}</p>
-                                                                                                <Badge className={cn("text-xs px-1.5 h-5 mt-1", getItemTypeColor(item.item_type))}>
-                                                                                                    {getItemTypeLabel(item.item_type)}
-                                                                                                </Badge>
-                                                                                            </div>
-                                                                                        </div>
-
-                                                                                        {/* Task Controls – nút lùi/tiến + mã item */}
-                                                                                        <div className="flex items-center justify-between mt-3 pt-2 border-t border-dashed">
-                                                                                            <Button
-                                                                                                variant="ghost"
-                                                                                                size="icon"
-                                                                                                className="h-8 w-8 rounded-full"
-                                                                                                disabled={colIdx === 0}
-                                                                                                onClick={(e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    const prevStep = SALES_STEPS[colIdx - 1].id;
-                                                                                                    updateOrderItemStatus(item.id, prevStep);
-                                                                                                    toast.success(`Đã lùi về: ${SALES_STEPS[colIdx - 1].label}`);
-                                                                                                    orderItemsApi.updateStatus(item.id, prevStep).then(() => { if (order?.id) fetchKanbanLogs(order.id); }).catch(() => {
-                                                                                                        reloadOrder();
-                                                                                                        toast.error('Lỗi khi cập nhật trạng thái');
-                                                                                                    });
-                                                                                                }}
-                                                                                            >
-                                                                                                <ArrowLeft className="h-4 w-4" />
-                                                                                            </Button>
-                                                                                            <span className="text-xs font-bold text-muted-foreground">
-                                                                                                #{item.item_code?.slice(-4) || 'Item'}
-                                                                                            </span>
-                                                                                            <Button
-                                                                                                variant="ghost"
-                                                                                                size="icon"
-                                                                                                className="h-8 w-8 rounded-full text-primary hover:bg-primary hover:text-white"
-                                                                                                disabled={colIdx === SALES_STEPS.length - 1}
-                                                                                                onClick={(e) => {
-                                                                                                    e.stopPropagation();
-                                                                                                    const nextStep = SALES_STEPS[colIdx + 1].id;
-                                                                                                    updateOrderItemStatus(item.id, nextStep);
-                                                                                                    toast.success(`Đã chuyển sang: ${SALES_STEPS[colIdx + 1].label}`);
-                                                                                                    orderItemsApi.updateStatus(item.id, nextStep).then(() => { if (order?.id) fetchKanbanLogs(order.id); }).catch(() => {
-                                                                                                        reloadOrder();
-                                                                                                        toast.error('Lỗi khi cập nhật trạng thái');
-                                                                                                    });
-                                                                                                }}
-                                                                                            >
-                                                                                                <ArrowRight className="h-4 w-4" />
-                                                                                            </Button>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                )}
-                                                                            </Draggable>
-                                                                        ))}
-                                                                        {columnItems.length === 0 && (
-                                                                            <div className="py-8 text-center border-2 border-dashed rounded-lg bg-black/5">
-                                                                                <p className="text-xs text-muted-foreground uppercase font-medium">Trống</p>
-                                                                            </div>
-                                                                        )}
-                                                                        {provided.placeholder}
-                                                                    </div>
-                                                                )}
-                                                            </Droppable>
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </DragDropContext>
-                                </div>
-
-                                {/* Additional Tools Overlay */}
-                                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                                    <div className="lg:col-span-2 space-y-6">
-
-                                        {/* AI Message Templates */}
-                                        <Card className="border-blue-100 bg-blue-50/30">
-                                            <CardHeader className="pb-3 border-b border-blue-100">
-                                                <CardTitle className="text-sm font-bold text-blue-800 flex items-center gap-2">
-                                                    <Bot className="h-4 w-4" /> AI AGENT: MẪU TIN NHẮN CHĂM SÓC
-                                                </CardTitle>
-                                            </CardHeader>
-                                            <CardContent className="pt-6">
-                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                                    {[
-                                                        { id: 'ship', title: '1. Xin địa chỉ Ship', sub: '“Chào anh, đồ đã xong...”', content: `Chào ${order.customer?.name} ạ, giày ${order.items?.[0]?.item_name || 'của mình'} đã xong. Anh/chị cho shop xin địa chỉ ship nhé!` },
-                                                        { id: 'care', title: '2. HD Bảo quản', sub: '“Shop gửi HDSD...”', content: `Shop gửi ${order.customer?.name} HDSD: Tránh nước, lau bằng khăn mềm định kỳ ạ.` },
-                                                        { id: 'feedback', title: '3. Xin Feedback', sub: '“Bạn đã nhận được đồ chưa...”', content: `Dạ chào ${order.customer?.name}, mình nhận được đồ chưa ạ? Cho shop xin feedback nhé!` }
-                                                    ].map(tmp => (
-                                                        <div
-                                                            key={tmp.id}
-                                                            className="bg-white p-4 rounded-xl border border-blue-200 hover:shadow-md transition-all group relative cursor-pointer"
-                                                            onClick={() => {
-                                                                navigator.clipboard.writeText(tmp.content);
-                                                                toast.success(`Đã copy mẫu: ${tmp.title}`);
-                                                            }}
-                                                        >
-                                                            <p className="text-xs font-black text-blue-600 uppercase mb-1">{tmp.title}</p>
-                                                            <p className="text-sm text-gray-500 line-clamp-2 italic">{tmp.sub}</p>
-                                                            <Copy className="absolute bottom-4 right-4 h-4 w-4 text-gray-300 group-hover:text-blue-500 transition-colors" />
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-
-                                        {/* Lịch sử chuyển bước Sales Kanban */}
-                                        <Card>
-                                            <CardHeader className="pb-3">
-                                                <CardTitle className="text-sm font-bold flex items-center gap-2">
-                                                    <History className="h-4 w-4 text-primary" /> LỊCH SỬ CHUYỂN BƯỚC (LÊN ĐƠN)
-                                                </CardTitle>
-                                            </CardHeader>
-                                            <CardContent className="space-y-2">
-                                                {salesLogs.length === 0 ? (
-                                                    <p className="text-xs text-muted-foreground italic py-2">Chưa có lịch sử chuyển bước.</p>
-                                                ) : (
-                                                    <ul className="space-y-2 max-h-48 overflow-y-auto">
-                                                        {salesLogs.map((log: any) => (
-                                                            <li key={log.id} className="text-xs flex items-center gap-2 py-1.5 border-b border-dashed last:border-0">
-                                                                <span className="text-muted-foreground shrink-0">{formatDateTime(log.created_at)}</span>
-                                                                <span className="font-medium">{log.created_by_user?.name ?? 'Hệ thống'}</span>
-                                                                <span className="text-muted-foreground">
-                                                                    {log.from_status ? `${getSalesStatusLabel(log.from_status)} → ` : ''}{getSalesStatusLabel(log.to_status)}
-                                                                </span>
-                                                            </li>
-                                                        ))}
-                                                    </ul>
-                                                )}
-                                            </CardContent>
-                                        </Card>
-                                    </div>
-
-                                    {/* Right: Quick Tools */}
-                                    <div className="lg:col-span-1 space-y-4">
-                                        <Card className="border-purple-100">
-                                            <CardHeader className="pb-3 bg-purple-50/50">
-                                                <CardTitle className="text-sm font-bold text-purple-800">CÔNG CỤ SALES</CardTitle>
-                                            </CardHeader>
-                                            <CardContent className="pt-4 space-y-3">
-                                                <Button variant="outline" className="w-full justify-start h-12 text-xs font-bold border-gray-200 hover:bg-purple-50 hover:text-purple-700">
-                                                    <Sparkles className="h-4 w-4 mr-2 text-purple-500" />
-                                                    Đề xuất gói VIP (Upsell)
-                                                </Button>
-                                                <Button variant="outline" className="w-full justify-start h-12 text-xs font-bold border-gray-200 hover:bg-orange-50 hover:text-orange-700">
-                                                    <Clock className="h-4 w-4 mr-2 text-orange-500" />
-                                                    Nhắc việc (Flow-up)
-                                                </Button>
-                                                <div className="mt-4 pt-4 border-t border-dashed">
-                                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-3">Thông tin sale phụ trách</p>
-                                                    <div className="flex items-center gap-3">
-                                                        <Avatar className="h-10 w-10">
-                                                            <AvatarFallback className="bg-orange-100 text-orange-600 font-bold">
-                                                                {order.sales_user?.name?.charAt(0) || 'S'}
-                                                            </AvatarFallback>
-                                                        </Avatar>
-                                                        <div>
-                                                            <p className="text-sm font-bold">{order.sales_user?.name || 'Chưa gán'}</p>
-                                                            <p className="text-[10px] text-muted-foreground uppercase">Saler Phụ Trách</p>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-
-                                        <Card>
-                                            <CardContent className="pt-6">
-                                                <div className="space-y-4">
-                                                    {/* Global Progress Summary */}
-                                                    <div className="pb-4 border-b border-dashed">
-                                                        <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">Tiến độ tổng thể</p>
-                                                        <div className="flex items-center justify-between mb-1">
-                                                            <span className="text-xs font-bold">{order.items?.filter(i => (i.status || 'step1') === 'step5').length || 0}/{order.items?.length || 0} hạng mục</span>
-                                                            <span className="text-xs font-bold text-primary">
-                                                                {Math.round(((order.items?.filter(i => (i.status || 'step1') === 'step5').length || 0) / (order.items?.length || 1)) * 100)}%
-                                                            </span>
-                                                        </div>
-                                                        <div className="w-full bg-gray-100 rounded-full h-1.5">
-                                                            <div
-                                                                className="bg-primary h-1.5 rounded-full transition-all duration-500"
-                                                                style={{ width: `${((order.items?.filter(i => (i.status || 'step1') === 'step5').length || 0) / (order.items?.length || 1)) * 100}%` }}
-                                                            />
-                                                        </div>
-                                                    </div>
-
-                                                    <div className="p-4 rounded-xl bg-green-50 border border-green-100">
-                                                        <p className="text-[10px] font-bold text-green-700 uppercase mb-1">Doanh thu dự kiến</p>
-                                                        <p className="text-xl font-black text-green-700">{formatCurrency(order.total_amount)}</p>
-                                                    </div>
-
-                                                    {/* Chốt đơn button */}
-                                                    {(order.status === 'before_sale' || (order.status as string).startsWith('step')) && (
-                                                        <Button
-                                                            className="w-full h-12 font-bold shadow-lg shadow-green-200 bg-green-600 hover:bg-green-700"
-                                                            disabled={!order.items?.every(i => (i.status || 'step1') === 'step5')}
-                                                            onClick={async () => {
-                                                                try {
-                                                                    await updateOrderStatus(order.id, 'in_progress');
-                                                                    toast.success('Đã xác nhận đơn hàng thành công!');
-                                                                    await reloadOrder();
-                                                                } catch {
-                                                                    toast.error('Lỗi khi chốt đơn hàng');
-                                                                }
-                                                            }}
-                                                        >
-                                                            <CheckCircle className="h-5 w-5 mr-2" />
-                                                            CHỐT ĐƠN HÀNG
-                                                        </Button>
-                                                    )}
-
-                                                    <div className="p-4 rounded-xl bg-blue-50 border border-blue-100">
-                                                        <p className="text-[10px] font-bold text-blue-700 uppercase mb-1">Hoa hồng ước tính</p>
-                                                        <p className="text-xl font-black text-blue-700">{formatCurrency(order.total_amount * 0.05)}</p>
-                                                        <p className="text-[9px] text-blue-500 mt-1 italic">* Tính dựa trên 5% doanh thu</p>
-                                                    </div>
-                                                </div>
-                                            </CardContent>
-                                        </Card>
-                                    </div>
-                                </div>
-                            </div>
-                        </TabsContent>
+                <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                    <Button variant="outline" onClick={() => setShowPrintDialog(true)} className="flex-1 sm:flex-none">
+                        <Printer className="h-4 w-4 mr-2" />
+                        In phiếu
+                    </Button>
+                    {order.status !== 'after_sale' && order.status !== 'cancelled' && (
+                        <Button variant="outline" onClick={() => navigate(`/orders/${order.id}/edit`)} className="flex-1 sm:flex-none">
+                            <Sparkles className="h-4 w-4 mr-2" />
+                            Sửa đơn
+                        </Button>
                     )}
-
-                    {/* Tiến trình / Quy trình - Kanban 3 phòng + Chi tiết bước (ẩn khi đơn đã hoàn thiện) */}
-                    {order?.status !== 'done' && (
-                        <TabsContent value="workflow">
-                            <div className="space-y-6">
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle className="flex items-center gap-2">
-                                            <Layers className="h-5 w-5 text-primary" />
-                                            Tiến trình / Quy trình – 3 phòng
-                                        </CardTitle>
-                                        <p className="text-sm text-muted-foreground">
-                                            Dịch vụ theo quy trình gồm các phòng Mạ, Dán đế, Da. Sau khi KTV xác nhận hoàn thành bước, dịch vụ sẽ được chuyển sang phòng tiếp theo.
-                                        </p>
-                                    </CardHeader>
-                                    <CardContent>
-                                        {stepsLoading && !order?.items?.length ? (
-                                            <div className="flex items-center justify-center py-12">
-                                                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                                                <span className="ml-3 text-muted-foreground">Đang tải...</span>
-                                            </div>
-                                        ) : !order?.items?.length ? (
-                                            <div className="text-center py-12 text-muted-foreground">
-                                                <Layers className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                                                <p>Đơn hàng chưa có hạng mục nào.</p>
-                                            </div>
-                                        ) : (
-                                            <div className="pb-4">
-                                                {/* 5 cột: 3 Phòng KT + Hoàn thành + Thất bại — Kéo thả thẻ */}
-                                                <DragDropContext onDragEnd={onWorkflowDragEnd}>
-                                                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4 overflow-x-auto min-w-[1200px] pb-4">
-                                                        {[
-                                                            ...TECH_ROOMS,
-                                                            { id: 'done', title: 'Hoàn thành' },
-                                                            { id: 'fail', title: 'Thất bại' }
-                                                        ].map((room) => {
-                                                            const groupsInRoom = workflowKanbanGroups.filter((g) => getGroupCurrentTechRoom(g) === room.id);
-                                                            return (
-                                                                <div key={room.id} className="flex flex-col min-w-[240px]">
-                                                                    <div className="flex justify-between items-center mb-4 px-2">
-                                                                        <h2 className={cn(
-                                                                            "font-bold uppercase text-xs tracking-widest",
-                                                                            room.id === 'done' ? "text-green-600" :
-                                                                                room.id === 'fail' ? "text-red-500" : "text-blue-700"
-                                                                        )}>
-                                                                            {room.title}
-                                                                        </h2>
-                                                                        <span className="bg-gray-200 text-gray-700 text-xs px-2.5 py-1 rounded-full">
-                                                                            {groupsInRoom.length}
-                                                                        </span>
-                                                                    </div>
-
-                                                                    <Droppable droppableId={room.id}>
-                                                                        {(provided, snapshot) => (
-                                                                            <div
-                                                                                ref={provided.innerRef}
-                                                                                {...provided.droppableProps}
-                                                                                className={cn(
-                                                                                    "min-h-[300px] p-2 rounded-xl flex-1 border-2 border-dashed transition-colors",
-                                                                                    snapshot.isDraggingOver ? "bg-blue-50 border-blue-300" : "bg-gray-100 border-transparent"
-                                                                                )}
-                                                                            >
-                                                                                {groupsInRoom.map((group, gIdx) => {
-                                                                                    const productName = group.product?.item_name ?? group.services[0]?.item_name ?? '—';
-                                                                                    const productItem = group.product as any;
-                                                                                    const productImages = productItem?.product_images ?? (productItem?.product?.image ? [productItem.product.image] : []);
-                                                                                    const hasProductDetails = group.product && (productItem?.product_type || productItem?.product_brand || productItem?.product_color || productItem?.product_size || productItem?.product_material || productItem?.product_condition_before || productItem?.product_notes);
-                                                                                    const cardKey = group.product?.id ?? group.services.map((s) => s.id).join('-');
-
-                                                                                    const leadItem = group.services.find((s) => getItemCurrentStep(s.id)) ?? group.services[0];
-                                                                                    const stepDeadline = leadItem ? getStepDeadlineDisplay(leadItem.id) : { label: 'N/A', dueAt: null };
-                                                                                    const itemLate = stepDeadline.dueAt ? stepDeadline.dueAt < new Date() : false;
-                                                                                    const currentStep = leadItem ? getItemCurrentStep(leadItem.id) : null;
-                                                                                    const saleName = order?.sales_user?.name || 'N/A';
-
-                                                                                    return (
-                                                                                        <Draggable key={cardKey} draggableId={cardKey} index={gIdx} isDragDisabled={room.id === 'done' || room.id === 'fail'}>
-                                                                                            {(provided, snapshot) => (
-                                                                                                <div
-                                                                                                    ref={provided.innerRef}
-                                                                                                    {...provided.draggableProps}
-                                                                                                    {...provided.dragHandleProps}
-                                                                                                    className={cn(
-                                                                                                        "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all cursor-grab active:cursor-grabbing",
-                                                                                                        snapshot.isDragging ? "shadow-lg ring-2 ring-primary/20 scale-105" : "",
-                                                                                                        itemLate && room.id !== 'done' ? "border-red-500 bg-red-50/30" :
-                                                                                                            room.id === 'done' ? "border-green-500" :
-                                                                                                                room.id === 'fail' ? "border-red-400" : "border-blue-400"
-                                                                                                    )}
-                                                                                                >
-                                                                                                    <div className="flex justify-between items-start mb-2">
-                                                                                                        <span className="text-xs font-semibold text-gray-400">#{order?.order_code ?? cardKey?.slice(0, 8)}</span>
-                                                                                                    </div>
-
-                                                                                                    {/* Ảnh + Thông tin sản phẩm */}
-                                                                                                    <div className="space-y-2 mb-3">
-                                                                                                        {productImages?.length > 0 && (
-                                                                                                            <div className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50 aspect-video w-full max-h-24">
-                                                                                                                <img src={productImages[0]} alt={productName} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                                                                                                            </div>
-                                                                                                        )}
-                                                                                                        <h3 className="font-bold text-gray-800 text-[13px] flex items-center gap-1.5 flex-wrap">
-                                                                                                            <ShoppingBag className="h-3.5 w-3.5 shrink-0 text-primary" />
-                                                                                                            <span className="truncate">{productName}</span>
-                                                                                                        </h3>
-                                                                                                        {hasProductDetails && (
-                                                                                                            <div className="grid grid-cols-1 gap-1 text-[11px] text-gray-600">
-                                                                                                                {productItem?.product_type && (
-                                                                                                                    <div className="flex items-center gap-1.5"><Tag className="h-3 w-3 shrink-0 text-muted-foreground" /><span>Loại: {productItem.product_type}</span></div>
-                                                                                                                )}
-                                                                                                                {productItem?.product_brand && (
-                                                                                                                    <div className="flex items-center gap-1.5"><Tag className="h-3 w-3 shrink-0 text-muted-foreground" /><span>Hãng: {productItem.product_brand}</span></div>
-                                                                                                                )}
-                                                                                                                {productItem?.product_notes && (
-                                                                                                                    <div className="flex items-center gap-1.5"><FileText className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="line-clamp-1">Ghi chú: {productItem.product_notes}</span></div>
-                                                                                                                )}
-                                                                                                            </div>
-                                                                                                        )}
-                                                                                                    </div>
-
-                                                                                                    {/* Dịch vụ */}
-                                                                                                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Dịch vụ</p>
-                                                                                                    <ul className="space-y-1">
-                                                                                                        {group.services.map((svc) => {
-                                                                                                            const isLeadService = leadItem?.id === svc.id;
-                                                                                                            const svcTechnicians = (svc as any).technicians;
-                                                                                                            const svcTechSingle = (svc as any).technician;
-                                                                                                            const techNames = svcTechnicians?.length > 0
-                                                                                                                ? svcTechnicians.map((t: any) => t.technician?.name).filter(Boolean).join(', ') || '—'
-                                                                                                                : svcTechSingle?.name || '—';
-                                                                                                            return (
-                                                                                                                <li key={svc.id} className={cn("rounded-md px-2 py-1", isLeadService ? "bg-primary/5 border border-primary/20" : "")}>
-                                                                                                                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-gray-700">
-                                                                                                                        <Wrench className="h-3 w-3 shrink-0 text-primary/60" />
-                                                                                                                        <span className="truncate">{svc.item_name}</span>
-                                                                                                                    </div>
-                                                                                                                    <div className="flex items-center gap-1.5 text-[10px] text-gray-500 mt-0.5" title="Nhấn để phân công/đổi kỹ thuật viên">
-                                                                                                                        <UserIcon className="h-2.5 w-2.5 shrink-0" />
-                                                                                                                        <span className="truncate">KT: {techNames}</span>
-                                                                                                                    </div>
-                                                                                                                    {isLeadService && currentStep && (
-                                                                                                                        <div className="mt-1.5 pt-1.5 border-t border-primary/10">
-                                                                                                                            <p className="text-[10px] text-primary font-semibold">Bước: {currentStep.step_name}</p>
-                                                                                                                            <p className="text-[10px] text-muted-foreground">{currentStep.status === 'in_progress' ? 'Đang thực hiện' : currentStep.status === 'assigned' ? 'Đã phân công' : currentStep.status}</p>
-                                                                                                                        </div>
-                                                                                                                    )}
-                                                                                                                </li>
-                                                                                                            );
-                                                                                                        })}
-                                                                                                    </ul>
-
-                                                                                                    {room.id !== 'done' && room.id !== 'fail' && (
-                                                                                                        <>
-                                                                                                            <div className="mt-2 flex items-center justify-between text-[11px]">
-                                                                                                                <span className="text-gray-500">Hết hạn bước:</span>
-                                                                                                                <span className={cn("font-semibold", itemLate ? "text-red-600" : stepDeadline.dueAt ? "text-emerald-600" : "text-gray-400")}>{stepDeadline.label}</span>
-                                                                                                            </div>
-                                                                                                            <div className="mt-3 pt-2 border-t border-gray-100 flex flex-wrap gap-1.5">
-                                                                                                                <button
-                                                                                                                    type="button"
-                                                                                                                    onClick={(e) => { e.stopPropagation(); leadItem && handleOpenAccessory(leadItem); }}
-                                                                                                                    className={cn(
-                                                                                                                        'inline-flex items-center gap-1 p-1 px-2 rounded-md text-[10px] font-medium transition-all',
-                                                                                                                        (leadItem as any)?.accessory?.status ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-700 border border-blue-200'
-                                                                                                                    )}
-                                                                                                                >
-                                                                                                                    <Package className="h-3 w-3" />
-                                                                                                                    <span>{(leadItem as any)?.accessory?.status ? 'Phụ kiện OK' : 'Cần PK'}</span>
-                                                                                                                </button>
-                                                                                                                <button
-                                                                                                                    type="button"
-                                                                                                                    onClick={(e) => { e.stopPropagation(); leadItem && handleOpenPartner(leadItem); }}
-                                                                                                                    className={cn(
-                                                                                                                        'inline-flex items-center gap-1 p-1 px-2 rounded-md text-[10px] font-medium transition-all',
-                                                                                                                        (leadItem as any)?.partner?.status ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-700 border border-amber-200'
-                                                                                                                    )}
-                                                                                                                >
-                                                                                                                    <Truck className="h-3 w-3" />
-                                                                                                                    <span>{(leadItem as any)?.partner?.status ? 'Đối tác OK' : 'Gửi ĐT'}</span>
-                                                                                                                </button>
-                                                                                                            </div>
-                                                                                                        </>
-                                                                                                    )}
-                                                                                                </div>
-                                                                                            )}
-                                                                                        </Draggable>
-                                                                                    );
-                                                                                })}
-                                                                                {provided.placeholder}
-                                                                                {groupsInRoom.length === 0 && !snapshot.isDraggingOver && (
-                                                                                    <div className="flex items-center justify-center h-20 text-muted-foreground text-xs italic">
-                                                                                        Trống
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
-                                                                        )}
-                                                                    </Droppable>
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                </DragDropContext>
-                                                {/* Summary progress */}
-                                                {allWorkflowSteps.length > 0 && (
-                                                    <div className="mt-6 p-4 bg-muted/30 rounded-lg">
-                                                        <div className="flex items-center justify-between mb-2">
-                                                            <span className="text-sm text-muted-foreground">
-                                                                {allWorkflowSteps.filter((s: any) => s.status === 'completed').length} / {allWorkflowSteps.length} bước hoàn thành
-                                                            </span>
-                                                        </div>
-                                                        <div className="h-3 bg-muted rounded-full overflow-hidden">
-                                                            <div
-                                                                className="h-full bg-gradient-to-r from-green-400 to-green-500 transition-all duration-500"
-                                                                style={{
-                                                                    width: allWorkflowSteps.length
-                                                                        ? `${(allWorkflowSteps.filter((s: any) => s.status === 'completed').length / allWorkflowSteps.length) * 100}%`
-                                                                        : '0%'
-                                                                }}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                )}
-
-                                                {/* Lịch sử chuyển bước Workflow (Quy trình) */}
-                                                <div className="mt-6 border-t pt-6">
-                                                    <h3 className="text-sm font-bold flex items-center gap-2 mb-3">
-                                                        <History className="h-4 w-4 text-primary" /> Lịch sử chuyển bước (Quy trình)
-                                                    </h3>
-                                                    {workflowLogs.length === 0 ? (
-                                                        <p className="text-xs text-muted-foreground italic py-2">Chưa có lịch sử.</p>
-                                                    ) : (
-                                                        <ul className="space-y-2 max-h-48 overflow-y-auto">
-                                                            {workflowLogs.map((log: any) => (
-                                                                <li key={log.id} className="text-xs flex items-center gap-2 py-1.5 border-b border-dashed last:border-0">
-                                                                    <span className="text-muted-foreground shrink-0">{formatDateTime(log.created_at)}</span>
-                                                                    <span className="font-medium">{log.created_by_user?.name ?? 'Hệ thống'}</span>
-                                                                    <span className="text-muted-foreground">
-                                                                        {log.step_name ? `${log.step_name}: ` : ''}{log.action === 'completed' ? 'Hoàn thành' : log.action === 'started' ? 'Bắt đầu' : 'Bỏ qua'}
-                                                                    </span>
-                                                                </li>
-                                                            ))}
-                                                        </ul>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </CardContent>
-                                </Card>
-                            </div>
-                        </TabsContent>
+                    {order.status !== 'after_sale' && order.status !== 'cancelled' && (
+                        <Button
+                            className="bg-green-600 hover:bg-green-700 flex-1 sm:flex-none"
+                            onClick={() => setShowPaymentRecordDialog(true)}
+                        >
+                            <CreditCard className="h-4 w-4 mr-2" />
+                            Thanh toán
+                        </Button>
                     )}
-
-                    {/* After sale – dựa theo WorkflowKanbanBoardPage (C. After-sale) */}
-                    <TabsContent value="aftersale">
-                        <Card>
-                            <CardHeader>
-                                <CardTitle className="flex items-center gap-2">
-                                    <RefreshCcw className="h-5 w-5 text-primary" />
-                                    After sale – Quy trình sau kỹ thuật
-                                </CardTitle>
-                                <p className="text-sm text-muted-foreground">
-                                    Kiểm nợ & Ảnh → Đóng gói & Giao hàng → Nhắn HD & Feedback → Lưu trữ. Kéo thả thẻ đơn vào cột để chuyển bước.
-                                </p>
-                            </CardHeader>
-                            <CardContent>
-                                {(() => {
-                                    const AFTER_COLS = [
-                                        { id: 'after1', title: 'Kiểm nợ & Ảnh hoàn thiện', color: 'text-purple-700' },
-                                        { id: 'after2', title: 'Đóng gói & Giao hàng', color: 'text-purple-700' },
-                                        { id: 'after3', title: 'Nhắn HD & Feedback', color: 'text-purple-700' },
-                                        { id: 'after4', title: 'Lưu Trữ', color: 'text-green-700' },
-                                    ] as const;
-                                    const currentStage = (order as Order & { after_sale_stage?: string | null })?.after_sale_stage ?? 'after1';
-
-                                    const handleAfterSaleDragEnd = (result: DropResult) => {
-                                        if (!order || !result.destination || result.destination.droppableId === result.source.droppableId) return;
-                                        const newStage = result.destination.droppableId as string;
-
-                                        const patch: Partial<Order> = { after_sale_stage: newStage };
-                                        // If status not after_sale, update it
-                                        if (order.status !== 'after_sale') {
-                                            patch.status = 'after_sale';
-                                        }
-
-                                        updateOrderAfterSale(patch);
-                                        toast.success('Đã chuyển bước After sale');
-
-                                        ordersApi.updateAfterSaleStage(order.id, newStage).then(() => {
-                                            // Also update status in backend if needed
-                                            if (order.status !== 'after_sale') {
-                                                ordersApi.updateStatus(order.id, 'after_sale').catch(console.error);
-                                            }
-                                            fetchKanbanLogs(order.id);
-                                        }).catch((e: any) => {
-                                            reloadOrder();
-                                            toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
-                                        });
-                                    };
-
-                                    return (
-                                        <DragDropContext onDragEnd={handleAfterSaleDragEnd}>
-                                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 overflow-x-auto pb-4">
-                                                {AFTER_COLS.map((col) => {
-                                                    const hasOrder = order && col.id === currentStage;
-                                                    return (
-                                                        <div key={col.id} className="flex flex-col min-w-[280px]">
-                                                            <div className="flex justify-between items-center mb-4 px-2">
-                                                                <h2 className={cn('font-bold uppercase text-xs sm:text-sm tracking-widest', col.color)}>{col.title}</h2>
-                                                                <span className="bg-gray-200 text-gray-700 text-xs px-2.5 py-1 rounded-full">
-                                                                    {hasOrder ? 1 : 0}
-                                                                </span>
-                                                            </div>
-                                                            <Droppable droppableId={col.id}>
-                                                                {(provided) => (
-                                                                    <div
-                                                                        ref={provided.innerRef}
-                                                                        {...provided.droppableProps}
-                                                                        className="min-h-[200px] bg-gray-100 p-2 rounded-xl border-2 border-dashed border-transparent"
-                                                                    >
-                                                                        {hasOrder && order && (
-                                                                            <Draggable draggableId={order.id} index={0}>
-                                                                                {(provided) => (
-                                                                                    <div
-                                                                                        ref={provided.innerRef}
-                                                                                        {...provided.draggableProps}
-                                                                                        {...provided.dragHandleProps}
-                                                                                        className={cn(
-                                                                                            'bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all cursor-grab active:cursor-grabbing',
-                                                                                            order.due_at && new Date(order.due_at) < new Date() ? 'border-red-500 bg-red-50/30' : 'border-purple-400'
-                                                                                        )}
-                                                                                    >
-                                                                                        <div className="flex justify-between items-start mb-2">
-                                                                                            <span className="text-xs font-black text-gray-300">#{order.order_code}</span>
-                                                                                        </div>
-                                                                                        <h3 className="font-bold text-gray-800 text-sm truncate">{order.customer?.name || 'Khách'}</h3>
-                                                                                        <p className="text-xs text-gray-400 mt-1">
-                                                                                            {order.items?.length ? (order.items[0] as OrderItem).item_name : 'Đơn hàng'}
-                                                                                            {(order.items?.length ?? 0) > 1 && ` +${(order.items?.length ?? 0) - 1}`}
-                                                                                        </p>
-                                                                                        <div className="mt-4 flex justify-between items-center">
-                                                                                            <Badge variant="secondary" className="text-xs font-bold text-purple-500 bg-purple-50 uppercase">
-                                                                                                {order.sales_user?.name || 'Sale'}
-                                                                                            </Badge>
-                                                                                            <span className="text-xs font-bold text-gray-400">{getSLADisplay(order.due_at)}</span>
-                                                                                        </div>
-                                                                                        {col.id === 'after1' && (
-                                                                                            <Button size="sm" variant="outline" className="mt-2 w-full h-9 text-sm" onClick={(e) => { e.stopPropagation(); setCompletionPhotos((order as any).completion_photos ?? []); setDebtChecked(!!(order as any).debt_checked); setDebtCheckedNotes((order as any).debt_checked_notes ?? ''); setAfter1JustSaved(false); setShowAfter1Dialog(true); }}>
-                                                                                                <Camera className="h-4 w-4 mr-1.5" /> Kiểm nợ & Ảnh hoàn thiện
-                                                                                            </Button>
-                                                                                        )}
-                                                                                        {col.id === 'after2' && (
-                                                                                            <Button size="sm" variant="outline" className="mt-2 w-full h-9 text-sm" onClick={(e) => { e.stopPropagation(); setPackagingPhotos((order as any).packaging_photos ?? []); setDeliveryCarrier((order as any).delivery_carrier ?? ''); setDeliveryAddress((order as any).delivery_address ?? ''); setDeliverySelfPickup(!!(order as any).delivery_self_pickup); setDeliveryNotes((order as any).delivery_notes ?? ''); setAfter2JustSaved(false); setShowAfter2Dialog(true); }}>
-                                                                                                <Upload className="h-4 w-4 mr-1.5" /> Đóng gói & Giao hàng
-                                                                                            </Button>
-                                                                                        )}
-                                                                                    </div>
-                                                                                )}
-                                                                            </Draggable>
-                                                                        )}
-                                                                        {!hasOrder && (
-                                                                            <div className="flex items-center justify-center h-20 text-muted-foreground text-base">
-                                                                                —
-                                                                            </div>
-                                                                        )}
-                                                                        {provided.placeholder}
-                                                                    </div>
-                                                                )}
-                                                            </Droppable>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        </DragDropContext>
-                                    );
-                                })()}
-                                {/* Nhắn HD & Feedback – checkboxes khi đơn ở after3 */}
-                                {order && ((order as Order & { after_sale_stage?: string | null; hd_sent?: boolean; feedback_requested?: boolean }).after_sale_stage ?? 'after1') === 'after3' && (
-                                    <div className="mt-6 p-6 bg-purple-50 rounded-2xl border border-purple-100 space-y-6">
-                                        <div>
-                                            <h3 className="text-xs font-bold text-purple-800 uppercase mb-3 tracking-widest">Đã nhắn HD & Xin feedback</h3>
-                                            <div className="flex flex-wrap gap-6">
-                                                <label className="flex items-center gap-2 cursor-pointer">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={!!(order as any).hd_sent}
-                                                        onChange={(e) => {
-                                                            const checked = e.target.checked;
-                                                            updateOrderAfterSale({ hd_sent: checked });
-                                                            toast.success(checked ? 'Đã đánh dấu nhắn HD' : 'Đã bỏ đánh dấu');
-                                                            ordersApi.patch(order.id, { hd_sent: checked }).catch((err: any) => {
-                                                                reloadOrder();
-                                                                toast.error(err?.response?.data?.message || 'Lỗi cập nhật');
-                                                            });
-                                                        }}
-                                                        className="rounded h-4 w-4"
-                                                    />
-                                                    <span className="text-sm font-medium">Đã nhắn hướng dẫn bảo quản</span>
-                                                </label>
-                                                <label className="flex items-center gap-2 cursor-pointer">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={!!(order as any).feedback_requested}
-                                                        onChange={(e) => {
-                                                            const checked = e.target.checked;
-                                                            updateOrderAfterSale({ feedback_requested: checked });
-                                                            toast.success(checked ? 'Đã đánh dấu xin feedback' : 'Đã bỏ đánh dấu');
-                                                            ordersApi.patch(order.id, { feedback_requested: checked }).catch((err: any) => {
-                                                                reloadOrder();
-                                                                toast.error(err?.response?.data?.message || 'Lỗi cập nhật');
-                                                            });
-                                                        }}
-                                                        className="rounded h-4 w-4"
-                                                    />
-                                                    <span className="text-sm font-medium">Đã xin feedback khách</span>
-                                                </label>
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <h3 className="text-xs font-bold text-purple-800 uppercase mb-4 tracking-widest">Xử lý Feedback khách hàng</h3>
-                                            <div className="flex flex-wrap gap-4">
-                                                <Button
-                                                    onClick={() => {
-                                                        const payload = { after_sale_stage: 'after4' as const, care_warranty_flow: 'care' as const, care_warranty_stage: 'care6' as const };
-                                                        updateOrderAfterSale(payload);
-                                                        toast.success('Đã chuyển sang Lưu trữ (Khách khen)');
-                                                        ordersApi.patch(order.id, payload).then(() => {
-                                                            fetchKanbanLogs(order.id);
-                                                            setActiveTab('care');
-                                                        }).catch((e: any) => {
-                                                            reloadOrder();
-                                                            toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
-                                                        });
-                                                    }}
-                                                    className="flex-1 min-w-[180px] bg-green-600 hover:bg-green-700 h-12 text-white font-bold rounded-xl"
-                                                >
-                                                    <ThumbsUp className="mr-2 h-5 w-5" /> Khách khen (→ Lưu trữ)
-                                                </Button>
-                                                <Button
-                                                    onClick={() => {
-                                                        const payload = { after_sale_stage: 'after4' as const, care_warranty_flow: 'warranty' as const, care_warranty_stage: 'war1' as const };
-                                                        updateOrderAfterSale(payload);
-                                                        toast.success('Đã ghi nhận – chuyển quy trình bảo hành');
-                                                        ordersApi.patch(order.id, payload).then(() => {
-                                                            fetchKanbanLogs(order.id);
-                                                            setActiveTab('care');
-                                                        }).catch((e: any) => {
-                                                            reloadOrder();
-                                                            toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
-                                                        });
-                                                    }}
-                                                    variant="destructive"
-                                                    className="flex-1 min-w-[180px] h-12 font-bold rounded-xl"
-                                                >
-                                                    <ThumbsDown className="mr-2 h-5 w-5" /> Khách chê (→ Bảo hành)
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                )}
-                                {/* Tin nhắn mẫu – dựa theo WorkflowKanbanBoardPage modal */}
-                                {order && (
-                                    <div className="mt-6 p-5 bg-purple-50 border border-purple-100 rounded-xl">
-                                        <h3 className="text-xs font-bold text-purple-800 uppercase tracking-widest mb-4 flex items-center gap-2">
-                                            <Bot className="h-4 w-4" /> Tin nhắn mẫu cho Sale (Facebook Inbox)
-                                        </h3>
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                            {[
-                                                { id: 'ship', title: '1. Xin địa chỉ Ship', getText: () => `Chào ${order.customer?.name || 'anh/chị'} ạ, giày đã xong. Anh/chị cho shop xin địa chỉ ship nhé!` },
-                                                { id: 'care', title: '2. HD Bảo quản', getText: () => `Shop gửi ${order.customer?.name || 'anh/chị'} HDSD: Tránh nước, lau bằng khăn mềm định kỳ ạ.` },
-                                                { id: 'feedback', title: '3. Xin Feedback', getText: () => `Dạ chào ${order.customer?.name || 'anh/chị'}, mình nhận được giày chưa ạ? Cho shop xin feedback nhé!` },
-                                            ].map((tmp) => (
-                                                <Button
-                                                    key={tmp.id}
-                                                    variant="outline"
-                                                    className="h-auto py-3 px-4 justify-start text-left border-purple-200 hover:bg-white hover:shadow-md"
-                                                    onClick={() => {
-                                                        const text = tmp.getText();
-                                                        navigator.clipboard.writeText(text);
-                                                        toast.success('Đã copy tin nhắn mẫu!');
-                                                    }}
-                                                >
-                                                    <Copy className="mr-2 h-4 w-4 shrink-0 text-purple-500" />
-                                                    <span className="text-xs font-bold text-purple-700">{tmp.title}</span>
-                                                </Button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                                {/* Lịch sử chuyển giai đoạn After sale */}
-                                {order && (
-                                    <div className="mt-6 border-t pt-6">
-                                        <h3 className="text-sm font-bold flex items-center gap-2 mb-3">
-                                            <History className="h-4 w-4 text-primary" /> Lịch sử chuyển bước (After sale)
-                                        </h3>
-                                        {aftersaleLogs.length === 0 ? (
-                                            <p className="text-xs text-muted-foreground italic py-2">Chưa có lịch sử.</p>
-                                        ) : (
-                                            <ul className="space-y-2 max-h-48 overflow-y-auto">
-                                                {aftersaleLogs.map((log: any) => (
-                                                    <li key={log.id} className="text-xs flex items-center gap-2 py-1.5 border-b border-dashed last:border-0">
-                                                        <span className="text-muted-foreground shrink-0">{formatDateTime(log.created_at)}</span>
-                                                        <span className="font-medium">{log.created_by_user?.name ?? 'Hệ thống'}</span>
-                                                        <span className="text-muted-foreground">
-                                                            {log.from_stage ? `${getAfterSaleStageLabel(log.from_stage)} → ` : ''}{getAfterSaleStageLabel(log.to_stage)}
-                                                        </span>
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        )}
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
-                    </TabsContent>
-
-                    {/* Chăm sóc / Bảo hành – đơn hiện tại, kéo thả chuyển bước */}
-                    <TabsContent value="care">
-                        <Card>
-                            <CardHeader>
-                                <CardTitle className="flex items-center gap-2">
-                                    <Heart className="h-5 w-5 text-primary" />
-                                    Chăm sóc / Bảo hành
-                                </CardTitle>
-                                <p className="text-sm text-muted-foreground">
-                                    Đơn có thể chuyển sang Bảo hành (từ Khách chê tại tab After sale) hoặc Chăm sóc (từ Khách khen). Kéo thẻ đơn giữa các cột để chuyển bước.
-                                </p>
-                            </CardHeader>
-                            <CardContent>
-                                {(() => {
-                                    const CARE_WAR_COLS = [
-                                        { id: 'war1' as const, title: '1. Tiếp nhận', color: 'border-red-200 bg-red-50/30', flow: 'warranty' as const },
-                                        { id: 'war2' as const, title: '2. Xử lý', color: 'border-red-200 bg-red-50/30', flow: 'warranty' as const },
-                                        { id: 'war3' as const, title: '3. Hoàn tất', color: 'border-green-200 bg-green-50/30', flow: 'warranty' as const },
-                                        { id: 'care6' as const, title: 'Mốc 6 Tháng', color: 'border-teal-200 bg-teal-50/30', flow: 'care' as const },
-                                        { id: 'care12' as const, title: 'Mốc 12 Tháng', color: 'border-teal-200 bg-teal-50/30', flow: 'care' as const },
-                                        { id: 'care-custom' as const, title: 'Lịch Riêng', color: 'border-teal-200 bg-teal-50/30', flow: 'care' as const },
-                                    ];
-                                    const currentFlow = (order as Order & { care_warranty_flow?: string | null })?.care_warranty_flow ?? null;
-                                    const currentStage = (order as Order & { care_warranty_stage?: string | null })?.care_warranty_stage ?? null;
-                                    const orderInCareFlow = currentFlow && currentStage;
-
-                                    const handleCareDragEnd = (result: DropResult) => {
-                                        if (!order || !result.destination || result.destination.droppableId === result.source.droppableId) return;
-                                        const toStage = result.destination.droppableId as string;
-                                        const toFlow = ['war1', 'war2', 'war3'].includes(toStage) ? 'warranty' : 'care';
-                                        updateOrderAfterSale({ care_warranty_flow: toFlow, care_warranty_stage: toStage });
-                                        toast.success('Đã chuyển bước Chăm sóc/Bảo hành');
-                                        ordersApi.patch(order.id, { care_warranty_flow: toFlow, care_warranty_stage: toStage }).then(() => fetchKanbanLogs(order.id)).catch((e: any) => {
-                                            reloadOrder();
-                                            toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
-                                        });
-                                    };
-
-                                    return (
-                                        <>
-                                            {!orderInCareFlow && (
-                                                <p className="text-sm text-muted-foreground mb-4">
-                                                    Đơn chưa vào quy trình Chăm sóc/Bảo hành. Tại tab After sale, bấm &quot;Khách khen&quot; hoặc &quot;Khách chê&quot; để chuyển đơn vào đây.
-                                                </p>
-                                            )}
-                                            <DragDropContext onDragEnd={handleCareDragEnd}>
-                                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                                                    <div className="flex flex-col min-w-0">
-                                                        <h3 className="font-bold text-red-600 mb-4 flex items-center tracking-tight uppercase text-sm">
-                                                            <Wrench className="mr-2 h-4 w-4" /> Quy trình Bảo hành (Feedback Chê)
-                                                        </h3>
-                                                        <div className="grid grid-cols-3 gap-3">
-                                                            {CARE_WAR_COLS.filter((c) => c.flow === 'warranty').map((col) => {
-                                                                const hasOrder = order && orderInCareFlow && col.id === currentStage;
-                                                                return (
-                                                                    <div key={col.id} className="flex flex-col min-w-[120px]">
-                                                                        <Droppable droppableId={col.id}>
-                                                                            {(provided) => (
-                                                                                <div
-                                                                                    ref={provided.innerRef}
-                                                                                    {...provided.droppableProps}
-                                                                                    className={cn('rounded-xl border-t-4 p-3 min-h-[140px]', col.color)}
-                                                                                >
-                                                                                    <h4 className="font-bold text-xs uppercase tracking-tight text-gray-700">{col.title}</h4>
-                                                                                    {hasOrder && order && (
-                                                                                        <Draggable draggableId={order.id} index={0}>
-                                                                                            {(provided) => (
-                                                                                                <div
-                                                                                                    ref={provided.innerRef}
-                                                                                                    {...provided.draggableProps}
-                                                                                                    {...provided.dragHandleProps}
-                                                                                                    className="mt-2 p-2 bg-white rounded-lg shadow border border-red-100 cursor-grab active:cursor-grabbing"
-                                                                                                >
-                                                                                                    <span className="text-[10px] font-bold text-gray-500">#{order.order_code}</span>
-                                                                                                    <p className="text-xs font-medium truncate">{order.customer?.name || 'Khách'}</p>
-                                                                                                    <p className="text-[10px] text-muted-foreground truncate">
-                                                                                                        {order.items?.length ? (order.items[0] as OrderItem).item_name : 'Đơn hàng'}
-                                                                                                    </p>
-                                                                                                </div>
-                                                                                            )}
-                                                                                        </Draggable>
-                                                                                    )}
-                                                                                    {!hasOrder && <p className="text-[10px] text-muted-foreground mt-2">—</p>}
-                                                                                    {provided.placeholder}
-                                                                                </div>
-                                                                            )}
-                                                                        </Droppable>
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex flex-col min-w-0">
-                                                        <h3 className="font-bold text-teal-600 mb-4 flex items-center tracking-tight uppercase text-sm">
-                                                            <Heart className="mr-2 h-4 w-4" /> Quy trình Chăm sóc (Feedback Khen)
-                                                        </h3>
-                                                        <div className="grid grid-cols-3 gap-3">
-                                                            {CARE_WAR_COLS.filter((c) => c.flow === 'care').map((col) => {
-                                                                const hasOrder = order && orderInCareFlow && col.id === currentStage;
-                                                                return (
-                                                                    <div key={col.id} className="flex flex-col min-w-[120px]">
-                                                                        <Droppable droppableId={col.id}>
-                                                                            {(provided) => (
-                                                                                <div
-                                                                                    ref={provided.innerRef}
-                                                                                    {...provided.droppableProps}
-                                                                                    className={cn('rounded-xl border-t-4 p-3 min-h-[140px]', col.color)}
-                                                                                >
-                                                                                    <h4 className="font-bold text-xs uppercase tracking-tight text-gray-700">{col.title}</h4>
-                                                                                    {hasOrder && order && (
-                                                                                        <Draggable draggableId={order.id} index={0}>
-                                                                                            {(provided) => (
-                                                                                                <div
-                                                                                                    ref={provided.innerRef}
-                                                                                                    {...provided.draggableProps}
-                                                                                                    {...provided.dragHandleProps}
-                                                                                                    className="mt-2 p-2 bg-white rounded-lg shadow border border-teal-100 cursor-grab active:cursor-grabbing"
-                                                                                                >
-                                                                                                    <span className="text-[10px] font-bold text-gray-500">#{order.order_code}</span>
-                                                                                                    <p className="text-xs font-medium truncate">{order.customer?.name || 'Khách'}</p>
-                                                                                                    <p className="text-[10px] text-muted-foreground truncate">
-                                                                                                        {order.items?.length ? (order.items[0] as OrderItem).item_name : 'Đơn hàng'}
-                                                                                                    </p>
-                                                                                                </div>
-                                                                                            )}
-                                                                                        </Draggable>
-                                                                                    )}
-                                                                                    {!hasOrder && <p className="text-[10px] text-muted-foreground mt-2">—</p>}
-                                                                                    {provided.placeholder}
-                                                                                </div>
-                                                                            )}
-                                                                        </Droppable>
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </DragDropContext>
-                                            {order && (
-                                                <div className="mt-6 border-t pt-6">
-                                                    <h3 className="text-sm font-bold flex items-center gap-2 mb-3">
-                                                        <History className="h-4 w-4 text-primary" /> Lịch sử chuyển bước (Chăm sóc / Bảo hành)
-                                                    </h3>
-                                                    {careLogs.length === 0 ? (
-                                                        <p className="text-xs text-muted-foreground italic py-2">Chưa có lịch sử.</p>
-                                                    ) : (
-                                                        <ul className="space-y-2 max-h-48 overflow-y-auto">
-                                                            {careLogs.map((log: any) => (
-                                                                <li key={log.id} className="text-xs flex items-center gap-2 py-1.5 border-b border-dashed last:border-0">
-                                                                    <span className="text-muted-foreground shrink-0">{formatDateTime(log.created_at)}</span>
-                                                                    <span className="font-medium">{log.created_by_user?.name ?? 'Hệ thống'}</span>
-                                                                    <span className="text-muted-foreground">
-                                                                        {log.from_stage ? `${getCareWarrantyStageLabel(log.from_stage)} → ` : ''}{getCareWarrantyStageLabel(log.to_stage)}
-                                                                        {log.flow_type && <span className="ml-1 text-muted-foreground">({log.flow_type === 'warranty' ? 'Bảo hành' : 'Chăm sóc'})</span>}
-                                                                    </span>
-                                                                </li>
-                                                            ))}
-                                                        </ul>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </>
-                                    );
-                                })()}
-                            </CardContent>
-                        </Card>
-                    </TabsContent>
-                </Tabs>
+                    {(user?.role === 'manager' || user?.role === 'admin') &&
+                        order.items?.some(item => (item as any).status === 'step4') && (
+                            <Button
+                                className="bg-red-600 hover:bg-red-700 flex-1 sm:flex-none"
+                                onClick={() => handleApproveOrder(order)}
+                            >
+                                <ThumbsUp className="h-4 w-4 mr-2" />
+                                Phê duyệt đơn
+                            </Button>
+                        )}
+                </div>
             </div>
 
-            {/* Print QR Dialog */}
+            {/* Tabs */}
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                <TabsList className="mb-4 w-full justify-start overflow-x-auto no-scrollbar md:w-auto md:overflow-visible">
+                    <TabsTrigger value="detail" className="gap-2 shrink-0">
+                        <FileText className="h-4 w-4" />
+                        Chi tiết
+                    </TabsTrigger>
+                    {order.status === 'before_sale' && (
+                        <TabsTrigger value="sales" className="gap-2 shrink-0">
+                            <ShoppingBag className="h-4 w-4" />
+                            Lên đơn (Sales)
+                        </TabsTrigger>
+                    )}
+                    {order.status !== 'done' && (
+                        <TabsTrigger value="workflow" className="gap-2 shrink-0">
+                            <Layers className="h-4 w-4" />
+                            Tiến trình / Quy trình
+                        </TabsTrigger>
+                    )}
+                    <TabsTrigger value="aftersale" className="gap-2 shrink-0">
+                        <RefreshCcw className="h-4 w-4" />
+                        After sale
+                    </TabsTrigger>
+                    <TabsTrigger value="care" className="gap-2 shrink-0">
+                        <Heart className="h-4 w-4" />
+                        Chăm sóc / Bảo hành
+                    </TabsTrigger>
+                </TabsList>
+
+                <DetailTab
+                    order={order}
+                    productStatusSummary={productStatusSummary}
+                    onShowPrintDialog={() => setShowPrintDialog(true)}
+                    onShowPaymentDialog={() => setShowPaymentDialog(true)}
+                />
+
+                {order.status === 'before_sale' && (
+                    <SalesTab
+                        order={order}
+                        salesLogs={salesLogs}
+                        updateOrderItemStatus={updateOrderItemStatus}
+                        updateOrderStatus={updateOrderStatus}
+                        reloadOrder={reloadOrder}
+                        fetchKanbanLogs={fetchKanbanLogs}
+                    />
+                )}
+
+                <WorkflowTab
+                    order={order}
+                    stepsLoading={stepsLoading}
+                    allWorkflowSteps={allWorkflowSteps}
+                    workflowKanbanGroups={workflowKanbanGroups}
+                    workflowLogs={workflowLogs}
+                    onWorkflowDragEnd={onWorkflowDragEnd}
+                    getGroupCurrentTechRoom={getGroupCurrentTechRoom}
+                    getItemCurrentStep={getItemCurrentStep}
+                    getStepDeadlineDisplay={(itemId: string) => getStepDeadlineDisplay(itemId)}
+                    handleOpenAccessory={handleOpenAccessory}
+                    handleOpenPartner={handleOpenPartner}
+                    handleOpenAssignDialog={handleOpenAssignDialog}
+                />
+
+                <AftersaleTab
+                    order={order}
+                    groups={workflowKanbanGroups}
+                    aftersaleLogs={aftersaleLogs}
+                    updateOrderAfterSale={updateOrderAfterSale}
+                    reloadOrder={reloadOrder}
+                    fetchKanbanLogs={fetchKanbanLogs}
+                    setActiveTab={setActiveTab}
+                    getSLADisplay={getSLADisplay}
+                    getAfterSaleStageLabel={getAfterSaleStageLabel}
+                    getGroupCurrentTechRoom={getGroupCurrentTechRoom}
+                    openAfter1Dialog={() => { /* Implement if needed */ }}
+                    openAfter2Dialog={() => { /* Implement if needed */ }}
+                />
+
+                <CareTab
+                    order={order}
+                    careLogs={careLogs}
+                    updateOrderAfterSale={updateOrderAfterSale}
+                    reloadOrder={reloadOrder}
+                    fetchKanbanLogs={fetchKanbanLogs}
+                    getCareWarrantyStageLabel={getCareWarrantyStageLabel}
+                />
+            </Tabs>
+
+            {/* Dialogs */}
             <PrintQRDialog
                 order={order}
                 open={showPrintDialog}
                 onClose={() => setShowPrintDialog(false)}
             />
 
-            {/* Payment Dialog */}
             <PaymentDialog
                 order={showPaymentDialog ? order : null}
                 open={showPaymentDialog}
@@ -2342,118 +488,37 @@ export function OrderDetailPage() {
                 onSuccess={handlePaymentSuccess}
             />
 
-            {/* Assign Technician Dialog */}
-            <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
-                <DialogContent className="max-w-md">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <UserPlus className="h-5 w-5 text-primary" />
-                            Phân công kỹ thuật viên
-                        </DialogTitle>
-                    </DialogHeader>
-                    <div className="space-y-4">
-                        {selectedItem && (
-                            <div className="p-3 bg-muted rounded-lg">
-                                <p className="font-medium">{selectedItem.item_name}</p>
-                                <p className="text-sm text-muted-foreground">
-                                    {getItemTypeLabel(selectedItem.item_type)} • SL: {selectedItem.quantity}
-                                </p>
-                            </div>
-                        )}
-                        <div className="space-y-4">
-                            <Label>Danh sách kỹ thuật viên</Label>
-                            {assignments.map((assignment, index) => (
-                                <div key={index} className="flex gap-2 items-start">
-                                    <div className="flex-1">
-                                        <Select
-                                            value={assignment.technician_id}
-                                            onValueChange={(val) => {
-                                                const newAssignments = [...assignments];
-                                                newAssignments[index].technician_id = val;
-                                                setAssignments(newAssignments);
-                                            }}
-                                        >
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Chọn KTV..." />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {technicians.map(tech => (
-                                                    <SelectItem key={tech.id} value={tech.id}>
-                                                        {tech.name}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="w-24 relative">
-                                        <Input
-                                            type="number"
-                                            value={assignment.commission}
-                                            onChange={(e) => {
-                                                const newAssignments = [...assignments];
-                                                newAssignments[index].commission = Number(e.target.value);
-                                                setAssignments(newAssignments);
-                                            }}
-                                            placeholder="%"
-                                            className="pr-6"
-                                        />
-                                        <span className="absolute right-2 top-2.5 text-xs text-muted-foreground">%</span>
-                                    </div>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="shrink-0 text-red-500 hover:text-red-600 hover:bg-red-50"
-                                        onClick={() => {
-                                            const newAssignments = assignments.filter((_, i) => i !== index);
-                                            setAssignments(newAssignments);
-                                        }}
-                                    >
-                                        <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                            ))}
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                className="w-full border-dashed"
-                                onClick={() => setAssignments([...assignments, { technician_id: '', commission: 0 }])}
-                            >
-                                <Plus className="h-4 w-4 mr-2" /> Thêm kỹ thuật viên
-                            </Button>
-                        </div>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setShowAssignDialog(false)}>
-                            Hủy
-                        </Button>
-                        <Button
-                            onClick={handleAssignTechnician}
-                            disabled={assignments.filter(a => a.technician_id).length === 0 || assignLoading}
-                        >
-                            {assignLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                            Phân công
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+            <PaymentRecordDialog
+                open={showPaymentRecordDialog}
+                onOpenChange={setShowPaymentRecordDialog}
+                orderId={order.id}
+                orderCode={order.order_code}
+                remainingDebt={order.remaining_debt ?? (order.total_amount - (order.paid_amount || 0))}
+                onSuccess={reloadOrder}
+            />
 
-            {/* Mua phụ kiện Dialog */}
+            {/* Technician Assignment Dialog */}
+            {selectedItem && (
+                <AssignTechnicianDialog
+                    open={showAssignDialog}
+                    onOpenChange={setShowAssignDialog}
+                    selectedItem={selectedItem}
+                    technicians={technicians}
+                    onSuccess={reloadOrder}
+                />
+            )}
+
+            {/* Accessory Dialog */}
             <Dialog open={showAccessoryDialog} onOpenChange={setShowAccessoryDialog}>
-                <DialogContent className="max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>Mua phụ kiện</DialogTitle>
-                    </DialogHeader>
+                <DialogContent>
+                    <DialogHeader><DialogTitle>Mua phụ kiện</DialogTitle></DialogHeader>
                     {accessoryItem && (
                         <div className="space-y-4">
-                            <div className="p-3 bg-muted rounded-lg">
-                                <p className="font-medium text-sm">{accessoryItem.item_name}</p>
-                            </div>
+                            <div className="p-3 bg-muted rounded-lg"><p className="font-medium">{accessoryItem.item_name}</p></div>
                             <div className="space-y-2">
                                 <Label>Trạng thái</Label>
                                 <Select value={accessoryStatus} onValueChange={setAccessoryStatus}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="need_buy">Cần mua</SelectItem>
                                         <SelectItem value="bought">Đã mua</SelectItem>
@@ -2464,13 +529,12 @@ export function OrderDetailPage() {
                                 </Select>
                             </div>
                             <div className="space-y-2">
-                                <Label>Ghi chú (tùy chọn)</Label>
-                                <Textarea value={accessoryNotes} onChange={(e) => setAccessoryNotes(e.target.value)} placeholder="Ghi chú..." className="min-h-[80px]" />
+                                <Label>Ghi chú</Label>
+                                <Textarea value={accessoryNotes} onChange={e => setAccessoryNotes(e.target.value)} />
                             </div>
                             <DialogFooter>
-                                <Button variant="outline" onClick={() => setShowAccessoryDialog(false)}>Hủy</Button>
                                 <Button onClick={handleSubmitAccessory} disabled={accessoryLoading}>
-                                    {accessoryLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                                    {accessoryLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                     Cập nhật
                                 </Button>
                             </DialogFooter>
@@ -2479,23 +543,17 @@ export function OrderDetailPage() {
                 </DialogContent>
             </Dialog>
 
-            {/* Gửi Đối Tác Dialog */}
+            {/* Partner Dialog */}
             <Dialog open={showPartnerDialog} onOpenChange={setShowPartnerDialog}>
-                <DialogContent className="max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>Gửi Đối Tác</DialogTitle>
-                    </DialogHeader>
+                <DialogContent>
+                    <DialogHeader><DialogTitle>Gửi đối tác</DialogTitle></DialogHeader>
                     {partnerItem && (
                         <div className="space-y-4">
-                            <div className="p-3 bg-muted rounded-lg">
-                                <p className="font-medium text-sm">{partnerItem.item_name}</p>
-                            </div>
+                            <div className="p-3 bg-muted rounded-lg"><p className="font-medium">{partnerItem.item_name}</p></div>
                             <div className="space-y-2">
                                 <Label>Trạng thái</Label>
                                 <Select value={partnerStatus} onValueChange={setPartnerStatus}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
+                                    <SelectTrigger><SelectValue /></SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="ship_to_partner">Ship đối tác</SelectItem>
                                         <SelectItem value="partner_doing">Đối tác làm</SelectItem>
@@ -2505,13 +563,12 @@ export function OrderDetailPage() {
                                 </Select>
                             </div>
                             <div className="space-y-2">
-                                <Label>Ghi chú (tùy chọn)</Label>
-                                <Textarea value={partnerNotes} onChange={(e) => setPartnerNotes(e.target.value)} placeholder="Ghi chú..." className="min-h-[80px]" />
+                                <Label>Ghi chú</Label>
+                                <Textarea value={partnerNotes} onChange={e => setPartnerNotes(e.target.value)} />
                             </div>
                             <DialogFooter>
-                                <Button variant="outline" onClick={() => setShowPartnerDialog(false)}>Hủy</Button>
                                 <Button onClick={handleSubmitPartner} disabled={partnerLoading}>
-                                    {partnerLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                                    {partnerLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                     Cập nhật
                                 </Button>
                             </DialogFooter>
@@ -2520,308 +577,57 @@ export function OrderDetailPage() {
                 </DialogContent>
             </Dialog>
 
-            {/* Xin gia hạn Dialog */}
+            {/* Extension Dialog */}
             <Dialog open={showExtensionDialog} onOpenChange={setShowExtensionDialog}>
-                <DialogContent className="max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>Xin gia hạn</DialogTitle>
-                    </DialogHeader>
+                <DialogContent>
+                    <DialogHeader><DialogTitle>Yêu cầu gia hạn</DialogTitle></DialogHeader>
                     <div className="space-y-4">
-                        {order?.extension_request && (
-                            <div className="p-3 bg-muted rounded-lg text-sm space-y-1">
-                                <p className="font-medium">Trạng thái: {order.extension_request.status}</p>
-                                {order.extension_request.reason && <p className="text-muted-foreground">Lý do: {order.extension_request.reason}</p>}
-                                {order.extension_request.customer_result && <p className="text-muted-foreground">Kết quả liên hệ: {order.extension_request.customer_result}</p>}
-                            </div>
-                        )}
-                        {!order?.extension_request ? (
+                        {!order.extension_request ? (
                             <div className="space-y-2">
-                                <Label>Lý do gia hạn (Kỹ thuật yêu cầu)</Label>
-                                <Textarea value={extensionReason} onChange={(e) => setExtensionReason(e.target.value)} placeholder="Nhập lý do..." className="min-h-[100px]" />
+                                <Label>Lý do gia hạn</Label>
+                                <Textarea value={extensionReason} onChange={e => setExtensionReason(e.target.value)} />
                             </div>
                         ) : (
                             <>
-                                {(user?.role === 'sale' || user?.role === 'manager' || user?.role === 'admin') && (
-                                    <div className="space-y-2">
-                                        <Label>Kết quả liên hệ khách (Sale gọi/nhắn)</Label>
-                                        <Textarea value={extensionCustomerResult} onChange={(e) => setExtensionCustomerResult(e.target.value)} placeholder="Cập nhật kết quả sau khi gọi/nhắn khách..." className="min-h-[80px]" />
-                                    </div>
-                                )}
+                                <div className="p-3 bg-muted rounded-lg text-sm">
+                                    <p>Lý do: {order.extension_request.reason}</p>
+                                    <p>Trạng thái: {order.extension_request.status}</p>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Kết quả liên hệ khách</Label>
+                                    <Textarea value={extensionCustomerResult} onChange={e => setExtensionCustomerResult(e.target.value)} />
+                                </div>
                                 {(user?.role === 'manager' || user?.role === 'admin') && (
-                                    <>
-                                        <div className="space-y-2">
-                                            <Label>Ngày gia hạn mới (Quản lý chốt)</Label>
-                                            <input type="datetime-local" className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm" value={extensionNewDueAt} onChange={(e) => setExtensionNewDueAt(e.target.value)} />
-                                        </div>
+                                    <div className="space-y-4">
                                         <div className="flex items-center gap-2">
-                                            <input type="checkbox" id="valid_reason" checked={extensionValidReason} onChange={(e) => setExtensionValidReason(e.target.checked)} />
-                                            <Label htmlFor="valid_reason">Lý do hợp lệ (không ghi trễ KPI)</Label>
+                                            <Checkbox checked={extensionValidReason} onCheckedChange={(val) => setExtensionValidReason(!!val)} />
+                                            <Label>Lý do hợp lệ</Label>
                                         </div>
-                                    </>
+                                        <div className="space-y-2">
+                                            <Label>Hạn mới</Label>
+                                            <Input type="datetime-local" value={extensionNewDueAt} onChange={e => setExtensionNewDueAt(e.target.value)} />
+                                        </div>
+                                    </div>
                                 )}
                             </>
                         )}
-                        {order?.extension_request && (
-                            <Button variant="outline" className="w-full" onClick={handleNotifyTelegram}>
-                                Gửi thông báo Telegram (Sale + Quản lý / Sale + Kỹ thuật)
-                            </Button>
-                        )}
-                        <DialogFooter>
-                            <Button variant="outline" onClick={() => setShowExtensionDialog(false)}>Hủy</Button>
-                            <Button onClick={handleSubmitExtension} disabled={extensionLoading || (!order?.extension_request && !extensionReason.trim())}>
-                                {extensionLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                                {order?.extension_request ? 'Cập nhật' : 'Gửi yêu cầu'}
-                            </Button>
-                        </DialogFooter>
                     </div>
+                    <DialogFooter>
+                        <Button onClick={handleSubmitExtension} disabled={extensionLoading}>
+                            {extensionLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            {order.extension_request ? 'Cập nhật' : 'Gửi yêu cầu'}
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
-
-            {/* After sale – Kiểm nợ & Ảnh hoàn thiện (after1) */}
-            <Dialog open={showAfter1Dialog} onOpenChange={(open) => { setShowAfter1Dialog(open); if (!open) setAfter1JustSaved(false); }}>
-                <DialogContent className="max-w-lg">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <Camera className="h-5 w-5 text-primary" />
-                            Kiểm nợ & Ảnh hoàn thiện
-                        </DialogTitle>
-                    </DialogHeader>
-                    {order && (
-                        <div className="space-y-4">
-                            <div className="p-3 bg-muted rounded-lg">
-                                <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">Công nợ đơn hàng</p>
-                                <p className="font-medium">Tổng đơn: {formatCurrency(order.total_amount)}</p>
-                                <p className="text-sm">Đã thu: {formatCurrency(order.paid_amount ?? 0)}</p>
-                                <p className={cn('text-sm font-semibold', (order.remaining_debt ?? 0) > 0 ? 'text-amber-600' : 'text-green-600')}>
-                                    Còn nợ: {formatCurrency(order.remaining_debt ?? Math.max(0, order.total_amount - (order.paid_amount ?? 0)))}
-                                </p>
-                            </div>
-                            <div>
-                                <Label>Ảnh hoàn thiện</Label>
-                                <div className="mt-1 flex flex-wrap gap-2">
-                                    {completionPhotos.map((url, i) => (
-                                        <div key={i} className="relative">
-                                            <img src={url} alt="" className="h-20 w-20 rounded border object-cover" />
-                                            <button type="button" className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center" onClick={() => setCompletionPhotos(prev => prev.filter((_, j) => j !== i))}>
-                                                <X className="h-3 w-3" />
-                                            </button>
-                                        </div>
-                                    ))}
-                                    <label className={cn('h-20 w-20 rounded border-2 border-dashed flex items-center justify-center cursor-pointer', after1Uploading ? 'opacity-50' : 'hover:bg-muted')}>
-                                        <input
-                                            type="file"
-                                            accept="image/*"
-                                            className="hidden"
-                                            multiple
-                                            disabled={after1Uploading}
-                                            onChange={async (e) => {
-                                                const files = e.target.files;
-                                                if (!files?.length || !order) return;
-                                                setAfter1Uploading(true);
-                                                for (let i = 0; i < files.length; i++) {
-                                                    const { url: u, error } = await uploadFile('payment-proofs', `orders/${order.id}/completion`, files[i]);
-                                                    if (u) setCompletionPhotos(prev => [...prev, u]);
-                                                    if (error) toast.error('Lỗi tải ảnh: ' + (error as Error).message);
-                                                }
-                                                setAfter1Uploading(false);
-                                                e.target.value = '';
-                                            }}
-                                        />
-                                        {after1Uploading ? <Loader2 className="h-6 w-6 animate-spin" /> : <Camera className="h-6 w-6 text-muted-foreground" />}
-                                    </label>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <input type="checkbox" id="debt_checked" checked={debtChecked} onChange={(e) => setDebtChecked(e.target.checked)} className="rounded h-4 w-4" />
-                                <Label htmlFor="debt_checked">Đã kiểm tra công nợ (đơn hết nợ / còn nợ)</Label>
-                            </div>
-                            <div>
-                                <Label>Ghi chú kiểm nợ (tùy chọn)</Label>
-                                <Textarea value={debtCheckedNotes} onChange={(e) => setDebtCheckedNotes(e.target.value)} placeholder="Ghi chú..." className="mt-1 min-h-[60px]" />
-                            </div>
-                            {after1JustSaved && (
-                                <div className="p-3 bg-green-50 border border-green-200 rounded-lg flex flex-col gap-2">
-                                    <p className="text-sm font-medium text-green-800">Đã lưu thành công. Chuyển sang bước tiếp theo?</p>
-                                    <Button
-                                        className="w-full bg-green-600 hover:bg-green-700"
-                                        onClick={() => {
-                                            updateOrderAfterSale({ after_sale_stage: 'after2' });
-                                            setShowAfter1Dialog(false);
-                                            setAfter1JustSaved(false);
-                                            toast.success('Đã chuyển sang Đóng gói & Giao hàng');
-                                            ordersApi.updateAfterSaleStage(order.id, 'after2').then(() => fetchKanbanLogs(order.id)).catch((e: any) => {
-                                                reloadOrder();
-                                                toast.error(e?.response?.data?.message || 'Lỗi chuyển bước');
-                                            });
-                                        }}
-                                    >
-                                        <ArrowRight className="h-4 w-4 mr-2" /> Chuyển sang Đóng gói & Giao hàng
-                                    </Button>
-                                </div>
-                            )}
-                            <DialogFooter>
-                                <Button variant="outline" onClick={() => setShowAfter1Dialog(false)}>{after1JustSaved ? 'Đóng' : 'Hủy'}</Button>
-                                {!after1JustSaved && (
-                                    <Button
-                                        disabled={after1Saving || completionPhotos.length === 0 || !debtChecked}
-                                        onClick={() => {
-                                            setAfter1Saving(true);
-                                            const payload = { completion_photos: completionPhotos, debt_checked: debtChecked, debt_checked_notes: debtCheckedNotes || undefined };
-                                            updateOrderAfterSale(payload);
-                                            setAfter1JustSaved(true);
-                                            toast.success('Đã lưu Kiểm nợ & Ảnh hoàn thiện');
-                                            ordersApi.patch(order.id, payload).catch((e: any) => {
-                                                reloadOrder();
-                                                toast.error(e?.response?.data?.message || 'Lỗi lưu');
-                                            }).finally(() => setAfter1Saving(false));
-                                        }}
-                                    >
-                                        {after1Saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                                        Lưu
-                                    </Button>
-                                )}
-                            </DialogFooter>
-                        </div>
-                    )}
-                </DialogContent>
-            </Dialog>
-
-            {/* After sale – Đóng gói & Giao hàng (after2) */}
-            <Dialog open={showAfter2Dialog} onOpenChange={(open) => { setShowAfter2Dialog(open); if (!open) setAfter2JustSaved(false); }}>
-                <DialogContent className="max-w-lg">
-                    <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                            <Upload className="h-5 w-5 text-primary" />
-                            Đóng gói & Giao hàng
-                        </DialogTitle>
-                    </DialogHeader>
-                    {order && (
-                        <div className="space-y-4">
-                            <div>
-                                <Label>Ảnh đóng gói</Label>
-                                <div className="mt-1 flex flex-wrap gap-2">
-                                    {packagingPhotos.map((url, i) => (
-                                        <div key={i} className="relative">
-                                            <img src={url} alt="" className="h-20 w-20 rounded border object-cover" />
-                                            <button type="button" className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center" onClick={() => setPackagingPhotos(prev => prev.filter((_, j) => j !== i))}>
-                                                <X className="h-3 w-3" />
-                                            </button>
-                                        </div>
-                                    ))}
-                                    <label className={cn('h-20 w-20 rounded border-2 border-dashed flex items-center justify-center cursor-pointer', after2Uploading ? 'opacity-50' : 'hover:bg-muted')}>
-                                        <input
-                                            type="file"
-                                            accept="image/*"
-                                            className="hidden"
-                                            multiple
-                                            disabled={after2Uploading}
-                                            onChange={async (e) => {
-                                                const files = e.target.files;
-                                                if (!files?.length || !order) return;
-                                                setAfter2Uploading(true);
-                                                for (let i = 0; i < files.length; i++) {
-                                                    const { url: u, error } = await uploadFile('payment-proofs', `orders/${order.id}/packaging`, files[i]);
-                                                    if (u) setPackagingPhotos(prev => [...prev, u]);
-                                                    if (error) toast.error('Lỗi tải ảnh: ' + (error as Error).message);
-                                                }
-                                                setAfter2Uploading(false);
-                                                e.target.value = '';
-                                            }}
-                                        />
-                                        {after2Uploading ? <Loader2 className="h-6 w-6 animate-spin" /> : <Upload className="h-6 w-6 text-muted-foreground" />}
-                                    </label>
-                                </div>
-                            </div>
-                            <div>
-                                <Label>Đơn vị giao hàng</Label>
-                                <Input value={deliveryCarrier} onChange={(e) => setDeliveryCarrier(e.target.value)} placeholder="VD: GHTK, Viettel Post, Grab..." className="mt-1" />
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <input type="checkbox" id="delivery_self_pickup" checked={deliverySelfPickup} onChange={(e) => setDeliverySelfPickup(e.target.checked)} className="rounded h-4 w-4" />
-                                <Label htmlFor="delivery_self_pickup">Khách tự đến lấy</Label>
-                            </div>
-                            {!deliverySelfPickup && (
-                                <div>
-                                    <Label>Địa chỉ giao hàng (khách nhận)</Label>
-                                    <Textarea value={deliveryAddress} onChange={(e) => setDeliveryAddress(e.target.value)} placeholder="Địa chỉ đầy đủ..." className="mt-1 min-h-[80px]" />
-                                </div>
-                            )}
-                            <div>
-                                <Label>Ghi chú giao hàng (tùy chọn)</Label>
-                                <Textarea value={deliveryNotes} onChange={(e) => setDeliveryNotes(e.target.value)} placeholder="Ghi chú..." className="mt-1 min-h-[60px]" />
-                            </div>
-                            {after2JustSaved && (
-                                <div className="p-3 bg-green-50 border border-green-200 rounded-lg flex flex-col gap-2">
-                                    <p className="text-sm font-medium text-green-800">Đã lưu thành công. Chuyển sang bước tiếp theo?</p>
-                                    <Button
-                                        className="w-full bg-green-600 hover:bg-green-700"
-                                        onClick={() => {
-                                            updateOrderAfterSale({ after_sale_stage: 'after3' });
-                                            setShowAfter2Dialog(false);
-                                            setAfter2JustSaved(false);
-                                            toast.success('Đã chuyển sang Nhắn HD & Feedback');
-                                            ordersApi.updateAfterSaleStage(order.id, 'after3').then(() => fetchKanbanLogs(order.id)).catch((e: any) => {
-                                                reloadOrder();
-                                                toast.error(e?.response?.data?.message || 'Lỗi chuyển bước');
-                                            });
-                                        }}
-                                    >
-                                        <ArrowRight className="h-4 w-4 mr-2" /> Chuyển sang Nhắn HD & Feedback
-                                    </Button>
-                                </div>
-                            )}
-                            <DialogFooter>
-                                <Button variant="outline" onClick={() => setShowAfter2Dialog(false)}>{after2JustSaved ? 'Đóng' : 'Hủy'}</Button>
-                                {!after2JustSaved && (
-                                    <Button
-                                        disabled={after2Saving || packagingPhotos.length === 0 || (!deliverySelfPickup && !deliveryCarrier.trim())}
-                                        onClick={() => {
-                                            setAfter2Saving(true);
-                                            const payload = {
-                                                packaging_photos: packagingPhotos,
-                                                delivery_carrier: deliveryCarrier || undefined,
-                                                delivery_address: deliverySelfPickup ? undefined : (deliveryAddress || undefined),
-                                                delivery_self_pickup: deliverySelfPickup,
-                                                delivery_notes: deliveryNotes || undefined,
-                                            };
-                                            updateOrderAfterSale(payload);
-                                            setAfter2JustSaved(true);
-                                            toast.success('Đã lưu Đóng gói & Giao hàng');
-                                            ordersApi.patch(order.id, payload).catch((e: any) => {
-                                                reloadOrder();
-                                                toast.error(e?.response?.data?.message || 'Lỗi lưu');
-                                            }).finally(() => setAfter2Saving(false));
-                                        }}
-                                    >
-                                        {after2Saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                                        Lưu
-                                    </Button>
-                                )}
-                            </DialogFooter>
-                        </div>
-                    )}
-                </DialogContent>
-            </Dialog>
-
-            {/* Payment Record Dialog */}
-            {order && (
-                <PaymentRecordDialog
-                    open={showPaymentRecordDialog}
-                    onOpenChange={setShowPaymentRecordDialog}
-                    orderId={order.id}
-                    orderCode={order.order_code}
-                    remainingDebt={order.remaining_debt ?? (order.total_amount - (order.paid_amount || 0))}
-                    onSuccess={reloadOrder}
-                />
-            )}
 
             {/* Workflow Kanban Dialogs */}
             <MoveStepDialog
                 open={showMoveStepDialog}
                 onOpenChange={setShowMoveStepDialog}
                 itemId={moveStepItemId}
-                targetRoomId={moveStepTargetRoom.id}
-                targetRoomName={moveStepTargetRoom.title}
+                targetRoomId={moveStepTargetRoom?.id}
+                targetRoomName={moveStepTargetRoom?.title}
                 onSuccess={() => {
                     reloadOrder();
                     if (order?.id) fetchKanbanLogs(order.id);
@@ -2841,13 +647,13 @@ export function OrderDetailPage() {
             <ConfirmDoneDialog
                 open={showConfirmDoneDialog}
                 onOpenChange={setShowConfirmDoneDialog}
-                itemId={confirmDoneItemId}
+                itemIds={confirmDoneItemIds}
                 isV2Service={isV2ServiceForDone}
                 onSuccess={() => {
                     reloadOrder();
                     if (order?.id) fetchKanbanLogs(order.id);
                 }}
             />
-        </>
+        </div>
     );
 }
