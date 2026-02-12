@@ -21,6 +21,8 @@ interface WorkflowCardProps {
     handleOpenAccessory: (item: OrderItem) => void;
     handleOpenPartner: (item: OrderItem) => void;
     handleOpenAssignDialog: (item: OrderItem) => void;
+    handleOpenSaleAssignDialog: (item: OrderItem) => void;
+    onCardClick: (group: { product: OrderItem | null; services: OrderItem[] }, roomId: string) => void;
 }
 
 const WorkflowCard = memo(({
@@ -32,7 +34,9 @@ const WorkflowCard = memo(({
     getStepDeadlineDisplay,
     handleOpenAccessory,
     handleOpenPartner,
-    handleOpenAssignDialog
+    handleOpenAssignDialog,
+    handleOpenSaleAssignDialog,
+    onCardClick
 }: WorkflowCardProps) => {
     const productName = group.product?.item_name ?? group.services[0]?.item_name ?? '—';
     const productItem = group.product as any;
@@ -59,6 +63,7 @@ const WorkflowCard = memo(({
                             roomId === 'done' ? "border-green-500" :
                                 roomId === 'fail' ? "border-red-400" : "border-blue-400"
                     )}
+                    onClick={() => onCardClick(group, roomId)}
                 >
                     <div className="flex justify-between items-start mb-2">
                         <span className="text-xs font-semibold text-gray-400">#{orderCode ?? cardKey?.slice(0, 8)}</span>
@@ -111,6 +116,14 @@ const WorkflowCard = memo(({
                                     >
                                         <UserIcon className="h-2.5 w-2.5 shrink-0" />
                                         <span className="truncate">KT: {techNames}</span>
+                                    </div>
+                                    <div
+                                        className="flex items-center gap-1.5 text-[10px] text-amber-500 mt-0.5 cursor-pointer hover:text-amber-600 transition-colors"
+                                        title="Nhấn để phân công/đổi kinh doanh"
+                                        onClick={(e) => { e.stopPropagation(); handleOpenSaleAssignDialog(svc); }}
+                                    >
+                                        <Tag className="h-2.5 w-2.5 shrink-0" />
+                                        <span className="truncate">Sale: {(svc as any).sales?.length > 0 ? (svc as any).sales.map((s: any) => s.sale?.name || s.name).join(', ') : '—'}</span>
                                     </div>
                                     {isLeadService && currentStep && (
                                         <div className="mt-1.5 pt-1.5 border-t border-primary/10">
@@ -172,6 +185,8 @@ interface WorkflowColumnProps {
     handleOpenAccessory: (item: OrderItem) => void;
     handleOpenPartner: (item: OrderItem) => void;
     handleOpenAssignDialog: (item: OrderItem) => void;
+    handleOpenSaleAssignDialog: (item: OrderItem) => void;
+    onCardClick: (group: { product: OrderItem | null; services: OrderItem[] }, roomId: string) => void;
 }
 
 const WorkflowColumn = ({
@@ -182,7 +197,9 @@ const WorkflowColumn = ({
     getStepDeadlineDisplay,
     handleOpenAccessory,
     handleOpenPartner,
-    handleOpenAssignDialog
+    handleOpenAssignDialog,
+    handleOpenSaleAssignDialog,
+    onCardClick
 }: WorkflowColumnProps) => {
     return (
         <div className="flex flex-col min-w-[240px]">
@@ -221,6 +238,8 @@ const WorkflowColumn = ({
                                 handleOpenAccessory={handleOpenAccessory}
                                 handleOpenPartner={handleOpenPartner}
                                 handleOpenAssignDialog={handleOpenAssignDialog}
+                                handleOpenSaleAssignDialog={handleOpenSaleAssignDialog}
+                                onCardClick={onCardClick}
                             />
                         ))}
                         {provided.placeholder}
@@ -249,6 +268,8 @@ interface WorkflowTabProps {
     handleOpenAccessory: (item: OrderItem) => void;
     handleOpenPartner: (item: OrderItem) => void;
     handleOpenAssignDialog: (item: OrderItem) => void;
+    handleOpenSaleAssignDialog: (item: OrderItem) => void;
+    onProductCardClick: (group: { product: OrderItem | null; services: OrderItem[] }, roomId: string) => void;
 }
 
 export function WorkflowTab({
@@ -263,7 +284,9 @@ export function WorkflowTab({
     getStepDeadlineDisplay,
     handleOpenAccessory,
     handleOpenPartner,
-    handleOpenAssignDialog
+    handleOpenAssignDialog,
+    handleOpenSaleAssignDialog,
+    onProductCardClick
 }: WorkflowTabProps) {
     if (order?.status === 'done') return null;
 
@@ -322,6 +345,8 @@ export function WorkflowTab({
                                                 handleOpenAccessory={handleOpenAccessory}
                                                 handleOpenPartner={handleOpenPartner}
                                                 handleOpenAssignDialog={handleOpenAssignDialog}
+                                                handleOpenSaleAssignDialog={handleOpenSaleAssignDialog}
+                                                onCardClick={onProductCardClick}
                                             />
                                         ))}
                                     </div>

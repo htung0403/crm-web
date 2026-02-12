@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-    ArrowLeft, Save, Loader2, Gift, Wrench, Package as PackageIcon, Trash2, Plus, Info, Search
+    ArrowLeft, Save, Loader2, Gift, Wrench, Package as PackageIcon, Trash2, Plus, Info, Search, Percent
 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -195,37 +195,34 @@ export function CreatePackagePage() {
     const availableProducts = products.filter(p => !formData.items.some(item => item.product_id === p.id));
 
     return (
-        <div className="w-full mx-auto px-4 md:px-8 space-y-4 animate-fade-in pb-12">
+        <div className="px-1 pt-0.5 pb-4 space-y-2 animate-fade-in max-w-[1600px] mx-auto">
             <Toaster richColors position="top-right" />
 
             {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+            <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-3">
                     <Button
                         variant="ghost"
                         size="icon"
                         onClick={() => navigate('/packages')}
-                        className="hover:bg-muted h-8 w-8"
+                        className="hover:bg-muted h-9 w-9"
                     >
-                        <ArrowLeft className="h-4 w-4" />
+                        <ArrowLeft className="h-5 w-5" />
                     </Button>
                     <div>
-                        <h1 className="text-xl font-bold flex items-center gap-2">
-                            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                                <Gift className="h-4 w-4 text-primary" />
-                            </div>
+                        <h1 className="text-2xl font-bold tracking-tight">
                             {isEditing ? 'Sửa gói dịch vụ' : 'Thêm gói dịch vụ mới'}
                         </h1>
-                        <p className="text-muted-foreground text-xs uppercase tracking-wider">
+                        <p className="text-muted-foreground text-sm">
                             {isEditing ? `Mã gói: ${formData.code}` : 'Thông tin gói combo / liệu trình'}
                         </p>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={() => navigate('/packages')}>
+                <div className="flex items-center gap-3">
+                    <Button variant="outline" onClick={() => navigate('/packages')}>
                         Huỷ
                     </Button>
-                    <Button onClick={handleSubmit} disabled={isSubmitting} size="sm" className="gap-2">
+                    <Button onClick={handleSubmit} disabled={isSubmitting} className="gap-2 px-6">
                         {isSubmitting ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
@@ -236,21 +233,26 @@ export function CreatePackagePage() {
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
                 {/* Left Column - General Info (2/5) */}
                 <div className="lg:col-span-2 space-y-6">
-                    <Card className="shadow-sm border-border/50">
-                        <CardHeader className="pb-3 pt-4 px-4">
-                            <CardTitle className="text-base">Thông tin chung</CardTitle>
+                    <Card className="shadow-sm border-border/60">
+                        <CardHeader className="pb-4 pt-5 px-5">
+                            <CardTitle className="text-lg flex items-center gap-2">
+                                <Info className="h-5 w-5 text-primary" />
+                                Thông tin chung
+                            </CardTitle>
                         </CardHeader>
-                        <CardContent className="space-y-4 px-4 pb-4">
-                            <div className="space-y-2">
+                        <CardContent className="space-y-6 px-5 pb-6">
+                            <div className="space-y-3">
                                 <Label className="text-sm font-medium">Hình ảnh đại diện</Label>
-                                <ImageUpload
-                                    value={formData.image}
-                                    onChange={(img) => setFormData(prev => ({ ...prev, image: img }))}
-                                    folder="packages"
-                                />
+                                <div className="bg-muted/30 rounded-xl p-4 border border-dashed border-muted-foreground/10">
+                                    <ImageUpload
+                                        value={formData.image}
+                                        onChange={(img) => setFormData(prev => ({ ...prev, image: img }))}
+                                        folder="packages"
+                                    />
+                                </div>
                             </div>
 
                             <div className="space-y-2">
@@ -262,7 +264,7 @@ export function CreatePackagePage() {
                                     value={formData.name}
                                     onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                                     placeholder=""
-                                    className="h-10"
+                                    className="h-12 text-md font-bold"
                                 />
                             </div>
 
@@ -276,53 +278,59 @@ export function CreatePackagePage() {
                                         type="text"
                                         value={formData.priceDisplay}
                                         onChange={handlePriceChange}
-                                        onFocus={(e) => formData.price === 0 && e.target.select()}
+                                        onFocus={(e) => e.target.select()}
                                         placeholder="0"
-                                        className="h-10 pr-12 font-bold text-primary"
+                                        className="h-11 pr-12 text-right font-bold text-primary text-xl"
                                     />
-                                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                                        đ
+                                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-muted-foreground">
+                                        VNĐ
                                     </span>
                                 </div>
                             </div>
 
                             <div className="space-y-2">
-                                <Label htmlFor="description" className="text-sm font-medium">Mô tả</Label>
+                                <Label htmlFor="description" className="text-sm font-medium">Mô tả chi tiết</Label>
                                 <textarea
                                     id="description"
-                                    className="w-full min-h-[100px] px-3 py-2 text-sm rounded-lg border focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                                    className="w-full min-h-[120px] px-4 py-3 text-sm rounded-xl border-border/60 border bg-muted/5 focus:outline-none focus:ring-2 focus:ring-primary/20 resize-none transition-all"
                                     value={formData.description}
                                     onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
                                     placeholder="Chi tiết ưu đãi hoặc điều kiện áp dụng..."
                                 />
                             </div>
 
-                            <Separator />
-
-                            <div className="space-y-3">
+                            <div className="pt-4 border-t space-y-4">
                                 <div className="flex items-center gap-2">
-                                    <Info className="h-4 w-4 text-muted-foreground" />
-                                    <Label className="text-sm font-medium text-muted-foreground">Hoa hồng định mức (%)</Label>
+                                    <Percent className="h-4 w-4 text-primary" />
+                                    <Label className="text-sm font-bold text-primary uppercase tracking-tight">Cấu hình hoa hồng (%)</Label>
                                 </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-2">
-                                        <Label className="text-xs">Sale</Label>
+                                <div className="grid grid-cols-2 gap-6">
+                                    <div className="space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <Label className="text-sm font-medium">Sale</Label>
+                                            <span className="text-xs font-bold text-primary">{formData.commission_sale}%</span>
+                                        </div>
                                         <Input
                                             type="number"
                                             value={formData.commission_sale}
                                             onChange={(e) => setFormData(prev => ({ ...prev, commission_sale: Number(e.target.value) }))}
-                                            className="h-10"
+                                            onFocus={(e) => e.target.select()}
+                                            className="h-11 font-bold"
                                             min={0}
                                             max={100}
                                         />
                                     </div>
-                                    <div className="space-y-2">
-                                        <Label className="text-xs">Kỹ thuật viên</Label>
+                                    <div className="space-y-3">
+                                        <div className="flex items-center justify-between">
+                                            <Label className="text-sm font-medium">KTV</Label>
+                                            <span className="text-xs font-bold text-primary">{formData.commission_tech}%</span>
+                                        </div>
                                         <Input
                                             type="number"
                                             value={formData.commission_tech}
                                             onChange={(e) => setFormData(prev => ({ ...prev, commission_tech: Number(e.target.value) }))}
-                                            className="h-10"
+                                            onFocus={(e) => e.target.select()}
+                                            className="h-11 font-bold"
                                             min={0}
                                             max={100}
                                         />
@@ -336,19 +344,19 @@ export function CreatePackagePage() {
                 {/* Right Column - Items (3/5) */}
                 <div className="lg:col-span-3 space-y-6">
                     {/* Services Section */}
-                    <Card className="shadow-sm border-border/50">
-                        <CardHeader className="pb-3 pt-4 px-4 flex flex-row items-center justify-between space-y-0">
+                    <Card className="shadow-sm border-border/60">
+                        <CardHeader className="pb-3 pt-4 px-4 flex flex-row items-center justify-between space-y-0 text-pretty">
                             <div>
-                                <CardTitle className="text-base flex items-center gap-2">
-                                    <Wrench className="h-4 w-4 text-primary" />
+                                <CardTitle className="text-lg flex items-center gap-2">
+                                    <Wrench className="h-5 w-5 text-primary" />
                                     Dịch vụ trong gói
                                 </CardTitle>
                                 <CardDescription className="text-xs">Các dịch vụ chính của gói combo này</CardDescription>
                             </div>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button variant="outline" size="sm" className="h-8 gap-1">
-                                        <Plus className="h-3.5 w-3.5" /> Thêm dịch vụ
+                                    <Button variant="outline" size="sm" className="h-9 gap-1.5 border-primary/20 text-primary hover:bg-primary/5">
+                                        <Plus className="h-4 w-4" /> Thêm dịch vụ
                                     </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end" className="w-[300px] max-h-[400px] overflow-y-auto">
@@ -372,13 +380,13 @@ export function CreatePackagePage() {
                                 {formData.items.map((item, index) => {
                                     if (!('service_id' in item)) return null;
                                     return (
-                                        <div key={index} className="flex items-center gap-2 p-3 bg-muted/30 rounded-xl border border-border/50 transition-all hover:bg-muted/50">
-                                            <div className="flex-1">
+                                        <div key={index} className="flex items-center gap-3 p-3 bg-muted/20 rounded-xl border border-border/40 transition-all hover:bg-muted/40 group">
+                                            <div className="flex-1 min-w-0">
                                                 <Select
                                                     value={item.service_id}
                                                     onValueChange={(v) => updateItem(index, 'service_id', v)}
                                                 >
-                                                    <SelectTrigger className="border-none bg-transparent shadow-none focus:ring-0 px-0 h-auto font-medium">
+                                                    <SelectTrigger className="border-none bg-transparent shadow-none focus:ring-0 px-0 h-auto font-semibold text-base truncate">
                                                         <SelectValue placeholder="Chọn dịch vụ..." />
                                                     </SelectTrigger>
                                                     <SelectContent>
@@ -393,14 +401,15 @@ export function CreatePackagePage() {
                                                     </SelectContent>
                                                 </Select>
                                             </div>
-                                            <div className="flex items-center gap-3">
+                                            <div className="flex items-center gap-4 shrink-0">
                                                 <div className="flex items-center gap-2">
-                                                    <Label className="text-xs text-muted-foreground">SL:</Label>
+                                                    <Label className="text-xs font-bold text-muted-foreground uppercase">SL:</Label>
                                                     <Input
                                                         type="number"
                                                         value={item.quantity}
                                                         onChange={(e) => updateItem(index, 'quantity', Number(e.target.value))}
-                                                        className="w-16 h-8 text-center"
+                                                        onFocus={(e) => e.target.select()}
+                                                        className="w-16 h-9 text-center font-bold"
                                                         min={1}
                                                     />
                                                 </div>
@@ -408,7 +417,7 @@ export function CreatePackagePage() {
                                                     variant="ghost"
                                                     size="icon"
                                                     onClick={() => removeItem(index)}
-                                                    className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                    className="h-9 w-9 text-destructive hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
                                                 >
                                                     <Trash2 className="h-4 w-4" />
                                                 </Button>
@@ -420,14 +429,14 @@ export function CreatePackagePage() {
                                 {serviceItems.length === 0 && (
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
-                                            <div className="text-center py-8 border-2 border-dashed rounded-xl border-muted-foreground/10 bg-muted/5 hover:bg-muted/10 transition-colors cursor-pointer group">
+                                            <div className="text-center py-10 border-2 border-dashed rounded-xl border-muted-foreground/10 bg-muted/5 hover:bg-muted/10 transition-colors cursor-pointer group">
                                                 <div className="flex flex-col items-center gap-2">
-                                                    <div className="h-10 w-10 rounded-full bg-primary/5 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
-                                                        <Plus className="h-5 w-5 text-primary" />
+                                                    <div className="h-12 w-12 rounded-full bg-primary/5 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                                                        <Plus className="h-6 w-6 text-primary" />
                                                     </div>
                                                     <div>
-                                                        <p className="text-sm font-medium text-muted-foreground">Chưa có dịch vụ nào</p>
-                                                        <p className="text-xs text-muted-foreground/60">Nhấn để chọn và thêm nhanh dịch vụ</p>
+                                                        <p className="text-sm font-semibold text-muted-foreground">Chưa có dịch vụ nào</p>
+                                                        <p className="text-xs text-muted-foreground/60 mt-1">Nhấn để chọn và thêm nhanh dịch vụ vào gói</p>
                                                     </div>
                                                 </div>
                                             </div>
@@ -453,19 +462,19 @@ export function CreatePackagePage() {
                     </Card>
 
                     {/* Products Section (Cross-sell) */}
-                    <Card className="shadow-sm border-border/50">
-                        <CardHeader className="pb-3 pt-4 px-4 flex flex-row items-center justify-between space-y-0">
+                    <Card className="shadow-sm border-border/60">
+                        <CardHeader className="pb-3 pt-4 px-4 flex flex-row items-center justify-between space-y-0 text-pretty">
                             <div>
-                                <CardTitle className="text-base flex items-center gap-2">
-                                    <PackageIcon className="h-4 w-4 text-primary" />
+                                <CardTitle className="text-lg flex items-center gap-2">
+                                    <PackageIcon className="h-5 w-5 text-primary" />
                                     Sản phẩm bán kèm
                                 </CardTitle>
                                 <CardDescription className="text-xs">Phụ kiện hoặc sản phẩm tặng kèm / bán kèm</CardDescription>
                             </div>
                             <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
-                                    <Button variant="outline" size="sm" className="h-8 gap-1">
-                                        <Plus className="h-3.5 w-3.5" /> Thêm sản phẩm
+                                    <Button variant="outline" size="sm" className="h-9 gap-1.5 border-primary/20 text-primary hover:bg-primary/5">
+                                        <Plus className="h-4 w-4" /> Thêm sản phẩm
                                     </Button>
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end" className="w-[300px] max-h-[400px] overflow-y-auto">
@@ -489,13 +498,13 @@ export function CreatePackagePage() {
                                 {formData.items.map((item, index) => {
                                     if (!('product_id' in item)) return null;
                                     return (
-                                        <div key={index} className="flex items-center gap-2 p-3 bg-muted/30 rounded-xl border border-border/50 transition-all hover:bg-muted/50">
-                                            <div className="flex-1">
+                                        <div key={index} className="flex items-center gap-3 p-3 bg-muted/20 rounded-xl border border-border/40 transition-all hover:bg-muted/40 group">
+                                            <div className="flex-1 min-w-0">
                                                 <Select
                                                     value={item.product_id}
                                                     onValueChange={(v) => updateItem(index, 'product_id', v)}
                                                 >
-                                                    <SelectTrigger className="border-none bg-transparent shadow-none focus:ring-0 px-0 h-auto font-medium">
+                                                    <SelectTrigger className="border-none bg-transparent shadow-none focus:ring-0 px-0 h-auto font-semibold text-base truncate">
                                                         <SelectValue placeholder="Chọn sản phẩm..." />
                                                     </SelectTrigger>
                                                     <SelectContent>
@@ -510,14 +519,15 @@ export function CreatePackagePage() {
                                                     </SelectContent>
                                                 </Select>
                                             </div>
-                                            <div className="flex items-center gap-3">
+                                            <div className="flex items-center gap-4 shrink-0">
                                                 <div className="flex items-center gap-2">
-                                                    <Label className="text-xs text-muted-foreground">SL:</Label>
+                                                    <Label className="text-xs font-bold text-muted-foreground uppercase">SL:</Label>
                                                     <Input
                                                         type="number"
                                                         value={item.quantity}
                                                         onChange={(e) => updateItem(index, 'quantity', Number(e.target.value))}
-                                                        className="w-16 h-8 text-center"
+                                                        onFocus={(e) => e.target.select()}
+                                                        className="w-16 h-9 text-center font-bold"
                                                         min={1}
                                                     />
                                                 </div>
@@ -525,7 +535,7 @@ export function CreatePackagePage() {
                                                     variant="ghost"
                                                     size="icon"
                                                     onClick={() => removeItem(index)}
-                                                    className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                    className="h-9 w-9 text-destructive hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity"
                                                 >
                                                     <Trash2 className="h-4 w-4" />
                                                 </Button>
@@ -537,14 +547,14 @@ export function CreatePackagePage() {
                                 {productItems.length === 0 && (
                                     <DropdownMenu>
                                         <DropdownMenuTrigger asChild>
-                                            <div className="text-center py-8 border-2 border-dashed rounded-xl border-muted-foreground/10 bg-muted/5 hover:bg-muted/10 transition-colors cursor-pointer group">
+                                            <div className="text-center py-10 border-2 border-dashed rounded-xl border-muted-foreground/10 bg-muted/5 hover:bg-muted/10 transition-colors cursor-pointer group">
                                                 <div className="flex flex-col items-center gap-2">
-                                                    <div className="h-10 w-10 rounded-full bg-primary/5 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
-                                                        <Plus className="h-5 w-5 text-primary" />
+                                                    <div className="h-12 w-12 rounded-full bg-primary/5 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                                                        <Plus className="h-6 w-6 text-primary" />
                                                     </div>
                                                     <div>
-                                                        <p className="text-sm font-medium text-muted-foreground">Chưa có sản phẩm nào</p>
-                                                        <p className="text-xs text-muted-foreground/60">Nhấn để chọn và thêm nhanh sản phẩm</p>
+                                                        <p className="text-sm font-semibold text-muted-foreground">Chưa có sản phẩm nào</p>
+                                                        <p className="text-xs text-muted-foreground/60 mt-1">Nhấn để chọn và thêm nhanh sản phẩm vào gói</p>
                                                     </div>
                                                 </div>
                                             </div>

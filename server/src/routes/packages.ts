@@ -100,7 +100,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 // Create package
 router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { name, description, price, original_price, validity_days, items } = req.body;
+        const { name, description, price, original_price, validity_days, items, image, commission_sale, commission_tech, status } = req.body;
 
         if (!name || !price) {
             throw new ApiError('Tên và giá gói là bắt buộc', 400);
@@ -134,7 +134,10 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
                 price,
                 original_price: original_price || price,
                 validity_days: validity_days || 0,
-                status: 'active',
+                image,
+                commission_sale: commission_sale || 0,
+                commission_tech: commission_tech || 0,
+                status: status || 'active',
                 created_by: req.user!.id,
             })
             .select()
@@ -204,7 +207,7 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
 router.put('/:id', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { name, description, price, original_price, validity_days, status, items } = req.body;
+        const { name, description, price, original_price, validity_days, status, items, image, commission_sale, commission_tech } = req.body;
 
         const updateData: any = {};
         if (name !== undefined) updateData.name = name;
@@ -213,7 +216,9 @@ router.put('/:id', authenticate, requireManager, async (req: AuthenticatedReques
         if (original_price !== undefined) updateData.original_price = original_price;
         if (validity_days !== undefined) updateData.validity_days = validity_days;
         if (status !== undefined) updateData.status = status;
-        updateData.updated_at = new Date().toISOString();
+        if (image !== undefined) updateData.image = image;
+        if (commission_sale !== undefined) updateData.commission_sale = commission_sale;
+        if (commission_tech !== undefined) updateData.commission_tech = commission_tech;
 
         const { data: pkg, error } = await supabaseAdmin
             .from('packages')

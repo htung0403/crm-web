@@ -15,8 +15,6 @@ import { useProductTypes, type ProductType } from '@/hooks/useProductTypes';
 import { toast } from 'sonner';
 
 import {
-    ProductFormDialog,
-    ServiceFormDialog,
     VoucherFormDialog,
     ProductTypeFormDialog,
     ProductsTable,
@@ -29,7 +27,7 @@ import {
     type ServicePackage,
     type APIVoucher,
 } from '@/components/products';
-import { type ServiceDepartment } from '@/components/products/ServiceFormDialog';
+import { type ServiceDepartment } from '@/components/products/types';
 import api from '@/lib/api';
 
 // Main Page Component
@@ -116,8 +114,6 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
     };
 
     // Dialog states
-    const [showProductForm, setShowProductForm] = useState(false);
-    const [showServiceForm, setShowServiceForm] = useState(false);
     const [showVoucherForm, setShowVoucherForm] = useState(false);
     const [showProductTypeForm, setShowProductTypeForm] = useState(false);
     const [editingItem, setEditingItem] = useState<any>(null);
@@ -287,7 +283,7 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
     // Helper to open add dialog based on active tab
     const handleAddClick = () => {
         setEditingItem(null);
-        if (activeTab === 'products') setShowProductForm(true);
+        if (activeTab === 'products') navigate('/products/new');
         else if (activeTab === 'services') navigate('/services/new');
         else if (activeTab === 'packages') navigate('/packages/new');
         else if (activeTab === 'vouchers') setShowVoucherForm(true);
@@ -360,7 +356,7 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
                             <ProductsTable
                                 products={filteredProducts}
                                 loading={loading}
-                                onEdit={(product) => { setEditingItem(product); setShowProductForm(true); }}
+                                onEdit={(product) => navigate(`/products/${product.id}/edit`)}
                                 onDelete={handleDeleteProduct}
                             />
                         </TabsContent>
@@ -408,19 +404,6 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
             </Card>
 
             {/* Dialogs */}
-            <ProductFormDialog
-                open={showProductForm}
-                onClose={() => { setShowProductForm(false); setEditingItem(null); }}
-                product={editingItem as Product}
-                onSubmit={editingItem ? handleUpdateProduct : handleCreateProduct}
-            />
-            <ServiceFormDialog
-                open={showServiceForm}
-                onClose={() => { setShowServiceForm(false); setEditingItem(null); }}
-                service={editingItem as Service}
-                onSubmit={editingItem ? handleUpdateService : handleCreateService}
-                departments={departments}
-            />
             <VoucherFormDialog
                 open={showVoucherForm}
                 onClose={() => { setShowVoucherForm(false); setEditingItem(null); }}

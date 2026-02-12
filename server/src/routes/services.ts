@@ -61,7 +61,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 // Create service
 router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { name, category, price, duration, description, commission_rate, applicable_product_types } = req.body;
+        const { name, category, price, duration, description, commission_rate, applicable_product_types, commission_sale, commission_tech } = req.body;
 
         if (!name || !price) {
             throw new ApiError('Tên và giá dịch vụ là bắt buộc', 400);
@@ -98,6 +98,8 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
                 duration,
                 description,
                 commission_rate: commission_rate || 5,
+                commission_sale: commission_sale || 0,
+                commission_tech: commission_tech || 0,
                 applicable_product_types: applicable_product_types || null,
                 status: 'active',
                 created_by: req.user!.id,

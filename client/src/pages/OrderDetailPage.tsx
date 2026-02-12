@@ -58,7 +58,8 @@ import { SalesTab } from './OrderDetailPage/tabs/SalesTab';
 import { WorkflowTab } from './OrderDetailPage/tabs/WorkflowTab';
 import { AftersaleTab } from './OrderDetailPage/tabs/AftersaleTab';
 import { CareTab } from './OrderDetailPage/tabs/CareTab';
-import { TECH_ROOMS, columns, getAfterSaleStageLabel, getCareWarrantyStageLabel } from './OrderDetailPage/constants';
+import { TECH_ROOMS } from '@/components/orders/constants';
+import { columns, getAfterSaleStageLabel, getCareWarrantyStageLabel } from './OrderDetailPage/constants';
 import { getStatusVariant, getItemTypeLabel, getSLADisplay } from './OrderDetailPage/utils';
 
 // Specific Dialogs
@@ -66,9 +67,11 @@ import { PrintQRDialog } from '@/components/orders/PrintQRDialog';
 import { PaymentDialog } from '@/components/orders/PaymentDialog';
 import { PaymentRecordDialog } from '@/components/orders/PaymentRecordDialog';
 import { AssignTechnicianDialog } from './OrderDetailPage/dialogs/AssignTechnicianDialog';
+import { AssignSalesPersonDialog } from './OrderDetailPage/dialogs/AssignSalesPersonDialog';
 import { MoveStepDialog } from '@/components/orders/workflow/MoveStepDialog';
 import { FailDialog } from '@/components/orders/workflow/FailDialog';
 import { ConfirmDoneDialog } from '@/components/orders/workflow/ConfirmDoneDialog';
+import { ProductDetailDialog } from './OrderDetailPage/dialogs/ProductDetailDialog';
 
 export function OrderDetailPage() {
     const { id } = useParams<{ id: string }>();
@@ -116,6 +119,7 @@ export function OrderDetailPage() {
     const [showPaymentRecordDialog, setShowPaymentRecordDialog] = useState(false);
 
     const [showAssignDialog, setShowAssignDialog] = useState(false);
+    const [showSaleAssignDialog, setShowSaleAssignDialog] = useState(false);
     const [selectedItem, setSelectedItem] = useState<OrderItem | null>(null);
 
     const [showAccessoryDialog, setShowAccessoryDialog] = useState(false);
@@ -147,9 +151,13 @@ export function OrderDetailPage() {
     const [confirmDoneItemIds, setConfirmDoneItemIds] = useState<string[]>([]);
     const [isV2ServiceForDone, setIsV2ServiceForDone] = useState(false);
 
-    // Departments and Technicians
+    const [showProductDialog, setShowProductDialog] = useState(false);
+    const [selectedProductGroup, setSelectedProductGroup] = useState<any>(null);
+    const [currentRoomId, setCurrentRoomId] = useState('');
+
+    // Departments and Technicians/Sales
     const { departments, fetchDepartments } = useDepartments();
-    const { users: technicians, fetchUsers: fetchTechnicians } = useUsers();
+    const { technicians, salesPersons, fetchTechnicians, fetchSales } = useUsers();
 
     useEffect(() => {
         if (!id) {
@@ -157,8 +165,9 @@ export function OrderDetailPage() {
             return;
         }
         fetchTechnicians();
+        fetchSales();
         fetchDepartments();
-    }, [id, navigate, fetchTechnicians, fetchDepartments]);
+    }, [id, navigate, fetchTechnicians, fetchSales, fetchDepartments]);
 
     // Tab switching logic for completed orders
     useEffect(() => {
@@ -193,6 +202,11 @@ export function OrderDetailPage() {
     const handleOpenAssignDialog = (item: OrderItem) => {
         setSelectedItem(item);
         setShowAssignDialog(true);
+    };
+
+    const handleOpenSaleAssignDialog = (item: OrderItem) => {
+        setSelectedItem(item);
+        setShowSaleAssignDialog(true);
     };
 
     const handleSubmitAccessory = async () => {
@@ -310,6 +324,12 @@ export function OrderDetailPage() {
                 setShowMoveStepDialog(true);
             }
         }
+    };
+
+    const handleOpenProductDialog = (group: any, roomId: string) => {
+        setSelectedProductGroup(group);
+        setCurrentRoomId(roomId);
+        setShowProductDialog(true);
     };
 
     if (loading) {
@@ -447,6 +467,8 @@ export function OrderDetailPage() {
                     handleOpenAccessory={handleOpenAccessory}
                     handleOpenPartner={handleOpenPartner}
                     handleOpenAssignDialog={handleOpenAssignDialog}
+                    handleOpenSaleAssignDialog={handleOpenSaleAssignDialog}
+                    onProductCardClick={handleOpenProductDialog}
                 />
 
                 <AftersaleTab
@@ -460,8 +482,7 @@ export function OrderDetailPage() {
                     getSLADisplay={getSLADisplay}
                     getAfterSaleStageLabel={getAfterSaleStageLabel}
                     getGroupCurrentTechRoom={getGroupCurrentTechRoom}
-                    openAfter1Dialog={() => { /* Implement if needed */ }}
-                    openAfter2Dialog={() => { /* Implement if needed */ }}
+                    onProductCardClick={handleOpenProductDialog}
                 />
 
                 <CareTab
@@ -471,6 +492,7 @@ export function OrderDetailPage() {
                     reloadOrder={reloadOrder}
                     fetchKanbanLogs={fetchKanbanLogs}
                     getCareWarrantyStageLabel={getCareWarrantyStageLabel}
+                    onProductCardClick={handleOpenProductDialog}
                 />
             </Tabs>
 
@@ -504,6 +526,17 @@ export function OrderDetailPage() {
                     onOpenChange={setShowAssignDialog}
                     selectedItem={selectedItem}
                     technicians={technicians}
+                    onSuccess={reloadOrder}
+                />
+            )}
+
+            {/* Sales Assignment Dialog */}
+            {selectedItem && (
+                <AssignSalesPersonDialog
+                    open={showSaleAssignDialog}
+                    onOpenChange={setShowSaleAssignDialog}
+                    selectedItem={selectedItem}
+                    salesPersons={salesPersons}
                     onSuccess={reloadOrder}
                 />
             )}
@@ -652,7 +685,18 @@ export function OrderDetailPage() {
                 onSuccess={() => {
                     reloadOrder();
                     if (order?.id) fetchKanbanLogs(order.id);
+                    setActiveTab('aftersale');
                 }}
+            />
+
+            <ProductDetailDialog
+                open={showProductDialog}
+                onOpenChange={setShowProductDialog}
+                group={selectedProductGroup}
+                roomId={currentRoomId}
+                currentUserId={user?.id}
+                order={order}
+                onUpdateOrder={updateOrderAfterSale}
             />
         </div>
     );

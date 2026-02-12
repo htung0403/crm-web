@@ -389,6 +389,14 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                 assigned_by,
                 assigned_at,
                 technician:users!order_item_technicians_technician_id_fkey(id, name)
+            ),
+            sales:order_item_sales(
+                id,
+                sale_id,
+                commission,
+                assigned_by,
+                assigned_at,
+                sale:users!order_item_sales_sale_id_fkey(id, name, avatar)
             )
         )
       `);
@@ -427,6 +435,13 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                         status,
                         assigned_at,
                         technician:users!order_product_service_technicians_technician_id_fkey(id, name, avatar)
+                    ),
+                    sales:order_product_service_sales(
+                        id,
+                        sale_id,
+                        commission,
+                        assigned_at,
+                        sale:users!order_product_service_sales_sale_id_fkey(id, name, avatar)
                     )
                 )
             `)
@@ -472,6 +487,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                 if (product.services && product.services.length > 0) {
                     for (const s of product.services) {
                         let technicians = s.technicians || [];
+                        let sales = s.sales || [];
                         if (technicians.length === 0 && s.technician_id) {
                             technicians = [{
                                 technician_id: s.technician_id,
@@ -492,6 +508,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                             technician_id: s.technician_id,
                             technician: s.technician,
                             technicians: technicians,
+                            sales: sales,
                             service: s.service,
                             package: s.package,
                             started_at: s.started_at,
@@ -779,7 +796,8 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                             technician_id: techId,
                             status: hasTechs ? 'assigned' : 'pending',
                             assigned_at: hasTechs ? new Date().toISOString() : null,
-                            _technicians: svc.technicians || [] // temp metadata
+                            _technicians: svc.technicians || [], // temp metadata
+                            _sales: svc.sales || [] // temp metadata
                         };
                     });
 
@@ -812,6 +830,27 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
 
                         if (techAssignments.length > 0) {
                             await supabaseAdmin.from('order_product_service_technicians').insert(techAssignments);
+                        }
+
+                        // Handle multiple salespersons
+                        const saleAssignments: any[] = [];
+                        for (let j = 0; j < createdSvcs.length; j++) {
+                            const createdSvc = createdSvcs[j];
+                            const originalSvc = servicesPayload[j];
+                            const sales = originalSvc._sales || [];
+                            for (const s of sales) {
+                                saleAssignments.push({
+                                    order_product_service_id: createdSvc.id,
+                                    sale_id: s.sale_id || s.id,
+                                    commission: s.commission || 0,
+                                    assigned_by: req.user!.id,
+                                    assigned_at: new Date().toISOString()
+                                });
+                            }
+                        }
+
+                        if (saleAssignments.length > 0) {
+                            await supabaseAdmin.from('order_product_service_sales').insert(saleAssignments);
                         }
 
                         // Generate Workflow Steps for services
@@ -866,7 +905,28 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                     status: 'pending'
                 };
             });
-            await supabaseAdmin.from('order_items').insert(saleItemsPayload);
+            const { data: createdItems, error: itemsError } = await supabaseAdmin.from('order_items').insert(saleItemsPayload).select();
+
+            if (!itemsError && createdItems) {
+                const saleItemAssignments: any[] = [];
+                for (let idx = 0; idx < createdItems.length; idx++) {
+                    const createdItem = createdItems[idx];
+                    const originalItem = finalSaleItems[idx];
+                    const sales = originalItem.sales || [];
+                    for (const s of sales) {
+                        saleItemAssignments.push({
+                            order_item_id: createdItem.id,
+                            sale_id: s.sale_id || s.id,
+                            commission: s.commission || 0,
+                            assigned_by: req.user!.id,
+                            assigned_at: new Date().toISOString()
+                        });
+                    }
+                }
+                if (saleItemAssignments.length > 0) {
+                    await supabaseAdmin.from('order_item_sales').insert(saleItemAssignments);
+                }
+            }
         }
 
         // 6. Create Transaction record for payment
@@ -988,6 +1048,7 @@ router.put('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, 
                     commission_tech_rate: commissionTechRate,
                     commission_sale_amount: commissionSaleAmount,
                     commission_tech_amount: commissionTechAmount,
+                    _sales: item.sales || [] // temp metadata
                 };
             });
 
@@ -999,13 +1060,34 @@ router.put('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, 
             .eq('order_id', id);
 
         if (saleItemsToInsert.length > 0) {
-            const { error: itemsError } = await supabaseAdmin
+            const { data: createdItems, error: itemsError } = await supabaseAdmin
                 .from('order_items')
-                .insert(saleItemsToInsert);
+                .insert(saleItemsToInsert.map(({ _sales, ...data }: any) => data))
+                .select();
 
-            if (itemsError) {
+            if (itemsError || !createdItems) {
                 console.error('Error updating sale items:', itemsError);
                 throw new ApiError('Lỗi khi cập nhật danh sách sản phẩm bán kèm', 500);
+            }
+
+            // Insert Sales assignments
+            const saleItemAssignments: any[] = [];
+            for (let idx = 0; idx < createdItems.length; idx++) {
+                const createdItem = createdItems[idx];
+                const originalItem = saleItemsToInsert[idx];
+                const sales = originalItem._sales || [];
+                for (const s of sales) {
+                    saleItemAssignments.push({
+                        order_item_id: createdItem.id,
+                        sale_id: s.sale_id || s.id,
+                        commission: s.commission || 0,
+                        assigned_by: req.user!.id,
+                        assigned_at: new Date().toISOString()
+                    });
+                }
+            }
+            if (saleItemAssignments.length > 0) {
+                await supabaseAdmin.from('order_item_sales').insert(saleItemAssignments);
             }
         }
 
@@ -1016,7 +1098,13 @@ router.put('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, 
                 *,
                 customer:customers(id, name, phone, email),
                 sales_user:users!orders_sales_id_fkey(id, name),
-                items:order_items(id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price)
+                items:order_items(
+                    id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price,
+                    sales:order_item_sales(
+                        id, sale_id, commission, assigned_at,
+                        sale:users!order_item_sales_sale_id_fkey(id, name, avatar)
+                    )
+                )
             `)
             .eq('id', id)
             .single();
@@ -1169,6 +1257,19 @@ router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequ
                                 await supabaseAdmin.from('order_product_service_technicians').insert(techPayload);
                             }
 
+                            // Sales
+                            const hasSales = svc.sales && svc.sales.length > 0;
+                            if (hasSales) {
+                                const salePayload = svc.sales.map((s: any) => ({
+                                    order_product_service_id: createdSvc.id,
+                                    sale_id: s.sale_id || s.id,
+                                    commission: s.commission || 0,
+                                    assigned_by: req.user!.id,
+                                    assigned_at: new Date().toISOString()
+                                }));
+                                await supabaseAdmin.from('order_product_service_sales').insert(salePayload);
+                            }
+
                             // Workflow steps
                             if (svc.type === 'service' && svc.id) {
                                 const { data: sData } = await supabaseAdmin.from('services').select('workflow_id').eq('id', svc.id).single();
@@ -1204,9 +1305,30 @@ router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequ
                 quantity: Number(a.quantity) || 1,
                 unit_price: Number(a.unit_price) || 0,
                 total_price: (Number(a.quantity) || 1) * (Number(a.unit_price) || 0),
-                item_code: `IT${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`,
+                item_code: a.item_code || `IT${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`,
             }));
-            await supabaseAdmin.from('order_items').insert(saleItemsPayload);
+            const { data: createdItems, error: itemsError } = await supabaseAdmin.from('order_items').insert(saleItemsPayload).select();
+
+            if (!itemsError && createdItems) {
+                const saleItemAssignments: any[] = [];
+                for (let idx = 0; idx < createdItems.length; idx++) {
+                    const createdItem = createdItems[idx];
+                    const originalItem = sale_items[idx];
+                    const sales = originalItem.sales || [];
+                    for (const s of sales) {
+                        saleItemAssignments.push({
+                            order_item_id: createdItem.id,
+                            sale_id: s.sale_id || s.id,
+                            commission: s.commission || 0,
+                            assigned_by: req.user!.id,
+                            assigned_at: new Date().toISOString()
+                        });
+                    }
+                }
+                if (saleItemAssignments.length > 0) {
+                    await supabaseAdmin.from('order_item_sales').insert(saleItemAssignments);
+                }
+            }
         }
 
         res.json({

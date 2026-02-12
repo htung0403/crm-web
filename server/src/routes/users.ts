@@ -29,6 +29,29 @@ router.get('/technicians', authenticate, async (req: AuthenticatedRequest, res, 
     }
 });
 
+// Get sales list (cho tất cả user đã đăng nhập - dùng để phân công)
+router.get('/sales', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { data: sales, error } = await supabaseAdmin
+            .from('users')
+            .select('id, name, avatar, phone, department, status, role')
+            .eq('role', 'sale')
+            .eq('status', 'active')
+            .order('name', { ascending: true });
+
+        if (error) {
+            throw new ApiError('Lỗi khi lấy danh sách sales', 500);
+        }
+
+        res.json({
+            status: 'success',
+            data: { users: sales || [] },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 // Get all users (chỉ manager)
 router.get('/', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {

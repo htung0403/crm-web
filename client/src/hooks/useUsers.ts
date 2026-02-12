@@ -30,10 +30,12 @@ interface UpdateUserData {
 interface UseUsersReturn {
     users: User[];
     technicians: User[];
+    salesPersons: User[];
     loading: boolean;
     error: string | null;
     fetchUsers: (params?: { role?: string }) => Promise<void>;
     fetchTechnicians: () => Promise<void>;
+    fetchSales: () => Promise<void>;
     createUser: (data: CreateUserData) => Promise<User>;
     updateUser: (id: string, data: UpdateUserData) => Promise<User>;
     deleteUser: (id: string) => Promise<void>;
@@ -58,7 +60,11 @@ export function useUsers(): UseUsersReturn {
             const responseData = response?.data ?? response;
             const usersData = responseData?.data?.users ?? responseData?.users ?? responseData;
 
-            setUsers(Array.isArray(usersData) ? usersData : []);
+            const newData = Array.isArray(usersData) ? usersData : [];
+            setUsers(prev => {
+                const ids = new Set(newData.map(u => u.id));
+                return [...prev.filter(u => !ids.has(u.id)), ...newData];
+            });
         } catch (err) {
             const message = err instanceof Error ? err.message : 'Lỗi khi tải danh sách người dùng';
             setError(message);
@@ -79,11 +85,36 @@ export function useUsers(): UseUsersReturn {
             const responseData = response?.data ?? response;
             const usersData = responseData?.data?.users ?? responseData?.users ?? responseData;
 
-            setUsers(Array.isArray(usersData) ? usersData : []);
+            const newData = Array.isArray(usersData) ? usersData : [];
+            setUsers(prev => {
+                const ids = new Set(newData.map(u => u.id));
+                return [...prev.filter(u => !ids.has(u.id)), ...newData];
+            });
         } catch (err) {
             const message = err instanceof Error ? err.message : 'Lỗi khi tải danh sách kỹ thuật viên';
             setError(message);
             console.error('Error fetching technicians:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    const fetchSales = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const response = await api.get('/users/sales');
+            const responseData = response?.data ?? response;
+            const usersData = responseData?.data?.users ?? responseData?.users ?? responseData;
+            const newData = Array.isArray(usersData) ? usersData : [];
+            setUsers(prev => {
+                const ids = new Set(newData.map(u => u.id));
+                return [...prev.filter(u => !ids.has(u.id)), ...newData];
+            });
+        } catch (err) {
+            const message = err instanceof Error ? err.message : 'Lỗi khi tải danh sách sales';
+            setError(message);
+            console.error('Error fetching sales:', err);
         } finally {
             setLoading(false);
         }
@@ -142,16 +173,19 @@ export function useUsers(): UseUsersReturn {
         }
     }, []);
 
-    // Filter technicians from users
+    // Filter professionals from users
     const technicians = Array.isArray(users) ? users.filter(u => u.role === 'technician') : [];
+    const salesPersons = Array.isArray(users) ? users.filter(u => u.role === 'sale') : [];
 
     return {
         users,
         technicians,
+        salesPersons,
         loading,
         error,
         fetchUsers,
         fetchTechnicians,
+        fetchSales,
         createUser,
         updateUser,
         deleteUser

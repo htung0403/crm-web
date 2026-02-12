@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
-    ArrowLeft, Save, Loader2, Wrench, GitBranch, Clock, Building2, Plus, ArrowRight, Check
+    ArrowLeft, Save, Loader2, Wrench, GitBranch, Clock, Building2, Plus, ArrowRight, Check, Info
 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -42,6 +42,8 @@ export function CreateServicePage() {
         image: null as string | null,
         workflow_id: null as string | null,
         applicable_product_types: [] as string[],
+        commission_sale: 0,
+        commission_tech: 0,
     });
 
     // Fetch workflows on mount
@@ -64,6 +66,8 @@ export function CreateServicePage() {
                     image: service.image || null,
                     workflow_id: service.workflow_id || null,
                     applicable_product_types: service.applicable_product_types || [],
+                    commission_sale: service.commission_sale || 0,
+                    commission_tech: service.commission_tech || 0,
                 });
             }
             setLoading(false);
@@ -116,6 +120,8 @@ export function CreateServicePage() {
                 image: formData.image || undefined,
                 workflow_id: formData.workflow_id || undefined,
                 applicable_product_types: formData.applicable_product_types.length > 0 ? formData.applicable_product_types : undefined,
+                commission_sale: formData.commission_sale,
+                commission_tech: formData.commission_tech,
                 status: 'active' as const,
             };
 
@@ -151,37 +157,34 @@ export function CreateServicePage() {
     }
 
     return (
-        <div className="p-4 space-y-4 animate-fade-in">
+        <div className="px-1 pt-0.5 pb-4 space-y-2 animate-fade-in max-w-[1600px] mx-auto">
             <Toaster richColors position="top-right" />
 
             {/* Header */}
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-3">
                     <Button
                         variant="ghost"
                         size="icon"
                         onClick={() => navigate('/services')}
-                        className="hover:bg-muted h-8 w-8"
+                        className="hover:bg-muted h-9 w-9"
                     >
-                        <ArrowLeft className="h-4 w-4" />
+                        <ArrowLeft className="h-5 w-5" />
                     </Button>
                     <div>
-                        <h1 className="text-xl font-bold flex items-center gap-2">
-                            <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                                <Wrench className="h-4 w-4 text-primary" />
-                            </div>
+                        <h1 className="text-2xl font-bold tracking-tight">
                             {isEditing ? 'Sửa dịch vụ' : 'Thêm dịch vụ mới'}
                         </h1>
-                        <p className="text-muted-foreground text-xs">
-                            {isEditing ? 'Chỉnh sửa thông tin dịch vụ' : 'Tạo dịch vụ mới với quy trình'}
+                        <p className="text-muted-foreground text-sm">
+                            {isEditing ? 'Chỉnh sửa thông tin dịch vụ' : 'Tạo dịch vụ mới với quy trình thực hiện'}
                         </p>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={() => navigate('/services')}>
+                <div className="flex items-center gap-3">
+                    <Button variant="outline" onClick={() => navigate('/services')}>
                         Huỷ
                     </Button>
-                    <Button onClick={handleSubmit} disabled={isSubmitting} size="sm" className="gap-2">
+                    <Button onClick={handleSubmit} disabled={isSubmitting} className="gap-2 px-6">
                         {isSubmitting ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
@@ -195,21 +198,25 @@ export function CreateServicePage() {
             {/* Two Column Layout */}
             <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
                 {/* Left Column - Basic Info (2/5 width) */}
-                <div className="lg:col-span-2 overflow-auto">
-                    <Card className="shadow-sm border-border/50">
-                        <CardHeader className="pb-3 pt-4 px-4">
-                            <CardTitle className="text-base">Thông tin cơ bản</CardTitle>
-                            <CardDescription className="text-xs">Nhập thông tin dịch vụ</CardDescription>
+                <div className="lg:col-span-2 space-y-6">
+                    <Card className="shadow-sm border-border/60">
+                        <CardHeader className="pb-4">
+                            <CardTitle className="text-lg flex items-center gap-2">
+                                <Info className="h-5 w-5 text-primary" />
+                                Thông tin cơ bản
+                            </CardTitle>
                         </CardHeader>
-                        <CardContent className="space-y-4 px-4 pb-4">
+                        <CardContent className="space-y-6">
                             {/* Image Upload */}
-                            <div className="space-y-2">
-                                <Label className="text-sm font-medium">Hình ảnh</Label>
-                                <ImageUpload
-                                    value={formData.image}
-                                    onChange={(img) => setFormData(prev => ({ ...prev, image: img }))}
-                                    folder="services"
-                                />
+                            <div className="space-y-3">
+                                <Label className="text-sm font-medium">Hình ảnh đại diện</Label>
+                                <div className="bg-muted/30 rounded-xl p-4 border border-dashed border-muted-foreground/10">
+                                    <ImageUpload
+                                        value={formData.image}
+                                        onChange={(img) => setFormData(prev => ({ ...prev, image: img }))}
+                                        folder="services"
+                                    />
+                                </div>
                             </div>
 
                             <div className="space-y-2">
@@ -220,12 +227,12 @@ export function CreateServicePage() {
                                     id="name"
                                     value={formData.name}
                                     onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                                    placeholder=""
-                                    className="h-11"
+                                    placeholder="Ví dụ: Lắp đặt hệ thống lọc nước RO"
+                                    className="h-12 text-lg font-medium"
                                 />
                             </div>
 
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="space-y-2">
                                     <Label className="text-sm font-medium">
                                         Giá dịch vụ <span className="text-destructive">*</span>
@@ -237,44 +244,84 @@ export function CreateServicePage() {
                                             onChange={handlePriceChange}
                                             onFocus={(e) => formData.price === 0 && e.target.select()}
                                             placeholder="0"
-                                            className="h-11 pr-12"
+                                            className="h-11 pr-12 text-right font-bold text-primary"
                                         />
-                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                                            đ
+                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground font-medium">
+                                            VNĐ
                                         </span>
                                     </div>
                                 </div>
                                 <div className="space-y-2">
-                                    <Label className="text-sm font-medium">Thời lượng</Label>
+                                    <Label className="text-sm font-medium flex items-center gap-2">
+                                        <Clock className="h-4 w-4" />
+                                        Thời lượng (phút)
+                                    </Label>
                                     <div className="relative">
                                         <Input
                                             type="number"
                                             value={formData.duration}
                                             onChange={(e) => setFormData(prev => ({ ...prev, duration: Number(e.target.value) }))}
+                                            onFocus={(e) => e.target.select()}
                                             disabled={!!formData.workflow_id}
-                                            className="h-11 pr-14"
+                                            className="h-11 text-right font-medium"
                                         />
                                     </div>
                                 </div>
                             </div>
 
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <Label className="text-sm font-medium">Hoa hồng Sale</Label>
+                                        <span className="text-xs text-primary font-bold">{formData.commission_sale}%</span>
+                                    </div>
+                                    <Input
+                                        type="number"
+                                        value={formData.commission_sale}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, commission_sale: Number(e.target.value) }))}
+                                        onFocus={(e) => e.target.select()}
+                                        className="h-11"
+                                        min={0}
+                                        max={100}
+                                    />
+                                </div>
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <Label className="text-sm font-medium">Hoa hồng KTV</Label>
+                                        <span className="text-xs text-primary font-bold">{formData.commission_tech}%</span>
+                                    </div>
+                                    <Input
+                                        type="number"
+                                        value={formData.commission_tech}
+                                        onChange={(e) => setFormData(prev => ({ ...prev, commission_tech: Number(e.target.value) }))}
+                                        onFocus={(e) => e.target.select()}
+                                        className="h-11"
+                                        min={0}
+                                        max={100}
+                                    />
+                                </div>
+                            </div>
+
                             {/* Applicable Product Types */}
-                            <div className="space-y-2">
-                                <Label className="text-sm font-medium">Sản phẩm áp dụng</Label>
+                            <div className="space-y-3 pt-2">
+                                <Label className="text-sm font-medium flex items-center gap-2">
+                                    <Building2 className="h-4 w-4" />
+                                    Loại sản phẩm áp dụng
+                                </Label>
                                 <ProductTypeSelector
                                     value={formData.applicable_product_types}
                                     onChange={(types) => setFormData(prev => ({ ...prev, applicable_product_types: types }))}
                                 />
-                                <p className="text-xs text-muted-foreground mt-1">
-                                    Chọn các loại sản phẩm có thể áp dụng dịch vụ này. Để trống nếu áp dụng cho tất cả.
+                                <p className="text-xs text-muted-foreground italic">
+                                    * Chọn các loại sản phẩm có thể áp dụng dịch vụ này (để trống nếu áp dụng tất cả).
                                 </p>
                             </div>
 
                             {/* Workflow Selection */}
-                            <div className="space-y-2 pt-2">
-                                <Label className="flex items-center gap-2 text-sm font-medium">
-                                    <GitBranch className="h-4 w-4 text-primary" />
-                                    Quy trình áp dụng
+                            <div className="space-y-3 pt-4 border-t">
+                                <Label className="flex items-center gap-2 text-sm font-medium text-primary">
+                                    <GitBranch className="h-4 w-4" />
+                                    Quyết định quy trình thực hiện
                                 </Label>
                                 <Select
                                     value={formData.workflow_id || 'none'}

@@ -1,6 +1,19 @@
 import type { Product as APIProduct, Service as APIService } from '@/hooks/useProducts';
 import type { Package as APIPackage, Voucher as APIVoucher } from '@/types';
 
+export interface DepartmentOption {
+    id: string;
+    code: string;
+    name: string;
+}
+
+export interface ServiceDepartment {
+    department_id: string;
+    commission_sale: number;
+    commission_tech: number;
+    is_primary: boolean;
+}
+
 // Extended types for products
 export interface Product extends APIProduct {
     hasInventory?: boolean;

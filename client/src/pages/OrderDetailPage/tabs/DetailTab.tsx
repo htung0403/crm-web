@@ -140,7 +140,18 @@ export function DetailTab({ order, productStatusSummary, onShowPrintDialog, onSh
                                                                             {getCustomerProductTypeLabel((product as any).product_type)}
                                                                         </Badge>
                                                                     </td>
-                                                                    <td className="p-4 font-medium align-top">{product.item_name}</td>
+                                                                    <td className="p-4 font-medium align-top">
+                                                                        <div>{product.item_name}</div>
+                                                                        {(product as any).sales?.length > 0 && (
+                                                                            <div className="flex flex-wrap gap-1 mt-1">
+                                                                                {(product as any).sales.map((s: any, idx: number) => (
+                                                                                    <Badge key={idx} variant="outline" className="text-[10px] py-0 h-4 bg-amber-50 text-amber-700 border-amber-200">
+                                                                                        Sale: {s.sale?.name || s.name} ({s.commission}%)
+                                                                                    </Badge>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                    </td>
                                                                     <td className="p-4 text-center align-top">{product.quantity}</td>
                                                                     <td className="p-4 text-right text-muted-foreground align-top">—</td>
                                                                     <td className="p-4 text-right font-semibold align-top">
@@ -169,7 +180,31 @@ export function DetailTab({ order, productStatusSummary, onShowPrintDialog, onSh
                                                                                 {getItemTypeLabel(svc.item_type)}
                                                                             </Badge>
                                                                         </td>
-                                                                        <td className="p-4 pl-8 text-muted-foreground">{svc.item_name}</td>
+                                                                        <td className="p-4 pl-8 text-muted-foreground">
+                                                                            <div>{svc.item_name}</div>
+                                                                            {((svc as any).technicians?.length > 0 || (svc as any).technician) && (
+                                                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                                                    {(svc as any).technicians?.length > 0 ? (svc as any).technicians.map((t: any, idx: number) => (
+                                                                                        <Badge key={idx} variant="outline" className="text-[10px] py-0 h-4 bg-blue-50 text-blue-700 border-blue-200">
+                                                                                            KT: {t.technician?.name || t.name} ({t.commission}%)
+                                                                                        </Badge>
+                                                                                    )) : (svc as any).technician && (
+                                                                                        <Badge variant="outline" className="text-[10px] py-0 h-4 bg-blue-50 text-blue-700 border-blue-200">
+                                                                                            KT: {(svc as any).technician.name} ({(svc as any).commission || 0}%)
+                                                                                        </Badge>
+                                                                                    )}
+                                                                                </div>
+                                                                            )}
+                                                                            {(svc as any).sales?.length > 0 && (
+                                                                                <div className="flex flex-wrap gap-1 mt-0.5">
+                                                                                    {(svc as any).sales.map((s: any, idx: number) => (
+                                                                                        <Badge key={idx} variant="outline" className="text-[10px] py-0 h-4 bg-amber-50 text-amber-700 border-amber-200">
+                                                                                            Sale: {s.sale?.name || s.name} ({s.commission}%)
+                                                                                        </Badge>
+                                                                                    ))}
+                                                                                </div>
+                                                                            )}
+                                                                        </td>
                                                                         <td className="p-4 text-center">{svc.quantity}</td>
                                                                         <td className="p-4 text-right text-muted-foreground">{formatCurrency(svc.unit_price)}</td>
                                                                         <td className="p-4 text-right font-semibold">{formatCurrency(svc.total_price)}</td>
@@ -204,7 +239,31 @@ export function DetailTab({ order, productStatusSummary, onShowPrintDialog, onSh
                                                                     {getItemTypeLabel(item.item_type)}
                                                                 </Badge>
                                                             </td>
-                                                            <td className="p-4 font-medium">{item.item_name}</td>
+                                                            <td className="p-4 font-medium">
+                                                                <div>{item.item_name}</div>
+                                                                {((item as any).technicians?.length > 0 || (item as any).technician) && (
+                                                                    <div className="flex flex-wrap gap-1 mt-1">
+                                                                        {(item as any).technicians?.length > 0 ? (item as any).technicians.map((t: any, idx: number) => (
+                                                                            <Badge key={idx} variant="outline" className="text-[10px] py-0 h-4 bg-blue-50 text-blue-700 border-blue-200">
+                                                                                KT: {t.technician?.name || t.name} ({t.commission}%)
+                                                                            </Badge>
+                                                                        )) : (item as any).technician && (
+                                                                            <Badge variant="outline" className="text-[10px] py-0 h-4 bg-blue-50 text-blue-700 border-blue-200">
+                                                                                KT: {(item as any).technician.name} ({(item as any).commission || 0}%)
+                                                                            </Badge>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                                {(item as any).sales?.length > 0 && (
+                                                                    <div className="flex flex-wrap gap-1 mt-0.5">
+                                                                        {(item as any).sales.map((s: any, idx: number) => (
+                                                                            <Badge key={idx} variant="outline" className="text-[10px] py-0 h-4 bg-amber-50 text-amber-700 border-amber-200">
+                                                                                Sale: {s.sale?.name || s.name} ({s.commission}%)
+                                                                            </Badge>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </td>
                                                             <td className="p-4 text-center">{item.quantity}</td>
                                                             <td className="p-4 text-right text-muted-foreground">{formatCurrency(item.unit_price)}</td>
                                                             <td className="p-4 text-right font-semibold">{formatCurrency(item.total_price)}</td>

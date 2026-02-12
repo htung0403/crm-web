@@ -287,6 +287,11 @@ export const orderItemsApi = {
         return api.patch<ApiResponse<any>>(`/order-items/${id}/assign`, payload);
     },
 
+    assignSale: (id: string, data: string | { sale_id: string; commission: number }[]) => {
+        const payload = Array.isArray(data) ? { assignments: data } : { sale_id: data };
+        return api.patch<ApiResponse<any>>(`/order-items/${id}/assign-sale`, payload);
+    },
+
     start: (id: string) =>
         api.patch<ApiResponse<any>>(`/order-items/${id}/start`),
 
@@ -578,6 +583,12 @@ export const transactionsApi = {
 };
 
 // Product Types API
+export const productChatsApi = {
+    getMessages: (entityId: string, roomId: string) => api.get(`/product-chats/${entityId}/${roomId}`),
+    sendMessage: (data: { entity_id: string; entity_type: string; room_id: string; content: string }) =>
+        api.post('/product-chats', data),
+};
+
 export const productTypesApi = {
     getAll: () =>
         api.get<ApiResponse<any[]>>('/product-types'),

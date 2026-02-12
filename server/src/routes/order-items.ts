@@ -150,6 +150,119 @@ router.patch('/:id/assign', authenticate, async (req: AuthenticatedRequest, res,
     }
 });
 
+// Assign salesperson(s) to order item
+router.patch('/:id/assign-sale', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { sale_id, assignments } = req.body;
+        console.log('[Assign Sale] Body:', JSON.stringify(req.body, null, 2));
+        const userId = req.user?.id;
+
+        let item: any = null;
+
+        // Try to update V1 item (order_items)
+        const { data: v1Exists } = await supabaseAdmin.from('order_items').select('id, total_price, order_id').eq('id', id).maybeSingle();
+
+        if (v1Exists) {
+            const saleAssignments = (Array.isArray(assignments) ? assignments : []).map(s => ({
+                sale_id: s.sale_id || s.id,
+                commission: Number(s.commission) || 0
+            }));
+
+            // Backward compatibility
+            if (saleAssignments.length === 0 && sale_id) {
+                saleAssignments.push({ sale_id, commission: 0 });
+            }
+
+            if (saleAssignments.length === 0) throw new ApiError('Cần ít nhất một nhân viên kinh doanh', 400);
+
+            // Handle junction table for multiple salespersons
+            // 1. Delete existing assignments
+            await supabaseAdmin.from('order_item_sales').delete().eq('order_item_id', id);
+
+            // 2. Insert new assignments
+            const junctionRows = saleAssignments.map(s => ({
+                order_item_id: id,
+                sale_id: s.sale_id,
+                commission: s.commission || 0,
+                assigned_by: userId,
+                assigned_at: new Date().toISOString()
+            }));
+
+            const { error: junctionError } = await supabaseAdmin.from('order_item_sales').insert(junctionRows);
+            if (junctionError) throw new ApiError('Lỗi cập nhật phân công sales: ' + junctionError.message, 500);
+
+            // Get updated item with order info
+            const { data: v1Item } = await supabaseAdmin
+                .from('order_items')
+                .select('*, order:orders(id, order_code, status)')
+                .eq('id', id)
+                .single();
+            item = v1Item;
+        } else {
+            // Try V2 item (order_product_services)
+            const { data: v2Exists } = await supabaseAdmin.from('order_product_services').select('id, unit_price').eq('id', id).maybeSingle();
+
+            if (v2Exists) {
+                const saleAssignments = (Array.isArray(assignments) ? assignments : []).map(s => ({
+                    sale_id: s.sale_id || s.id,
+                    commission: Number(s.commission) || 0
+                }));
+
+                if (saleAssignments.length === 0 && sale_id) {
+                    saleAssignments.push({ sale_id, commission: 0 });
+                }
+
+                if (saleAssignments.length === 0) throw new ApiError('Cần ít nhất một nhân viên kinh doanh', 400);
+
+                // Handle junction table for V2
+                // 1. Delete existing
+                await supabaseAdmin.from('order_product_service_sales').delete().eq('order_product_service_id', id);
+
+                // 2. Insert new
+                const junctionRows = saleAssignments.map(s => ({
+                    order_product_service_id: id,
+                    sale_id: s.sale_id,
+                    commission: s.commission || 0,
+                    assigned_by: userId,
+                    assigned_at: new Date().toISOString()
+                }));
+
+                const { error: junctionError } = await supabaseAdmin.from('order_product_service_sales').insert(junctionRows);
+                if (junctionError) throw new ApiError('Lỗi cập nhật phân công sales cho dịch vụ: ' + junctionError.message, 500);
+
+                // Get updated item
+                const { data: v2Item } = await supabaseAdmin
+                    .from('order_product_services')
+                    .select('*, order_product:order_products(order:orders(id, order_code, status))')
+                    .eq('id', id)
+                    .single();
+
+                item = {
+                    ...v2Item,
+                    order: v2Item.order_product?.order
+                };
+            } else {
+                throw new ApiError('Không tìm thấy hạng mục hoặc dịch vụ', 404);
+            }
+        }
+
+        // Re-trigger commission recording
+        if (item?.order?.id && (item.order.status === 'done' || item.order.status === 'after_sale')) {
+            const { recordCommissions } = await import('../utils/orderHelper.js');
+            await recordCommissions(item.order.id);
+        }
+
+        res.json({
+            status: 'success',
+            data: item,
+            message: 'Đã phân công nhân viên kinh doanh thành công'
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 // Update order item status (generic)
 router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {

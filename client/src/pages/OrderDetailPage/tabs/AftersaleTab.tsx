@@ -27,8 +27,7 @@ interface AftersaleTabProps {
     getAfterSaleStageLabel: (stage: string) => string;
     getGroupCurrentTechRoom: (group: any) => string;
     // Dialog control props
-    openAfter1Dialog: () => void;
-    openAfter2Dialog: () => void;
+    onProductCardClick: (group: any, roomId: string) => void;
 }
 
 const AFTER_COLS = [
@@ -49,8 +48,7 @@ export function AftersaleTab({
     getSLADisplay,
     getAfterSaleStageLabel,
     getGroupCurrentTechRoom,
-    openAfter1Dialog,
-    openAfter2Dialog
+    onProductCardClick
 }: AftersaleTabProps) {
     if (!order) return null;
 
@@ -102,12 +100,12 @@ export function AftersaleTab({
                                         <div className="flex justify-between items-center mb-4 px-2">
                                             <h2 className={cn('font-bold uppercase text-xs sm:text-sm tracking-widest', col.color)}>{col.title}</h2>
                                             <span className="bg-gray-200 text-gray-700 text-xs px-2.5 py-1 rounded-full">
-                                                {groups.filter(g => order.after_sale_stage === col.id && getGroupCurrentTechRoom(g) === 'done').length}
+                                                {groups.filter(g => currentStage === col.id && getGroupCurrentTechRoom(g) === 'done').length}
                                             </span>
                                         </div>
                                         <Droppable droppableId={col.id}>
                                             {(provided, snapshot) => {
-                                                const colGroups = groups.filter(g => order.after_sale_stage === col.id && getGroupCurrentTechRoom(g) === 'done');
+                                                const colGroups = groups.filter(g => currentStage === col.id && getGroupCurrentTechRoom(g) === 'done');
                                                 return (
                                                     <div
                                                         ref={provided.innerRef}
@@ -129,9 +127,10 @@ export function AftersaleTab({
                                                                             {...provided.draggableProps}
                                                                             {...provided.dragHandleProps}
                                                                             className={cn(
-                                                                                'bg-white rounded-xl shadow-sm mb-3 border-l-4 transition-all overflow-hidden cursor-grab active:cursor-grabbing',
+                                                                                'bg-white rounded-xl shadow-sm mb-3 border-l-4 transition-all overflow-hidden cursor-grab active:cursor-grabbing hover:shadow-md hover:border-purple-600',
                                                                                 order.due_at && new Date(order.due_at) < new Date() ? 'border-red-500 bg-red-50/30' : 'border-purple-400'
                                                                             )}
+                                                                            onClick={() => onProductCardClick(group, col.id)}
                                                                         >
                                                                             {/* Full width image at the top */}
                                                                             {(product?.image || product?.product?.image || (product as any)?.service?.image) ? (
@@ -173,20 +172,24 @@ export function AftersaleTab({
                                                                                     <span className="text-xs font-bold text-gray-400">{getSLADisplay(order.due_at)}</span>
                                                                                 </div>
                                                                                 {col.id === 'after1' && (
-                                                                                    <button
-                                                                                        className="mt-2 w-full h-9 text-sm inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 font-medium shadow-sm hover:bg-accent hover:text-accent-foreground"
-                                                                                        onClick={(e) => { e.stopPropagation(); openAfter1Dialog(); }}
+                                                                                    <Button
+                                                                                        variant="outline"
+                                                                                        size="sm"
+                                                                                        className="mt-2 w-full h-9 font-bold border-purple-200 hover:bg-purple-50 text-purple-700"
+                                                                                        onClick={(e) => { e.stopPropagation(); onProductCardClick(group, 'after1'); }}
                                                                                     >
                                                                                         <Camera className="h-4 w-4 mr-1.5" /> Kiểm nợ & Ảnh hoàn thiện
-                                                                                    </button>
+                                                                                    </Button>
                                                                                 )}
                                                                                 {col.id === 'after2' && (
-                                                                                    <button
-                                                                                        className="mt-2 w-full h-9 text-sm inline-flex items-center justify-center rounded-md border border-input bg-background px-4 py-2 font-medium shadow-sm hover:bg-accent hover:text-accent-foreground"
-                                                                                        onClick={(e) => { e.stopPropagation(); openAfter2Dialog(); }}
+                                                                                    <Button
+                                                                                        variant="outline"
+                                                                                        size="sm"
+                                                                                        className="mt-2 w-full h-9 font-bold border-purple-200 hover:bg-purple-50 text-purple-700"
+                                                                                        onClick={(e) => { e.stopPropagation(); onProductCardClick(group, 'after2'); }}
                                                                                     >
                                                                                         <Upload className="h-4 w-4 mr-1.5" /> Đóng gói & Giao hàng
-                                                                                    </button>
+                                                                                    </Button>
                                                                                 )}
                                                                             </div>
                                                                         </div>

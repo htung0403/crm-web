@@ -76,6 +76,11 @@ interface CustomerProduct {
             name: string;
             commission: number; // phần trăm hoa hồng
         }>;
+        sales: Array<{
+            id: string;
+            name: string;
+            commission: number; // phần trăm hoa hồng
+        }>;
     }>;
 }
 
@@ -95,7 +100,7 @@ export function CreateOrderPage() {
     const { customers, fetchCustomers, createCustomer } = useCustomers();
     const { products: catalogProducts, services, fetchProducts, fetchServices } = useProducts();
     const { packages, fetchPackages } = usePackages();
-    const { users: technicians, fetchTechnicians } = useUsers();
+    const { users, fetchUsers, fetchTechnicians, fetchSales } = useUsers();
     const { productTypes, fetchProductTypes } = useProductTypes();
 
     // Form state
@@ -120,7 +125,14 @@ export function CreateOrderPage() {
     const [techDialogOpen, setTechDialogOpen] = useState(false);
     const [pendingService, setPendingService] = useState<{
         productIndex: number;
-        service: { id: string; type: 'service' | 'package'; name: string; price: number };
+        service: {
+            id: string;
+            type: 'service' | 'package';
+            name: string;
+            price: number;
+            commission_sale?: number;
+            commission_tech?: number;
+        };
     } | null>(null);
 
     // Create customer dialog state
@@ -139,10 +151,26 @@ export function CreateOrderPage() {
         name: string;
         price: number;
         quantity: number;
+        sales: Array<{
+            id: string;
+            name: string;
+            commission: number;
+        }>;
     }
     const [addOnProducts, setAddOnProducts] = useState<AddOnProduct[]>([]);
     const [addOnDialogOpen, setAddOnDialogOpen] = useState(false);
     const [addOnSearch, setAddOnSearch] = useState('');
+
+    // Sales selection dialog state
+    const [saleDialogOpen, setSaleDialogOpen] = useState(false);
+    const [pendingSaleItem, setPendingSaleItem] = useState<{
+        type: 'service' | 'addon';
+        productIndex?: number;
+        serviceIndex?: number;
+        addonId?: string;
+    } | null>(null);
+
+    const [lastAddedAddOnSale, setLastAddedAddOnSale] = useState<{ addOnId: string; saleId: string } | null>(null);
 
     // Fetch data
     useEffect(() => {
@@ -156,6 +184,7 @@ export function CreateOrderPage() {
                     fetchServices({ status: 'active' }),
                     fetchPackages(),
                     fetchTechnicians(),
+                    fetchSales(),
                     fetchProductTypes()
                 ]);
             } catch {
@@ -165,7 +194,7 @@ export function CreateOrderPage() {
             }
         };
         fetchData();
-    }, [fetchCustomers, fetchProducts, fetchServices, fetchPackages, fetchTechnicians, fetchProductTypes]);
+    }, [fetchCustomers, fetchProducts, fetchServices, fetchPackages, fetchTechnicians, fetchSales, fetchProductTypes]);
 
     // Fetch next order code separately (for QR preview)
     useEffect(() => {
@@ -228,6 +257,11 @@ export function CreateOrderPage() {
                                     id: t.technician_id,
                                     name: t.technician?.name || 'Unknown',
                                     commission: t.commission || 0
+                                })),
+                                sales: (s.sales || []).map((sale: any) => ({
+                                    id: sale.sale_id || sale.id,
+                                    name: sale.sale?.name || 'Unknown',
+                                    commission: sale.commission || 0
                                 }))
                             }))
                         }));
@@ -237,7 +271,12 @@ export function CreateOrderPage() {
                             id: item.product_id || item.id,
                             name: item.item_name,
                             price: item.unit_price,
-                            quantity: item.quantity
+                            quantity: item.quantity,
+                            sales: (item.sales || []).map((s: any) => ({
+                                id: s.sale_id || s.id,
+                                name: s.sale?.name || 'Unknown',
+                                commission: s.commission || 0
+                            }))
                         }));
 
                         setProducts(customerItems);
@@ -315,10 +354,11 @@ export function CreateOrderPage() {
         }
     }, [searchParams, customers, createCustomer]);
 
-    // Filter technicians by role
-    const availableTechnicians = technicians.filter(t =>
-        t.role === 'technician' || t.role === 'tech' as string
+    // List of users filtered by role for selection
+    const availableTechnicians = users.filter(t =>
+        t.role === 'technician'
     );
+    const availableSales = users.filter(u => u.role === 'sale');
 
     // Helpers
     const activeCustomers = customers.filter(c => c.status === 'active' || !c.status);
@@ -381,7 +421,14 @@ export function CreateOrderPage() {
     };
 
     // Add service to product (opens technician dialog first)
-    const handleServiceClick = (productIndex: number, service: { id: string; type: 'service' | 'package'; name: string; price: number }) => {
+    const handleServiceClick = (productIndex: number, service: {
+        id: string;
+        type: 'service' | 'package';
+        name: string;
+        price: number;
+        commission_sale?: number;
+        commission_tech?: number;
+    }) => {
         // Check if service already exists
         const product = products[productIndex];
         const exists = product?.services.find(s => s.id === service.id && s.type === service.type);
@@ -408,8 +455,9 @@ export function CreateOrderPage() {
                     ...service,
                     technicians: selectedTechnicians.map(t => ({
                         ...t,
-                        commission: t.commission || (availableTechnicians.find(at => at.id === t.id)?.commission || 0)
-                    }))
+                        commission: t.commission || service.commission_tech || (availableTechnicians.find(at => at.id === t.id)?.commission || 0)
+                    })),
+                    sales: [] // Initialize with empty sales
                 }]
             };
         }));
@@ -436,12 +484,16 @@ export function CreateOrderPage() {
                         toast.error('KTV đã được thêm');
                         return s;
                     }
+                    const service = s.type === 'service'
+                        ? services.find(sv => sv.id === s.id)
+                        : packages.find(pk => pk.id === s.id);
+
                     return {
                         ...s,
                         technicians: [...s.technicians, {
                             id: technician.id,
                             name: technician.name,
-                            commission: commission || technician.commission || 0
+                            commission: commission || service?.commission_tech || technician.commission || 0
                         }]
                     };
                 })
@@ -493,13 +545,89 @@ export function CreateOrderPage() {
         }));
     };
 
+    // Add sale to a service
+    const handleAddSaleToService = (productIndex: number, serviceIndex: number, saleId: string, commission: number = 0) => {
+        const sale = availableSales.find(s => s.id === saleId);
+        if (!sale) return;
+
+        setProducts(prev => prev.map((p, i) => {
+            if (i !== productIndex) return p;
+            return {
+                ...p,
+                services: p.services.map((s, si) => {
+                    if (si !== serviceIndex) return s;
+                    // Check if already added
+                    if (s.sales.some(sl => sl.id === saleId)) {
+                        toast.error('Sales này đã được thêm');
+                        return s;
+                    }
+                    const service = s.type === 'service'
+                        ? services.find(sv => sv.id === s.id)
+                        : packages.find(pk => pk.id === s.id);
+
+                    return {
+                        ...s,
+                        sales: [...s.sales, {
+                            id: sale.id,
+                            name: sale.name,
+                            commission: commission || service?.commission_sale || sale.commission || 0
+                        }]
+                    };
+                })
+            };
+        }));
+    };
+
+    // Remove sale from service
+    const handleRemoveSaleFromService = (productIndex: number, serviceIndex: number, saleId: string) => {
+        setProducts(prev => prev.map((p, i) => {
+            if (i !== productIndex) return p;
+            return {
+                ...p,
+                services: p.services.map((s, si) => {
+                    if (si !== serviceIndex) return s;
+                    return {
+                        ...s,
+                        sales: s.sales.filter(sl => sl.id !== saleId)
+                    };
+                })
+            };
+        }));
+    };
+
+    // Update sale commission for service
+    const handleUpdateSaleCommission = (productIndex: number, serviceIndex: number, saleId: string, commission: number) => {
+        setProducts(prev => prev.map((p, i) => {
+            if (i !== productIndex) return p;
+            return {
+                ...p,
+                services: p.services.map((s, si) => {
+                    if (si !== serviceIndex) return s;
+                    return {
+                        ...s,
+                        sales: s.sales.map(sl =>
+                            sl.id === saleId ? { ...sl, commission } : sl
+                        )
+                    };
+                })
+            };
+        }));
+    };
+
     // Add sản phẩm bán kèm
     const handleAddAddOn = (product: { id: string; name: string; price: number }, quantity: number = 1) => {
         const existing = addOnProducts.find(a => a.id === product.id);
         if (existing) {
             setAddOnProducts(prev => prev.map(a => a.id === product.id ? { ...a, quantity: a.quantity + quantity } : a));
         } else {
-            setAddOnProducts(prev => [...prev, { id: product.id, name: product.name, price: product.price, quantity }]);
+            const catalogProduct = catalogProducts.find(p => p.id === product.id);
+            setAddOnProducts(prev => [...prev, {
+                id: product.id,
+                name: product.name,
+                price: product.price,
+                quantity,
+                sales: []
+            }]);
         }
         setAddOnDialogOpen(false);
         setAddOnSearch('');
@@ -515,6 +643,54 @@ export function CreateOrderPage() {
 
     const handleRemoveAddOn = (id: string) => {
         setAddOnProducts(prev => prev.filter(a => a.id !== id));
+    };
+
+    // Add sale to an add-on product
+    const handleAddSaleToAddOn = (addOnId: string, saleId: string, commission: number = 0) => {
+        const sale = availableSales.find(s => s.id === saleId);
+        if (!sale) return;
+
+        setAddOnProducts(prev => prev.map(a => {
+            if (a.id !== addOnId) return a;
+            if (a.sales.some(sl => sl.id === saleId)) {
+                toast.error('Sales này đã được thêm');
+                return a;
+            }
+            const catalogProduct = catalogProducts.find(p => p.id === addOnId);
+            setLastAddedAddOnSale({ addOnId, saleId });
+            return {
+                ...a,
+                sales: [...a.sales, {
+                    id: sale.id,
+                    name: sale.name,
+                    commission: commission || catalogProduct?.commission_sale || sale.commission || 0
+                }]
+            };
+        }));
+    };
+
+    // Remove sale from add-on product
+    const handleRemoveSaleFromAddOn = (addOnId: string, saleId: string) => {
+        setAddOnProducts(prev => prev.map(a => {
+            if (a.id !== addOnId) return a;
+            return {
+                ...a,
+                sales: a.sales.filter(sl => sl.id !== saleId)
+            };
+        }));
+    };
+
+    // Update sale commission for add-on product
+    const handleUpdateAddOnSaleCommission = (addOnId: string, saleId: string, commission: number) => {
+        setAddOnProducts(prev => prev.map(a => {
+            if (a.id !== addOnId) return a;
+            return {
+                ...a,
+                sales: a.sales.map(sl =>
+                    sl.id === saleId ? { ...sl, commission } : sl
+                )
+            };
+        }));
     };
 
     // Calculate totals (sản phẩm khách + dịch vụ + sản phẩm bán kèm)
@@ -701,6 +877,10 @@ export function CreateOrderPage() {
                         technicians: s.technicians.map(t => ({
                             technician_id: t.id,
                             commission: t.commission
+                        })),
+                        sales: s.sales.map(sl => ({
+                            sale_id: sl.id,
+                            commission: sl.commission
                         }))
                     }))
                 })),
@@ -708,7 +888,11 @@ export function CreateOrderPage() {
                     product_id: a.id,
                     name: a.name,
                     unit_price: a.price,
-                    quantity: a.quantity
+                    quantity: a.quantity,
+                    sales: a.sales.map(sl => ({
+                        sale_id: sl.id,
+                        commission: sl.commission
+                    }))
                 })),
                 notes,
                 discount: discountAmount,
@@ -1229,6 +1413,73 @@ export function CreateOrderPage() {
                                                                                 </SelectContent>
                                                                             </Select>
                                                                         </div>
+
+                                                                        {/* Sales section - compact */}
+                                                                        <div className="pt-1 mt-2 border-t border-dashed">
+                                                                            <p className="text-xs text-muted-foreground mb-1">Nhân viên sales:</p>
+
+                                                                            {/* Assigned sales */}
+                                                                            {s.sales && s.sales.length > 0 ? (
+                                                                                <div className="space-y-2 mb-2">
+                                                                                    {s.sales.map((sale, sai) => (
+                                                                                        <div key={sai} className="flex flex-wrap items-center gap-2 bg-white p-2 rounded-lg border text-xs">
+                                                                                            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                                                                                <Avatar className="h-6 w-6 flex-shrink-0">
+                                                                                                    <AvatarFallback className="bg-amber-100 text-amber-700 text-[10px]">
+                                                                                                        {sale.name.charAt(0)}
+                                                                                                    </AvatarFallback>
+                                                                                                </Avatar>
+                                                                                                <span className="font-medium truncate">{sale.name}</span>
+                                                                                            </div>
+                                                                                            <div className="flex items-center gap-1.5">
+                                                                                                <Input
+                                                                                                    type="number"
+                                                                                                    min="0"
+                                                                                                    max="100"
+                                                                                                    value={sale.commission || 0}
+                                                                                                    onChange={(e) => handleUpdateSaleCommission(index, si, sale.id, Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
+                                                                                                    onFocus={(e) => e.target.select()}
+                                                                                                    className="w-14 h-7 text-xs text-center p-1"
+                                                                                                />
+                                                                                                <span className="text-[10px]">%</span>
+                                                                                                <span className="font-semibold text-amber-600 min-w-[65px] text-right text-xs">
+                                                                                                    = {formatCurrency(s.price * (sale.commission || 0) / 100)}
+                                                                                                </span>
+                                                                                                <Button
+                                                                                                    variant="ghost"
+                                                                                                    size="icon"
+                                                                                                    className="h-7 w-7 text-red-400 hover:text-red-600 flex-shrink-0 touch-manipulation"
+                                                                                                    onClick={() => handleRemoveSaleFromService(index, si, sale.id)}
+                                                                                                >
+                                                                                                    <X className="h-3.5 w-3.5" />
+                                                                                                </Button>
+                                                                                            </div>
+                                                                                        </div>
+                                                                                    ))}
+                                                                                </div>
+                                                                            ) : null}
+
+                                                                            {/* Add sale dropdown */}
+                                                                            <Select
+                                                                                value=""
+                                                                                onValueChange={(saleId) => {
+                                                                                    if (saleId) handleAddSaleToService(index, si, saleId, 0);
+                                                                                }}
+                                                                            >
+                                                                                <SelectTrigger className="h-7 text-xs">
+                                                                                    <SelectValue placeholder="+ Chọn nhân viên sales" />
+                                                                                </SelectTrigger>
+                                                                                <SelectContent>
+                                                                                    {availableSales
+                                                                                        .filter(sale => !s.sales?.some(sl => sl.id === sale.id))
+                                                                                        .map(sale => (
+                                                                                            <SelectItem key={sale.id} value={sale.id}>
+                                                                                                {sale.name}
+                                                                                            </SelectItem>
+                                                                                        ))}
+                                                                                </SelectContent>
+                                                                            </Select>
+                                                                        </div>
                                                                     </div>
                                                                 ))}
                                                             </div>
@@ -1277,23 +1528,87 @@ export function CreateOrderPage() {
                             {addOnProducts.length > 0 ? (
                                 <CardContent className="space-y-2">
                                     {addOnProducts.map((a) => (
-                                        <div key={a.id} className="flex items-center justify-between gap-3 p-3 bg-amber-50/50 rounded-lg border border-amber-200/50">
-                                            <div className="flex-1 min-w-0">
-                                                <p className="font-medium truncate">{a.name}</p>
-                                                <p className="text-sm text-muted-foreground">{formatCurrency(a.price)} × {a.quantity}</p>
+                                        <div key={a.id} className="flex flex-col gap-3 p-3 bg-amber-50/50 rounded-lg border border-amber-200/50">
+                                            <div className="flex items-center justify-between gap-3">
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="font-medium truncate">{a.name}</p>
+                                                    <p className="text-sm text-muted-foreground">{formatCurrency(a.price)} × {a.quantity}</p>
+                                                </div>
+                                                <div className="flex items-center gap-2 shrink-0">
+                                                    <Input
+                                                        type="number"
+                                                        min={1}
+                                                        value={a.quantity}
+                                                        onChange={(e) => handleUpdateAddOnQuantity(a.id, Math.max(1, parseInt(e.target.value, 10) || 1))}
+                                                        className="w-16 h-8 text-center"
+                                                    />
+                                                    <span className="font-semibold text-amber-700 w-24 text-right">{formatCurrency(a.price * a.quantity)}</span>
+                                                    <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleRemoveAddOn(a.id)}>
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
                                             </div>
-                                            <div className="flex items-center gap-2 shrink-0">
-                                                <Input
-                                                    type="number"
-                                                    min={1}
-                                                    value={a.quantity}
-                                                    onChange={(e) => handleUpdateAddOnQuantity(a.id, Math.max(1, parseInt(e.target.value, 10) || 1))}
-                                                    className="w-16 h-8 text-center"
-                                                />
-                                                <span className="font-semibold text-amber-700 w-24 text-right">{formatCurrency(a.price * a.quantity)}</span>
-                                                <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500" onClick={() => handleRemoveAddOn(a.id)}>
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
+
+                                            {/* Sales assignment for add-on */}
+                                            <div className="pt-2 border-t border-amber-200/60">
+                                                <p className="text-[10px] font-medium text-amber-800 uppercase mb-2">Nhân viên sales</p>
+                                                {a.sales && a.sales.length > 0 && (
+                                                    <div className="space-y-2 mb-2">
+                                                        {a.sales.map((sale, sai) => (
+                                                            <div key={sai} className="flex flex-wrap items-center gap-2 bg-white p-2 rounded-lg border text-xs">
+                                                                <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                                                    <Avatar className="h-6 w-6 flex-shrink-0">
+                                                                        <AvatarFallback className="bg-amber-100 text-amber-700 text-[10px]">
+                                                                            {sale.name.charAt(0)}
+                                                                        </AvatarFallback>
+                                                                    </Avatar>
+                                                                    <span className="font-medium truncate">{sale.name}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1.5">
+                                                                    <Input
+                                                                        type="number"
+                                                                        min="0"
+                                                                        max="100"
+                                                                        value={sale.commission || 0}
+                                                                        onChange={(e) => handleUpdateAddOnSaleCommission(a.id, sale.id, Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
+                                                                        onFocus={(e) => {
+                                                                            e.target.select();
+                                                                            if (lastAddedAddOnSale?.addOnId === a.id && lastAddedAddOnSale?.saleId === sale.id) {
+                                                                                setLastAddedAddOnSale(null);
+                                                                            }
+                                                                        }}
+                                                                        className="w-14 h-7 text-xs text-center p-1"
+                                                                        autoFocus={lastAddedAddOnSale?.addOnId === a.id && lastAddedAddOnSale?.saleId === sale.id}
+                                                                    />
+                                                                    <span className="text-[10px]">%</span>
+                                                                    <span className="font-semibold text-amber-600 min-w-[65px] text-right text-xs">
+                                                                        = {formatCurrency(((a.price * a.quantity) * (sale.commission || 0)) / 100)}
+                                                                    </span>
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="icon"
+                                                                        className="h-7 w-7 text-red-400 hover:text-red-600 flex-shrink-0 touch-manipulation"
+                                                                        onClick={() => handleRemoveSaleFromAddOn(a.id, sale.id)}
+                                                                    >
+                                                                        <X className="h-3.5 w-3.5" />
+                                                                    </Button>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                                <Select value="" onValueChange={(val) => handleAddSaleToAddOn(a.id, val, 0)}>
+                                                    <SelectTrigger className="h-7 text-[10px] bg-white/40 border-amber-200/50">
+                                                        <SelectValue placeholder="+ Thêm nhân viên sales" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {availableSales
+                                                            .filter(s => !a.sales?.some(as => as.id === s.id))
+                                                            .map(s => (
+                                                                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                                                            ))}
+                                                    </SelectContent>
+                                                </Select>
                                             </div>
                                         </div>
                                     ))}
@@ -1391,8 +1706,22 @@ export function CreateOrderPage() {
                                                                     {s.technicians.length > 0 && (
                                                                         <div className="flex flex-wrap gap-1.5 mt-2">
                                                                             {s.technicians.map((tech, ti) => (
-                                                                                <span key={ti} className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full whitespace-nowrap">
+                                                                                <span key={ti} className="text-[10px] text-blue-600 bg-blue-50 px-2 py-1 rounded-full whitespace-nowrap">
                                                                                     KTV: {tech.name} ({tech.commission}%)
+                                                                                </span>
+                                                                            ))}
+                                                                            {s.sales && s.sales.length > 0 && s.sales.map((sale, sai) => (
+                                                                                <span key={`s-${sai}`} className="text-[10px] text-amber-600 bg-amber-50 px-2 py-1 rounded-full whitespace-nowrap">
+                                                                                    Sales: {sale.name} ({sale.commission}%)
+                                                                                </span>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                    {s.technicians.length === 0 && s.sales && s.sales.length > 0 && (
+                                                                        <div className="flex flex-wrap gap-1.5 mt-2">
+                                                                            {s.sales.map((sale, sai) => (
+                                                                                <span key={`s-${sai}`} className="text-[10px] text-amber-600 bg-amber-50 px-2 py-1 rounded-full whitespace-nowrap">
+                                                                                    Sales: {sale.name} ({sale.commission}%)
                                                                                 </span>
                                                                             ))}
                                                                         </div>
@@ -1421,9 +1750,20 @@ export function CreateOrderPage() {
                                         </p>
                                         <div className="space-y-2">
                                             {addOnProducts.map((a) => (
-                                                <div key={a.id} className="flex justify-between items-center bg-amber-50/50 p-3 rounded-lg border border-amber-200/50">
-                                                    <span className="font-medium">{a.name}</span>
-                                                    <span className="text-amber-700 font-semibold">{a.quantity} × {formatCurrency(a.price)} = {formatCurrency(a.price * a.quantity)}</span>
+                                                <div key={a.id} className="bg-amber-50/50 p-3 rounded-lg border border-amber-200/50">
+                                                    <div className="flex justify-between items-center mb-1">
+                                                        <span className="font-medium">{a.name}</span>
+                                                        <span className="text-amber-700 font-semibold">{a.quantity} × {formatCurrency(a.price)} = {formatCurrency(a.price * a.quantity)}</span>
+                                                    </div>
+                                                    {a.sales && a.sales.length > 0 && (
+                                                        <div className="flex flex-wrap gap-1 mt-1">
+                                                            {a.sales.map((sale, sai) => (
+                                                                <span key={sai} className="text-[10px] text-amber-600 bg-amber-100/50 px-1.5 py-0.5 rounded border border-amber-200/50">
+                                                                    Sales: {sale.name} ({sale.commission}%)
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             ))}
                                         </div>
@@ -1850,6 +2190,11 @@ export function CreateOrderPage() {
                         </p>
                         <p className="text-sm text-muted-foreground">
                             Giá: <span className="font-medium text-green-600">{formatCurrency(pendingService?.service.price || 0)}</span>
+                            {pendingService?.service.commission_tech !== undefined && (
+                                <span className="ml-3">
+                                    Hoa hồng: <span className="font-medium text-blue-600">{pendingService.service.commission_tech}%</span>
+                                </span>
+                            )}
                         </p>
 
                         <div className="space-y-2 max-h-64 overflow-y-auto">
@@ -1935,7 +2280,7 @@ export function CreateOrderPage() {
                             {(catalogProducts || [])
                                 .filter((p: { status: string; name: string }) => p.status === 'active')
                                 .filter((p: { name: string }) => !addOnSearch.trim() || p.name.toLowerCase().includes(addOnSearch.toLowerCase()))
-                                .map((p: { id: string; name: string; price: number }) => (
+                                .map((p: any) => (
                                     <button
                                         key={p.id}
                                         type="button"

@@ -33,6 +33,7 @@ import { CreateOrderPage } from '@/pages/CreateOrderPage';
 import { RequestsPage } from '@/pages/RequestsPage';
 import { CreateLeadPage } from '@/pages/CreateLeadPage';
 import { CreatePackagePage } from '@/pages/CreatePackagePage';
+import { CreateProductPage } from '@/pages/CreateProductPage';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import type { UserRole, User } from '@/types';
@@ -471,6 +472,18 @@ function AppContent() {
             <Route path="/services/:id/edit" element={
               <ProtectedRoute allowedRoles={pagePermissions.products}>
                 <CreateServicePage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/products/new" element={
+              <ProtectedRoute allowedRoles={pagePermissions.products}>
+                <CreateProductPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/products/:id/edit" element={
+              <ProtectedRoute allowedRoles={pagePermissions.products}>
+                <CreateProductPage />
               </ProtectedRoute>
             } />
 

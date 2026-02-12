@@ -36,7 +36,8 @@ export function ServicesTable({ services, loading, onEdit, onDelete, departments
                             <th className="p-3 text-center text-sm font-medium text-muted-foreground">Thời lượng</th>
                             <th className="p-3 text-center text-sm font-medium text-muted-foreground">Quy trình</th>
                             <th className="p-3 text-center text-sm font-medium text-muted-foreground">Phòng ban</th>
-                            <th className="p-3 text-center text-sm font-medium text-muted-foreground">Hoa hồng</th>
+                            <th className="p-3 text-center text-sm font-medium text-muted-foreground">HH Sale</th>
+                            <th className="p-3 text-center text-sm font-medium text-muted-foreground">HH KTV</th>
                             <th className="p-3 text-right text-sm font-medium text-muted-foreground">Thao tác</th>
                         </tr>
                     </thead>
@@ -93,7 +94,14 @@ export function ServicesTable({ services, loading, onEdit, onDelete, departments
                                         )}
                                     </td>
                                     <td className="p-3 text-center">
-                                        <Badge variant="info">{service.commission_rate || 0}%</Badge>
+                                        <Badge variant="info" className="bg-amber-100 text-amber-700 hover:bg-amber-200 border-amber-200">
+                                            {service.commission_sale || 0}%
+                                        </Badge>
+                                    </td>
+                                    <td className="p-3 text-center">
+                                        <Badge variant="info" className="bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border-emerald-200">
+                                            {service.commission_tech || 0}%
+                                        </Badge>
                                     </td>
                                     <td className="p-3 text-right">
                                         <div className="flex items-center justify-end gap-1">
@@ -176,8 +184,11 @@ export function ServicesTable({ services, loading, onEdit, onDelete, departments
                                     )}
                                 </div>
                                 <div className="flex items-center justify-between col-span-2">
-                                    <span className="text-muted-foreground">Hoa hồng:</span>
-                                    <Badge variant="info">{service.commission_rate || 0}%</Badge>
+                                    <span className="text-muted-foreground">HH Sale / KTV:</span>
+                                    <div className="flex gap-2">
+                                        <Badge variant="info" className="bg-amber-100 text-amber-700 border-amber-200">{service.commission_sale || 0}%</Badge>
+                                        <Badge variant="info" className="bg-emerald-100 text-emerald-700 border-emerald-200">{service.commission_tech || 0}%</Badge>
+                                    </div>
                                 </div>
                             </div>
 

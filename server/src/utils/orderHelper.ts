@@ -141,7 +141,7 @@ export async function checkAndCompleteOrder(orderId: string): Promise<string> {
 
 /**
  * Records commissions for an order when it is completed.
- * This handles both Sales (5% of total) and Technicians (based on service rates).
+ * This handles both Sales and Technicians based on per-service/item assignments.
  */
 export async function recordCommissions(orderId: string): Promise<void> {
     try {
@@ -184,36 +184,7 @@ export async function recordCommissions(orderId: string): Promise<void> {
             return;
         }
 
-        // 3. Record Sales Commission
-        if (order.sales_id && !hasCommission(order.sales_id, 'product', `Hoa hồng Sales cho đơn hàng ${order.order_code}`)) {
-            const salesPerson = order.sales as any;
-            // Use user's commission rate or default to 5%
-            const commissionRate = (salesPerson?.commission || 5) / 100;
-            const amount = Math.floor(order.total_amount * commissionRate);
-
-            if (amount > 0) {
-                const { error: saleCommError } = await supabaseAdmin
-                    .from('commissions')
-                    .insert({
-                        user_id: order.sales_id,
-                        order_id: order.id,
-                        commission_type: 'product',
-                        amount: amount,
-                        percentage: (salesPerson?.commission || 5),
-                        base_amount: order.total_amount,
-                        status: 'pending',
-                        notes: `Hoa hồng Sales cho đơn hàng ${order.order_code}`
-                    });
-
-                if (saleCommError) {
-                    console.error('[Commission] Error recording sales commission:', saleCommError.message);
-                } else {
-                    console.log(`[Commission] Recorded Sales commission for ${order.sales_id}: ${amount}`);
-                }
-            }
-        }
-
-        // 4. Record Technician Commissions (V2 Service Technicians)
+        // 3. Record Sales & Technician Commissions (V2 Service Items)
         const { data: orderProducts, error: opError } = await supabaseAdmin
             .from('order_products')
             .select(`
@@ -224,6 +195,10 @@ export async function recordCommissions(orderId: string): Promise<void> {
                     unit_price,
                     technicians:order_product_service_technicians (
                         technician_id,
+                        commission
+                    ),
+                    sales:order_product_service_sales (
+                        sale_id,
                         commission
                     )
                 )
@@ -237,15 +212,36 @@ export async function recordCommissions(orderId: string): Promise<void> {
                 const services = product.order_product_services || [];
                 for (const service of services as any[]) {
                     const technicians = service.technicians || [];
+                    const salesPeople = service.sales || [];
                     const servicePrice = service.unit_price || 0;
 
+                    // A. Record Sales Commissions
+                    for (const s of salesPeople) {
+                        const note = `Hoa hồng Sales cho dịch vụ ${service.item_name} (Đơn ${order.order_code})`;
+                        if (hasCommission(s.sale_id, 'product', note)) continue;
+
+                        const commissionRate = s.commission || 0;
+                        if (commissionRate > 0) {
+                            const saleAmount = Math.floor((servicePrice * commissionRate) / 100);
+                            await supabaseAdmin.from('commissions').insert({
+                                user_id: s.sale_id,
+                                order_id: order.id,
+                                commission_type: 'product',
+                                amount: saleAmount,
+                                percentage: commissionRate,
+                                base_amount: servicePrice,
+                                status: 'pending',
+                                notes: note
+                            });
+                        }
+                    }
+
+                    // B. Record Technician Commissions
                     for (const tech of technicians) {
                         const note = `Hoa hồng KTV cho dịch vụ ${service.item_name} (Đơn ${order.order_code})`;
                         if (hasCommission(tech.technician_id, 'service', note)) continue;
 
                         let commissionRate = tech.commission;
-
-                        // FALLBACK: If commission is 0 or null, fetch from user profile
                         if (!commissionRate || commissionRate <= 0) {
                             const { data: userData } = await supabaseAdmin
                                 .from('users')
@@ -257,41 +253,63 @@ export async function recordCommissions(orderId: string): Promise<void> {
 
                         if (commissionRate > 0) {
                             const techCommission = Math.floor((servicePrice * commissionRate) / 100);
-
-                            const { error: techCommError } = await supabaseAdmin
-                                .from('commissions')
-                                .insert({
-                                    user_id: tech.technician_id,
-                                    order_id: order.id,
-                                    commission_type: 'service',
-                                    amount: techCommission,
-                                    percentage: commissionRate,
-                                    base_amount: servicePrice,
-                                    status: 'pending',
-                                    notes: note
-                                });
-
-                            if (techCommError) {
-                                console.error(`[Commission] Error recording tech commission for ${tech.technician_id}:`, techCommError.message);
-                            } else {
-                                console.log(`[Commission] Recorded Tech commission for ${tech.technician_id}: ${techCommission} (Rate: ${commissionRate}%)`);
-                            }
+                            await supabaseAdmin.from('commissions').insert({
+                                user_id: tech.technician_id,
+                                order_id: order.id,
+                                commission_type: 'service',
+                                amount: techCommission,
+                                percentage: commissionRate,
+                                base_amount: servicePrice,
+                                status: 'pending',
+                                notes: note
+                            });
                         }
                     }
                 }
             }
         }
 
-        // 5. Record Technician Commissions (V1 items)
+        // 5. Record Sales & Technician Commissions (V1 items)
         const { data: orderItems, error: oiError } = await supabaseAdmin
             .from('order_items')
-            .select('id, technician_id, commission_tech_amount, commission_tech_rate, total_price, item_name')
+            .select(`
+                id, technician_id, commission_tech_amount, commission_tech_rate, total_price, item_name,
+                sales:order_item_sales (
+                    sale_id,
+                    commission
+                )
+            `)
             .eq('order_id', orderId);
 
         if (oiError) {
             console.error('[Commission] Error fetching V1 items:', oiError.message);
         } else if (orderItems) {
             for (const item of orderItems) {
+                const itemTotalPrice = item.total_price || 0;
+
+                // A. Record Sales Commissions
+                const salesPeople = (item as any).sales || [];
+                for (const s of salesPeople) {
+                    const note = `Hoa hồng Sales cho hạng mục ${item.item_name} (Đơn ${order.order_code} - V1)`;
+                    if (hasCommission(s.sale_id, 'product', note)) continue;
+
+                    const commissionRate = s.commission || 0;
+                    if (commissionRate > 0) {
+                        const saleAmount = Math.floor((itemTotalPrice * commissionRate) / 100);
+                        await supabaseAdmin.from('commissions').insert({
+                            user_id: s.sale_id,
+                            order_id: order.id,
+                            commission_type: 'product',
+                            amount: saleAmount,
+                            percentage: commissionRate,
+                            base_amount: itemTotalPrice,
+                            status: 'pending',
+                            notes: note
+                        });
+                    }
+                }
+
+                // B. Record Technician Commissions
                 if (item.technician_id && item.commission_tech_amount > 0) {
                     const note = `Hoa hồng KTV cho hạng mục ${item.item_name} (Đơn ${order.order_code} - V1)`;
                     if (hasCommission(item.technician_id, 'service', note)) continue;

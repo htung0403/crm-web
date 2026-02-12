@@ -25,6 +25,8 @@ interface Service {
     price: number;
     status?: string;
     applicable_product_types?: string[];
+    commission_sale?: number;
+    commission_tech?: number;
 }
 
 interface Package {
@@ -32,13 +34,22 @@ interface Package {
     name: string;
     price: number;
     status?: string;
+    commission_sale?: number;
+    commission_tech?: number;
 }
 
 interface ServiceSelectorProps {
     services: Service[];
     packages: Package[];
     productType?: string;
-    onSelect: (service: { id: string; type: 'service' | 'package'; name: string; price: number }) => void;
+    onSelect: (service: {
+        id: string;
+        type: 'service' | 'package';
+        name: string;
+        price: number;
+        commission_sale?: number;
+        commission_tech?: number;
+    }) => void;
 }
 
 export function ServiceSelector({ services, packages, productType, onSelect }: ServiceSelectorProps) {
@@ -87,7 +98,9 @@ export function ServiceSelector({ services, packages, productType, onSelect }: S
                                                 id: service.id,
                                                 type: 'service',
                                                 name: service.name,
-                                                price: service.price
+                                                price: service.price,
+                                                commission_sale: service.commission_sale,
+                                                commission_tech: service.commission_tech
                                             });
                                             setOpen(false);
                                         }}
@@ -117,7 +130,9 @@ export function ServiceSelector({ services, packages, productType, onSelect }: S
                                                 id: pkg.id,
                                                 type: 'package',
                                                 name: pkg.name,
-                                                price: pkg.price
+                                                price: pkg.price,
+                                                commission_sale: pkg.commission_sale,
+                                                commission_tech: pkg.commission_tech
                                             });
                                             setOpen(false);
                                         }}
