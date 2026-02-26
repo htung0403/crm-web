@@ -656,6 +656,108 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
     }
 });
 
+// Update sales step data (receiver info, technician exchange details, etc.)
+router.patch('/:id/sales-step-data', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { sales_step_data } = req.body;
+
+        if (!sales_step_data || typeof sales_step_data !== 'object') {
+            throw new ApiError('Dữ liệu không hợp lệ', 400);
+        }
+
+        // Try V1 order_items first
+        const { data: v1Exists } = await supabaseAdmin
+            .from('order_items')
+            .select('id, sales_step_data')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (v1Exists) {
+            const merged = { ...(v1Exists.sales_step_data || {}), ...sales_step_data };
+
+            const { data: updated, error } = await supabaseAdmin
+                .from('order_items')
+                .update({ sales_step_data: merged })
+                .eq('id', id)
+                .select()
+                .single();
+
+            if (error) throw new ApiError('Lỗi cập nhật dữ liệu: ' + error.message, 500);
+
+            return res.json({
+                status: 'success',
+                data: updated,
+                message: 'Đã cập nhật thông tin bước bán hàng'
+            });
+        }
+
+        // Try V2 order_products directly
+        const { data: v2Product } = await supabaseAdmin
+            .from('order_products')
+            .select('id, sales_step_data')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (v2Product) {
+            const merged = { ...(v2Product.sales_step_data || {}), ...sales_step_data };
+
+            const { data: updated, error } = await supabaseAdmin
+                .from('order_products')
+                .update({ sales_step_data: merged })
+                .eq('id', id)
+                .select()
+                .single();
+
+            if (error) throw new ApiError('Lỗi cập nhật dữ liệu: ' + error.message, 500);
+
+            return res.json({
+                status: 'success',
+                data: updated,
+                message: 'Đã cập nhật thông tin bước bán hàng'
+            });
+        }
+
+        // Try V2 order_product_services → save on parent order_products
+        const { data: v2Service } = await supabaseAdmin
+            .from('order_product_services')
+            .select('id, order_product_id')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (v2Service?.order_product_id) {
+            const { data: parentProduct } = await supabaseAdmin
+                .from('order_products')
+                .select('id, sales_step_data')
+                .eq('id', v2Service.order_product_id)
+                .single();
+
+            if (parentProduct) {
+                const merged = { ...(parentProduct.sales_step_data || {}), ...sales_step_data };
+
+                const { data: updated, error } = await supabaseAdmin
+                    .from('order_products')
+                    .update({ sales_step_data: merged })
+                    .eq('id', v2Service.order_product_id)
+                    .select()
+                    .single();
+
+                if (error) throw new ApiError('Lỗi cập nhật dữ liệu: ' + error.message, 500);
+
+                return res.json({
+                    status: 'success',
+                    data: updated,
+                    message: 'Đã cập nhật thông tin bước bán hàng'
+                });
+            }
+        }
+
+        throw new ApiError('Không tìm thấy hạng mục', 404);
+    } catch (error) {
+        next(error);
+    }
+});
+
 // =====================================================
 // ORDER ITEM STEPS ROUTES
 // =====================================================

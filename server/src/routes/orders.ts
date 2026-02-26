@@ -106,7 +106,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                     customer:customers(id, name, phone, email),
                     sales_user:users!orders_sales_id_fkey(id, name),
                     items:order_items(
-                        id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id,
+                        id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data,
                         product:products(id, image, code),
                         service:services(id, image, code),
                         technician:users!order_product_services_technician_id_fkey(id, name),
@@ -127,7 +127,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                 const { data: v2Products } = await supabaseAdmin
                     .from('order_products')
                     .select(`
-                        id, order_id, product_code, name, type, images, status,
+                        id, order_id, product_code, name, type, images, status, sales_step_data,
                         services:order_product_services(
                             id, item_name, item_type, unit_price, technician_id,
                             service:services(id, image, code),
@@ -177,6 +177,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                                 item_code: product.product_code,
                                 product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
                                 is_customer_item: true,
+                                sales_step_data: product.sales_step_data || null,
                             });
                             if (product.services?.length) {
                                 for (const s of product.services as any[]) {
@@ -202,6 +203,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                                         package: s.package,
                                         product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
                                         is_customer_item: true,
+                                        sales_step_data: product.sales_step_data,
                                         order_item_steps: s.order_item_steps || [],
                                     });
                                 }
@@ -233,7 +235,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
         customer:customers(id, name, phone, email),
         sales_user:users!orders_sales_id_fkey(id, name),
         items:order_items(
-            id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id,
+            id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data,
             product:products(id, image, code),
             service:services(id, image, code),
             technician:users!order_items_technician_id_fkey(id, name),
@@ -260,7 +262,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
             const { data: v2Products } = await supabaseAdmin
                 .from('order_products')
                 .select(`
-                    id, order_id, product_code, name, type, images, status,
+                    id, order_id, product_code, name, type, images, status, sales_step_data,
                     services:order_product_services(
                         id, item_name, item_type, unit_price, technician_id,
                         service:services(id, image, code),
@@ -311,6 +313,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                             item_code: product.product_code,
                             product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
                             is_customer_item: true,
+                            sales_step_data: product.sales_step_data || null,
                         });
                         if (product.services?.length) {
                             for (const s of product.services as any[]) {
@@ -336,6 +339,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                                     package: s.package,
                                     product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
                                     is_customer_item: true,
+                                    sales_step_data: product.sales_step_data,
                                     order_item_steps: s.order_item_steps || [],
                                 });
                             }
@@ -380,6 +384,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         sales_user:users!orders_sales_id_fkey(id, name),
         sale_items:order_items(
             *,
+            sales_step_data,
             product:products(*),
             service:services(*),
             technicians:order_item_technicians(
@@ -481,7 +486,8 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                     product_size: product.size || null,
                     product_material: product.material || null,
                     product_condition_before: product.condition_before || null,
-                    product_notes: product.notes || null
+                    product_notes: product.notes || null,
+                    sales_step_data: product.sales_step_data || null
                 });
 
                 if (product.services && product.services.length > 0) {
@@ -515,6 +521,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                             completed_at: s.completed_at,
                             assigned_at: s.assigned_at,
                             is_customer_item: true, // Mark as customer item for grouping in OrderDetailPage
+                            sales_step_data: product.sales_step_data, // Inherit from parent product
                             product: {
                                 id: product.id,
                                 image: product.images?.[0] || null
@@ -1356,10 +1363,16 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
             completion_photos,
             debt_checked,
             debt_checked_notes,
+            debt_checked_by_name,
+            aftersale_receiver_name,
             packaging_photos,
             delivery_carrier,
             delivery_address,
             delivery_self_pickup,
+            delivery_type,
+            delivery_code,
+            delivery_fee,
+            aftersale_return_user_name,
             delivery_notes,
             hd_sent,
             feedback_requested,
@@ -1391,10 +1404,16 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
             updatePayload.debt_checked_at = !!debt_checked ? new Date().toISOString() : null;
         }
         if (debt_checked_notes !== undefined) updatePayload.debt_checked_notes = debt_checked_notes ?? null;
+        if (debt_checked_by_name !== undefined) updatePayload.debt_checked_by_name = debt_checked_by_name ?? null;
+        if (aftersale_receiver_name !== undefined) updatePayload.aftersale_receiver_name = aftersale_receiver_name ?? null;
         if (packaging_photos !== undefined) updatePayload.packaging_photos = Array.isArray(packaging_photos) ? packaging_photos : [];
         if (delivery_carrier !== undefined) updatePayload.delivery_carrier = delivery_carrier ?? null;
         if (delivery_address !== undefined) updatePayload.delivery_address = delivery_address ?? null;
         if (delivery_self_pickup !== undefined) updatePayload.delivery_self_pickup = !!delivery_self_pickup;
+        if (delivery_type !== undefined) updatePayload.delivery_type = delivery_type ?? 'ship';
+        if (delivery_code !== undefined) updatePayload.delivery_code = delivery_code ?? null;
+        if (delivery_fee !== undefined) updatePayload.delivery_fee = Number(delivery_fee) || 0;
+        if (aftersale_return_user_name !== undefined) updatePayload.aftersale_return_user_name = aftersale_return_user_name ?? null;
         if (delivery_notes !== undefined) updatePayload.delivery_notes = delivery_notes ?? null;
         if (hd_sent !== undefined) {
             updatePayload.hd_sent = !!hd_sent;

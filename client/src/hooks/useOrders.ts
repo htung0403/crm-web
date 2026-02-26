@@ -70,8 +70,14 @@ export interface Order {
     debt_checked?: boolean;
     debt_checked_at?: string | null;
     debt_checked_notes?: string | null;
+    debt_checked_by_name?: string | null;
+    aftersale_receiver_name?: string | null;
     packaging_photos?: string[];
     delivery_carrier?: string | null;
+    delivery_type?: 'ship' | 'pickup' | null;
+    delivery_code?: string | null;
+    delivery_fee?: number | null;
+    aftersale_return_user_name?: string | null;
     delivery_address?: string | null;
     delivery_self_pickup?: boolean;
     delivery_notes?: string | null;

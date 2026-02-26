@@ -198,6 +198,20 @@ export function OrderDetailPage() {
         fetchProductStatusSummary();
     }, [order?.items, setProductStatusSummary]);
 
+    // Keep selectedProductGroup in sync with workflowKanbanGroups when order updates
+    useEffect(() => {
+        if (showProductDialog && selectedProductGroup && workflowKanbanGroups.length > 0) {
+            const groupId = selectedProductGroup.product?.id || selectedProductGroup.services?.[0]?.id;
+            const currentGroup = workflowKanbanGroups.find(g =>
+                (g.product?.id === groupId) ||
+                (g.services && g.services.length > 0 && g.services[0].id === groupId)
+            );
+            if (currentGroup) {
+                setSelectedProductGroup(currentGroup);
+            }
+        }
+    }, [workflowKanbanGroups, showProductDialog]);
+
     // Handlers
     const handleOpenAssignDialog = (item: OrderItem) => {
         setSelectedItem(item);
@@ -451,6 +465,8 @@ export function OrderDetailPage() {
                         updateOrderStatus={updateOrderStatus}
                         reloadOrder={reloadOrder}
                         fetchKanbanLogs={fetchKanbanLogs}
+                        onProductCardClick={handleOpenProductDialog}
+                        workflowKanbanGroups={workflowKanbanGroups}
                     />
                 )}
 
@@ -697,6 +713,7 @@ export function OrderDetailPage() {
                 currentUserId={user?.id}
                 order={order}
                 onUpdateOrder={updateOrderAfterSale}
+                onReloadOrder={reloadOrder}
             />
         </div>
     );

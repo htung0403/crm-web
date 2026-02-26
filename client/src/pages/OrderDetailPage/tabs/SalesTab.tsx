@@ -29,6 +29,8 @@ interface SalesTabProps {
     updateOrderStatus: (orderId: string, status: string) => Promise<void>;
     reloadOrder: () => Promise<void>;
     fetchKanbanLogs: (orderId: string) => Promise<void>;
+    onProductCardClick?: (group: any, roomId: string) => void;
+    workflowKanbanGroups?: any[];
 }
 
 export function SalesTab({
@@ -38,6 +40,8 @@ export function SalesTab({
     updateOrderStatus,
     reloadOrder,
     fetchKanbanLogs,
+    onProductCardClick,
+    workflowKanbanGroups,
 }: SalesTabProps) {
     if (order?.status !== 'before_sale') return null;
 
@@ -130,7 +134,18 @@ export function SalesTab({
                                                                         ref={provided.innerRef}
                                                                         {...provided.draggableProps}
                                                                         {...provided.dragHandleProps}
-                                                                        className="bg-white p-3 rounded-lg border shadow-sm group hover:border-primary hover:shadow-md transition-all cursor-grab active:cursor-grabbing"
+                                                                        onClick={() => {
+                                                                            if (onProductCardClick) {
+                                                                                // Tìm group tương ứng với item này để show ProductDetailDialog
+                                                                                const group = workflowKanbanGroups?.find(g =>
+                                                                                    g.product?.id === item.id ||
+                                                                                    g.services.some((s: any) => s.id === item.id)
+                                                                                ) || { product: item.item_type === 'product' ? item : null, services: item.item_type !== 'product' ? [item] : [] };
+
+                                                                                onProductCardClick(group, column.id);
+                                                                            }
+                                                                        }}
+                                                                        className="bg-white p-3 rounded-lg border shadow-sm group hover:border-primary hover:shadow-md transition-all cursor-pointer active:scale-[0.98]"
                                                                     >
                                                                         <div className="flex items-start gap-2 mb-2">
                                                                             <div className="w-9 h-9 rounded bg-muted flex items-center justify-center shrink-0">

@@ -25,9 +25,8 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
     const column = columns.find((c) => c.id === columnId);
     const columnTitle = column?.title ?? columnId;
 
-    const allItems = order?.items || [];
     const effectiveProduct = product;
-    const effectiveServices = services.length > 0 ? services : allItems.filter((it) => it.item_name);
+    const effectiveServices = services;
 
     const productImage =
         effectiveProduct?.product?.image ||
@@ -67,6 +66,14 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
     const receiveDate = order.confirmed_at || order.created_at;
     const dueDate = order.due_at;
 
+    const displayName = effectiveProduct?.item_name || effectiveServices[0]?.item_name || 'N/A';
+    const displayServices = effectiveServices
+        .filter(s => s.item_name !== displayName)
+        .map(s => ({
+            ...s,
+            item_name: s.item_name.replace(/\s*\(.*?\)\s*/g, ' ').trim()
+        }));
+
     return (
         <Draggable draggableId={draggableId} index={index}>
             {(provided, snapshot) => (
@@ -88,14 +95,17 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
                                 />
                             ) : (
                                 <AvatarFallback className="rounded-lg text-xs bg-primary/10 text-primary">
-                                    {effectiveProduct?.item_name?.charAt(0) || effectiveServices[0]?.item_name?.charAt(0) || order?.order_code?.charAt(0) || 'SP'}
+                                    {displayName.charAt(0) || 'SP'}
                                 </AvatarFallback>
                             )}
                         </Avatar>
                         <div className="min-w-0 flex-1">
-                            <span className="font-mono text-xs font-medium text-foreground block truncate">
+                            <span className="font-mono text-[10px] text-muted-foreground block truncate">
                                 {productCode}
                             </span>
+                            <div className="font-semibold text-xs text-foreground truncate mt-0.5" title={displayName}>
+                                {displayName}
+                            </div>
                             <Badge variant="secondary" className="text-[10px] mt-0.5">
                                 {columnTitle}
                             </Badge>
@@ -104,22 +114,21 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
 
                     {/* Dịch vụ sử dụng */}
                     <div className="flex flex-wrap gap-1 mb-2">
-                        {effectiveServices.length > 0 ? (
-                            effectiveServices.slice(0, 3).map((s, i) => (
-                                <Badge
-                                    key={i}
-                                    variant="outline"
-                                    className="text-[10px] truncate max-w-[120px]"
-                                >
-                                    {s.item_name}
-                                </Badge>
-                            ))
-                        ) : (
-                            <span className="text-xs text-muted-foreground">N/A</span>
-                        )}
-                        {effectiveServices.length > 3 && (
+                        {displayServices.length > 0 ? (
+                            displayServices
+                                .slice(0, 3).map((s, i) => (
+                                    <Badge
+                                        key={i}
+                                        variant="outline"
+                                        className="text-[10px] truncate max-w-[120px]"
+                                    >
+                                        {s.item_name}
+                                    </Badge>
+                                ))
+                        ) : null}
+                        {displayServices.length > 3 && (
                             <Badge variant="secondary" className="text-[10px]">
-                                +{effectiveServices.length - 3}
+                                +{displayServices.length - 3}
                             </Badge>
                         )}
                     </div>

@@ -323,6 +323,9 @@ export const orderItemsApi = {
     updatePartner: (orderItemId: string, data: { status: string; notes?: string }) =>
         api.patch<ApiResponse<any>>(`/order-items/${orderItemId}/partner`, data),
 
+    updateSalesStepData: (orderItemId: string, data: Record<string, any>) =>
+        api.patch<ApiResponse<any>>(`/order-items/${orderItemId}/sales-step-data`, { sales_step_data: data }),
+
     // New Kanban Actions
     fail: (id: string, reason: string) =>
         api.patch<ApiResponse<any>>(`/order-items/${id}/fail`, { reason }),
