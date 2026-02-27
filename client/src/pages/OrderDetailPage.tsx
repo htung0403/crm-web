@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
     ArrowLeft,
     ShoppingBag,
@@ -16,6 +16,8 @@ import {
     UserPlus,
     Trash2,
     Plus,
+    Calendar,
+    Pencil,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { DropResult } from '@hello-pangea/dnd';
@@ -61,6 +63,7 @@ import { CareTab } from './OrderDetailPage/tabs/CareTab';
 import { TECH_ROOMS } from '@/components/orders/constants';
 import { columns, getAfterSaleStageLabel, getCareWarrantyStageLabel } from './OrderDetailPage/constants';
 import { getStatusVariant, getItemTypeLabel, getSLADisplay } from './OrderDetailPage/utils';
+import { formatDate } from '@/lib/utils';
 
 // Specific Dialogs
 import { PrintQRDialog } from '@/components/orders/PrintQRDialog';
@@ -76,6 +79,7 @@ import { ProductDetailDialog } from './OrderDetailPage/dialogs/ProductDetailDial
 export function OrderDetailPage() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
+    const location = useLocation();
     const { user } = useAuth();
     const { fetchOrders } = useOrders();
 
@@ -154,6 +158,7 @@ export function OrderDetailPage() {
     const [showProductDialog, setShowProductDialog] = useState(false);
     const [selectedProductGroup, setSelectedProductGroup] = useState<any>(null);
     const [currentRoomId, setCurrentRoomId] = useState('');
+    const [highlightMessageId, setHighlightMessageId] = useState<string | undefined>(undefined);
 
     // Departments and Technicians/Sales
     const { departments, fetchDepartments } = useDepartments();
@@ -198,7 +203,27 @@ export function OrderDetailPage() {
         fetchProductStatusSummary();
     }, [order?.items, setProductStatusSummary]);
 
-    // Keep selectedProductGroup in sync with workflowKanbanGroups when order updates
+    // Auto-open product dialog from mention notification navigation state
+    useEffect(() => {
+        const chatState = (location.state as any)?.openChat;
+        if (!chatState || !order || !workflowKanbanGroups.length) return;
+
+        const { entityId, roomId, messageId } = chatState;
+        // Find the matching group by entity id
+        const group = workflowKanbanGroups.find((g: any) =>
+            g.product?.id === entityId ||
+            g.services?.some((s: any) => s.id === entityId)
+        );
+        if (group) {
+            setSelectedProductGroup(group);
+            setCurrentRoomId(roomId || '');
+            setHighlightMessageId(messageId);
+            setShowProductDialog(true);
+            // Clear the navigation state so dialog doesn't re-open on refresh
+            navigate(location.pathname, { replace: true, state: {} });
+        }
+    }, [location.state, order, workflowKanbanGroups]);
+
     useEffect(() => {
         if (showProductDialog && selectedProductGroup && workflowKanbanGroups.length > 0) {
             const groupId = selectedProductGroup.product?.id || selectedProductGroup.services?.[0]?.id;
@@ -298,7 +323,11 @@ export function OrderDetailPage() {
                     setExtensionLoading(false);
                     return;
                 }
-                await ordersApi.createExtensionRequest(order.id, { reason: extensionReason.trim() });
+                const extensionData: { reason: string; new_due_at?: string } = { reason: extensionReason.trim() };
+                if (extensionNewDueAt) {
+                    extensionData.new_due_at = new Date(extensionNewDueAt).toISOString();
+                }
+                await ordersApi.createExtensionRequest(order.id, extensionData);
                 toast.success('Đã gửi yêu cầu gia hạn.');
             }
             await reloadOrder();
@@ -385,7 +414,30 @@ export function OrderDetailPage() {
                                 {columns.find(c => c.id === order.status)?.title || order.status}
                             </Badge>
                         </h1>
-                        <p className="text-muted-foreground text-sm">Chi tiết đơn hàng</p>
+                        <p className="text-muted-foreground text-sm flex items-center gap-2">
+                            <span>Chi tiết đơn hàng</span>
+                            <span className="text-muted-foreground/30 px-1">•</span>
+                            <div
+                                className="flex items-center gap-1.5 cursor-pointer hover:bg-orange-50 px-1.5 py-0.5 rounded transition-colors group"
+                                onClick={handleOpenExtension}
+                            >
+                                {order.due_at ? (
+                                    <>
+                                        <Calendar className="h-3.5 w-3.5 text-orange-500" />
+                                        <span className="font-medium">Hạn trả: {formatDate(order.due_at)}</span>
+                                        <span className={`font-semibold ${getSLADisplay(order.due_at).includes('Trễ') ? 'text-red-600' : 'text-green-600'}`}>
+                                            ({getSLADisplay(order.due_at)})
+                                        </span>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                                        <span className="italic">Chưa có hạn</span>
+                                    </>
+                                )}
+                                <Pencil className="h-3 w-3 text-muted-foreground opacity-20 group-hover:opacity-100 transition-opacity ml-1" />
+                            </div>
+                        </p>
                     </div>
                 </div>
                 <div className="flex flex-wrap gap-2 w-full sm:w-auto">
@@ -629,13 +681,32 @@ export function OrderDetailPage() {
             {/* Extension Dialog */}
             <Dialog open={showExtensionDialog} onOpenChange={setShowExtensionDialog}>
                 <DialogContent>
-                    <DialogHeader><DialogTitle>Yêu cầu gia hạn</DialogTitle></DialogHeader>
+                    <DialogHeader>
+                        <DialogTitle>
+                            {order.extension_request ? 'Cập nhật yêu cầu gia hạn' : 'Cập nhật hạn trả / Gia hạn'}
+                        </DialogTitle>
+                    </DialogHeader>
                     <div className="space-y-4">
                         {!order.extension_request ? (
-                            <div className="space-y-2">
-                                <Label>Lý do gia hạn</Label>
-                                <Textarea value={extensionReason} onChange={e => setExtensionReason(e.target.value)} />
-                            </div>
+                            <>
+                                <div className="space-y-2">
+                                    <Label>Lý do thay đổi hạn trả (Gia hạn)</Label>
+                                    <Textarea
+                                        placeholder="Nhập lý do lùi deadline hoặc thay đổi hạn trả..."
+                                        value={extensionReason}
+                                        onChange={e => setExtensionReason(e.target.value)}
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Gia hạn đến (Không bắt buộc)</Label>
+                                    <Input
+                                        type="datetime-local"
+                                        value={extensionNewDueAt}
+                                        onChange={e => setExtensionNewDueAt(e.target.value)}
+                                    />
+                                    <p className="text-xs text-muted-foreground">Bạn có thể đề xuất ngày hoàn thành mới.</p>
+                                </div>
+                            </>
                         ) : (
                             <>
                                 <div className="p-3 bg-muted rounded-lg text-sm">
@@ -707,13 +778,17 @@ export function OrderDetailPage() {
 
             <ProductDetailDialog
                 open={showProductDialog}
-                onOpenChange={setShowProductDialog}
+                onOpenChange={(open) => {
+                    setShowProductDialog(open);
+                    if (!open) setHighlightMessageId(undefined);
+                }}
                 group={selectedProductGroup}
                 roomId={currentRoomId}
                 currentUserId={user?.id}
                 order={order}
                 onUpdateOrder={updateOrderAfterSale}
                 onReloadOrder={reloadOrder}
+                highlightMessageId={highlightMessageId}
             />
         </div>
     );

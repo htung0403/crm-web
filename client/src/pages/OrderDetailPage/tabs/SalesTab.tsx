@@ -21,6 +21,7 @@ import {
     getItemTypeLabel,
     getItemTypeColor,
 } from '../utils';
+import { UpsellDialog } from '@/components/orders/UpsellDialog';
 
 interface SalesTabProps {
     order: Order;
@@ -43,6 +44,8 @@ export function SalesTab({
     onProductCardClick,
     workflowKanbanGroups,
 }: SalesTabProps) {
+    const [showUpsellDialog, setShowUpsellDialog] = React.useState(false);
+
     if (order?.status !== 'before_sale') return null;
 
     return (
@@ -71,25 +74,47 @@ export function SalesTab({
                 {/* Kanban Board Layout */}
                 <div className="overflow-x-auto pb-4 -mx-1 px-1">
                     <DragDropContext
-                        onDragEnd={(result: DropResult) => {
+                        onDragEnd={async (result: DropResult) => {
                             if (!result.destination || result.destination.droppableId === result.source.droppableId) return;
-                            const itemId = result.draggableId;
+                            const draggableId = result.draggableId;
                             const newStatus = result.destination.droppableId;
                             const stepLabel = SALES_STEPS.find((s) => s.id === newStatus)?.label || newStatus;
-                            updateOrderItemStatus(itemId, newStatus);
-                            toast.success(`Đã chuyển sang: ${stepLabel}`);
-                            orderItemsApi.updateStatus(itemId, newStatus).then(() => { if (order?.id) fetchKanbanLogs(order.id); }).catch(() => {
-                                reloadOrder();
-                                toast.error('Lỗi khi cập nhật trạng thái');
-                            });
+
+                            // Find the group to update all its items
+                            const group = workflowKanbanGroups?.find(g =>
+                                (g.product?.id ?? g.services.map(s => s.id).join('-')) === draggableId
+                            );
+
+                            if (group) {
+                                // Update all items in the group
+                                const itemsToUpdate = [];
+                                if (group.product) itemsToUpdate.push(group.product);
+                                if (group.services) itemsToUpdate.push(...group.services);
+
+                                try {
+                                    for (const item of itemsToUpdate) {
+                                        updateOrderItemStatus(item.id, newStatus);
+                                        await orderItemsApi.updateStatus(item.id, newStatus);
+                                    }
+                                    toast.success(`Đã chuyển nhóm sang: ${stepLabel}`);
+                                    if (order?.id) fetchKanbanLogs(order.id);
+                                } catch (error) {
+                                    reloadOrder();
+                                    toast.error('Lỗi khi cập nhật trạng thái');
+                                }
+                            }
                         }}
                     >
                         <div className="flex gap-4 min-w-[1200px]">
                             {SALES_STEPS.map((column, colIdx) => {
-                                const columnItems = order.items?.filter(item => {
-                                    const hasCustomerItems = order.items?.some(i => (i as any).is_customer_item);
-                                    if (hasCustomerItems && !(item as any).is_customer_item) return false;
-                                    const status = item.status || 'step1';
+                                // Filter groups where the "main" item matches the column status
+                                const columnGroups = workflowKanbanGroups?.filter(group => {
+                                    // Identify the "lead" item to determine status
+                                    // Usually product, or first service
+                                    const leadItem = group.product || group.services[0];
+                                    if (!leadItem) return false;
+
+                                    const status = leadItem.status || 'step1';
                                     if (status === 'pending' && column.id === 'step1') return true;
                                     return status === column.id;
                                 }) || [];
@@ -115,7 +140,7 @@ export function SalesTab({
                                                     <h3 className="font-bold text-sm uppercase tracking-tight">{column.title}</h3>
                                                 </div>
                                                 <Badge variant="outline" className="text-xs bg-white">
-                                                    {columnItems.length}
+                                                    {columnGroups.length}
                                                 </Badge>
                                             </div>
 
@@ -127,87 +152,122 @@ export function SalesTab({
                                                         {...provided.droppableProps}
                                                         className="space-y-3 min-h-[150px]"
                                                     >
-                                                        {columnItems.map((item, itemIdx) => (
-                                                            <Draggable key={item.id} draggableId={item.id} index={itemIdx}>
-                                                                {(provided) => (
-                                                                    <div
-                                                                        ref={provided.innerRef}
-                                                                        {...provided.draggableProps}
-                                                                        {...provided.dragHandleProps}
-                                                                        onClick={() => {
-                                                                            if (onProductCardClick) {
-                                                                                // Tìm group tương ứng với item này để show ProductDetailDialog
-                                                                                const group = workflowKanbanGroups?.find(g =>
-                                                                                    g.product?.id === item.id ||
-                                                                                    g.services.some((s: any) => s.id === item.id)
-                                                                                ) || { product: item.item_type === 'product' ? item : null, services: item.item_type !== 'product' ? [item] : [] };
+                                                        {columnGroups.map((group, groupIdx) => {
+                                                            const draggableId = group.product?.id ?? group.services.map(s => s.id).join('-');
+                                                            const leadItem = group.product || group.services[0];
 
-                                                                                onProductCardClick(group, column.id);
-                                                                            }
-                                                                        }}
-                                                                        className="bg-white p-3 rounded-lg border shadow-sm group hover:border-primary hover:shadow-md transition-all cursor-pointer active:scale-[0.98]"
-                                                                    >
-                                                                        <div className="flex items-start gap-2 mb-2">
-                                                                            <div className="w-9 h-9 rounded bg-muted flex items-center justify-center shrink-0">
-                                                                                {item.item_type === 'product' ? <ShoppingBag className="h-5 w-5 text-muted-foreground" /> :
-                                                                                    item.item_type === 'service' ? <Wrench className="h-5 w-5 text-muted-foreground" /> :
-                                                                                        <Gift className="h-5 w-5 text-muted-foreground" />}
+                                                            return (
+                                                                <Draggable key={draggableId} draggableId={draggableId} index={groupIdx}>
+                                                                    {(provided) => (
+                                                                        <div
+                                                                            ref={provided.innerRef}
+                                                                            {...provided.draggableProps}
+                                                                            {...provided.dragHandleProps}
+                                                                            onClick={() => {
+                                                                                if (onProductCardClick) {
+                                                                                    onProductCardClick(group, column.id);
+                                                                                }
+                                                                            }}
+                                                                            className="bg-white p-3 rounded-lg border shadow-sm group hover:border-primary hover:shadow-md transition-all cursor-pointer active:scale-[0.98]"
+                                                                        >
+                                                                            <div className="flex items-start gap-2 mb-2">
+                                                                                <div className="w-9 h-9 rounded bg-muted flex items-center justify-center shrink-0">
+                                                                                    {group.product ? <ShoppingBag className="h-5 w-5 text-muted-foreground" /> :
+                                                                                        <Wrench className="h-5 w-5 text-muted-foreground" />}
+                                                                                </div>
+                                                                                <div className="flex-1 min-w-0">
+                                                                                    <p className="font-bold text-sm truncate leading-tight">
+                                                                                        {group.product?.item_name || group.services[0]?.item_name}
+                                                                                    </p>
+                                                                                    {group.product && (
+                                                                                        <Badge className={cn("text-[10px] px-1 h-4 mt-1", getItemTypeColor('product'))}>
+                                                                                            {getItemTypeLabel('product')}
+                                                                                        </Badge>
+                                                                                    )}
+                                                                                </div>
                                                                             </div>
-                                                                            <div className="flex-1 min-w-0">
-                                                                                <p className="font-bold text-sm truncate leading-tight">{item.item_name}</p>
-                                                                                <Badge className={cn("text-xs px-1.5 h-5 mt-1", getItemTypeColor(item.item_type))}>
-                                                                                    {getItemTypeLabel(item.item_type)}
-                                                                                </Badge>
+
+                                                                            {/* List of services inside product card */}
+                                                                            {group.services.length > 0 && (
+                                                                                <div className="mt-2 space-y-1 pl-1 border-l-2 border-primary/20">
+                                                                                    {group.services.map(svc => (
+                                                                                        <div key={svc.id} className="flex items-center justify-between gap-2">
+                                                                                            <span className="text-[11px] text-gray-600 truncate flex-1">
+                                                                                                • {svc.item_name}
+                                                                                            </span>
+                                                                                        </div>
+                                                                                    ))}
+                                                                                </div>
+                                                                            )}
+
+                                                                            {/* Task Controls */}
+                                                                            <div className="flex items-center justify-between mt-3 pt-2 border-t border-dashed">
+                                                                                <Button
+                                                                                    variant="ghost"
+                                                                                    size="icon"
+                                                                                    className="h-8 w-8 rounded-full"
+                                                                                    disabled={colIdx === 0}
+                                                                                    onClick={async (e) => {
+                                                                                        e.stopPropagation();
+                                                                                        const prevStep = SALES_STEPS[colIdx - 1].id;
+
+                                                                                        const itemsToUpdate = [];
+                                                                                        if (group.product) itemsToUpdate.push(group.product);
+                                                                                        if (group.services) itemsToUpdate.push(...group.services);
+
+                                                                                        try {
+                                                                                            for (const item of itemsToUpdate) {
+                                                                                                updateOrderItemStatus(item.id, prevStep);
+                                                                                                await orderItemsApi.updateStatus(item.id, prevStep);
+                                                                                            }
+                                                                                            toast.success(`Đã lùi nhóm về: ${SALES_STEPS[colIdx - 1].label}`);
+                                                                                            if (order?.id) fetchKanbanLogs(order.id);
+                                                                                        } catch {
+                                                                                            reloadOrder();
+                                                                                            toast.error('Lỗi khi cập nhật trạng thái');
+                                                                                        }
+                                                                                    }}
+                                                                                >
+                                                                                    <ArrowLeft className="h-4 w-4" />
+                                                                                </Button>
+                                                                                <span className="text-xs font-bold text-muted-foreground text-[10px]">
+                                                                                    #{leadItem?.item_code?.slice(-4) || 'Item'}
+                                                                                </span>
+                                                                                <Button
+                                                                                    variant="ghost"
+                                                                                    size="icon"
+                                                                                    className="h-8 w-8 rounded-full text-primary hover:bg-primary hover:text-white"
+                                                                                    disabled={colIdx === SALES_STEPS.length - 1}
+                                                                                    onClick={async (e) => {
+                                                                                        e.stopPropagation();
+                                                                                        const nextStep = SALES_STEPS[colIdx + 1].id;
+
+                                                                                        const itemsToUpdate = [];
+                                                                                        if (group.product) itemsToUpdate.push(group.product);
+                                                                                        if (group.services) itemsToUpdate.push(...group.services);
+
+                                                                                        try {
+                                                                                            for (const item of itemsToUpdate) {
+                                                                                                updateOrderItemStatus(item.id, nextStep);
+                                                                                                await orderItemsApi.updateStatus(item.id, nextStep);
+                                                                                            }
+                                                                                            toast.success(`Đã chuyển nhóm sang: ${SALES_STEPS[colIdx + 1].label}`);
+                                                                                            if (order?.id) fetchKanbanLogs(order.id);
+                                                                                        } catch {
+                                                                                            reloadOrder();
+                                                                                            toast.error('Lỗi khi cập nhật trạng thái');
+                                                                                        }
+                                                                                    }}
+                                                                                >
+                                                                                    <ArrowRight className="h-4 w-4" />
+                                                                                </Button>
                                                                             </div>
                                                                         </div>
-
-                                                                        {/* Task Controls */}
-                                                                        <div className="flex items-center justify-between mt-3 pt-2 border-t border-dashed">
-                                                                            <Button
-                                                                                variant="ghost"
-                                                                                size="icon"
-                                                                                className="h-8 w-8 rounded-full"
-                                                                                disabled={colIdx === 0}
-                                                                                onClick={(e) => {
-                                                                                    e.stopPropagation();
-                                                                                    const prevStep = SALES_STEPS[colIdx - 1].id;
-                                                                                    updateOrderItemStatus(item.id, prevStep);
-                                                                                    toast.success(`Đã lùi về: ${SALES_STEPS[colIdx - 1].label}`);
-                                                                                    orderItemsApi.updateStatus(item.id, prevStep).then(() => { if (order?.id) fetchKanbanLogs(order.id); }).catch(() => {
-                                                                                        reloadOrder();
-                                                                                        toast.error('Lỗi khi cập nhật trạng thái');
-                                                                                    });
-                                                                                }}
-                                                                            >
-                                                                                <ArrowLeft className="h-4 w-4" />
-                                                                            </Button>
-                                                                            <span className="text-xs font-bold text-muted-foreground">
-                                                                                #{item.item_code?.slice(-4) || 'Item'}
-                                                                            </span>
-                                                                            <Button
-                                                                                variant="ghost"
-                                                                                size="icon"
-                                                                                className="h-8 w-8 rounded-full text-primary hover:bg-primary hover:text-white"
-                                                                                disabled={colIdx === SALES_STEPS.length - 1}
-                                                                                onClick={(e) => {
-                                                                                    e.stopPropagation();
-                                                                                    const nextStep = SALES_STEPS[colIdx + 1].id;
-                                                                                    updateOrderItemStatus(item.id, nextStep);
-                                                                                    toast.success(`Đã chuyển sang: ${SALES_STEPS[colIdx + 1].label}`);
-                                                                                    orderItemsApi.updateStatus(item.id, nextStep).then(() => { if (order?.id) fetchKanbanLogs(order.id); }).catch(() => {
-                                                                                        reloadOrder();
-                                                                                        toast.error('Lỗi khi cập nhật trạng thái');
-                                                                                    });
-                                                                                }}
-                                                                            >
-                                                                                <ArrowRight className="h-4 w-4" />
-                                                                            </Button>
-                                                                        </div>
-                                                                    </div>
-                                                                )}
-                                                            </Draggable>
-                                                        ))}
-                                                        {columnItems.length === 0 && (
+                                                                    )}
+                                                                </Draggable>
+                                                            );
+                                                        })}
+                                                        {columnGroups.length === 0 && (
                                                             <div className="py-8 text-center border-2 border-dashed rounded-lg bg-black/5">
                                                                 <p className="text-xs text-muted-foreground uppercase font-medium">Trống</p>
                                                             </div>
@@ -293,10 +353,22 @@ export function SalesTab({
                                 <CardTitle className="text-sm font-bold text-purple-800">CÔNG CỤ SALES</CardTitle>
                             </CardHeader>
                             <CardContent className="pt-4 space-y-3">
-                                <Button variant="outline" className="w-full justify-start h-12 text-xs font-bold border-gray-200 hover:bg-purple-50 hover:text-purple-700">
+                                <Button
+                                    variant="outline"
+                                    className="w-full justify-start h-12 text-xs font-bold border-gray-200 hover:bg-purple-50 hover:text-purple-700"
+                                    onClick={() => setShowUpsellDialog(true)}
+                                >
                                     <Sparkles className="h-4 w-4 mr-2 text-purple-500" />
                                     Đề xuất gói VIP (Upsell)
                                 </Button>
+                                <UpsellDialog
+                                    open={showUpsellDialog}
+                                    onOpenChange={setShowUpsellDialog}
+                                    orderId={order.id}
+                                    onSuccess={async () => {
+                                        await reloadOrder();
+                                    }}
+                                />
                                 <Button variant="outline" className="w-full justify-start h-12 text-xs font-bold border-gray-200 hover:bg-orange-50 hover:text-orange-700">
                                     <Clock className="h-4 w-4 mr-2 text-orange-500" />
                                     Nhắc việc (Flow-up)

@@ -183,7 +183,7 @@ export const ordersApi = {
     delete: (id: string) =>
         api.delete<ApiResponse<null>>(`/orders/${id}`),
 
-    createExtensionRequest: (orderId: string, data: { reason: string }) =>
+    createExtensionRequest: (orderId: string, data: { reason: string; new_due_at?: string }) =>
         api.post<ApiResponse<any>>(`/orders/${orderId}/extension-request`, data),
 
     updateExtensionRequest: (orderId: string, data: { customer_result?: string; new_due_at?: string; valid_reason?: boolean; status?: string }) =>
@@ -203,6 +203,9 @@ export const ordersApi = {
         image_url?: string;
         notes?: string;
     }) => api.post<ApiResponse<{ payment: any; order: any }>>(`/orders/${orderId}/payments`, data),
+
+    upsell: (id: string, data: { customer_items?: any[]; sale_items?: any[] }) =>
+        api.post<ApiResponse<any>>(`/orders/${id}/upsell`, data),
 };
 
 // Order Products API (Customer's products: shoes, bags, etc.)
@@ -587,8 +590,9 @@ export const transactionsApi = {
 
 // Product Types API
 export const productChatsApi = {
+    getRooms: () => api.get('/product-chats/rooms'),
     getMessages: (entityId: string, roomId: string) => api.get(`/product-chats/${entityId}/${roomId}`),
-    sendMessage: (data: { entity_id: string; entity_type: string; room_id: string; content: string }) =>
+    sendMessage: (data: { order_id?: string; entity_id: string; entity_type: string; room_id: string; content: string; image_url?: string; mentions?: string[] }) =>
         api.post('/product-chats', data),
 };
 

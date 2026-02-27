@@ -47,10 +47,27 @@ export function Header({ onMenuToggle, isMobile, currentUser, onLogout }: Header
         navigate(`/leads/${leadId}`);
     };
 
-    const handleOrderNotificationClick = (orderId: string, notificationId: string) => {
-        markOrderAsRead(notificationId);
+    const handleOrderNotificationClick = (notification: any) => {
+        markOrderAsRead(notification.id);
         setShowNotifications(false);
-        navigate(`/orders/${orderId}`);
+
+        const orderId = notification.data?.order_id || notification.data?.entity_id;
+        if (orderId) {
+            const isMention = notification.type === 'mention';
+            if (isMention && notification.data?.entity_id) {
+                navigate(`/orders/${orderId}`, {
+                    state: {
+                        openChat: {
+                            entityId: notification.data.entity_id,
+                            roomId: notification.data.room_id,
+                            messageId: notification.data.message_id,
+                        }
+                    }
+                });
+            } else {
+                navigate(`/orders/${orderId}`);
+            }
+        }
     };
 
     const formatTimeAgo = (dateStr: string): string => {
@@ -206,11 +223,18 @@ export function Header({ onMenuToggle, isMobile, currentUser, onLogout }: Header
                                                             <div
                                                                 key={notification.id}
                                                                 className={`p-3 hover:bg-muted/50 cursor-pointer transition-colors ${!notification.is_read ? 'bg-green-50/50' : ''}`}
-                                                                onClick={() => handleOrderNotificationClick(notification.data?.order_id || '', notification.id)}
+                                                                onClick={() => handleOrderNotificationClick(notification)}
                                                             >
                                                                 <div className="flex gap-3">
-                                                                    <div className="h-9 w-9 rounded-full flex items-center justify-center shrink-0 bg-green-100 text-green-700">
-                                                                        <CheckCheck className="h-4 w-4" />
+                                                                    <div className={`h-9 w-9 rounded-full flex items-center justify-center shrink-0 ${notification.type === 'mention'
+                                                                        ? 'bg-blue-100 text-blue-700'
+                                                                        : 'bg-green-100 text-green-700'
+                                                                        }`}>
+                                                                        {notification.type === 'mention' ? (
+                                                                            <User className="h-4 w-4" />
+                                                                        ) : (
+                                                                            <CheckCheck className="h-4 w-4" />
+                                                                        )}
                                                                     </div>
                                                                     <div className="flex-1 min-w-0">
                                                                         <p className="text-sm font-medium">{notification.title}</p>
@@ -220,7 +244,8 @@ export function Header({ onMenuToggle, isMobile, currentUser, onLogout }: Header
                                                                         </p>
                                                                     </div>
                                                                     {!notification.is_read && (
-                                                                        <div className="h-2 w-2 rounded-full bg-green-500 shrink-0" />
+                                                                        <div className={`h-2 w-2 rounded-full shrink-0 ${notification.type === 'mention' ? 'bg-blue-500' : 'bg-green-500'
+                                                                            }`} />
                                                                     )}
                                                                 </div>
                                                             </div>

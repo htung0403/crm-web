@@ -24,7 +24,6 @@ export function useOrderNotifications() {
         try {
             const response = await api.get('/notifications', {
                 params: {
-                    type: 'order_completed',
                     limit: 50
                 }
             });

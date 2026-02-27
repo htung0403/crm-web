@@ -123,7 +123,7 @@ const WorkflowCard = memo(({
                                         onClick={(e) => { e.stopPropagation(); handleOpenSaleAssignDialog(svc); }}
                                     >
                                         <Tag className="h-2.5 w-2.5 shrink-0" />
-                                        <span className="truncate">Sale: {(svc as any).sales?.length > 0 ? (svc as any).sales.map((s: any) => s.sale?.name || s.name).join(', ') : '—'}</span>
+                                        <span className="truncate">Sale: {(svc as any).sales?.length > 0 ? (svc as any).sales.map((s: any) => s.sale?.name || (s as any).name).join(', ') : '—'}</span>
                                     </div>
                                     {isLeadService && currentStep && (
                                         <div className="mt-1.5 pt-1.5 border-t border-primary/10">
@@ -291,20 +291,30 @@ export function WorkflowTab({
     if (order?.status === 'done') return null;
 
     const rooms = useMemo(() => [
+        { id: 'waiting', title: 'Chờ tiếp nhận' },
         ...TECH_ROOMS,
         { id: 'done', title: 'Hoàn thành' },
         { id: 'fail', title: 'Thất bại' }
     ], []);
 
+    // Khi order ở trạng thái before_sale, chỉ hiển thị nhóm đã được "Chốt đơn" (step5)
+    const filteredGroups = useMemo(() => {
+        if (order?.status !== 'before_sale') return workflowKanbanGroups;
+        return workflowKanbanGroups.filter(g => {
+            const leadItem = g.product || g.services[0];
+            return leadItem?.status === 'step5';
+        });
+    }, [workflowKanbanGroups, order?.status]);
+
     const groupsByRoom = useMemo(() => {
         const map: Record<string, typeof workflowKanbanGroups> = {};
         rooms.forEach(r => { map[r.id] = []; });
-        workflowKanbanGroups.forEach(g => {
+        filteredGroups.forEach(g => {
             const roomId = getGroupCurrentTechRoom(g);
             if (map[roomId]) map[roomId].push(g);
         });
         return map;
-    }, [workflowKanbanGroups, getGroupCurrentTechRoom, rooms]);
+    }, [filteredGroups, getGroupCurrentTechRoom, rooms]);
 
     return (
         <TabsContent value="workflow">
@@ -333,7 +343,7 @@ export function WorkflowTab({
                         ) : (
                             <div className="pb-4">
                                 <DragDropContext onDragEnd={onWorkflowDragEnd}>
-                                    <div className="grid grid-cols-1 md:grid-cols-5 gap-4 overflow-x-auto min-w-[1200px] pb-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-6 gap-4 overflow-x-auto min-w-[1200px] pb-4">
                                         {rooms.map((room) => (
                                             <WorkflowColumn
                                                 key={room.id}

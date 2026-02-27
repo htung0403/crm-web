@@ -55,13 +55,31 @@ interface ServiceSelectorProps {
 export function ServiceSelector({ services, packages, productType, onSelect }: ServiceSelectorProps) {
     const [open, setOpen] = useState(false);
 
+    // List of common synonyms for product types
+    const getTypeSynonyms = (type: string) => {
+        const lowerType = type.toLowerCase();
+        if (lowerType === 'shoe' || lowerType === 'giày') return ['shoe', 'giày'];
+        if (lowerType === 'bag' || lowerType === 'túi xách' || lowerType === 'túi') return ['bag', 'túi xách', 'túi'];
+        if (lowerType === 'wallet' || lowerType === 'ví' || lowerType === 'thắt lưng') return ['wallet', 'ví', 'thắt lưng', 'belt'];
+        return [lowerType];
+    };
+
     // Filter services based on product type
-    const filteredServices = services
-        .filter(s => s.status === 'active')
-        .filter(s => {
-            if (!s.applicable_product_types || s.applicable_product_types.length === 0) return true;
-            return productType ? s.applicable_product_types.includes(productType) : true;
-        });
+    const activeServices = services.filter(s => s.status === 'active');
+
+    const filteredServices = activeServices.filter(s => {
+        if (!s.applicable_product_types || s.applicable_product_types.length === 0) return true;
+        if (!productType) return true;
+
+        const synonyms = getTypeSynonyms(productType);
+        return s.applicable_product_types.some(t =>
+            synonyms.includes(t.toLowerCase()) || synonyms.includes(t)
+        );
+    });
+
+    // If no services match the specific type, show all active services as a fallback 
+    // to prevent the user from being stuck with "No services found"
+    const displayServices = filteredServices.length > 0 ? filteredServices : activeServices;
 
     const activePackages = packages.filter(p => p.status === 'active');
 
@@ -81,15 +99,20 @@ export function ServiceSelector({ services, packages, productType, onSelect }: S
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-[300px] p-0" align="start">
-                <Command>
+            <PopoverContent
+                className="w-[300px] p-0 pointer-events-auto"
+                align="start"
+                onWheel={(e) => e.stopPropagation()}
+                onTouchMove={(e) => e.stopPropagation()}
+            >
+                <Command className="max-h-[350px] flex flex-col">
                     <CommandInput placeholder="Tìm dịch vụ hoặc gói..." />
-                    <CommandList>
+                    <CommandList className="max-h-[300px] overflow-y-auto">
                         <CommandEmpty>Không tìm thấy dịch vụ.</CommandEmpty>
 
-                        {filteredServices.length > 0 && (
+                        {displayServices.length > 0 && (
                             <CommandGroup heading="Dịch vụ đơn lẻ">
-                                {filteredServices.map((service) => (
+                                {displayServices.map((service) => (
                                     <CommandItem
                                         key={service.id}
                                         value={service.name}
@@ -117,7 +140,7 @@ export function ServiceSelector({ services, packages, productType, onSelect }: S
                             </CommandGroup>
                         )}
 
-                        {filteredServices.length > 0 && activePackages.length > 0 && <CommandSeparator />}
+                        {displayServices.length > 0 && activePackages.length > 0 && <CommandSeparator />}
 
                         {activePackages.length > 0 && (
                             <CommandGroup heading="Gói dịch vụ">

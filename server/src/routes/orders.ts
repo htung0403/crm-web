@@ -975,6 +975,241 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
     }
 });
 
+// Upsell: Add more products/services to an existing order
+router.post('/:id/upsell', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { customer_items, sale_items } = req.body;
+
+        // 1. Fetch Order and check status
+        const { data: order, error: orderFetchError } = await supabaseAdmin
+            .from('orders')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (orderFetchError || !order) {
+            throw new ApiError('Không tìm thấy đơn hàng', 404);
+        }
+
+        if (order.status === 'cancelled') {
+            throw new ApiError('Không thể upsell trên đơn hàng đã hủy', 400);
+        }
+
+        let newSubtotal = 0;
+        const createdCustomerItems = [];
+
+        // 2. Process Customer Items (V2)
+        if (customer_items && Array.isArray(customer_items) && customer_items.length > 0) {
+            // Get count of existing products for code generation
+            const { count } = await supabaseAdmin
+                .from('order_products')
+                .select('*', { count: 'exact', head: true })
+                .eq('order_id', id);
+
+            let productIdx = (count || 0) + 1;
+
+            for (const item of customer_items) {
+                let orderProduct;
+
+                if (item.order_product_id) {
+                    // Use existing product
+                    const { data: existingProduct, error: fetchError } = await supabaseAdmin
+                        .from('order_products')
+                        .select('*')
+                        .eq('id', item.order_product_id)
+                        .single();
+
+                    if (fetchError || !existingProduct) {
+                        console.error('Error fetching existing product for upsell:', fetchError);
+                        continue;
+                    }
+                    orderProduct = existingProduct;
+                } else {
+                    // Create new product
+                    const productCode = `${order.order_code}-${productIdx++}`;
+
+                    const { data: newProduct, error: pError } = await supabaseAdmin
+                        .from('order_products')
+                        .insert({
+                            order_id: id,
+                            product_code: productCode,
+                            name: item.name,
+                            type: item.type,
+                            brand: item.brand,
+                            color: item.color,
+                            size: item.size,
+                            material: item.material,
+                            condition_before: item.condition_before,
+                            images: item.images || [],
+                            notes: item.notes,
+                            status: 'pending'
+                        })
+                        .select()
+                        .single();
+
+                    if (pError || !newProduct) {
+                        console.error('Error creating upsell product:', pError);
+                        continue;
+                    }
+                    orderProduct = newProduct;
+                }
+
+                if (item.services && Array.isArray(item.services)) {
+                    for (const svc of item.services) {
+                        const price = Number(svc.price) || 0;
+                        newSubtotal += price;
+
+                        const hasTechs = svc.technicians && svc.technicians.length > 0;
+                        const techId = hasTechs ? svc.technicians[0].technician_id : null;
+
+                        const { data: createdSvc, error: sError } = await supabaseAdmin
+                            .from('order_product_services')
+                            .insert({
+                                order_product_id: orderProduct.id,
+                                service_id: svc.type === 'service' ? svc.id : null,
+                                package_id: svc.type === 'package' ? svc.id : null,
+                                item_name: svc.name,
+                                item_type: svc.type,
+                                unit_price: price,
+                                technician_id: techId,
+                                status: hasTechs ? 'assigned' : 'pending',
+                                assigned_at: hasTechs ? new Date().toISOString() : null,
+                            })
+                            .select()
+                            .single();
+
+                        if (!sError && createdSvc) {
+                            // Tech Assignments
+                            if (hasTechs) {
+                                const techPayload = svc.technicians.map((t: any) => ({
+                                    order_product_service_id: createdSvc.id,
+                                    technician_id: t.technician_id,
+                                    commission: t.commission || 0,
+                                    assigned_by: req.user!.id,
+                                    assigned_at: new Date().toISOString(),
+                                    status: 'assigned'
+                                }));
+                                await supabaseAdmin.from('order_product_service_technicians').insert(techPayload);
+                            }
+
+                            // Sales Assignments
+                            if (svc.sales && svc.sales.length > 0) {
+                                const salePayload = svc.sales.map((s: any) => ({
+                                    order_product_service_id: createdSvc.id,
+                                    sale_id: s.sale_id || s.id,
+                                    commission: s.commission || 0,
+                                    assigned_by: req.user!.id,
+                                    assigned_at: new Date().toISOString()
+                                }));
+                                await supabaseAdmin.from('order_product_service_sales').insert(salePayload);
+                            }
+
+                            // Workflow Steps
+                            if (svc.type === 'service' && svc.id) {
+                                const { data: sData } = await supabaseAdmin.from('services').select('workflow_id').eq('id', svc.id).single();
+                                if (sData?.workflow_id) {
+                                    const { data: wSteps } = await supabaseAdmin.from('workflow_steps').select('*').eq('workflow_id', sData.workflow_id).order('step_order', { ascending: true });
+                                    if (wSteps) {
+                                        const itemSteps = wSteps.map(ws => ({
+                                            order_product_service_id: createdSvc.id,
+                                            workflow_step_id: ws.id,
+                                            step_order: ws.step_order,
+                                            step_name: ws.name || `Bước ${ws.step_order}`,
+                                            department_id: ws.department_id,
+                                            status: 'pending',
+                                            estimated_duration: ws.estimated_duration
+                                        }));
+                                        await supabaseAdmin.from('order_item_steps').insert(itemSteps);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                createdCustomerItems.push(orderProduct);
+            }
+        }
+
+        // 3. Process Sale Items (V1)
+        if (sale_items && Array.isArray(sale_items) && sale_items.length > 0) {
+            const baseTime = Date.now().toString().slice(-8);
+            const saleItemsPayload = sale_items.map((itemValue: any, idxValue: number) => {
+                const qValue = Math.max(1, Number(itemValue.quantity) || 1);
+                const pValue = Number(itemValue.unit_price || itemValue.price) || 0;
+                const totalValue = pValue * qValue;
+                newSubtotal += totalValue;
+
+                return {
+                    order_id: id,
+                    product_id: itemValue.product_id || itemValue.id || null,
+                    item_type: 'product',
+                    item_name: itemValue.name || 'Sản phẩm upsell',
+                    quantity: qValue,
+                    unit_price: pValue,
+                    total_price: totalValue,
+                    item_code: `UP${baseTime}${idxValue.toString().padStart(2, '0')}`,
+                    status: 'pending'
+                };
+            });
+
+            const { data: createdItems, error: itemsError } = await supabaseAdmin.from('order_items').insert(saleItemsPayload).select();
+
+            if (!itemsError && createdItems) {
+                const saleItemAssignments: any[] = [];
+                for (let idx = 0; idx < createdItems.length; idx++) {
+                    const createdItem = createdItems[idx];
+                    const originalItem = sale_items[idx];
+                    const sales = originalItem.sales || [];
+                    for (const s of sales) {
+                        saleItemAssignments.push({
+                            order_item_id: createdItem.id,
+                            sale_id: s.sale_id || s.id,
+                            commission: s.commission || 0,
+                            assigned_by: req.user!.id,
+                            assigned_at: new Date().toISOString()
+                        });
+                    }
+                }
+                if (saleItemAssignments.length > 0) {
+                    await supabaseAdmin.from('order_item_sales').insert(saleItemAssignments);
+                }
+            }
+        }
+
+        // 4. Update Order Totals
+        const updatedSubtotal = (Number(order.subtotal) || 0) + newSubtotal;
+        const updatedTotalAmount = (Number(order.total_amount) || 0) + newSubtotal;
+        const updatedRemainingDebt = (Number(order.remaining_debt) || 0) + newSubtotal;
+
+        const { error: updateError } = await supabaseAdmin
+            .from('orders')
+            .update({
+                subtotal: updatedSubtotal,
+                total_amount: updatedTotalAmount,
+                remaining_debt: updatedRemainingDebt,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', id);
+
+        if (updateError) {
+            console.error('Error updating order totals after upsell:', updateError);
+        }
+
+        res.json({
+            status: 'success',
+            data: {
+                newSubtotal,
+                createdCustomerItems
+            },
+            message: `Đã thêm thành công ${newSubtotal.toLocaleString()}đ vào đơn hàng.`
+        });
+
+    } catch (error) {
+        next(error);
+    }
+});
+
 // Update order (items, notes, discount)
 router.put('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -1705,7 +1940,7 @@ const EXTENSION_STATUSES = ['requested', 'sale_contacted', 'manager_approved', '
 router.post('/:id/extension-request', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { reason } = req.body;
+        const { reason, new_due_at } = req.body;
 
         if (!reason || typeof reason !== 'string' || !reason.trim()) {
             throw new ApiError('Lý do gia hạn là bắt buộc', 400);
@@ -1722,6 +1957,7 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
                 order_id: id,
                 requested_by: req.user!.id,
                 reason: reason.trim(),
+                new_due_at: new_due_at || null,
                 status: 'requested',
             })
             .select()

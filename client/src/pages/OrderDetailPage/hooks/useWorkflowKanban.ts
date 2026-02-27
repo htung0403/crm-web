@@ -11,27 +11,47 @@ export function useWorkflowKanban(
     const workflowKanbanGroups = useMemo((): WorkflowKanbanGroup[] => {
         const items = order?.items || [];
         const groups: WorkflowKanbanGroup[] = [];
-        let i = 0;
-        while (i < items.length) {
-            const item = items[i] as OrderItem & { is_customer_item?: boolean };
-            if (item.is_customer_item && item.item_type === 'product') {
+
+        // Use a Set to track processed IDs to handle flat items correctly
+        const processedIds = new Set<string>();
+
+        // 1. Group Customer Items (Products and their nested services)
+        items.forEach((item: any, index) => {
+            if (item.is_customer_item && item.item_type === 'product' && !processedIds.has(item.id)) {
+                processedIds.add(item.id);
+
+                // Find services that belong to this product
+                // In flat list, services usually follow the product
                 const services: OrderItem[] = [];
-                let j = i + 1;
+                let j = index + 1;
                 while (j < items.length) {
-                    const next = items[j] as OrderItem & { is_customer_item?: boolean };
+                    const next = items[j];
+                    // Stop if we hit another customer product
                     if (next.is_customer_item && next.item_type === 'product') break;
-                    if (next.item_type === 'service' || next.item_type === 'package') services.push(items[j]);
+
+                    // If it's a service/package, it belongs to the previous product
+                    if (next.item_type === 'service' || next.item_type === 'package') {
+                        services.push(next);
+                        processedIds.add(next.id);
+                    }
                     j++;
                 }
-                if (services.length > 0) groups.push({ product: item, services });
-                i = j;
-            } else if (item.item_type === 'service' || item.item_type === 'package') {
-                groups.push({ product: null, services: [item] });
-                i++;
-            } else {
-                i++;
+                groups.push({ product: item, services });
             }
-        }
+        });
+
+        // 2. Add remaining items as standalone groups (Sale items or leftover services)
+        items.forEach((item) => {
+            if (!processedIds.has(item.id)) {
+                if (item.item_type === 'product') {
+                    groups.push({ product: item, services: [] });
+                } else if (item.item_type === 'service' || item.item_type === 'package') {
+                    groups.push({ product: null, services: [item] });
+                }
+                processedIds.add(item.id);
+            }
+        });
+
         return groups;
     }, [order?.items]);
 

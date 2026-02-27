@@ -9,8 +9,9 @@ import {
 import {
     ShoppingBag, Tag, FileText, Package, Truck, Wrench,
     User as UserIcon, CheckCircle2, MessageSquare, Receipt,
-    History, Save, Loader2, Heart, ShieldCheck, ClipboardList
+    History, Save, Loader2, Heart, ShieldCheck, ClipboardList, Sparkles
 } from 'lucide-react';
+import { UpsellDialog } from '@/components/orders/UpsellDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +19,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ProductChat } from '@/components/orders/workflow/ProductChat';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import { cn, formatCurrency, formatDateTime } from '@/lib/utils';
@@ -36,6 +38,7 @@ interface ProductDetailDialogProps {
     order?: Order | null;
     onUpdateOrder?: (patch: Partial<Order>) => Promise<void>;
     onReloadOrder?: () => void;
+    highlightMessageId?: string;
 }
 
 export function ProductDetailDialog({
@@ -46,10 +49,12 @@ export function ProductDetailDialog({
     currentUserId,
     order,
     onUpdateOrder,
-    onReloadOrder
+    onReloadOrder,
+    highlightMessageId,
 }: ProductDetailDialogProps) {
     const [activeImageIdx, setActiveImageIdx] = useState(0);
     const [saving, setSaving] = useState(false);
+    const [showUpsellDialog, setShowUpsellDialog] = useState(false);
 
     // Local form state
     const [formData, setFormData] = useState<Partial<Order>>({});
@@ -178,7 +183,7 @@ export function ProductDetailDialog({
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-4xl p-0 overflow-hidden flex flex-col h-[90vh]">
+            <DialogContent className="max-w-6xl p-0 overflow-hidden flex flex-col h-[90vh]">
                 <DialogHeader className="p-4 border-b">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
@@ -269,7 +274,18 @@ export function ProductDetailDialog({
                             </div>
 
                             <div className="space-y-3">
-                                <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Dịch vụ yêu cầu</h3>
+                                <div className="flex items-center justify-between">
+                                    <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Dịch vụ yêu cầu</h3>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 text-[10px] font-bold border-purple-200 hover:bg-purple-50 hover:text-purple-700 bg-purple-50/30 gap-1.5"
+                                        onClick={() => setShowUpsellDialog(true)}
+                                    >
+                                        <Sparkles className="h-3 w-3 text-purple-500" />
+                                        UPSALE
+                                    </Button>
+                                </div>
                                 <div className="space-y-2">
                                     {services.map((svc) => (
                                         <div key={svc.id} className="p-3.5 rounded-xl border bg-white shadow-sm hover:shadow-md transition-shadow group">
@@ -696,25 +712,56 @@ export function ProductDetailDialog({
                                             <div className="bg-white p-5 rounded-2xl border border-blue-100 shadow-sm space-y-4">
                                                 <div className="flex items-center gap-2 text-blue-700 mb-1">
                                                     <UserIcon className="h-4 w-4" />
-                                                    <span className="text-xs font-black uppercase tracking-tight">Thông tin người giao đồ</span>
+                                                    <span className="text-xs font-black uppercase tracking-tight">Thông tin người nhận đồ</span>
                                                 </div>
                                                 <div className="space-y-3">
-                                                    <div className="space-y-1.5">
-                                                        <Label className="text-xs font-bold text-gray-500">TÊN NGƯỜI GIAO</Label>
-                                                        <Input
-                                                            placeholder="VD: Nguyễn Văn A"
-                                                            value={stepData.step1_receiver_name || ''}
-                                                            onChange={(e) => setStepData(prev => ({ ...prev, step1_receiver_name: e.target.value }))}
-                                                        />
+                                                    <div className="grid grid-cols-2 gap-4">
+                                                        <div className="space-y-1.5">
+                                                            <Label className="text-xs font-bold text-gray-500">TÊN NGƯỜI NHẬN</Label>
+                                                            <Input
+                                                                placeholder="VD: Nguyễn Văn A"
+                                                                value={stepData.step1_receiver_name || ''}
+                                                                onChange={(e) => setStepData(prev => ({ ...prev, step1_receiver_name: e.target.value }))}
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-1.5">
+                                                            <Label className="text-xs font-bold text-gray-500">SỐ ĐIỆN THOẠI</Label>
+                                                            <Input
+                                                                placeholder="VD: 0909 xxx xxx"
+                                                                value={stepData.step1_receiver_phone || ''}
+                                                                onChange={(e) => setStepData(prev => ({ ...prev, step1_receiver_phone: e.target.value }))}
+                                                            />
+                                                        </div>
                                                     </div>
-                                                    <div className="space-y-1.5">
-                                                        <Label className="text-xs font-bold text-gray-500">SỐ ĐIỆN THOẠI</Label>
-                                                        <Input
-                                                            placeholder="VD: 0909 xxx xxx"
-                                                            value={stepData.step1_receiver_phone || ''}
-                                                            onChange={(e) => setStepData(prev => ({ ...prev, step1_receiver_phone: e.target.value }))}
-                                                        />
+
+                                                    <div className="grid grid-cols-2 gap-4">
+                                                        <div className="space-y-1.5">
+                                                            <Label className="text-xs font-bold text-gray-500">HÌNH THỨC NHẬN</Label>
+                                                            <Select
+                                                                value={stepData.step1_delivery_type || 'direct'}
+                                                                onValueChange={(val) => setStepData(prev => ({ ...prev, step1_delivery_type: val }))}
+                                                            >
+                                                                <SelectTrigger>
+                                                                    <SelectValue placeholder="Chọn hình thức" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value="direct">Trực tiếp</SelectItem>
+                                                                    <SelectItem value="ship">Giao hàng (Ship)</SelectItem>
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                        {stepData.step1_delivery_type === 'ship' && (
+                                                            <div className="space-y-1.5">
+                                                                <Label className="text-xs font-bold text-gray-500">MÃ VẬN ĐƠN</Label>
+                                                                <Input
+                                                                    placeholder="VD: SPX123..."
+                                                                    value={stepData.step1_tracking_code || ''}
+                                                                    onChange={(e) => setStepData(prev => ({ ...prev, step1_tracking_code: e.target.value }))}
+                                                                />
+                                                            </div>
+                                                        )}
                                                     </div>
+
                                                     <div className="space-y-1.5">
                                                         <Label className="text-xs font-bold text-gray-500">GHI CHÚ NHẬN ĐỒ</Label>
                                                         <Textarea
@@ -801,10 +848,12 @@ export function ProductDetailDialog({
                                                 <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Trao đổi nội bộ</h4>
                                             </div>
                                             <ProductChat
+                                                orderId={order?.id || ''}
                                                 entityId={entityId}
                                                 entityType={entityType}
                                                 roomId={roomId}
                                                 currentUserId={currentUserId}
+                                                highlightMessageId={highlightMessageId}
                                             />
                                         </div>
                                     )}
@@ -820,10 +869,12 @@ export function ProductDetailDialog({
 
                                     {entityId && (
                                         <ProductChat
+                                            orderId={order?.id || ''}
                                             entityId={entityId}
                                             entityType={entityType}
                                             roomId={roomId}
                                             currentUserId={currentUserId}
+                                            highlightMessageId={highlightMessageId}
                                         />
                                     )}
                                 </div>
@@ -832,6 +883,20 @@ export function ProductDetailDialog({
                     </ScrollArea>
                 </div>
             </DialogContent>
+
+            <UpsellDialog
+                open={showUpsellDialog}
+                onOpenChange={setShowUpsellDialog}
+                orderId={order?.id || ''}
+                preselectedProduct={product ? {
+                    id: product.id,
+                    name: productName,
+                    type: (product as any).product_type || (product as any).type || (product as any).item_type || 'giày'
+                } : null}
+                onSuccess={async () => {
+                    if (onReloadOrder) await onReloadOrder();
+                }}
+            />
         </Dialog>
     );
 }
