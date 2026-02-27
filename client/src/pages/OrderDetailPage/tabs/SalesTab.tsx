@@ -12,7 +12,7 @@ import { TabsContent } from '@/components/ui/tabs';
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils';
 import { orderItemsApi } from '@/lib/api';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
-import type { Order } from '@/hooks/useOrders';
+import type { Order, OrderItem } from '@/hooks/useOrders';
 import {
     SALES_STEPS,
     getSalesStatusLabel,
@@ -30,8 +30,8 @@ interface SalesTabProps {
     updateOrderStatus: (orderId: string, status: string) => Promise<void>;
     reloadOrder: () => Promise<void>;
     fetchKanbanLogs: (orderId: string) => Promise<void>;
-    onProductCardClick?: (group: any, roomId: string) => void;
-    workflowKanbanGroups?: any[];
+    onProductCardClick?: (group: { product: OrderItem | null; services: OrderItem[] }, roomId: string) => void;
+    workflowKanbanGroups?: { product: OrderItem | null; services: OrderItem[] }[];
 }
 
 export function SalesTab({
@@ -78,11 +78,11 @@ export function SalesTab({
                             if (!result.destination || result.destination.droppableId === result.source.droppableId) return;
                             const draggableId = result.draggableId;
                             const newStatus = result.destination.droppableId;
-                            const stepLabel = SALES_STEPS.find((s) => s.id === newStatus)?.label || newStatus;
+                            const stepLabel = SALES_STEPS.find((s: any) => s.id === newStatus)?.label || newStatus;
 
                             // Find the group to update all its items
                             const group = workflowKanbanGroups?.find(g =>
-                                (g.product?.id ?? g.services.map(s => s.id).join('-')) === draggableId
+                                (g.product?.id ?? g.services.map((s: OrderItem) => s.id).join('-')) === draggableId
                             );
 
                             if (group) {
@@ -153,7 +153,7 @@ export function SalesTab({
                                                         className="space-y-3 min-h-[150px]"
                                                     >
                                                         {columnGroups.map((group, groupIdx) => {
-                                                            const draggableId = group.product?.id ?? group.services.map(s => s.id).join('-');
+                                                            const draggableId = group.product?.id ?? group.services.map((s: OrderItem) => s.id).join('-');
                                                             const leadItem = group.product || group.services[0];
 
                                                             return (
@@ -190,7 +190,7 @@ export function SalesTab({
                                                                             {/* List of services inside product card */}
                                                                             {group.services.length > 0 && (
                                                                                 <div className="mt-2 space-y-1 pl-1 border-l-2 border-primary/20">
-                                                                                    {group.services.map(svc => (
+                                                                                    {group.services.map((svc: OrderItem) => (
                                                                                         <div key={svc.id} className="flex items-center justify-between gap-2">
                                                                                             <span className="text-[11px] text-gray-600 truncate flex-1">
                                                                                                 • {svc.item_name}
@@ -301,7 +301,7 @@ export function SalesTab({
                                         { id: 'ship', title: '1. Xin địa chỉ Ship', sub: '"Chào anh, đồ đã xong..."', content: `Chào ${order.customer?.name} ạ, giày ${order.items?.[0]?.item_name || 'của mình'} đã xong. Anh/chị cho shop xin địa chỉ ship nhé!` },
                                         { id: 'care', title: '2. HD Bảo quản', sub: '"Shop gửi HDSD..."', content: `Shop gửi ${order.customer?.name} HDSD: Tránh nước, lau bằng khăn mềm định kỳ ạ.` },
                                         { id: 'feedback', title: '3. Xin Feedback', sub: '"Bạn đã nhận được đồ chưa..."', content: `Dạ chào ${order.customer?.name}, mình nhận được đồ chưa ạ? Cho shop xin feedback nhé!` }
-                                    ].map(tmp => (
+                                    ].map((tmp: any) => (
                                         <div
                                             key={tmp.id}
                                             className="bg-white p-4 rounded-xl border border-blue-200 hover:shadow-md transition-all group relative cursor-pointer"
@@ -397,15 +397,15 @@ export function SalesTab({
                                     <div className="pb-4 border-b border-dashed">
                                         <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">Tiến độ tổng thể</p>
                                         <div className="flex items-center justify-between mb-1">
-                                            <span className="text-xs font-bold">{order.items?.filter(i => (i.status || 'step1') === 'step5').length || 0}/{order.items?.length || 0} hạng mục</span>
+                                            <span className="text-xs font-bold">{order.items?.filter((i: OrderItem) => (i.status || 'step1') === 'step5').length || 0}/{order.items?.length || 0} hạng mục</span>
                                             <span className="text-xs font-bold text-primary">
-                                                {Math.round(((order.items?.filter(i => (i.status || 'step1') === 'step5').length || 0) / (order.items?.length || 1)) * 100)}%
+                                                {Math.round(((order.items?.filter((i: OrderItem) => (i.status || 'step1') === 'step5').length || 0) / (order.items?.length || 1)) * 100)}%
                                             </span>
                                         </div>
                                         <div className="w-full bg-gray-100 rounded-full h-1.5">
                                             <div
                                                 className="bg-primary h-1.5 rounded-full transition-all duration-500"
-                                                style={{ width: `${((order.items?.filter(i => (i.status || 'step1') === 'step5').length || 0) / (order.items?.length || 1)) * 100}%` }}
+                                                style={{ width: `${((order.items?.filter((i: OrderItem) => (i.status || 'step1') === 'step5').length || 0) / (order.items?.length || 1)) * 100}%` }}
                                             />
                                         </div>
                                     </div>
