@@ -11,6 +11,7 @@ interface ImageUploadProps {
     disabled?: boolean;
     className?: string;
     hideInfo?: boolean;
+    placeholderIcon?: React.ReactNode;
 }
 
 export function ImageUpload({
@@ -20,7 +21,8 @@ export function ImageUpload({
     folder = 'images',
     disabled = false,
     className,
-    hideInfo = false
+    hideInfo = false,
+    placeholderIcon
 }: ImageUploadProps) {
     const [uploading, setUploading] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -95,7 +97,7 @@ export function ImageUpload({
                     disabled={disabled}
                     className={`${sizeClasses} rounded-lg border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center gap-1 hover:border-primary/50 hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
-                    <Upload className="h-5 w-5 text-muted-foreground" />
+                    {placeholderIcon || <Upload className="h-5 w-5 text-muted-foreground" />}
                     <span className="text-xs text-muted-foreground">Tải lên</span>
                 </button>
             )}

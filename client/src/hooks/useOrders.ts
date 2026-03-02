@@ -35,6 +35,9 @@ export interface OrderItem {
     service?: { id: string; name?: string; image?: string; code?: string; price?: number };
     accessory?: { id: string; order_item_id: string; status: string; notes?: string; updated_at: string } | null;
     partner?: { id: string; order_item_id: string; status: string; notes?: string; updated_at: string } | null;
+    after_sale_stage?: string | null;
+    completion_photos?: string[];
+    packaging_photos?: string[];
     /** Workflow steps for room deadline calculation */
     order_item_steps?: OrderItemStep[];
 }

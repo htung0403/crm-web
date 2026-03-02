@@ -104,6 +104,7 @@ export function OrderDetailPage() {
         updateOrderItemStatus,
         updateOrderStatus,
         updateOrderAfterSale,
+        updateItemAfterSaleData,
         handleApproveOrder,
         handlePaymentSuccess,
     } = useOrderActions(id, fetchOrders, reloadOrder);
@@ -414,7 +415,7 @@ export function OrderDetailPage() {
                                 {columns.find(c => c.id === order.status)?.title || order.status}
                             </Badge>
                         </h1>
-                        <p className="text-muted-foreground text-sm flex items-center gap-2">
+                        <div className="text-muted-foreground text-sm flex items-center gap-2">
                             <span>Chi tiết đơn hàng</span>
                             <span className="text-muted-foreground/30 px-1">•</span>
                             <div
@@ -437,7 +438,7 @@ export function OrderDetailPage() {
                                 )}
                                 <Pencil className="h-3 w-3 text-muted-foreground opacity-20 group-hover:opacity-100 transition-opacity ml-1" />
                             </div>
-                        </p>
+                        </div>
                     </div>
                 </div>
                 <div className="flex flex-wrap gap-2 w-full sm:w-auto">
@@ -555,6 +556,7 @@ export function OrderDetailPage() {
 
                 <CareTab
                     order={order}
+                    groups={workflowKanbanGroups}
                     careLogs={careLogs}
                     updateOrderAfterSale={updateOrderAfterSale}
                     reloadOrder={reloadOrder}
@@ -787,6 +789,7 @@ export function OrderDetailPage() {
                 currentUserId={user?.id}
                 order={order}
                 onUpdateOrder={updateOrderAfterSale}
+                onUpdateItemAfterSaleData={updateItemAfterSaleData}
                 onReloadOrder={reloadOrder}
                 highlightMessageId={highlightMessageId}
             />

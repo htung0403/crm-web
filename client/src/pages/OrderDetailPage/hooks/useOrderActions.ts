@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { toast } from 'sonner';
-import { ordersApi, orderItemsApi } from '@/lib/api';
+import { ordersApi, orderItemsApi, orderProductsApi } from '@/lib/api';
 import { useOrders } from '@/hooks/useOrders';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 
@@ -30,6 +30,19 @@ export function useOrderActions(
             toast.error('Lỗi khi cập nhật thông tin After-sale');
         }
     }, [id, reloadOrder]);
+
+    const updateItemAfterSaleData = useCallback(async (itemId: string, isCustomerItem: boolean, data: any) => {
+        try {
+            if (isCustomerItem) {
+                await orderProductsApi.updateAfterSaleData(itemId, data);
+            } else {
+                await orderItemsApi.updateAfterSaleData(itemId, data);
+            }
+            await reloadOrder();
+        } catch (error) {
+            toast.error('Lỗi khi cập nhật thông tin After-sale sản phẩm');
+        }
+    }, [reloadOrder]);
 
     const updateOrderItemStatus = useCallback(async (itemId: string, status: string) => {
         try {
@@ -75,6 +88,7 @@ export function useOrderActions(
     return {
         updateOrderStatus,
         updateOrderAfterSale,
+        updateItemAfterSaleData,
         updateOrderItemStatus,
         handleApproveOrder,
         handlePaymentSuccess,

@@ -22,8 +22,6 @@ interface OrderCardProps {
 
 export function OrderCard({ draggableId, order, productGroup, columnId, index, onClick }: OrderCardProps) {
     const { product, services } = productGroup;
-    const column = columns.find((c) => c.id === columnId);
-    const columnTitle = column?.title ?? columnId;
 
     const effectiveProduct = product;
     const effectiveServices = services;
@@ -103,12 +101,12 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
                             <span className="font-mono text-[10px] text-muted-foreground block truncate">
                                 {productCode}
                             </span>
+                            <div className="text-[10px] text-primary font-medium mt-0.5 truncate" title={order.customer?.name}>
+                                {order.customer?.name || 'N/A'}
+                            </div>
                             <div className="font-semibold text-xs text-foreground truncate mt-0.5" title={displayName}>
                                 {displayName}
                             </div>
-                            <Badge variant="secondary" className="text-[10px] mt-0.5">
-                                {columnTitle}
-                            </Badge>
                         </div>
                     </div>
 

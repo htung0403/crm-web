@@ -10,7 +10,7 @@ import { TabsContent } from '@/components/ui/tabs';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { cn } from '@/lib/utils';
 import { formatDateTime } from '@/lib/utils';
-import { ordersApi } from '@/lib/api';
+import { ordersApi, orderProductsApi, orderItemsApi } from '@/lib/api';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 
 import type { WorkflowKanbanGroup } from '../types';
@@ -57,21 +57,26 @@ export function AftersaleTab({
     const handleAfterSaleDragEnd = (result: DropResult) => {
         if (!order || !result.destination || result.destination.droppableId === result.source.droppableId) return;
         const newStage = result.destination.droppableId as string;
+        const itemId = result.draggableId;
 
-        const patch: Partial<Order> = { after_sale_stage: newStage };
-        // If status not after_sale, update it
-        if (order.status !== 'after_sale') {
-            patch.status = 'after_sale';
-        }
+        // Find the group/product being dragged
+        const draggedGroup = groups.find(g => g.product?.id === itemId);
+        if (!draggedGroup || !draggedGroup.product) return;
 
-        updateOrderAfterSale(patch);
-        toast.success('Đã chuyển bước After sale');
+        const isCustomerItem = !!draggedGroup.product.is_customer_item;
 
-        ordersApi.updateAfterSaleStage(order.id, newStage).then(() => {
-            // Also update status in backend if needed
+        toast.success(`Đã chuyển sản phẩm "${draggedGroup.product.item_name}" sang bước mới`);
+
+        const apiPromise = isCustomerItem
+            ? orderProductsApi.updateAfterSaleData(itemId, { stage: newStage })
+            : orderItemsApi.updateAfterSaleData(itemId, { stage: newStage });
+
+        apiPromise.then(() => {
+            // Also ensure the order status is 'after_sale' if it's not already
             if (order.status !== 'after_sale') {
                 ordersApi.updateStatus(order.id, 'after_sale').catch(console.error);
             }
+            reloadOrder();
             fetchKanbanLogs(order.id);
         }).catch((e: any) => {
             reloadOrder();
@@ -100,12 +105,18 @@ export function AftersaleTab({
                                         <div className="flex justify-between items-center mb-4 px-2">
                                             <h2 className={cn('font-bold uppercase text-xs sm:text-sm tracking-widest', col.color)}>{col.title}</h2>
                                             <span className="bg-gray-200 text-gray-700 text-xs px-2.5 py-1 rounded-full">
-                                                {groups.filter(g => currentStage === col.id && getGroupCurrentTechRoom(g) === 'done').length}
+                                                {groups.filter(g => {
+                                                    const itemStage = g.product?.after_sale_stage || (order as any).after_sale_stage || 'after1';
+                                                    return itemStage === col.id && getGroupCurrentTechRoom(g) === 'done';
+                                                }).length}
                                             </span>
                                         </div>
                                         <Droppable droppableId={col.id}>
                                             {(provided, snapshot) => {
-                                                const colGroups = groups.filter(g => currentStage === col.id && getGroupCurrentTechRoom(g) === 'done');
+                                                const colGroups = groups.filter(g => {
+                                                    const itemStage = g.product?.after_sale_stage || (order as any).after_sale_stage || 'after1';
+                                                    return itemStage === col.id && getGroupCurrentTechRoom(g) === 'done';
+                                                });
                                                 return (
                                                     <div
                                                         ref={provided.innerRef}

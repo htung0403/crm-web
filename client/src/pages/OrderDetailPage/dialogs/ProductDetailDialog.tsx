@@ -7,9 +7,10 @@ import {
     DialogDescription,
 } from '@/components/ui/dialog';
 import {
-    ShoppingBag, Tag, FileText, Package, Truck, Wrench,
+    ShoppingBag, Tag, FileText, Package, Truck, Wrench, Camera,
     User as UserIcon, CheckCircle2, MessageSquare, Receipt,
-    History, Save, Loader2, Heart, ShieldCheck, ClipboardList, Sparkles
+    History, Save, Loader2, Heart, ShieldCheck, ClipboardList, Sparkles,
+    ThumbsUp, ThumbsDown
 } from 'lucide-react';
 import { UpsellDialog } from '@/components/orders/UpsellDialog';
 import { Badge } from '@/components/ui/badge';
@@ -37,7 +38,9 @@ interface ProductDetailDialogProps {
     currentUserId?: string;
     order?: Order | null;
     onUpdateOrder?: (patch: Partial<Order>) => Promise<void>;
+    onUpdateItemAfterSaleData?: (itemId: string, isCustomerItem: boolean, data: any) => Promise<void>;
     onReloadOrder?: () => void;
+    setActiveTab?: (tab: string) => void;
     highlightMessageId?: string;
 }
 
@@ -49,7 +52,9 @@ export function ProductDetailDialog({
     currentUserId,
     order,
     onUpdateOrder,
+    onUpdateItemAfterSaleData,
     onReloadOrder,
+    setActiveTab,
     highlightMessageId,
 }: ProductDetailDialogProps) {
     const [activeImageIdx, setActiveImageIdx] = useState(0);
@@ -70,14 +75,18 @@ export function ProductDetailDialog({
                 return [];
             };
 
+            const item = group?.product || group?.services?.[0];
+            const itemCompPhotos = parsePhotos((item as any)?.completion_photos);
+            const itemPackPhotos = parsePhotos((item as any)?.packaging_photos);
+
             setFormData({
                 debt_checked: order.debt_checked || false,
                 debt_checked_notes: order.debt_checked_notes || '',
                 debt_checked_by_name: order.debt_checked_by_name || '',
                 aftersale_receiver_name: order.aftersale_receiver_name || '',
-                delivery_type: order.delivery_type || 'ship',
-                delivery_carrier: order.delivery_carrier || '',
-                delivery_code: order.delivery_code || '',
+                delivery_type: (item as any)?.delivery_type || order.delivery_type || 'ship',
+                delivery_carrier: (item as any)?.delivery_carrier || order.delivery_carrier || '',
+                delivery_code: (item as any)?.delivery_code || order.delivery_code || '',
                 delivery_fee: order.delivery_fee || 0,
                 aftersale_return_user_name: order.aftersale_return_user_name || '',
                 delivery_address: order.delivery_address || '',
@@ -85,11 +94,13 @@ export function ProductDetailDialog({
                 hd_sent: order.hd_sent || false,
                 feedback_requested: order.feedback_requested || false,
                 notes: order.notes || '',
-                completion_photos: parsePhotos(order.completion_photos),
-                packaging_photos: parsePhotos(order.packaging_photos),
+                // Strict separation: Only use item-specific photos
+                completion_photos: itemCompPhotos,
+                packaging_photos: itemPackPhotos,
             });
+            setActiveImageIdx(0);
         }
-    }, [open, order?.id]); // Only trigger on open or if order ID actually changes
+    }, [open, order?.id, group?.product?.id, group?.services?.[0]?.id]); // Only re-init when dialog opens or identity changes
 
     const product = group?.product;
     const services = group?.services || [];
@@ -102,22 +113,35 @@ export function ProductDetailDialog({
     const isCareFlow = roomId.startsWith('care') || roomId.startsWith('war');
     const isSalesStep = roomId.startsWith('step');
 
-    // Build image list based on stage
-    const productImages = [...(productItem?.product_images ?? (productItem?.product?.image ? [productItem.product.image] : []))];
+    // Build image lists
+    const originalImages = [...(productItem?.product_images ?? (productItem?.product?.image ? [productItem.product.image] : []))];
+    let completionImages: string[] = [];
+    let packagingImages: string[] = [];
 
-    if (isAftersale) {
-        // Merge all aftersale photos into preview list
-        const compPhotos = Array.isArray(formData?.completion_photos) ? formData.completion_photos :
-            (Array.isArray(order?.completion_photos) ? order.completion_photos : []);
-        const packPhotos = Array.isArray(formData?.packaging_photos) ? formData.packaging_photos :
-            (Array.isArray(order?.packaging_photos) ? order.packaging_photos : []);
-
-        [...compPhotos, ...packPhotos].forEach(img => {
-            if (img && typeof img === 'string' && !productImages.includes(img)) {
-                productImages.push(img);
+    if (isAftersale || isCareFlow) {
+        const item = product || services[0];
+        const parsePhotos = (photos: any) => {
+            if (Array.isArray(photos)) return photos;
+            if (typeof photos === 'string' && photos.startsWith('[')) {
+                try { return JSON.parse(photos); } catch { return []; }
             }
-        });
+            return [];
+        };
+
+        const itemCompPhotos = parsePhotos((item as any)?.completion_photos);
+        const itemPackPhotos = parsePhotos((item as any)?.packaging_photos);
+
+        completionImages = (formData.completion_photos?.length ? formData.completion_photos : itemCompPhotos) as string[];
+        packagingImages = (formData.packaging_photos?.length ? formData.packaging_photos : itemPackPhotos) as string[];
     }
+
+    // Total ordered list for big preview navigation
+    const allImages = [...originalImages];
+    [...completionImages, ...packagingImages].forEach(img => {
+        if (img && typeof img === 'string' && !allImages.includes(img)) {
+            allImages.push(img);
+        }
+    });
 
     // Sales step data state
     const [stepData, setStepData] = useState<Record<string, any>>({});
@@ -131,7 +155,7 @@ export function ProductDetailDialog({
             const existing = (item as any)?.sales_step_data || {};
             setStepData(existing);
         }
-    }, [open, roomId, isSalesStep, product, services]);
+    }, [open, roomId, isSalesStep, product?.id, services?.[0]?.id]); // Only re-init when dialog opens or identity changes
 
     const handleSaveStepData = async () => {
         const itemId = product?.id || services[0]?.id;
@@ -149,14 +173,73 @@ export function ProductDetailDialog({
     };
 
     const handleSave = async () => {
-        if (!onUpdateOrder) return;
         setSaving(true);
         try {
-            await onUpdateOrder(formData);
+            if ((isAftersale || isCareFlow) && onUpdateItemAfterSaleData) {
+                const itemId = product?.id || services[0]?.id;
+                if (itemId) {
+                    await onUpdateItemAfterSaleData(itemId, !!product, {
+                        completion_photos: formData.completion_photos,
+                        packaging_photos: formData.packaging_photos,
+                        delivery_carrier: formData.delivery_carrier,
+                        delivery_code: formData.delivery_code,
+                        delivery_type: formData.delivery_type,
+                    });
+                }
+            }
+
+            // Also update the general order data (debt, receiver, etc)
+            // But exclude photos from order-level update to keep them strictly at item-level
+            if (onUpdateOrder) {
+                const { completion_photos, packaging_photos, ...orderData } = formData;
+                await onUpdateOrder(orderData);
+            }
+
             toast.success('Đã cập nhật thông tin thành công');
             if (onReloadOrder) onReloadOrder();
         } catch (error: any) {
             toast.error(error?.message || 'Lỗi khi cập nhật thông tin');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleFeedbackAction = async (isPositive: boolean) => {
+        if (!entityId || !onUpdateItemAfterSaleData) return;
+
+        try {
+            setSaving(true);
+
+            // 1. Both move the item to 'after4' (Lưu trữ) stage in aftersale
+            await onUpdateItemAfterSaleData(entityId, !!product, {
+                stage: 'after4'
+            });
+
+            // 2. Update the order flow for the Care/Warranty tab
+            if (onUpdateOrder) {
+                if (!isPositive) {
+                    // ThumbsDown (Chê/Góp ý) -> Warranty Flow
+                    await onUpdateOrder({
+                        care_warranty_flow: 'warranty',
+                        care_warranty_stage: 'war1'
+                    });
+                    toast.success('Đã chuyển sang mục Bảo hành và Lưu trữ');
+                } else {
+                    // ThumbsUp (Khen/Hài lòng) -> Care Flow
+                    await onUpdateOrder({
+                        care_warranty_flow: 'care',
+                        care_warranty_stage: 'care6'
+                    });
+                    toast.success('Đã ghi nhận Feedback và chuyển sang mục Chăm sóc & Lưu trữ');
+                }
+            }
+
+            onOpenChange(false);
+            if (setActiveTab) setActiveTab('care');
+
+        } catch (error) {
+            console.error('Feedback action error:', error);
+            toast.error('Lỗi khi thực hiện thao tác');
         } finally {
             setSaving(false);
         }
@@ -211,31 +294,95 @@ export function ProductDetailDialog({
                     {/* Product Info - Left Side */}
                     <ScrollArea className="flex-1 p-4 md:max-w-[50%] border-r">
                         <div className="space-y-4">
-                            {productImages?.length > 0 && (
-                                <div className="space-y-3">
-                                    <div className="rounded-xl overflow-hidden border bg-gray-50 aspect-video relative group">
+                            {allImages?.length > 0 && (
+                                <div className="space-y-4">
+                                    <div className="rounded-2xl overflow-hidden border-4 border-white shadow-xl bg-gray-50 aspect-video relative group">
                                         <img
-                                            src={productImages[activeImageIdx]}
+                                            src={allImages[activeImageIdx]}
                                             alt={`${productName}-${activeImageIdx}`}
-                                            className="w-full h-full object-cover transition-transform group-hover:scale-105 duration-500"
+                                            className="w-full h-full object-cover transition-transform group-hover:scale-105 duration-700"
                                         />
                                     </div>
-                                    {productImages.length > 1 && (
-                                        <div className="flex flex-wrap gap-2">
-                                            {productImages.map((img: string, idx: number) => (
-                                                <button
-                                                    key={idx}
-                                                    onClick={() => setActiveImageIdx(idx)}
-                                                    className={cn(
-                                                        "w-16 h-16 rounded-lg overflow-hidden border-2 transition-all",
-                                                        activeImageIdx === idx ? "border-primary ring-2 ring-primary/20 scale-95" : "border-transparent opacity-60 hover:opacity-100"
-                                                    )}
-                                                >
-                                                    <img src={img} alt="" className="w-full h-full object-cover" />
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
+
+                                    <div className="space-y-4">
+                                        {/* Row 1: Original Product Photos */}
+                                        {originalImages.length > 0 && (
+                                            <div className="space-y-1.5">
+                                                <div className="flex items-center gap-1.5 text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">
+                                                    <ShoppingBag className="h-3 w-3" /> Ảnh sản phẩm lúc nhận
+                                                </div>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {originalImages.map((img: string, idx: number) => {
+                                                        const globalIdx = allImages.indexOf(img);
+                                                        return (
+                                                            <button
+                                                                key={`orig-${idx}`}
+                                                                onClick={() => setActiveImageIdx(globalIdx)}
+                                                                className={cn(
+                                                                    "w-16 h-16 rounded-xl overflow-hidden border-2 transition-all",
+                                                                    activeImageIdx === globalIdx ? "border-primary ring-2 ring-primary/20 scale-95" : "border-gray-100 opacity-60 hover:opacity-100"
+                                                                )}
+                                                            >
+                                                                <img src={img} alt="" className="w-full h-full object-cover" />
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Row 2: Completion Photos */}
+                                        {completionImages.length > 0 && (
+                                            <div className="space-y-1.5">
+                                                <div className="flex items-center gap-1.5 text-[10px] font-black text-purple-400 uppercase tracking-widest pl-1">
+                                                    <Camera className="h-3 w-3" /> Ảnh hoàn thiện
+                                                </div>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {completionImages.map((img: string, idx: number) => {
+                                                        const globalIdx = allImages.indexOf(img);
+                                                        return (
+                                                            <button
+                                                                key={`comp-${idx}`}
+                                                                onClick={() => setActiveImageIdx(globalIdx)}
+                                                                className={cn(
+                                                                    "w-16 h-16 rounded-xl overflow-hidden border-2 transition-all",
+                                                                    activeImageIdx === globalIdx ? "border-purple-500 ring-2 ring-purple-500/20 scale-95" : "border-purple-50 opacity-60 hover:opacity-100"
+                                                                )}
+                                                            >
+                                                                <img src={img} alt="" className="w-full h-full object-cover" />
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Row 3: Packaging Photos */}
+                                        {packagingImages.length > 0 && (
+                                            <div className="space-y-1.5">
+                                                <div className="flex items-center gap-1.5 text-[10px] font-black text-blue-400 uppercase tracking-widest pl-1">
+                                                    <Package className="h-3 w-3" /> Ảnh đóng gói
+                                                </div>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {packagingImages.map((img: string, idx: number) => {
+                                                        const globalIdx = allImages.indexOf(img);
+                                                        return (
+                                                            <button
+                                                                key={`pack-${idx}`}
+                                                                onClick={() => setActiveImageIdx(globalIdx)}
+                                                                className={cn(
+                                                                    "w-16 h-16 rounded-xl overflow-hidden border-2 transition-all",
+                                                                    activeImageIdx === globalIdx ? "border-blue-500 ring-2 ring-blue-500/20 scale-95" : "border-blue-50 opacity-60 hover:opacity-100"
+                                                                )}
+                                                            >
+                                                                <img src={img} alt="" className="w-full h-full object-cover" />
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             )}
 
@@ -386,29 +533,46 @@ export function ProductDetailDialog({
                                                         </div>
                                                     </div>
 
-                                                    <div className="space-y-3">
-                                                        <Label className="text-xs font-bold text-gray-500 uppercase">Ảnh hoàn thiện</Label>
-                                                        <div className="flex flex-wrap gap-2 p-4 bg-white rounded-xl border border-dashed hover:border-primary/30 transition-colors">
+                                                    <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100 shadow-sm space-y-3">
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="h-7 w-7 rounded-lg bg-purple-100 flex items-center justify-center">
+                                                                    <Camera className="h-4 w-4 text-purple-600" />
+                                                                </div>
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-[11px] font-black text-purple-900 uppercase tracking-tight">Ảnh hoàn thiện</span>
+                                                                    <span className="text-[9px] text-purple-500 font-medium">Chi tiết sản phẩm sau xử lý</span>
+                                                                </div>
+                                                            </div>
+                                                            <Badge variant="outline" className="text-[9px] bg-white text-purple-600 border-purple-200">
+                                                                {(formData.completion_photos?.length || 0)} ảnh
+                                                            </Badge>
+                                                        </div>
+
+                                                        <div className="flex flex-wrap gap-2 pt-1">
                                                             {(Array.isArray(formData.completion_photos) ? formData.completion_photos : []).map((photo, idx) => (
                                                                 <ImageUpload
-                                                                    key={idx}
+                                                                    key={`comp-${idx}`}
                                                                     value={photo}
                                                                     onChange={(url) => {
-                                                                        const newPhotos = [...(formData.completion_photos || [])];
-                                                                        if (url) {
-                                                                            newPhotos[idx] = url;
-                                                                        } else {
-                                                                            newPhotos.splice(idx, 1);
-                                                                        }
-                                                                        setFormData(prev => ({ ...prev, completion_photos: newPhotos }));
+                                                                        setFormData(prev => {
+                                                                            const newPhotos = [...(prev.completion_photos || [])];
+                                                                            if (url) {
+                                                                                newPhotos[idx] = url;
+                                                                            } else {
+                                                                                newPhotos.splice(idx, 1);
+                                                                            }
+                                                                            return { ...prev, completion_photos: newPhotos };
+                                                                        });
                                                                     }}
-                                                                    className="w-20 h-20"
+                                                                    className="w-16 h-16 rounded-xl border-2"
                                                                     bucket="orders"
                                                                     folder="completion"
                                                                     hideInfo
                                                                 />
                                                             ))}
                                                             <ImageUpload
+                                                                key="comp-new"
                                                                 value={null}
                                                                 onChange={(url) => {
                                                                     if (url) {
@@ -418,9 +582,10 @@ export function ProductDetailDialog({
                                                                         }));
                                                                     }
                                                                 }}
-                                                                className="w-20 h-20"
+                                                                className="w-16 h-16 rounded-xl border-2 border-dashed"
                                                                 bucket="orders"
                                                                 folder="completion"
+                                                                placeholderIcon={<Camera className="h-6 w-6 text-purple-300" />}
                                                                 hideInfo
                                                             />
                                                         </div>
@@ -538,29 +703,46 @@ export function ProductDetailDialog({
                                                     </div>
                                                 )}
 
-                                                <div className="space-y-3 pt-2 border-t border-dashed mt-4">
-                                                    <Label className="text-xs font-bold text-gray-500 uppercase">Ảnh đóng gói</Label>
-                                                    <div className="flex flex-wrap gap-2 p-4 bg-white rounded-xl border border-dashed hover:border-primary/30 transition-colors">
+                                                <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 shadow-sm space-y-3 pt-2">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="h-7 w-7 rounded-lg bg-blue-100 flex items-center justify-center">
+                                                                <Package className="h-4 w-4 text-blue-600" />
+                                                            </div>
+                                                            <div className="flex flex-col">
+                                                                <span className="text-[11px] font-black text-blue-900 uppercase tracking-tight">Ảnh đóng gói</span>
+                                                                <span className="text-[9px] text-blue-500 font-medium">Kiện hàng kèm mã vận đơn</span>
+                                                            </div>
+                                                        </div>
+                                                        <Badge variant="outline" className="text-[9px] bg-white text-blue-600 border-blue-200">
+                                                            {(formData.packaging_photos?.length || 0)} ảnh
+                                                        </Badge>
+                                                    </div>
+
+                                                    <div className="flex flex-wrap gap-2 pt-1">
                                                         {(Array.isArray(formData.packaging_photos) ? formData.packaging_photos : []).map((photo, idx) => (
                                                             <ImageUpload
-                                                                key={idx}
+                                                                key={`pack-${idx}`}
                                                                 value={photo}
                                                                 onChange={(url) => {
-                                                                    const newPhotos = [...(formData.packaging_photos || [])];
-                                                                    if (url) {
-                                                                        newPhotos[idx] = url;
-                                                                    } else {
-                                                                        newPhotos.splice(idx, 1);
-                                                                    }
-                                                                    setFormData(prev => ({ ...prev, packaging_photos: newPhotos }));
+                                                                    setFormData(prev => {
+                                                                        const newPhotos = [...(prev.packaging_photos || [])];
+                                                                        if (url) {
+                                                                            newPhotos[idx] = url;
+                                                                        } else {
+                                                                            newPhotos.splice(idx, 1);
+                                                                        }
+                                                                        return { ...prev, packaging_photos: newPhotos };
+                                                                    });
                                                                 }}
-                                                                className="w-20 h-20"
+                                                                className="w-16 h-16 rounded-xl border-2"
                                                                 bucket="orders"
                                                                 folder="packaging"
                                                                 hideInfo
                                                             />
                                                         ))}
                                                         <ImageUpload
+                                                            key="pack-new"
                                                             value={null}
                                                             onChange={(url) => {
                                                                 if (url) {
@@ -570,9 +752,10 @@ export function ProductDetailDialog({
                                                                     }));
                                                                 }
                                                             }}
-                                                            className="w-20 h-20"
+                                                            className="w-16 h-16 rounded-xl border-2 border-dashed"
                                                             bucket="orders"
                                                             folder="packaging"
+                                                            placeholderIcon={<Package className="h-6 w-6 text-blue-300" />}
                                                             hideInfo
                                                         />
                                                     </div>
@@ -617,6 +800,29 @@ export function ProductDetailDialog({
                                                         <Badge variant="outline" className="bg-green-50 text-green-700">{order.feedback_requested ? 'Đã gửi' : 'Chưa gửi'}</Badge>
                                                     )}
                                                 </div>
+
+                                                {roomId.startsWith('after3') && (
+                                                    <div className="grid grid-cols-2 gap-3 pt-2">
+                                                        <Button
+                                                            variant="outline"
+                                                            className="h-14 rounded-2xl border-green-200 hover:bg-green-50 hover:text-green-700 hover:border-green-300 flex flex-col items-center justify-center gap-1 group"
+                                                            onClick={() => handleFeedbackAction(true)}
+                                                            disabled={saving}
+                                                        >
+                                                            <ThumbsUp className="h-5 w-5 text-green-500 group-hover:scale-110 transition-transform" />
+                                                            <span className="text-[10px] font-black uppercase tracking-tighter">Hài lòng (Khen)</span>
+                                                        </Button>
+                                                        <Button
+                                                            variant="outline"
+                                                            className="h-14 rounded-2xl border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300 flex flex-col items-center justify-center gap-1 group"
+                                                            onClick={() => handleFeedbackAction(false)}
+                                                            disabled={saving}
+                                                        >
+                                                            <ThumbsDown className="h-5 w-5 text-red-500 group-hover:scale-110 transition-transform" />
+                                                            <span className="text-[10px] font-black uppercase tracking-tighter">Góp ý (Chê)</span>
+                                                        </Button>
+                                                    </div>
+                                                )}
                                             </div>
                                         </div>
                                     )}
@@ -663,6 +869,93 @@ export function ProductDetailDialog({
                                                     value={formData.notes || ''}
                                                     onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
                                                 />
+                                            </div>
+
+                                            {/* Photo management rows for Care/Warranty */}
+                                            <div className="grid grid-cols-2 gap-3 pt-2">
+                                                <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100 shadow-sm space-y-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="h-7 w-7 rounded-lg bg-purple-100 flex items-center justify-center">
+                                                                <Camera className="h-4 w-4 text-purple-600" />
+                                                            </div>
+                                                            <span className="text-[11px] font-black text-purple-900 uppercase tracking-tight">Ảnh hoàn thiện</span>
+                                                        </div>
+                                                        <Badge variant="outline" className="text-[9px] bg-white text-purple-600 border-purple-200">
+                                                            {(formData.completion_photos?.length || 0)}
+                                                        </Badge>
+                                                    </div>
+
+                                                    <div className="flex flex-wrap gap-2 pt-1">
+                                                        {(Array.isArray(formData.completion_photos) ? formData.completion_photos : []).map((photo, idx) => (
+                                                            <ImageUpload
+                                                                key={`comp-${idx}`}
+                                                                value={photo}
+                                                                onChange={(url) => {
+                                                                    setFormData(prev => {
+                                                                        const newPhotos = [...(prev.completion_photos || [])];
+                                                                        if (url) { newPhotos[idx] = url; } else { newPhotos.splice(idx, 1); }
+                                                                        return { ...prev, completion_photos: newPhotos };
+                                                                    });
+                                                                }}
+                                                                className="w-12 h-12 rounded-lg border-2"
+                                                                bucket="orders" folder="completion" hideInfo
+                                                            />
+                                                        ))}
+                                                        <ImageUpload
+                                                            key="comp-new" value={null}
+                                                            onChange={(url) => {
+                                                                if (url) {
+                                                                    setFormData(prev => ({ ...prev, completion_photos: [...(prev.completion_photos || []), url] }));
+                                                                }
+                                                            }}
+                                                            className="w-12 h-12 rounded-lg border-2 border-dashed"
+                                                            bucket="orders" folder="completion" placeholderIcon={<Camera className="h-4 w-4 text-purple-300" />} hideInfo
+                                                        />
+                                                    </div>
+                                                </div>
+
+                                                <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 shadow-sm space-y-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="h-7 w-7 rounded-lg bg-blue-100 flex items-center justify-center">
+                                                                <Package className="h-4 w-4 text-blue-600" />
+                                                            </div>
+                                                            <span className="text-[11px] font-black text-blue-900 uppercase tracking-tight">Ảnh đóng gói</span>
+                                                        </div>
+                                                        <Badge variant="outline" className="text-[9px] bg-white text-blue-600 border-blue-200">
+                                                            {(formData.packaging_photos?.length || 0)}
+                                                        </Badge>
+                                                    </div>
+
+                                                    <div className="flex flex-wrap gap-2 pt-1">
+                                                        {(Array.isArray(formData.packaging_photos) ? formData.packaging_photos : []).map((photo, idx) => (
+                                                            <ImageUpload
+                                                                key={`pack-${idx}`}
+                                                                value={photo}
+                                                                onChange={(url) => {
+                                                                    setFormData(prev => {
+                                                                        const newPhotos = [...(prev.packaging_photos || [])];
+                                                                        if (url) { newPhotos[idx] = url; } else { newPhotos.splice(idx, 1); }
+                                                                        return { ...prev, packaging_photos: newPhotos };
+                                                                    });
+                                                                }}
+                                                                className="w-12 h-12 rounded-lg border-2"
+                                                                bucket="orders" folder="packaging" hideInfo
+                                                            />
+                                                        ))}
+                                                        <ImageUpload
+                                                            key="pack-new" value={null}
+                                                            onChange={(url) => {
+                                                                if (url) {
+                                                                    setFormData(prev => ({ ...prev, packaging_photos: [...(prev.packaging_photos || []), url] }));
+                                                                }
+                                                            }}
+                                                            className="w-12 h-12 rounded-lg border-2 border-dashed"
+                                                            bucket="orders" folder="packaging" placeholderIcon={<Package className="h-4 w-4 text-blue-300" />} hideInfo
+                                                        />
+                                                    </div>
+                                                </div>
                                             </div>
 
                                             <Button

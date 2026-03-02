@@ -1535,6 +1535,58 @@ router.patch('/:id/change-room', authenticate, async (req: AuthenticatedRequest,
     }
 });
 
+// Update after-sale data for item
+router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, stage } = req.body;
+        const userId = req.user?.id;
+
+        const updatePayload: any = { updated_at: new Date().toISOString() };
+        if (completion_photos !== undefined) updatePayload.completion_photos = Array.isArray(completion_photos) ? completion_photos : [];
+        if (packaging_photos !== undefined) updatePayload.packaging_photos = Array.isArray(packaging_photos) ? packaging_photos : [];
+        if (delivery_code !== undefined) updatePayload.delivery_code = delivery_code;
+        if (delivery_carrier !== undefined) updatePayload.delivery_carrier = delivery_carrier;
+        if (delivery_type !== undefined) updatePayload.delivery_type = delivery_type;
+        if (stage !== undefined) updatePayload.after_sale_stage = stage;
+
+        // Get old stage first (for log)
+        const { data: currentItem } = await supabaseAdmin.from('order_items').select('after_sale_stage, order_id').eq('id', id).single();
+        const oldStage = currentItem?.after_sale_stage || 'after1';
+
+        const { data: item, error } = await supabaseAdmin
+            .from('order_items')
+            .update(updatePayload)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) {
+            throw new ApiError('Không thể cập nhật thông tin after-sale cho sản phẩm', 500);
+        }
+
+        // Record log if stage changed
+        if (stage !== undefined && oldStage !== stage) {
+            await supabaseAdmin.from('order_after_sale_stage_log').insert({
+                order_id: item.order_id,
+                entity_type: 'order_item',
+                entity_id: id,
+                from_stage: oldStage,
+                to_stage: stage,
+                created_by: userId
+            });
+        }
+
+        res.json({
+            status: 'success',
+            data: item,
+            message: 'Đã cập nhật thông tin after-sale cho sản phẩm'
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 export default router;
 
 

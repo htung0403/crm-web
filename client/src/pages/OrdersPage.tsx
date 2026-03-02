@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { DragDropContext, Droppable, type DropResult } from '@hello-pangea/dnd';
-import { Plus, Loader2 } from 'lucide-react';
+import { Plus, Loader2, Search } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { useOrders } from '@/hooks/useOrders';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import { useCustomers } from '@/hooks/useCustomers';
@@ -36,6 +37,7 @@ export function OrdersPage() {
     const [payingOrder, setPayingOrder] = useState<Order | null>(null);
     const [pendingDrop, setPendingDrop] = useState<{ orderId: string; targetStatus: string } | null>(null);
     const [newlyCreatedOrder, setNewlyCreatedOrder] = useState<Order | null>(null);
+    const [columnSearch, setColumnSearch] = useState<{ [key: string]: string }>({});
 
     // Fetch data on mount and when navigating back to this page
     useEffect(() => {
@@ -266,16 +268,40 @@ export function OrdersPage() {
                                             <CardTitle className={`text-sm font-semibold flex items-center justify-between ${column.color}`}>
                                                 <span>{column.title}</span>
                                                 <Badge variant="secondary" className="bg-white/80">
-                                                    {getOrdersByStatus(column.id).length}
+                                                    {(() => {
+                                                        const searchText = (columnSearch[column.id] || '').toLowerCase().trim();
+                                                        if (!searchText) return getOrdersByStatus(column.id).length;
+                                                        return getOrdersByStatus(column.id).filter(o =>
+                                                            o.customer?.name.toLowerCase().includes(searchText) ||
+                                                            o.customer?.phone?.includes(searchText)
+                                                        ).length;
+                                                    })()}
                                                 </Badge>
                                             </CardTitle>
+                                            <div className="relative mt-1.5 px-0.5">
+                                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                                                <Input
+                                                    placeholder="Khách hàng, SĐT..."
+                                                    value={columnSearch[column.id] || ''}
+                                                    onChange={(e) => setColumnSearch({ ...columnSearch, [column.id]: e.target.value })}
+                                                    className="h-7 pl-6.5 text-[11px] bg-white/40 border-0 focus-visible:ring-1 focus-visible:ring-primary/20 placeholder:text-muted-foreground/60"
+                                                />
+                                            </div>
                                         </CardHeader>
                                         <CardContent className="p-2">
                                             <Droppable droppableId={column.id}>
                                                 {(provided, snapshot) => {
                                                     const columnOrders = getOrdersByStatus(column.id);
+                                                    const searchText = (columnSearch[column.id] || '').toLowerCase().trim();
+                                                    const filteredOrders = searchText
+                                                        ? columnOrders.filter(o =>
+                                                            o.customer?.name.toLowerCase().includes(searchText) ||
+                                                            o.customer?.phone?.includes(searchText)
+                                                        )
+                                                        : columnOrders;
+
                                                     const cards: { order: Order; group: { product: OrderItem | null; services: OrderItem[] }; groupIndex: number }[] = [];
-                                                    columnOrders.forEach((order) => {
+                                                    filteredOrders.forEach((order) => {
                                                         const groups = getOrderProductGroups(order);
                                                         groups.forEach((group, groupIndex) => {
                                                             cards.push({ order, group, groupIndex });

@@ -278,6 +278,16 @@ export const orderProductsApi = {
     // Recalculate product status manually
     recalculateStatus: (id: string) =>
         api.post<ApiResponse<any>>(`/order-products/${id}/recalculate-status`),
+
+    // Update after-sale data independently (photos, stage, etc)
+    updateAfterSaleData: (id: string, data: {
+        stage?: string | null;
+        completion_photos?: string[];
+        packaging_photos?: string[];
+        delivery_code?: string | null;
+        delivery_carrier?: string | null;
+        delivery_type?: string | null;
+    }) => api.patch<ApiResponse<any>>(`/order-products/${id}/after-sale-data`, data),
 };
 
 // Order Items API
@@ -335,6 +345,16 @@ export const orderItemsApi = {
 
     changeRoom: (id: string, data: { targetRoomId: string; reason: string; deadline_days: number }) =>
         api.patch<ApiResponse<any>>(`/order-items/${id}/change-room`, data),
+
+    // Update after-sale data independently (photos, stage, etc)
+    updateAfterSaleData: (id: string, data: {
+        stage?: string | null;
+        completion_photos?: string[];
+        packaging_photos?: string[];
+        delivery_code?: string | null;
+        delivery_carrier?: string | null;
+        delivery_type?: string | null;
+    }) => api.patch<ApiResponse<any>>(`/order-items/${id}/after-sale-data`, data),
 };
 
 // Requests API (admin/manager - Mua phụ kiện, Gửi Đối Tác, Xin gia hạn)

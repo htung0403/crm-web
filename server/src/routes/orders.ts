@@ -106,7 +106,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                     customer:customers(id, name, phone, email),
                     sales_user:users!orders_sales_id_fkey(id, name),
                     items:order_items(
-                        id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data,
+                        id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data, after_sale_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type,
                         product:products(id, image, code),
                         service:services(id, image, code),
                         technician:users!order_product_services_technician_id_fkey(id, name),
@@ -127,7 +127,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                 const { data: v2Products } = await supabaseAdmin
                     .from('order_products')
                     .select(`
-                        id, order_id, product_code, name, type, images, status, sales_step_data,
+                        id, order_id, product_code, name, type, images, status, sales_step_data, after_sale_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type,
                         services:order_product_services(
                             id, item_name, item_type, unit_price, technician_id,
                             service:services(id, image, code),
@@ -178,6 +178,12 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                                 product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
                                 is_customer_item: true,
                                 sales_step_data: product.sales_step_data || null,
+                                after_sale_stage: product.after_sale_stage || null,
+                                completion_photos: product.completion_photos || [],
+                                packaging_photos: product.packaging_photos || [],
+                                delivery_code: product.delivery_code || null,
+                                delivery_carrier: product.delivery_carrier || null,
+                                delivery_type: product.delivery_type || null,
                             });
                             if (product.services?.length) {
                                 for (const s of product.services as any[]) {
@@ -204,6 +210,12 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                                         product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
                                         is_customer_item: true,
                                         sales_step_data: product.sales_step_data,
+                                        after_sale_stage: product.after_sale_stage || null,
+                                        completion_photos: product.completion_photos || [],
+                                        packaging_photos: product.packaging_photos || [],
+                                        delivery_code: product.delivery_code || null,
+                                        delivery_carrier: product.delivery_carrier || null,
+                                        delivery_type: product.delivery_type || null,
                                         order_item_steps: s.order_item_steps || [],
                                     });
                                 }
@@ -235,7 +247,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
         customer:customers(id, name, phone, email),
         sales_user:users!orders_sales_id_fkey(id, name),
         items:order_items(
-            id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data,
+            id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data, after_sale_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type,
             product:products(id, image, code),
             service:services(id, image, code),
             technician:users!order_items_technician_id_fkey(id, name),
@@ -262,7 +274,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
             const { data: v2Products } = await supabaseAdmin
                 .from('order_products')
                 .select(`
-                    id, order_id, product_code, name, type, images, status, sales_step_data,
+                    id, order_id, product_code, name, type, images, status, sales_step_data, after_sale_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type,
                     services:order_product_services(
                         id, item_name, item_type, unit_price, technician_id,
                         service:services(id, image, code),
@@ -314,6 +326,9 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                             product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
                             is_customer_item: true,
                             sales_step_data: product.sales_step_data || null,
+                            after_sale_stage: product.after_sale_stage || null,
+                            completion_photos: product.completion_photos || [],
+                            packaging_photos: product.packaging_photos || [],
                         });
                         if (product.services?.length) {
                             for (const s of product.services as any[]) {
@@ -479,6 +494,9 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                         image: product.images?.[0] || null
                     },
                     is_customer_item: true,
+                    after_sale_stage: product.after_sale_stage || null,
+                    completion_photos: product.completion_photos || [],
+                    packaging_photos: product.packaging_photos || [],
                     product_type: product.type || null,
                     product_images: product.images || [],
                     product_brand: product.brand || null,
@@ -487,7 +505,10 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                     product_material: product.material || null,
                     product_condition_before: product.condition_before || null,
                     product_notes: product.notes || null,
-                    sales_step_data: product.sales_step_data || null
+                    sales_step_data: product.sales_step_data || null,
+                    delivery_code: product.delivery_code || null,
+                    delivery_carrier: product.delivery_carrier || null,
+                    delivery_type: product.delivery_type || null
                 });
 
                 if (product.services && product.services.length > 0) {
@@ -522,6 +543,12 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                             assigned_at: s.assigned_at,
                             is_customer_item: true, // Mark as customer item for grouping in OrderDetailPage
                             sales_step_data: product.sales_step_data, // Inherit from parent product
+                            after_sale_stage: product.after_sale_stage || null,
+                            completion_photos: product.completion_photos || [],
+                            packaging_photos: product.packaging_photos || [],
+                            delivery_code: product.delivery_code || null,
+                            delivery_carrier: product.delivery_carrier || null,
+                            delivery_type: product.delivery_type || null,
                             product: {
                                 id: product.id,
                                 image: product.images?.[0] || null
