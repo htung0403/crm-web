@@ -363,7 +363,7 @@ export function UpsellDialog({ open, onOpenChange, orderId, preselectedProduct, 
                                     <Label className="text-xs font-bold text-slate-600 uppercase px-1 tracking-tight">Danh mục sản phẩm bán lẻ (Sẵn có)</Label>
                                     <ScrollArea className="max-h-[160px] pb-2">
                                         <div className="flex flex-wrap gap-3 p-1">
-                                            {catalogProducts.filter(p => p.status === 'active' && p.stock_quantity > 0).map(product => (
+                                            {catalogProducts.filter(p => p.status === 'active' && (p.stock || 0) > 0).map(product => (
                                                 <Button
                                                     key={product.id}
                                                     variant="outline"
@@ -374,7 +374,7 @@ export function UpsellDialog({ open, onOpenChange, orderId, preselectedProduct, 
                                                     <span className="text-[11px] font-bold line-clamp-1 group-hover:text-violet-700">{product.name}</span>
                                                     <span className="text-[10px] text-emerald-600 font-bold">{formatCurrency(product.price)}</span>
                                                     <div className="flex items-center gap-1 mt-1">
-                                                        <Badge variant="outline" className="text-[9px] h-4 px-1 text-slate-400 font-normal">Kho: {product.stock_quantity}</Badge>
+                                                        <Badge variant="outline" className="text-[9px] h-4 px-1 text-slate-400 font-normal">Kho: {product.stock || 0}</Badge>
                                                     </div>
                                                 </Button>
                                             ))}

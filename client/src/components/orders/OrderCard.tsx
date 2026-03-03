@@ -58,6 +58,7 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
     const roomDeadline = getRoomDeadlineDisplay(effectiveServices);
     const showRoomDeadline =
         order.status !== 'after_sale' &&
+        order.status !== 'done' &&
         order.status !== 'cancelled' &&
         roomDeadline.label !== 'N/A';
 
@@ -71,6 +72,29 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
             ...s,
             item_name: s.item_name.replace(/\s*\(.*?\)\s*/g, ' ').trim()
         }));
+
+    const deadlineStatus = (() => {
+        if (!dueDate) return null;
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        const due = new Date(dueDate);
+        due.setHours(0, 0, 0, 0);
+        const diffDays = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+        let color = '';
+        if (diffDays < 0) color = 'text-red-600 font-bold';
+        else if (diffDays === 0) color = 'text-red-600 font-bold';
+        else if (diffDays === 1) color = 'text-yellow-600 font-bold';
+        else if (diffDays === 2) color = 'text-green-600 font-bold';
+
+        const remainingLabel = diffDays < 0
+            ? ` (Quá ${Math.abs(diffDays)} ngày)`
+            : diffDays === 0
+                ? ' (Hôm nay)'
+                : ` (Còn ${diffDays} ngày)`;
+
+        return { color, remainingLabel };
+    })();
 
     return (
         <Draggable draggableId={draggableId} index={index}>
@@ -131,11 +155,23 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
                         )}
                     </div>
 
-                    {/* Ngày nhận - Ngày hẹn trả */}
+                    {/* Ngày nhận - Ngày hẹn trả / Ngày hoàn thành */}
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
                         <Calendar className="h-3.5 w-3.5 shrink-0" />
-                        <span>
-                            {receiveDate ? formatDate(receiveDate) : 'N/A'} - {dueDate ? formatDate(dueDate) : 'N/A'}
+                        <span className="flex items-center gap-1 flex-wrap">
+                            {order.status === 'done' || order.status === 'after_sale' ? (
+                                <span>
+                                    Hoàn thành: {order.completed_at ? formatDate(order.completed_at) : 'N/A'}
+                                </span>
+                            ) : (
+                                <>
+                                    {receiveDate ? formatDate(receiveDate) : 'N/A'} -
+                                    <span className={deadlineStatus?.color || ''}>
+                                        {dueDate ? formatDate(dueDate) : 'N/A'}
+                                        {deadlineStatus?.remainingLabel}
+                                    </span>
+                                </>
+                            )}
                         </span>
                     </div>
 

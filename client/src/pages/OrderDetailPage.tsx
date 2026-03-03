@@ -75,6 +75,7 @@ import { MoveStepDialog } from '@/components/orders/workflow/MoveStepDialog';
 import { FailDialog } from '@/components/orders/workflow/FailDialog';
 import { ConfirmDoneDialog } from '@/components/orders/workflow/ConfirmDoneDialog';
 import { ProductDetailDialog } from './OrderDetailPage/dialogs/ProductDetailDialog';
+import { UpsellDialog } from '@/components/orders/UpsellDialog';
 
 export function OrderDetailPage() {
     const { id } = useParams<{ id: string }>();
@@ -157,6 +158,7 @@ export function OrderDetailPage() {
     const [isV2ServiceForDone, setIsV2ServiceForDone] = useState(false);
 
     const [showProductDialog, setShowProductDialog] = useState(false);
+    const [showUpsellDialog, setShowUpsellDialog] = useState(false);
     const [selectedProductGroup, setSelectedProductGroup] = useState<any>(null);
     const [currentRoomId, setCurrentRoomId] = useState('');
     const [highlightMessageId, setHighlightMessageId] = useState<string | undefined>(undefined);
@@ -442,6 +444,10 @@ export function OrderDetailPage() {
                     </div>
                 </div>
                 <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+                    <Button variant="outline" onClick={() => setShowUpsellDialog(true)} className="flex-1 sm:flex-none">
+                        <Sparkles className="h-4 w-4 mr-2 text-purple-500" />
+                        Đề xuất gói VIP
+                    </Button>
                     <Button variant="outline" onClick={() => setShowPrintDialog(true)} className="flex-1 sm:flex-none">
                         <Printer className="h-4 w-4 mr-2" />
                         In phiếu
@@ -792,6 +798,15 @@ export function OrderDetailPage() {
                 onUpdateItemAfterSaleData={updateItemAfterSaleData}
                 onReloadOrder={reloadOrder}
                 highlightMessageId={highlightMessageId}
+            />
+
+            <UpsellDialog
+                open={showUpsellDialog}
+                onOpenChange={setShowUpsellDialog}
+                orderId={order.id}
+                onSuccess={async () => {
+                    await reloadOrder();
+                }}
             />
         </div>
     );

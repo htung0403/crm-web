@@ -1,5 +1,5 @@
-import React from 'react';
-import { Heart, Wrench, History, ShoppingBag, User } from 'lucide-react';
+import React, { memo } from 'react';
+import { Heart, Wrench, History, ShoppingBag, User as UserIcon, Tag, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -23,13 +23,92 @@ interface CareTabProps {
 }
 
 const CARE_WAR_COLS = [
-    { id: 'war1' as const, title: '1. Tiếp nhận', color: 'border-red-400 bg-red-50/20', flow: 'warranty' as const },
-    { id: 'war2' as const, title: '2. Xử lý', color: 'border-red-400 bg-red-50/20', flow: 'warranty' as const },
-    { id: 'war3' as const, title: '3. Hoàn tất', color: 'border-green-400 bg-green-50/20', flow: 'warranty' as const },
-    { id: 'care6' as const, title: 'Mốc 6 Tháng', color: 'border-teal-400 bg-teal-50/20', flow: 'care' as const },
-    { id: 'care12' as const, title: 'Mốc 12 Tháng', color: 'border-teal-400 bg-teal-50/20', flow: 'care' as const },
-    { id: 'care-custom' as const, title: 'Lịch Riêng', color: 'border-teal-400 bg-teal-50/20', flow: 'care' as const },
+    { id: 'war1' as const, title: '1. Tiếp nhận', color: 'border-red-400', flow: 'warranty' as const },
+    { id: 'war2' as const, title: '2. Xử lý', color: 'border-red-400', flow: 'warranty' as const },
+    { id: 'war3' as const, title: '3. Hoàn tất', color: 'border-green-400', flow: 'warranty' as const },
+    { id: 'care6' as const, title: 'Mốc 6 Tháng', color: 'border-teal-400', flow: 'care' as const },
+    { id: 'care12' as const, title: 'Mốc 12 Tháng', color: 'border-teal-400', flow: 'care' as const },
+    { id: 'care-custom' as const, title: 'Lịch Riêng', color: 'border-teal-400', flow: 'care' as const },
 ];
+
+const CareCard = memo(({
+    group,
+    index,
+    col,
+    order,
+    onProductCardClick
+}: {
+    group: WorkflowKanbanGroup;
+    index: number;
+    col: typeof CARE_WAR_COLS[number];
+    order: Order;
+    onProductCardClick: (group: any, roomId: string) => void;
+}) => {
+    const productItem = group.product;
+    const productName = productItem?.item_name || 'Sản phẩm';
+    const productImage = (productItem as any)?.product?.image || (group.services[0] as any)?.service?.image;
+    const draggableId = `${order.id}-${productItem?.id || index}-${col.flow}`;
+
+    return (
+        <Draggable key={draggableId} draggableId={draggableId} index={index}>
+            {(provided, snapshot) => (
+                <div
+                    ref={provided.innerRef}
+                    {...provided.draggableProps}
+                    {...provided.dragHandleProps}
+                    className={cn(
+                        "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all cursor-grab active:cursor-grabbing",
+                        snapshot.isDragging ? "shadow-lg ring-2 ring-primary/20 scale-105" : "",
+                        col.flow === 'warranty' ? "border-red-400 hover:border-red-600" : "border-teal-400 hover:border-teal-600"
+                    )}
+                    onClick={() => onProductCardClick(group, col.id)}
+                >
+                    <div className="flex justify-between items-start mb-2">
+                        <span className="text-xs font-semibold text-gray-400">#{order.order_code}</span>
+                    </div>
+
+                    <div className="space-y-2 mb-3">
+                        {productImage && (
+                            <div className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50 aspect-video w-full max-h-24 text-center flex items-center justify-center">
+                                <img
+                                    src={productImage}
+                                    alt={productName}
+                                    className="max-h-full max-w-full object-contain"
+                                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                                />
+                            </div>
+                        )}
+                        <h3 className="font-bold text-gray-800 text-[13px] flex items-center gap-1.5 flex-wrap">
+                            <ShoppingBag className="h-3.5 w-3.5 shrink-0 text-primary" />
+                            <span className="truncate">{productName}</span>
+                        </h3>
+                        {order.customer?.name && (
+                            <div className="flex items-center gap-1.5 text-[11px] text-gray-600">
+                                <UserIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
+                                <span className="truncate">{order.customer.name}</span>
+                            </div>
+                        )}
+                    </div>
+
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Quy trình</p>
+                    <div className="pt-2 border-t border-gray-100 flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none">
+                            {col.flow === 'warranty' ? 'Phòng Bảo hành' : 'Phòng Chăm sóc'}
+                        </span>
+                        <div className={cn(
+                            "h-7 w-7 rounded-full flex items-center justify-center",
+                            col.flow === 'warranty' ? "bg-red-50 text-red-500" : "bg-teal-50 text-teal-500"
+                        )}>
+                            {col.flow === 'warranty' ? <Wrench className="h-3.5 w-3.5" /> : <Heart className="h-3.5 w-3.5" />}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </Draggable>
+    );
+});
+
+CareCard.displayName = 'CareCard';
 
 export function CareTab({
     order,
@@ -58,9 +137,6 @@ export function CareTab({
             toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
         });
     };
-
-    // Note: Care/Warranty is currently order-level, so all groups in the order
-    // will be shown in the same (current) stage column.
 
     return (
         <TabsContent value="care">
@@ -95,77 +171,35 @@ export function CareTab({
                                 <h3 className="font-black text-red-700 mb-4 flex items-center tracking-widest uppercase text-xs">
                                     <Wrench className="mr-2 h-4 w-4" /> BẢO HÀNH (Feedback Chê)
                                 </h3>
-                                <div className="grid grid-cols-3 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     {CARE_WAR_COLS.filter((c) => c.flow === 'warranty').map((col) => {
                                         const isActive = orderInCareFlow && col.id === currentStage;
                                         return (
                                             <div key={col.id} className="flex flex-col min-w-[140px]">
+                                                <div className="flex justify-between items-center mb-4 px-2">
+                                                    <h4 className="font-bold text-[10px] uppercase tracking-widest text-gray-500">{col.title}</h4>
+                                                    {isActive && <Badge className="bg-red-500 h-2 w-2 p-0 rounded-full" />}
+                                                </div>
                                                 <Droppable droppableId={col.id}>
-                                                    {(provided) => (
+                                                    {(provided, snapshot) => (
                                                         <div
                                                             ref={provided.innerRef}
                                                             {...provided.droppableProps}
                                                             className={cn(
-                                                                'rounded-2xl border-t-4 p-3 min-h-[180px] transition-colors',
-                                                                isActive ? 'bg-red-50/50' : 'bg-gray-50/50',
-                                                                col.color
+                                                                "min-h-[200px] p-2 rounded-xl flex-1 border-2 border-dashed transition-colors",
+                                                                snapshot.isDraggingOver ? "bg-red-50 border-red-300" : isActive ? "bg-red-50/30 border-transparent" : "bg-gray-100 border-transparent"
                                                             )}
                                                         >
-                                                            <h4 className="font-bold text-[10px] uppercase tracking-widest text-gray-500 mb-3 px-1">{col.title}</h4>
-                                                            {isActive && groups.map((group, idx) => {
-                                                                const productItem = group.product;
-                                                                const serviceItems = group.services;
-                                                                const productImage = (productItem as any)?.product?.image || (serviceItems[0] as any)?.service?.image;
-                                                                const draggableId = `${order.id}-${productItem?.id || idx}`;
-
-                                                                return (
-                                                                    <Draggable key={draggableId} draggableId={draggableId} index={idx}>
-                                                                        {(provided) => (
-                                                                            <div
-                                                                                ref={provided.innerRef}
-                                                                                {...provided.draggableProps}
-                                                                                {...provided.dragHandleProps}
-                                                                                onClick={() => onProductCardClick(group, col.id)}
-                                                                                className="bg-white rounded-[2rem] shadow-sm border border-red-100/50 overflow-hidden cursor-grab active:cursor-grabbing hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 group mb-6 last:mb-0 relative"
-                                                                            >
-                                                                                {productImage && (
-                                                                                    <div className="h-40 w-full overflow-hidden border-b border-red-50 grayscale-[0.2] group-hover:grayscale-0 transition-all text-center bg-gray-50/50 flex items-center justify-center relative">
-                                                                                        <img src={productImage} alt="" className="max-h-full max-w-full object-contain p-3 group-hover:scale-110 transition-transform duration-700" />
-                                                                                        <div className="absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-transparent pointer-events-none" />
-                                                                                    </div>
-                                                                                )}
-                                                                                <div className="p-5 space-y-4">
-                                                                                    <div className="flex justify-between items-center">
-                                                                                        <Badge variant="outline" className="text-[10px] font-black bg-red-50 text-red-600 border-red-100 px-2 py-0.5 h-5 uppercase tracking-tighter">
-                                                                                            {productItem?.item_type === 'product' ? 'Sản phẩm' : 'Dịch vụ'}
-                                                                                        </Badge>
-                                                                                        <span className="text-xs font-black text-gray-300 group-hover:text-red-300 transition-colors">#{order.order_code}</span>
-                                                                                    </div>
-
-                                                                                    <div className="space-y-1">
-                                                                                        <p className="text-[14px] font-black text-gray-800 leading-tight line-clamp-2 uppercase tracking-tight group-hover:text-red-700 transition-colors">
-                                                                                            {productItem?.item_name || 'Sản phẩm'}
-                                                                                        </p>
-                                                                                        <div className="flex items-center gap-2 text-xs text-gray-500 font-medium pt-1">
-                                                                                            <div className="h-7 w-7 rounded-full bg-gray-100 flex items-center justify-center shadow-inner">
-                                                                                                <User className="h-4 w-4 text-gray-400" />
-                                                                                            </div>
-                                                                                            <span className="truncate flex-1 font-bold text-gray-700">{order.customer?.name || 'Khách lẻ'}</span>
-                                                                                        </div>
-                                                                                    </div>
-
-                                                                                    <div className="pt-3 border-t border-gray-100 flex items-center justify-between">
-                                                                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest leading-none">Phòng Bảo hành</span>
-                                                                                        <div className="h-9 w-9 rounded-full bg-red-50 flex items-center justify-center group-hover:bg-red-500 transition-colors duration-300">
-                                                                                            <ShoppingBag className="h-4 w-4 text-red-500 group-hover:text-white transition-colors" />
-                                                                                        </div>
-                                                                                    </div>
-                                                                                </div>
-                                                                            </div>
-                                                                        )}
-                                                                    </Draggable>
-                                                                );
-                                                            })}
+                                                            {isActive && groups.map((group, index) => (
+                                                                <CareCard
+                                                                    key={group.product?.id || index}
+                                                                    group={group}
+                                                                    index={index}
+                                                                    col={col}
+                                                                    order={order}
+                                                                    onProductCardClick={onProductCardClick}
+                                                                />
+                                                            ))}
                                                             {provided.placeholder}
                                                         </div>
                                                     )}
@@ -181,77 +215,35 @@ export function CareTab({
                                 <h3 className="font-black text-teal-700 mb-4 flex items-center tracking-widest uppercase text-xs">
                                     <Heart className="mr-2 h-4 w-4" /> CHĂM SÓC (Feedback Khen)
                                 </h3>
-                                <div className="grid grid-cols-3 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     {CARE_WAR_COLS.filter((c) => c.flow === 'care').map((col) => {
                                         const isActive = orderInCareFlow && col.id === currentStage;
                                         return (
                                             <div key={col.id} className="flex flex-col min-w-[140px]">
+                                                <div className="flex justify-between items-center mb-4 px-2">
+                                                    <h4 className="font-bold text-[10px] uppercase tracking-widest text-gray-500">{col.title}</h4>
+                                                    {isActive && <Badge className="bg-teal-500 h-2 w-2 p-0 rounded-full" />}
+                                                </div>
                                                 <Droppable droppableId={col.id}>
-                                                    {(provided) => (
+                                                    {(provided, snapshot) => (
                                                         <div
                                                             ref={provided.innerRef}
                                                             {...provided.droppableProps}
                                                             className={cn(
-                                                                'rounded-2xl border-t-4 p-3 min-h-[180px] transition-colors',
-                                                                isActive ? 'bg-teal-50/50' : 'bg-gray-50/50',
-                                                                col.color
+                                                                "min-h-[200px] p-2 rounded-xl flex-1 border-2 border-dashed transition-colors",
+                                                                snapshot.isDraggingOver ? "bg-teal-50 border-teal-300" : isActive ? "bg-teal-50/30 border-transparent" : "bg-gray-100 border-transparent"
                                                             )}
                                                         >
-                                                            <h4 className="font-bold text-[10px] uppercase tracking-widest text-gray-500 mb-3 px-1">{col.title}</h4>
-                                                            {isActive && groups.map((group, idx) => {
-                                                                const productItem = group.product;
-                                                                const serviceItems = group.services;
-                                                                const productImage = (productItem as any)?.product?.image || (serviceItems[0] as any)?.service?.image;
-                                                                const draggableId = `${order.id}-${productItem?.id || idx}-care`;
-
-                                                                return (
-                                                                    <Draggable key={draggableId} draggableId={draggableId} index={idx}>
-                                                                        {(provided) => (
-                                                                            <div
-                                                                                ref={provided.innerRef}
-                                                                                {...provided.draggableProps}
-                                                                                {...provided.dragHandleProps}
-                                                                                onClick={() => onProductCardClick(group, col.id)}
-                                                                                className="bg-white rounded-[2rem] shadow-sm border border-teal-100/50 overflow-hidden cursor-grab active:cursor-grabbing hover:shadow-2xl hover:-translate-y-2 transition-all duration-300 group mb-6 last:mb-0 relative"
-                                                                            >
-                                                                                {productImage && (
-                                                                                    <div className="h-40 w-full overflow-hidden border-b border-teal-50 grayscale-[0.2] group-hover:grayscale-0 transition-all text-center bg-gray-50/50 flex items-center justify-center relative">
-                                                                                        <img src={productImage} alt="" className="max-h-full max-w-full object-contain p-3 group-hover:scale-110 transition-transform duration-700" />
-                                                                                        <div className="absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-transparent pointer-events-none" />
-                                                                                    </div>
-                                                                                )}
-                                                                                <div className="p-5 space-y-4">
-                                                                                    <div className="flex justify-between items-center">
-                                                                                        <Badge variant="outline" className="text-[10px] font-black bg-teal-50 text-teal-500 border-teal-100 px-2 py-0.5 h-5 uppercase tracking-tighter">
-                                                                                            {productItem?.item_type === 'product' ? 'Sản phẩm' : 'Dịch vụ'}
-                                                                                        </Badge>
-                                                                                        <span className="text-xs font-black text-gray-300 group-hover:text-teal-300 transition-colors">#{order.order_code}</span>
-                                                                                    </div>
-
-                                                                                    <div className="space-y-1">
-                                                                                        <p className="text-[14px] font-black text-gray-800 leading-tight line-clamp-2 uppercase tracking-tight group-hover:text-teal-700 transition-colors">
-                                                                                            {productItem?.item_name || 'Sản phẩm'}
-                                                                                        </p>
-                                                                                        <div className="flex items-center gap-2 text-xs text-gray-500 font-medium pt-1">
-                                                                                            <div className="h-7 w-7 rounded-full bg-gray-100 flex items-center justify-center shadow-inner">
-                                                                                                <User className="h-4 w-4 text-gray-400" />
-                                                                                            </div>
-                                                                                            <span className="truncate flex-1 font-bold text-gray-700">{order.customer?.name || 'Khách lẻ'}</span>
-                                                                                        </div>
-                                                                                    </div>
-
-                                                                                    <div className="pt-3 border-t border-gray-100 flex items-center justify-between">
-                                                                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest leading-none">Phòng Chăm sóc</span>
-                                                                                        <div className="h-9 w-9 rounded-full bg-teal-50 flex items-center justify-center group-hover:bg-teal-500 transition-colors duration-300">
-                                                                                            <Heart className="h-4 w-4 text-teal-500 group-hover:text-white transition-colors" />
-                                                                                        </div>
-                                                                                    </div>
-                                                                                </div>
-                                                                            </div>
-                                                                        )}
-                                                                    </Draggable>
-                                                                );
-                                                            })}
+                                                            {isActive && groups.map((group, index) => (
+                                                                <CareCard
+                                                                    key={group.product?.id || index}
+                                                                    group={group}
+                                                                    index={index}
+                                                                    col={col}
+                                                                    order={order}
+                                                                    onProductCardClick={onProductCardClick}
+                                                                />
+                                                            ))}
                                                             {provided.placeholder}
                                                         </div>
                                                     )}
@@ -288,7 +280,7 @@ export function CareTab({
                                                         <span className="text-primary">{getCareWarrantyStageLabel(log.to_stage)}</span>
                                                     </p>
                                                     <div className="flex items-center gap-2 text-[10px] text-gray-400 font-medium">
-                                                        <User className="h-3 w-3" />
+                                                        <UserIcon className="h-3 w-3" />
                                                         {log.created_by_user?.name ?? 'Hệ thống'}
                                                         <span className="mx-1">•</span>
                                                         {log.flow_type === 'warranty' ? 'Bảo hành' : 'Chăm sóc'}
@@ -309,4 +301,3 @@ export function CareTab({
         </TabsContent>
     );
 }
-

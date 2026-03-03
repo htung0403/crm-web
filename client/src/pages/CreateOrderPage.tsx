@@ -177,24 +177,113 @@ export function CreateOrderPage() {
         const fetchData = async () => {
             setLoading(true);
             try {
-                await Promise.all([
+                const promises: Promise<any>[] = [
                     fetchCustomers({ status: 'active' }),
                     fetchProducts({ status: 'active' }),
-                    fetchServices({ status: 'active' }),
                     fetchServices({ status: 'active' }),
                     fetchPackages(),
                     fetchTechnicians(),
                     fetchSales(),
                     fetchProductTypes()
-                ]);
-            } catch {
+                ];
+
+                // If editing, add order fetch to the parallel pool
+                if (isEditMode && id && !orderFetchedRef.current) {
+                    promises.push(fetchOrderForEdit(id));
+                }
+
+                await Promise.all(promises);
+            } catch (err) {
+                console.error('Error loading data:', err);
                 toast.error('Lỗi khi tải dữ liệu');
             } finally {
                 setLoading(false);
             }
         };
         fetchData();
-    }, [fetchCustomers, fetchProducts, fetchServices, fetchPackages, fetchTechnicians, fetchSales, fetchProductTypes]);
+    }, [id, isEditMode]);
+
+    const fetchOrderForEdit = async (orderId: string) => {
+        try {
+            const response = await ordersApi.getById(orderId);
+            const order = response.data.data?.order;
+            if (order) {
+                setCustomerId(order.customer_id);
+                setNotes(order.notes || '');
+                setDiscount(order.discount_value || order.discount || 0);
+                setDiscountType(order.discount_type || 'amount');
+                setDueAt(order.due_at ? new Date(order.due_at).toISOString().split('T')[0] : '');
+
+                // Map Customer Items (order_products + services)
+                const customerItems: CustomerProduct[] = (order.customer_items || []).map((item: any) => ({
+                    id: item.id,
+                    name: item.name,
+                    type: item.type || 'giày',
+                    brand: item.brand || '',
+                    color: item.color || '',
+                    size: item.size || '',
+                    material: item.material || '',
+                    condition_before: item.condition_before || '',
+                    images: item.images || [],
+                    notes: item.notes || '',
+                    services: (item.services || []).map((s: any) => ({
+                        id: s.service_id || s.package_id || s.id,
+                        type: s.item_type,
+                        name: s.item_name,
+                        price: s.unit_price,
+                        technicians: (s.technicians || []).map((t: any) => ({
+                            id: t.technician_id,
+                            name: t.technician?.name || 'Unknown',
+                            commission: t.commission || 0
+                        })),
+                        sales: (s.sales || []).map((sale: any) => ({
+                            id: sale.sale_id || sale.id,
+                            name: sale.sale?.name || 'Unknown',
+                            commission: sale.commission || 0
+                        }))
+                    }))
+                }));
+
+                // Map Sale Items (add-on products)
+                const saleItems: AddOnProduct[] = (order.sale_items || []).map((item: any) => ({
+                    id: item.product_id || item.id,
+                    name: item.item_name,
+                    price: item.unit_price,
+                    quantity: item.quantity,
+                    sales: (item.sales || []).map((s: any) => ({
+                        id: s.sale_id || s.id,
+                        name: s.sale?.name || 'Unknown',
+                        commission: s.commission || 0
+                    }))
+                }));
+
+                setProducts(customerItems);
+                setAddOnProducts(saleItems);
+
+                // Set surcharges
+                if (order.surcharges && Array.isArray(order.surcharges)) {
+                    setSurcharges(order.surcharges.map((s: any) => ({
+                        id: generateTempId(),
+                        type: s.type,
+                        label: s.label,
+                        value: s.value,
+                        isPercent: s.is_percent
+                    })));
+                }
+
+                // Mark all products as confirmed since it's an existing order
+                const confirmed = new Set<number>();
+                const totalProducts = customerItems.length;
+                for (let i = 0; i < totalProducts; i++) confirmed.add(i);
+                setConfirmedProducts(confirmed);
+
+                orderFetchedRef.current = true;
+            }
+        } catch (err) {
+            console.error('Error fetching order for edit:', err);
+            throw err;
+        }
+    };
 
     // Fetch next order code separately (for QR preview)
     useEffect(() => {
@@ -222,93 +311,7 @@ export function CreateOrderPage() {
     const leadProcessedRef = useRef(false);
     const orderFetchedRef = useRef(false);
 
-    // Fetch Order Data for Edit Mode
-    useEffect(() => {
-        if (isEditMode && id && !orderFetchedRef.current && !loading) {
-            const fetchOrderData = async () => {
-                try {
-                    const response = await ordersApi.getById(id);
-                    const order = response.data.data?.order;
-                    if (order) {
-                        setCustomerId(order.customer_id);
-                        setNotes(order.notes || '');
-                        setDiscount(order.discount_value || order.discount || 0);
-                        setDiscountType(order.discount_type || 'amount');
-                        setDueAt(order.due_at ? new Date(order.due_at).toISOString().split('T')[0] : '');
-
-                        // Map Customer Items (order_products + services)
-                        const customerItems: CustomerProduct[] = (order.customer_items || []).map((item: any) => ({
-                            id: item.id,
-                            name: item.name,
-                            type: item.type || 'giày',
-                            brand: item.brand || '',
-                            color: item.color || '',
-                            size: item.size || '',
-                            material: item.material || '',
-                            condition_before: item.condition_before || '',
-                            images: item.images || [],
-                            notes: item.notes || '',
-                            services: (item.services || []).map((s: any) => ({
-                                id: s.service_id || s.package_id || s.id,
-                                type: s.item_type,
-                                name: s.item_name,
-                                price: s.unit_price,
-                                technicians: (s.technicians || []).map((t: any) => ({
-                                    id: t.technician_id,
-                                    name: t.technician?.name || 'Unknown',
-                                    commission: t.commission || 0
-                                })),
-                                sales: (s.sales || []).map((sale: any) => ({
-                                    id: sale.sale_id || sale.id,
-                                    name: sale.sale?.name || 'Unknown',
-                                    commission: sale.commission || 0
-                                }))
-                            }))
-                        }));
-
-                        // Map Sale Items (add-on products)
-                        const saleItems: AddOnProduct[] = (order.sale_items || []).map((item: any) => ({
-                            id: item.product_id || item.id,
-                            name: item.item_name,
-                            price: item.unit_price,
-                            quantity: item.quantity,
-                            sales: (item.sales || []).map((s: any) => ({
-                                id: s.sale_id || s.id,
-                                name: s.sale?.name || 'Unknown',
-                                commission: s.commission || 0
-                            }))
-                        }));
-
-                        setProducts(customerItems);
-                        setAddOnProducts(saleItems);
-
-                        // Set surcharges
-                        if (order.surcharges && Array.isArray(order.surcharges)) {
-                            setSurcharges(order.surcharges.map((s: any) => ({
-                                id: generateTempId(),
-                                type: s.type,
-                                label: s.label,
-                                value: s.value,
-                                isPercent: s.is_percent
-                            })));
-                        }
-
-                        // Mark all products as confirmed since it's an existing order
-                        const confirmed = new Set<number>();
-                        const totalProducts = customerItems.length;
-                        for (let i = 0; i < totalProducts; i++) confirmed.add(i);
-                        setConfirmedProducts(confirmed);
-
-                        orderFetchedRef.current = true;
-                    }
-                } catch (err) {
-                    console.error('Error fetching order for edit:', err);
-                    toast.error('Không thể tải dữ liệu đơn hàng để sửa');
-                }
-            };
-            fetchOrderData();
-        }
-    }, [isEditMode, id, loading]);
+    // Removed separate fetchOrderData useEffect and integrated into the main fetchData parallel process
 
     // Handle lead info from URL params (when coming from Lead Detail page)
     useEffect(() => {
@@ -953,10 +956,26 @@ export function CreateOrderPage() {
                 </Button>
                 <div className="flex-1">
                     <h1 className="text-2xl font-bold flex items-center gap-2">
-                        <ShoppingBag className="h-6 w-6 text-primary" />
-                        Tạo đơn hàng mới
+                        {isEditMode ? (
+                            <>
+                                <Wrench className="h-6 w-6 text-orange-500" />
+                                Chỉnh sửa đơn hàng
+                                <Badge variant="outline" className="ml-2 bg-orange-50 text-orange-600 border-orange-200 uppercase tracking-wider text-[10px] font-bold">
+                                    Edit Mode
+                                </Badge>
+                            </>
+                        ) : (
+                            <>
+                                <ShoppingBag className="h-6 w-6 text-primary" />
+                                Tạo đơn hàng mới
+                            </>
+                        )}
                     </h1>
-                    <p className="text-muted-foreground">Nhận sản phẩm khách và chọn dịch vụ</p>
+                    <p className="text-muted-foreground">
+                        {isEditMode
+                            ? "Cập nhật thông tin sản phẩm, dịch vụ và các mục bán kèm cho đơn hàng hiện tại"
+                            : "Nhận sản phẩm khách và chọn dịch vụ"}
+                    </p>
                 </div>
             </div>
 
@@ -2046,7 +2065,7 @@ export function CreateOrderPage() {
                 <Card className="text-center py-12">
                     <CardContent>
                         <CheckCircle className="h-20 w-20 text-green-500 mx-auto mb-6" />
-                        <h2 className="text-2xl font-bold mb-2">Tạo đơn hàng thành công!</h2>
+                        <h2 className="text-2xl font-bold mb-2">{isEditMode ? 'Cập nhật đơn hàng thành công!' : 'Tạo đơn hàng thành công!'}</h2>
                         <p className="text-muted-foreground mb-6">
                             Mã đơn: <span className="font-mono font-bold">{createdOrder.order?.order_code}</span>
                         </p>
@@ -2159,12 +2178,12 @@ export function CreateOrderPage() {
                             {submitting ? (
                                 <>
                                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                    Đang tạo...
+                                    {isEditMode ? 'Đang cập nhật...' : 'Đang tạo...'}
                                 </>
                             ) : (
                                 <>
                                     <CheckCircle className="h-4 w-4 mr-2" />
-                                    Tạo đơn hàng
+                                    {isEditMode ? 'Cập nhật đơn hàng' : 'Tạo đơn hàng'}
                                 </>
                             )}
                         </Button>

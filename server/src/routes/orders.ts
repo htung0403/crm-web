@@ -923,13 +923,18 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
         // 5. Create Sale Items (order_items table)
         if (finalSaleItems && Array.isArray(finalSaleItems) && finalSaleItems.length > 0) {
             const baseTime = Date.now().toString().slice(-8);
-            const saleItemsPayload = finalSaleItems.map((itemValue: any, idxValue: number) => {
+            const saleItemsPayload = [];
+
+            for (let idxValue = 0; idxValue < finalSaleItems.length; idxValue++) {
+                const itemValue = finalSaleItems[idxValue];
                 const qValue = Math.max(1, Number(itemValue.quantity) || 1);
                 const pValue = Number(itemValue.unit_price || itemValue.price) || 0;
                 const totalValue = pValue * qValue;
-                return {
+                const productId = itemValue.product_id || itemValue.id;
+
+                saleItemsPayload.push({
                     order_id: order.id,
-                    product_id: itemValue.product_id || itemValue.id || null, // Handle both catalog id and product_id
+                    product_id: productId || null,
                     item_type: 'product',
                     item_name: itemValue.name || 'Sản phẩm bán kèm',
                     quantity: qValue,
@@ -937,8 +942,22 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                     total_price: totalValue,
                     item_code: `IT${baseTime}${idxValue.toString().padStart(2, '0')}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`,
                     status: 'pending'
-                };
-            });
+                });
+
+                // Decrement stock for catalog product
+                if (productId) {
+                    try {
+                        const { data: currentProd } = await supabaseAdmin.from('products').select('stock').eq('id', productId).single();
+                        if (currentProd) {
+                            const newStock = Math.max(0, (currentProd.stock || 0) - qValue);
+                            await supabaseAdmin.from('products').update({ stock: newStock }).eq('id', productId);
+                        }
+                    } catch (err) {
+                        console.error(`Error decrementing stock for product ${productId}:`, err);
+                    }
+                }
+            }
+
             const { data: createdItems, error: itemsError } = await supabaseAdmin.from('order_items').insert(saleItemsPayload).select();
 
             if (!itemsError && createdItems) {
@@ -1161,45 +1180,94 @@ router.post('/:id/upsell', authenticate, requireSale, async (req: AuthenticatedR
         // 3. Process Sale Items (V1)
         if (sale_items && Array.isArray(sale_items) && sale_items.length > 0) {
             const baseTime = Date.now().toString().slice(-8);
-            const saleItemsPayload = sale_items.map((itemValue: any, idxValue: number) => {
+
+            for (let idxValue = 0; idxValue < sale_items.length; idxValue++) {
+                const itemValue = sale_items[idxValue];
                 const qValue = Math.max(1, Number(itemValue.quantity) || 1);
                 const pValue = Number(itemValue.unit_price || itemValue.price) || 0;
                 const totalValue = pValue * qValue;
+                const productId = itemValue.product_id || itemValue.id;
+
                 newSubtotal += totalValue;
 
-                return {
-                    order_id: id,
-                    product_id: itemValue.product_id || itemValue.id || null,
-                    item_type: 'product',
-                    item_name: itemValue.name || 'Sản phẩm upsell',
-                    quantity: qValue,
-                    unit_price: pValue,
-                    total_price: totalValue,
-                    item_code: `UP${baseTime}${idxValue.toString().padStart(2, '0')}`,
-                    status: 'pending'
-                };
-            });
+                // Check for existing item to aggregate (cộng dồn)
+                let targetItemId: string | null = null;
 
-            const { data: createdItems, error: itemsError } = await supabaseAdmin.from('order_items').insert(saleItemsPayload).select();
+                if (productId) {
+                    const { data: existingItem } = await supabaseAdmin
+                        .from('order_items')
+                        .select('id, quantity, total_price')
+                        .eq('order_id', id)
+                        .eq('product_id', productId)
+                        .eq('unit_price', pValue)
+                        .eq('status', 'pending') // Only aggregate if still pending
+                        .maybeSingle();
 
-            if (!itemsError && createdItems) {
-                const saleItemAssignments: any[] = [];
-                for (let idx = 0; idx < createdItems.length; idx++) {
-                    const createdItem = createdItems[idx];
-                    const originalItem = sale_items[idx];
-                    const sales = originalItem.sales || [];
-                    for (const s of sales) {
-                        saleItemAssignments.push({
-                            order_item_id: createdItem.id,
+                    if (existingItem) {
+                        targetItemId = existingItem.id;
+                        const newQty = (Number(existingItem.quantity) || 0) + qValue;
+                        const newTotal = (Number(existingItem.total_price) || 0) + totalValue;
+
+                        await supabaseAdmin
+                            .from('order_items')
+                            .update({
+                                quantity: newQty,
+                                total_price: newTotal,
+                                updated_at: new Date().toISOString()
+                            })
+                            .eq('id', targetItemId);
+                    }
+                }
+
+                if (!targetItemId) {
+                    // Create new item if not aggregated
+                    const { data: newItem, error: insertError } = await supabaseAdmin
+                        .from('order_items')
+                        .insert({
+                            order_id: id,
+                            product_id: productId || null,
+                            item_type: 'product',
+                            item_name: itemValue.name || 'Sản phẩm upsell',
+                            quantity: qValue,
+                            unit_price: pValue,
+                            total_price: totalValue,
+                            item_code: `UP${baseTime}${idxValue.toString().padStart(2, '0')}`,
+                            status: 'pending'
+                        })
+                        .select()
+                        .single();
+
+                    if (!insertError && newItem) {
+                        targetItemId = newItem.id;
+                    }
+                }
+
+                // Handle assignments if we have a target item
+                if (targetItemId) {
+                    const sales = itemValue.sales || [];
+                    if (sales.length > 0) {
+                        const saleItemAssignments = sales.map((s: any) => ({
+                            order_item_id: targetItemId,
                             sale_id: s.sale_id || s.id,
                             commission: s.commission || 0,
                             assigned_by: req.user!.id,
                             assigned_at: new Date().toISOString()
-                        });
+                        }));
+                        await supabaseAdmin.from('order_item_sales').insert(saleItemAssignments);
                     }
                 }
-                if (saleItemAssignments.length > 0) {
-                    await supabaseAdmin.from('order_item_sales').insert(saleItemAssignments);
+
+                // Decrement stock for catalog product
+                if (productId) {
+                    try {
+                        const { data: currentProd } = await supabaseAdmin.from('products').select('stock').eq('id', productId).single();
+                        if (currentProd) {
+                            const newStock = Math.max(0, (currentProd.stock || 0) - qValue);
+                            await supabaseAdmin.from('products').update({ stock: newStock }).eq('id', productId);
+                        }
+                    } catch (err) {
+                        console.error(`Error decrementing stock during upsell for product ${productId}:`, err);
+                    }
                 }
             }
         }
@@ -1402,6 +1470,12 @@ router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequ
             throw new ApiError('Không tìm thấy đơn hàng', 404);
         }
 
+        // Fetch old sale items for stock restoration
+        const { data: oldItems } = await supabaseAdmin
+            .from('order_items')
+            .select('product_id, quantity, item_type')
+            .eq('order_id', id);
+
         // 2. Calculate totals
         let subtotal = 0;
         if (customer_items && Array.isArray(customer_items)) {
@@ -1434,7 +1508,7 @@ router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequ
                 total_amount: totalAmount,
                 notes,
                 paid_amount: Number(paid_amount) || 0,
-                remaining_amount: totalAmount - (Number(paid_amount) || 0),
+                remaining_debt: totalAmount - (Number(paid_amount) || 0),
                 due_at: due_at || null,
                 surcharges: surcharges || [],
                 updated_at: new Date().toISOString(),
@@ -1448,6 +1522,23 @@ router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequ
         }
 
         // 4. Clean up old highly-dependent data
+        // Restore stock for old product items before deleting
+        if (oldItems) {
+            for (const item of oldItems) {
+                if (item.product_id && item.item_type === 'product') {
+                    try {
+                        const { data: prod } = await supabaseAdmin.from('products').select('stock').eq('id', item.product_id).single();
+                        if (prod) {
+                            const newStock = (prod.stock || 0) + (Number(item.quantity) || 0);
+                            await supabaseAdmin.from('products').update({ stock: newStock }).eq('id', item.product_id);
+                        }
+                    } catch (err) {
+                        console.error('Error restoring stock during update:', err);
+                    }
+                }
+            }
+        }
+
         // Order of deletion to respect FKs
         const { data: oldProducts } = await supabaseAdmin.from('order_products').select('id').eq('order_id', id);
         if (oldProducts && oldProducts.length > 0) {
@@ -1592,6 +1683,19 @@ router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequ
                             assigned_by: req.user!.id,
                             assigned_at: new Date().toISOString()
                         });
+                    }
+
+                    // Deduct stock for new items
+                    if (createdItem.product_id && createdItem.item_type === 'product') {
+                        try {
+                            const { data: prod } = await supabaseAdmin.from('products').select('stock').eq('id', createdItem.product_id).single();
+                            if (prod) {
+                                const newStock = Math.max(0, (prod.stock || 0) - (Number(createdItem.quantity) || 0));
+                                await supabaseAdmin.from('products').update({ stock: newStock }).eq('id', createdItem.product_id);
+                            }
+                        } catch (err) {
+                            console.error('Error deducting stock during update:', err);
+                        }
                     }
                 }
                 if (saleItemAssignments.length > 0) {
