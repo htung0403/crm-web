@@ -1022,6 +1022,69 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
 });
 
 // Upsell: Add more products/services to an existing order
+// Create an upsell ticket (to be approved by manager)
+router.post('/:id/upsell-ticket', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id: orderId } = req.params;
+        const { customer_items, sale_items, notes } = req.body;
+
+        // 1. Get order details to get customer_id
+        const { data: order, error: orderError } = await supabaseAdmin
+            .from('orders')
+            .select('customer_id')
+            .eq('id', orderId)
+            .single();
+
+        if (orderError || !order) {
+            throw new ApiError('Không tìm thấy đơn hàng', 404);
+        }
+
+        // Calculate total amount for the ticket
+        let totalAmount = 0;
+        if (customer_items) {
+            customer_items.forEach((item: any) => {
+                if (item.services) {
+                    item.services.forEach((svc: any) => {
+                        totalAmount += Number(svc.price) || 0;
+                    });
+                }
+            });
+        }
+        if (sale_items) {
+            sale_items.forEach((item: any) => {
+                totalAmount += (Number(item.quantity) || 1) * (Number(item.unit_price) || 0);
+            });
+        }
+
+        // 2. Create ticket
+        const { data: ticket, error: ticketError } = await supabaseAdmin
+            .from('upsell_tickets')
+            .insert({
+                order_id: orderId,
+                sales_id: req.user!.id,
+                customer_id: order.customer_id,
+                status: 'pending',
+                data: { customer_items, sale_items },
+                total_amount: totalAmount,
+                notes: notes || ''
+            })
+            .select()
+            .single();
+
+        if (ticketError) {
+            throw new ApiError('Lỗi khi tạo ticket upsell: ' + ticketError.message, 500);
+        }
+
+        res.json({
+            status: 'success',
+            data: ticket,
+            message: 'Đã gửi yêu cầu upsell thành công. Vui lòng chờ quản lý duyệt.'
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 router.post('/:id/upsell', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;

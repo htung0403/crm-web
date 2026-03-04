@@ -446,7 +446,7 @@ export function OrderDetailPage() {
                 <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                     <Button variant="outline" onClick={() => setShowUpsellDialog(true)} className="flex-1 sm:flex-none">
                         <Sparkles className="h-4 w-4 mr-2 text-purple-500" />
-                        Đề xuất gói VIP
+                        Upsell
                     </Button>
                     <Button variant="outline" onClick={() => setShowPrintDialog(true)} className="flex-1 sm:flex-none">
                         <Printer className="h-4 w-4 mr-2" />
@@ -804,6 +804,7 @@ export function OrderDetailPage() {
                 open={showUpsellDialog}
                 onOpenChange={setShowUpsellDialog}
                 orderId={order.id}
+                order={order}
                 onSuccess={async () => {
                     await reloadOrder();
                 }}

@@ -34,6 +34,7 @@ import { RequestsPage } from '@/pages/RequestsPage';
 import { CreateLeadPage } from '@/pages/CreateLeadPage';
 import { CreatePackagePage } from '@/pages/CreatePackagePage';
 import { CreateProductPage } from '@/pages/CreateProductPage';
+import { UpsellManagementPage } from '@/pages/UpsellManagementPage';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import type { UserRole, User } from '@/types';
@@ -82,6 +83,7 @@ const pagePermissions: Record<string, UserRole[]> = {
   kpi: ['admin', 'manager'],
   salary: ['admin', 'manager', 'accountant'],
   reports: ['admin', 'manager', 'accountant'],
+  'upsell-management': ['admin', 'manager'],
   settings: ['admin', 'manager'],
 };
 
@@ -304,6 +306,12 @@ function AppContent() {
             <Route path="/orders" element={
               <ProtectedRoute allowedRoles={pagePermissions.orders}>
                 <OrdersPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/orders/upsell-tickets" element={
+              <ProtectedRoute allowedRoles={pagePermissions['upsell-management']}>
+                <UpsellManagementPage />
               </ProtectedRoute>
             } />
 

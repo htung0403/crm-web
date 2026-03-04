@@ -65,7 +65,11 @@ const menuItems: MenuItem[] = [
         id: 'orders',
         label: 'Quản lý đơn hàng',
         icon: <ClipboardList className="h-5 w-5" />,
-        roles: ['admin', 'manager', 'sale', 'technician'] // All can view orders
+        roles: ['admin', 'manager', 'sale', 'technician'],
+        children: [
+            { id: 'orders', label: 'Tất cả đơn hàng', roles: ['admin', 'manager', 'sale', 'technician'] },
+            { id: 'orders/upsell-tickets', label: 'Duyệt Upsell', roles: ['admin', 'manager'] }
+        ]
     },
     {
         id: 'requests',

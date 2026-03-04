@@ -206,6 +206,9 @@ export const ordersApi = {
 
     upsell: (id: string, data: { customer_items?: any[]; sale_items?: any[] }) =>
         api.post<ApiResponse<any>>(`/orders/${id}/upsell`, data),
+
+    createUpsellTicket: (id: string, data: { customer_items?: any[]; sale_items?: any[]; notes?: string }) =>
+        api.post<ApiResponse<any>>(`/orders/${id}/upsell-ticket`, data),
 };
 
 // Order Products API (Customer's products: shoes, bags, etc.)
@@ -365,6 +368,16 @@ export const requestsApi = {
         api.get<ApiResponse<any[]>>('/requests/partners'),
     getExtensions: () =>
         api.get<ApiResponse<any[]>>('/requests/extensions'),
+};
+
+// Upsell Tickets API (admin/manager)
+export const upsellTicketsApi = {
+    getAll: () =>
+        api.get<ApiResponse<any[]>>('/upsell-tickets'),
+    approve: (id: string) =>
+        api.post<ApiResponse<any>>(`/upsell-tickets/${id}/approve`),
+    reject: (id: string) =>
+        api.post<ApiResponse<any>>(`/upsell-tickets/${id}/reject`),
 };
 
 // Invoices API
