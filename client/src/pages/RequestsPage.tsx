@@ -22,24 +22,9 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { requestsApi, orderItemsApi, ordersApi } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
-
-const ACCESSORY_LABELS: Record<string, string> = {
-    need_buy: 'Cần mua',
-    bought: 'Đã mua',
-    waiting_ship: 'Chờ ship',
-    shipped: 'Ship tới',
-    delivered_to_tech: 'Giao KT',
-};
+import { ACCESSORY_LABELS, PARTNER_LABELS } from '@/components/orders/constants';
 
 const ACCESSORY_COLUMNS = Object.entries(ACCESSORY_LABELS).map(([id, label]) => ({ id, label }));
-
-const PARTNER_LABELS: Record<string, string> = {
-    ship_to_partner: 'Ship Đối tác',
-    partner_doing: 'Đối tác làm',
-    ship_back: 'Ship về Shop',
-    done: 'Done',
-};
-
 const PARTNER_COLUMNS = Object.entries(PARTNER_LABELS).map(([id, label]) => ({ id, label }));
 
 const EXTENSION_LABELS: Record<string, string> = {

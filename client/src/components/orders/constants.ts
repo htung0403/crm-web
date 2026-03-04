@@ -193,3 +193,17 @@ export interface CustomerOption {
     phone: string;
     status?: string;
 }
+export const ACCESSORY_LABELS: Record<string, string> = {
+    need_buy: 'Cần mua',
+    bought: 'Đã mua',
+    waiting_ship: 'Chờ ship',
+    shipped: 'Ship tới',
+    delivered_to_tech: 'Giao KT',
+};
+
+export const PARTNER_LABELS: Record<string, string> = {
+    ship_to_partner: 'Ship Đối tác',
+    partner_doing: 'Đối tác làm',
+    ship_back: 'Ship về Shop',
+    done: 'Done',
+};

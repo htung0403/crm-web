@@ -8,7 +8,7 @@ import { TabsContent } from '@/components/ui/tabs';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { cn } from '@/lib/utils';
 import { formatDateTime } from '@/lib/utils';
-import { TECH_ROOMS } from '@/components/orders/constants';
+import { TECH_ROOMS, ACCESSORY_LABELS, PARTNER_LABELS } from '@/components/orders/constants';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 
 interface WorkflowCardProps {
@@ -152,7 +152,11 @@ const WorkflowCard = memo(({
                                     )}
                                 >
                                     <Package className="h-3 w-3" />
-                                    <span>{(leadItem as any)?.accessory?.status ? 'Đang xử lý PK' : 'Cần PK'}</span>
+                                    <span>
+                                        {(leadItem as any)?.accessory?.status
+                                            ? ACCESSORY_LABELS[(leadItem as any).accessory.status] || 'Đang xử lý PK'
+                                            : 'Cần PK'}
+                                    </span>
                                 </button>
                                 <button
                                     type="button"
@@ -163,7 +167,11 @@ const WorkflowCard = memo(({
                                     )}
                                 >
                                     <Truck className="h-3 w-3" />
-                                    <span>{(leadItem as any)?.partner?.status ? 'Đang xử lý ĐT' : 'Gửi ĐT'}</span>
+                                    <span>
+                                        {(leadItem as any)?.partner?.status
+                                            ? PARTNER_LABELS[(leadItem as any).partner.status] || 'Đang xử lý ĐT'
+                                            : 'Gửi ĐT'}
+                                    </span>
                                 </button>
                             </div>
                         </>
