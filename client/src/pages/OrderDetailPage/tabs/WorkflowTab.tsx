@@ -152,7 +152,7 @@ const WorkflowCard = memo(({
                                     )}
                                 >
                                     <Package className="h-3 w-3" />
-                                    <span>{(leadItem as any)?.accessory?.status ? 'Phụ kiện OK' : 'Cần PK'}</span>
+                                    <span>{(leadItem as any)?.accessory?.status ? 'Đang xử lý PK' : 'Cần PK'}</span>
                                 </button>
                                 <button
                                     type="button"
@@ -163,7 +163,7 @@ const WorkflowCard = memo(({
                                     )}
                                 >
                                     <Truck className="h-3 w-3" />
-                                    <span>{(leadItem as any)?.partner?.status ? 'Đối tác OK' : 'Gửi ĐT'}</span>
+                                    <span>{(leadItem as any)?.partner?.status ? 'Đang xử lý ĐT' : 'Gửi ĐT'}</span>
                                 </button>
                             </div>
                         </>
