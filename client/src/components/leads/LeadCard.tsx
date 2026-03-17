@@ -1,21 +1,33 @@
 import { Draggable } from '@hello-pangea/dnd';
-import { Eye } from 'lucide-react';
+import { Eye, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { formatTimeAgo } from '@/lib/utils';
 import type { Lead } from '@/hooks/useLeads';
 import { sourceLabels } from './constants';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface LeadCardProps {
     lead: Lead;
     index: number;
     onClick: () => void;
+    onDelete?: (id: string) => void;
 }
 
-export function LeadCard({ lead, index, onClick }: LeadCardProps) {
+export function LeadCard({ lead, index, onClick, onDelete }: LeadCardProps) {
+    const { user } = useAuth();
     // Use channel first, fallback to source for legacy data
     const channelKey = lead.channel || lead.source || '';
     const source = sourceLabels[channelKey] || { label: channelKey || 'Khác', color: 'bg-gray-100 text-gray-700' };
+
+    const isManagerOrAdmin = user?.role === 'admin' || user?.role === 'manager';
+
+    const handleDelete = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (onDelete && window.confirm(`Bạn có chắc chắn muốn xóa lead "${lead.name}"?`)) {
+            onDelete(lead.id);
+        }
+    };
 
     return (
         <Draggable draggableId={lead.id} index={index}>
@@ -46,17 +58,29 @@ export function LeadCard({ lead, index, onClick }: LeadCardProps) {
                                 </p>
                             </div>
                         </div>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                onClick();
-                            }}
-                        >
-                            <Eye className="h-3.5 w-3.5" />
-                        </Button>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onClick();
+                                }}
+                            >
+                                <Eye className="h-3.5 w-3.5" />
+                            </Button>
+                            {isManagerOrAdmin && onDelete && (
+                                <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                    onClick={handleDelete}
+                                >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                            )}
+                        </div>
                     </div>
 
                     {/* Tags */}

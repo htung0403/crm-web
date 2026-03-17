@@ -9,6 +9,7 @@ import {
     Smile,
     Paperclip,
     X,
+    Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -26,11 +27,13 @@ import type { Lead } from '@/hooks/useLeads';
 import { useLeads } from '@/hooks/useLeads';
 import { kanbanColumns, sourceLabels, getStatusLabel } from '@/components/leads/constants';
 import { format } from 'date-fns';
+import { useAuth } from '@/contexts/AuthContext';
 
 export function LeadDetailPage() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
-    const { updateLead, convertLead, fetchLeads } = useLeads();
+    const { updateLead, convertLead, deleteLead, fetchLeads } = useLeads();
+    const { user } = useAuth();
 
     const [lead, setLead] = useState<Lead | null>(null);
     const [loading, setLoading] = useState(true);
@@ -242,6 +245,22 @@ export function LeadDetailPage() {
         }
     };
 
+    const handleDelete = async () => {
+        if (confirm(`Bạn có chắc chắn muốn xóa lead "${lead.name}"? Hành động này không thể hoàn tác.`)) {
+            setIsSaving(true);
+            try {
+                await deleteLead(lead.id);
+                toast.success('Đã xóa lead thành công');
+                navigate('/leads');
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Lỗi khi xóa lead';
+                toast.error(message);
+            } finally {
+                setIsSaving(false);
+            }
+        }
+    };
+
     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -415,6 +434,18 @@ export function LeadDetailPage() {
                         <ShoppingBag className="h-4 w-4 mr-2" />
                         Tạo đơn
                     </Button>
+                    {(user?.role === 'admin' || user?.role === 'manager') && (
+                        <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={handleDelete}
+                            className="flex-1 sm:flex-none"
+                            disabled={isSaving}
+                        >
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Xóa Lead
+                        </Button>
+                    )}
                 </div>
             </div>
 

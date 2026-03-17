@@ -29,7 +29,7 @@ import type { CreateLeadFormData } from '@/components/leads';
 
 export function LeadsPage() {
     const navigate = useNavigate();
-    const { leads, loading, error, fetchLeads, createLead, updateLead, convertLead } = useLeads();
+    const { leads, loading, error, fetchLeads, createLead, updateLead, deleteLead, convertLead } = useLeads();
     const { employees, fetchEmployees } = useEmployees();
     const { users: technicians, fetchTechnicians } = useUsers();
 
@@ -160,6 +160,16 @@ export function LeadsPage() {
             const message = error instanceof Error ? error.message : 'Lỗi khi tạo lead';
             toast.error(message);
             throw error;
+        }
+    };
+
+    const handleDeleteLead = async (id: string) => {
+        try {
+            await deleteLead(id);
+            toast.success('Đã xóa lead thành công');
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Lỗi khi xóa lead';
+            toast.error(message);
         }
     };
 
@@ -303,16 +313,17 @@ export function LeadsPage() {
                     </Card>
                 </div>
 
-                {/* Kanban Board - Full viewport width with scroll */}
+                {/* Kanban Board - Flexible layout with auto-fit */}
                 <div className="pb-6">
                     <DragDropContext onDragEnd={handleDragEnd}>
-                        <div className="flex gap-4 overflow-x-auto pb-4 snap-x snap-mandatory px-4 sm:px-0">
+                        <div className="flex gap-4 overflow-x-auto lg:overflow-x-visible pb-4 px-4 sm:px-0 scrollbar-hide">
                             {kanbanColumns.map(column => (
-                                <div key={column.id} className="w-[90vw] sm:w-80 shrink-0 snap-center first:pl-0 last:pr-0">
+                                <div key={column.id} className="flex-1 min-w-[280px] lg:min-w-0">
                                     <KanbanColumn
                                         column={column}
                                         leads={leadsByStatus[column.id] || []}
                                         onCardClick={(lead) => navigate(`/leads/${lead.id}`)}
+                                        onDeleteLead={handleDeleteLead}
                                     />
                                 </div>
                             ))}

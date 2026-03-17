@@ -7,13 +7,14 @@ interface KanbanColumnProps {
     column: KanbanColumnConfig;
     leads: Lead[];
     onCardClick: (lead: Lead) => void;
+    onDeleteLead?: (id: string) => void;
 }
 
-export function KanbanColumn({ column, leads, onCardClick }: KanbanColumnProps) {
+export function KanbanColumn({ column, leads, onCardClick, onDeleteLead }: KanbanColumnProps) {
     const Icon = column.icon;
 
     return (
-        <div className="flex flex-col flex-1 min-w-[200px]">
+        <div className="flex flex-col h-full min-w-0">
             {/* Column Header */}
             <div className={`flex items-center gap-2 px-3 py-2.5 rounded-t-lg ${column.bgColor} ${column.borderColor} border border-b-0`}>
                 <div className={`p-1.5 rounded-md ${column.color}`}>
@@ -40,6 +41,7 @@ export function KanbanColumn({ column, leads, onCardClick }: KanbanColumnProps) 
                                 lead={lead}
                                 index={index}
                                 onClick={() => onCardClick(lead)}
+                                onDelete={onDeleteLead}
                             />
                         ))}
                         {provided.placeholder}
