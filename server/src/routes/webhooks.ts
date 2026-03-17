@@ -135,28 +135,43 @@ router.get('/health', (req: Request, res: Response) => {
 // ============================================================
 
 async function handleLeadCreate(data: any) {
-    const { name, phone, email, source, company, address, notes, assigned_to, lead_type } = data;
+    const { 
+        name, phone, email, source, company, address, notes, assigned_to, lead_type,
+        fb_thread_id, pancake_conversation_id, facebook_name, avatar_url,
+        last_message_text, last_message_time, last_actor
+    } = data;
 
-    if (!name || !phone) {
-        throw new ApiError('Lead cần có ít nhất "name" và "phone"', 400);
+    if (!name && !fb_thread_id && !pancake_conversation_id) {
+        throw new ApiError('Lead cần có ít nhất tên hoặc thông tin định danh (Facebook ID/Pancake ID)', 400);
     }
 
-    // Kiểm tra lead đã tồn tại chưa (theo phone)
-    const { data: existing } = await supabaseAdmin
-        .from('leads')
-        .select('id')
-        .eq('phone', phone)
-        .maybeSingle();
+    // 1. Kiểm tra lead đã tồn tại chưa (Duplicate Check)
+    let query = supabaseAdmin.from('leads').select('id, assigned_to');
+    
+    if (phone) {
+        query = query.eq('phone', phone);
+    } else if (fb_thread_id) {
+        query = query.eq('fb_thread_id', fb_thread_id);
+    } else if (pancake_conversation_id) {
+        query = query.eq('pancake_conversation_id', pancake_conversation_id);
+    } else {
+        // Nếu không có phone/fb_id thì không thể duplicate check chính xác, tạo mới luôn
+    }
+
+    const { data: existing } = await query.maybeSingle();
 
     if (existing) {
-        return { message: 'Lead với số điện thoại này đã tồn tại', lead_id: existing.id, skipped: true };
+        // Nếu đã tồn tại, chuyển sang update thay vì skip hoàn toàn (hoặc chỉ skip tạo mới)
+        console.log(`[Webhook] Lead đã tồn tại (ID: ${existing.id}), chuyển sang update...`);
+        return await handleLeadUpdate({ id: existing.id, ...data });
     }
 
+    // 2. Tạo Lead mới
     const { data: lead, error } = await supabaseAdmin
         .from('leads')
         .insert({
-            name,
-            phone,
+            name: name || facebook_name || 'Khách hàng mới',
+            phone: phone || null,
             email: email || null,
             source: source || 'n8n',
             company: company || null,
@@ -165,6 +180,17 @@ async function handleLeadCreate(data: any) {
             status: 'new',
             assigned_to: assigned_to || null,
             lead_type: lead_type || 'individual',
+            fb_thread_id: fb_thread_id || null,
+            pancake_conversation_id: pancake_conversation_id || null,
+            fb_profile_name: facebook_name || null,
+            facebook_name: facebook_name || null,
+            fb_profile_pic: avatar_url || null,
+            avatar_url: avatar_url || null,
+            last_message_text: last_message_text || null,
+            last_message_time: last_message_time || new Date().toISOString(),
+            last_actor: last_actor || null,
+            t_last_inbound: last_actor === 'lead' ? new Date().toISOString() : null,
+            t_last_outbound: last_actor === 'sale' ? new Date().toISOString() : null,
         })
         .select()
         .single();
@@ -173,38 +199,88 @@ async function handleLeadCreate(data: any) {
         throw new ApiError('Lỗi khi tạo lead: ' + error.message, 500);
     }
 
+    // 3. Log tin nhắn đầu tiên nếu có
+    if (last_message_text) {
+        await logLeadMessage(lead.id, {
+            content: last_message_text,
+            sender_type: last_actor || 'lead',
+            sender_name: last_actor === 'lead' ? (name || facebook_name) : 'Sale',
+            created_at: last_message_time
+        });
+    }
+
     return { lead };
 }
 
 async function handleLeadUpdate(data: any) {
-    const { id, phone, ...updateFields } = data;
+    const { 
+        id, phone, fb_thread_id, pancake_conversation_id, 
+        last_message_text, last_message_time, last_actor,
+        status, pipeline_stage, assigned_to, ...otherFields 
+    } = data;
 
-    // Tìm lead bằng id hoặc phone
+    // 1. Tìm leadId
     let leadId = id;
+    let currentLead: any = null;
 
-    if (!leadId && phone) {
-        const { data: existing } = await supabaseAdmin
-            .from('leads')
-            .select('id')
-            .eq('phone', phone)
-            .maybeSingle();
-
-        if (!existing) {
-            throw new ApiError('Không tìm thấy lead với số điện thoại: ' + phone, 404);
+    if (!leadId) {
+        let query = supabaseAdmin.from('leads').select('id, assigned_to, name, facebook_name');
+        if (phone) query = query.eq('phone', phone);
+        else if (fb_thread_id) query = query.eq('fb_thread_id', fb_thread_id);
+        else if (pancake_conversation_id) query = query.eq('pancake_conversation_id', pancake_conversation_id);
+        
+        const { data: found } = await query.maybeSingle();
+        if (found) {
+            leadId = found.id;
+            currentLead = found;
         }
-        leadId = existing.id;
     }
 
     if (!leadId) {
-        throw new ApiError('Cần có "id" hoặc "phone" để tìm lead cần cập nhật', 400);
+        throw new ApiError('Không tìm thấy lead để cập nhật', 404);
+    }
+
+    // 2. Lấy thông tin hiện tại nếu chưa có (để check ownership)
+    if (!currentLead) {
+        const { data: found } = await supabaseAdmin
+            .from('leads')
+            .select('id, assigned_to, name, facebook_name')
+            .eq('id', leadId)
+            .single();
+        currentLead = found;
+    }
+
+    // 3. Chuẩn bị dữ liệu update
+    const updateData: any = {
+        ...otherFields,
+        updated_at: new Date().toISOString(),
+    };
+
+    if (status) updateData.status = status;
+    if (pipeline_stage) updateData.pipeline_stage = pipeline_stage;
+    
+    // Logic Ownership: Chỉ gán khi lead chưa có chủ
+    if (assigned_to && !currentLead.assigned_to) {
+        updateData.assigned_to = assigned_to;
+        updateData.assign_state = 'assigned';
+    }
+
+    // Cập nhật thông tin tin nhắn cuối và SLA
+    if (last_message_text) {
+        updateData.last_message_text = last_message_text;
+        updateData.last_message_time = last_message_time || new Date().toISOString();
+        updateData.last_actor = last_actor;
+
+        if (last_actor === 'lead') {
+            updateData.t_last_inbound = updateData.last_message_time;
+        } else if (last_actor === 'sale') {
+            updateData.t_last_outbound = updateData.last_message_time;
+        }
     }
 
     const { data: lead, error } = await supabaseAdmin
         .from('leads')
-        .update({
-            ...updateFields,
-            updated_at: new Date().toISOString(),
-        })
+        .update(updateData)
         .eq('id', leadId)
         .select()
         .single();
@@ -213,7 +289,41 @@ async function handleLeadUpdate(data: any) {
         throw new ApiError('Lỗi khi cập nhật lead: ' + error.message, 500);
     }
 
+    // 4. Lưu lịch sử tin nhắn
+    if (last_message_text) {
+        await logLeadMessage(leadId, {
+            content: last_message_text,
+            sender_type: last_actor || 'lead',
+            sender_name: last_actor === 'lead' ? (currentLead?.name || currentLead?.facebook_name) : 'Sale',
+            created_at: last_message_time
+        });
+    }
+
     return { lead };
+}
+
+/**
+ * Helper: Lưu lịch sử tin nhắn vào bảng lead_messages
+ */
+async function logLeadMessage(leadId: string, messageData: any) {
+    try {
+        const { content, sender_type, sender_name, created_at, message_id, message_type, metadata } = messageData;
+        
+        await supabaseAdmin
+            .from('lead_messages')
+            .insert({
+                lead_id: leadId,
+                content,
+                sender_type,
+                sender_name: sender_name || null,
+                message_id: message_id || null,
+                message_type: message_type || 'text',
+                metadata: metadata || {},
+                created_at: created_at || new Date().toISOString()
+            });
+    } catch (err) {
+        console.error('[Webhook] Lỗi khi lưu lead_messages:', err);
+    }
 }
 
 async function handleCustomerCreate(data: any) {
