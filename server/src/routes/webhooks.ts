@@ -134,6 +134,35 @@ router.get('/health', (req: Request, res: Response) => {
 // Handlers cho từng loại event
 // ============================================================
 
+/**
+ * Helper: Kiểm tra chuỗi có phải UUID không
+ */
+const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
+
+/**
+ * Helper: Tìm UUID nhân viên dựa trên Họ tên
+ */
+async function resolveUserByName(nameOrId: string): Promise<string | null> {
+    if (!nameOrId) return null;
+    
+    // Nếu đã là UUID thì dùng luôn
+    if (isUUID(nameOrId)) return nameOrId;
+
+    // Tìm kiếm trong bảng users theo cột name
+    const { data, error } = await supabaseAdmin
+        .from('users')
+        .select('id')
+        .eq('name', nameOrId)
+        .maybeSingle();
+
+    if (error || !data) {
+        console.warn(`[Webhook] Không tìm thấy hoặc có nhiều user với tên: ${nameOrId}`);
+        return null;
+    }
+    
+    return data.id;
+}
+
 async function handleLeadCreate(data: any) {
     const { 
         name, phone, email, source, company, address, notes, assigned_to, lead_type,
@@ -166,7 +195,10 @@ async function handleLeadCreate(data: any) {
         return await handleLeadUpdate({ id: existing.id, ...data });
     }
 
-    // 2. Tạo Lead mới
+    // 2. Resolve assigned_to (Name -> UUID)
+    const resolvedAssignedTo = await resolveUserByName(assigned_to);
+
+    // 3. Tạo Lead mới
     const { data: lead, error } = await supabaseAdmin
         .from('leads')
         .insert({
@@ -178,7 +210,7 @@ async function handleLeadCreate(data: any) {
             address: address || null,
             notes: notes || null,
             status: 'new',
-            assigned_to: assigned_to || null,
+            assigned_to: resolvedAssignedTo,
             lead_type: lead_type || 'individual',
             fb_thread_id: fb_thread_id || null,
             pancake_conversation_id: pancake_conversation_id || null,
@@ -261,8 +293,11 @@ async function handleLeadUpdate(data: any) {
     
     // Logic Ownership: Chỉ gán khi lead chưa có chủ
     if (assigned_to && !currentLead.assigned_to) {
-        updateData.assigned_to = assigned_to;
-        updateData.assign_state = 'assigned';
+        const resolvedId = await resolveUserByName(assigned_to);
+        if (resolvedId) {
+            updateData.assigned_to = resolvedId;
+            updateData.assign_state = 'assigned';
+        }
     }
 
     // Cập nhật thông tin tin nhắn cuối và SLA
