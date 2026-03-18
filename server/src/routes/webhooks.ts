@@ -262,6 +262,15 @@ async function handleLeadUpsert(data: any) {
         });
     }
 
+    // 6. Log gợi ý AI nếu có
+    if (ai_suggested_reply) {
+        await logLeadActivity(lead.id, {
+            type: 'ai_suggestion',
+            content: ai_suggested_reply,
+            userName: 'AI Assistant'
+        });
+    }
+
     // 6. Log tin nhắn đầu tiên nếu có
     if (last_message_text) {
         await logLeadMessage(lead.id, {
@@ -324,7 +333,16 @@ async function handleLeadUpdate(data: any) {
 
     if (status) updateData.status = status;
     if (pipeline_stage) updateData.pipeline_stage = pipeline_stage;
-    if (ai_suggested_reply) updateData.ai_suggested_reply = ai_suggested_reply;
+    if (ai_suggested_reply) {
+        updateData.ai_suggested_reply = ai_suggested_reply;
+
+        // Log gợi ý AI
+        await logLeadActivity(leadId, {
+            type: 'ai_suggestion',
+            content: ai_suggested_reply,
+            userName: 'AI Assistant'
+        });
+    }
     if (pancake_customer_id) updateData.pancake_customer_id = pancake_customer_id;
     
     // Logic Ownership: Chỉ gán khi lead chưa có chủ

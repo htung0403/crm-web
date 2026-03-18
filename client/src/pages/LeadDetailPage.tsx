@@ -938,7 +938,8 @@ export function LeadDetailPage() {
                                                                 activity.activity_type === 'owner_assigned' ? 'bg-indigo-500' :
                                                                     activity.activity_type === 'customer_message' ? 'bg-cyan-500' :
                                                                         activity.activity_type === 'sale_reply' ? 'bg-emerald-500' :
-                                                                            'bg-green-500'
+                                                                            activity.activity_type === 'ai_suggestion' ? 'bg-purple-500' :
+                                                                                'bg-green-500'
                                                             }`} />
                                                         {index < activities.length - 1 && (
                                                             <div className="w-0.5 h-full bg-border absolute top-4" />
@@ -951,7 +952,8 @@ export function LeadDetailPage() {
                                                             activity.activity_type === 'lead_created' ||
                                                             activity.activity_type === 'owner_assigned' ||
                                                             activity.activity_type === 'customer_message' ||
-                                                            activity.activity_type === 'sale_reply') ? (
+                                                            activity.activity_type === 'sale_reply' ||
+                                                            activity.activity_type === 'ai_suggestion') ? (
                                                             <div className="space-y-2">
                                                                 <div className="flex items-center gap-2 mb-1">
                                                                     <span className="text-xs font-medium text-primary">
@@ -963,14 +965,16 @@ export function LeadDetailPage() {
                                                                             activity.activity_type === 'owner_assigned' ? 'border-indigo-200 text-indigo-700 bg-indigo-50' :
                                                                                 activity.activity_type === 'customer_message' ? 'border-cyan-200 text-cyan-700 bg-cyan-50' :
                                                                                     activity.activity_type === 'sale_reply' ? 'border-emerald-200 text-emerald-700 bg-emerald-50' :
-                                                                                        'border-blue-200 text-blue-700 bg-blue-50'
+                                                                                        activity.activity_type === 'ai_suggestion' ? 'border-purple-200 text-purple-700 bg-purple-50 font-bold' :
+                                                                                            'border-blue-200 text-blue-700 bg-blue-50'
                                                                             }`}
                                                                     >
                                                                         {activity.activity_type === 'lead_created' ? 'Tạo Lead' :
                                                                             activity.activity_type === 'owner_assigned' ? 'Gán Sale' :
                                                                                 activity.activity_type === 'customer_message' ? 'Khách nhắn' :
                                                                                     activity.activity_type === 'sale_reply' ? 'Sale trả lời' :
-                                                                                        'Đổi trạng thái'
+                                                                                        activity.activity_type === 'ai_suggestion' ? '✨ Gợi ý AI' :
+                                                                                            'Đổi trạng thái'
                                                                         }
                                                                     </Badge>
                                                                 </div>
@@ -992,9 +996,9 @@ export function LeadDetailPage() {
                                                                         </div>
                                                                     </>
                                                                 ) : (
-                                                                    <div className="bg-muted/30 rounded-lg py-2 px-3 border border-muted/50">
+                                                                    <div className={`rounded-lg py-2 px-3 border ${activity.activity_type === 'ai_suggestion' ? 'bg-purple-50/50 border-purple-100 italic' : 'bg-muted/30 border-muted/50'}`}>
                                                                         <p className="text-sm font-medium mb-1">
-                                                                            {activity.created_by_name || (activity.activity_type === 'customer_message' ? 'Khách hàng' : 'Hệ thống')}
+                                                                            {activity.created_by_name || (activity.activity_type === 'customer_message' ? 'Khách hàng' : (activity.activity_type === 'ai_suggestion' ? 'AI Assistant' : 'Hệ thống'))}
                                                                         </p>
                                                                         <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
                                                                             {activity.content}
