@@ -216,7 +216,6 @@ async function handleLeadCreate(data: any) {
             pancake_conversation_id: pancake_conversation_id || null,
             fb_profile_name: facebook_name || null,
             facebook_name: facebook_name || null,
-            fb_profile_pic: avatar_url || null,
             avatar_url: avatar_url || null,
             last_message_text: last_message_text || null,
             last_message_time: last_message_time || new Date().toISOString(),
@@ -231,7 +230,34 @@ async function handleLeadCreate(data: any) {
         throw new ApiError('Lỗi khi tạo lead: ' + error.message, 500);
     }
 
-    // 3. Log tin nhắn đầu tiên nếu có
+    // 3. Log sự kiện tạo lead
+    await logLeadActivity(lead.id, {
+        type: 'lead_created',
+        content: `Lead được tạo từ nguồn ${source || 'Pancake'}`,
+        userName: 'Hệ thống'
+    });
+
+    // 4. Log sự kiện gán Sale nếu có
+    if (resolvedAssignedTo) {
+        await logLeadActivity(lead.id, {
+            type: 'owner_assigned',
+            content: `Lead được gán cho ${assigned_to}`,
+            userId: resolvedAssignedTo,
+            userName: assigned_to
+        });
+    }
+
+    // 5. Log ghi chú ban đầu nếu có
+    if (notes) {
+        await logLeadActivity(lead.id, {
+            type: 'note',
+            content: notes,
+            userId: resolvedAssignedTo || undefined,
+            userName: assigned_to && !isUUID(assigned_to) ? assigned_to : 'n8n'
+        });
+    }
+
+    // 6. Log tin nhắn đầu tiên nếu có
     if (last_message_text) {
         await logLeadMessage(lead.id, {
             content: last_message_text,
@@ -282,9 +308,11 @@ async function handleLeadUpdate(data: any) {
         currentLead = found;
     }
 
-    // 3. Chuẩn bị dữ liệu update
+    // 3. Chuẩn bị dữ liệu update (Bỏ notes ra khỏi update trực tiếp)
+    const { notes: incomingNotes, ...updateFields } = otherFields;
+
     const updateData: any = {
-        ...otherFields,
+        ...updateFields,
         updated_at: new Date().toISOString(),
     };
 
@@ -297,6 +325,14 @@ async function handleLeadUpdate(data: any) {
         if (resolvedId) {
             updateData.assigned_to = resolvedId;
             updateData.assign_state = 'assigned';
+
+            // Log sự kiện gán Sale
+            await logLeadActivity(leadId, {
+                type: 'owner_assigned',
+                content: `Lead được gán cho ${assigned_to}`,
+                userId: resolvedId,
+                userName: assigned_to
+            });
         }
     }
 
@@ -308,8 +344,22 @@ async function handleLeadUpdate(data: any) {
 
         if (last_actor === 'lead') {
             updateData.t_last_inbound = updateData.last_message_time;
+            
+            // Log tin nhắn khách
+            await logLeadActivity(leadId, {
+                type: 'customer_message',
+                content: last_message_text,
+                userName: currentLead.name || currentLead.facebook_name || 'Khách hàng'
+            });
         } else if (last_actor === 'sale') {
             updateData.t_last_outbound = updateData.last_message_time;
+
+            // Log câu trả lời của Sale
+            await logLeadActivity(leadId, {
+                type: 'sale_reply',
+                content: last_message_text,
+                userName: 'Sale'
+            });
         }
     }
 
@@ -324,7 +374,17 @@ async function handleLeadUpdate(data: any) {
         throw new ApiError('Lỗi khi cập nhật lead: ' + error.message, 500);
     }
 
-    // 4. Lưu lịch sử tin nhắn
+    // 4. Lưu ghi chú vào lịch sử hoạt động nếu có
+    if (incomingNotes) {
+        await logLeadActivity(leadId, {
+            type: 'note',
+            content: incomingNotes,
+            userId: currentLead?.assigned_to || undefined,
+            userName: 'n8n'
+        });
+    }
+
+    // 5. Lưu lịch sử tin nhắn
     if (last_message_text) {
         await logLeadMessage(leadId, {
             content: last_message_text,
@@ -440,6 +500,35 @@ async function handleOrderCreate(data: any) {
     }
 
     return { order };
+}
+
+/**
+ * Helper: Lưu lịch sử hoạt động vào bảng lead_activities
+ */
+async function logLeadActivity(leadId: string, activityData: {
+    type: string;
+    content: string;
+    userId?: string;
+    userName?: string;
+    metadata?: any;
+}) {
+    try {
+        const { type, content, userId, userName, metadata } = activityData;
+        
+        await supabaseAdmin
+            .from('lead_activities')
+            .insert({
+                lead_id: leadId,
+                activity_type: type,
+                content: content,
+                created_by: userId || null,
+                created_by_name: userName || 'Hệ thống',
+                metadata: metadata || {},
+                created_at: new Date().toISOString()
+            });
+    } catch (err) {
+        console.error('[Webhook] Lỗi khi lưu lead_activities:', err);
+    }
 }
 
 // ============================================================

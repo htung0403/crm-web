@@ -673,41 +673,41 @@ export function LeadDetailPage() {
                         </CardHeader>
                         <CardContent className="space-y-3">
                             {/* Facebook Link */}
-                            <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Link Facebook</Label>
+                            <div className="flex items-center justify-between py-1 border-b border-slate-50 last:border-0">
+                                <Label className="text-xs text-muted-foreground font-normal shrink-0">Link Facebook</Label>
                                 {isEditingInfo ? (
                                     <Input
                                         value={editFbLink}
                                         onChange={(e) => setEditFbLink(e.target.value)}
                                         placeholder="https://facebook.com/..."
-                                        className="h-9"
+                                        className="h-7 text-xs max-w-[200px]"
                                     />
                                 ) : (
-                                    <p className="text-sm font-medium truncate">
+                                    <p className="text-xs font-medium truncate ml-4 max-w-[200px] text-blue-600">
                                         {lead.fb_link || lead.link_message || '-'}
                                     </p>
                                 )}
                             </div>
 
                             {/* FB Profile Name */}
-                            <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Tên Facebook</Label>
+                            <div className="flex items-center justify-between py-1 border-b border-slate-50 last:border-0">
+                                <Label className="text-xs text-muted-foreground font-normal shrink-0">Tên Facebook</Label>
                                 {isEditingInfo ? (
                                     <Input
                                         value={editFbName}
                                         onChange={(e) => setEditFbName(e.target.value)}
                                         placeholder="Tên profile"
-                                        className="h-9"
+                                        className="h-7 text-xs max-w-[200px]"
                                     />
                                 ) : (
-                                    <p className="text-sm font-medium">{lead.fb_profile_name || '-'}</p>
+                                    <p className="text-xs font-medium truncate ml-4 max-w-[200px]">{lead.fb_profile_name || '-'}</p>
                                 )}
                             </div>
 
                             {/* FB Thread ID */}
-                            <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Mã hội thoại (Thread ID)</Label>
-                                <p className="text-sm font-mono text-slate-600">{lead.fb_thread_id || '-'}</p>
+                            <div className="flex items-center justify-between py-1 border-b border-slate-50 last:border-0">
+                                <Label className="text-xs text-muted-foreground font-normal shrink-0">Mã hội thoại (Thread ID)</Label>
+                                <p className="text-xs font-mono text-slate-500 ml-4 truncate max-w-[200px]">{lead.fb_thread_id || '-'}</p>
                             </div>
 
                             {/* Next Follow-up */}
@@ -933,9 +933,12 @@ export function LeadDetailPage() {
                                                 <div className="flex gap-4">
                                                     {/* Timeline indicator */}
                                                     <div className="relative flex flex-col items-center">
-                                                        <div className={`w-3 h-3 rounded-full shrink-0 ${activity.activity_type === 'status_change'
-                                                            ? 'bg-blue-500'
-                                                            : 'bg-green-500'
+                                                        <div className={`w-3 h-3 rounded-full shrink-0 ${activity.activity_type === 'status_change' ? 'bg-blue-500' :
+                                                            activity.activity_type === 'lead_created' ? 'bg-orange-500' :
+                                                                activity.activity_type === 'owner_assigned' ? 'bg-indigo-500' :
+                                                                    activity.activity_type === 'customer_message' ? 'bg-cyan-500' :
+                                                                        activity.activity_type === 'sale_reply' ? 'bg-emerald-500' :
+                                                                            'bg-green-500'
                                                             }`} />
                                                         {index < activities.length - 1 && (
                                                             <div className="w-0.5 h-full bg-border absolute top-4" />
@@ -944,29 +947,60 @@ export function LeadDetailPage() {
 
                                                     {/* Content */}
                                                     <div className="flex-1 min-w-0 pb-2">
-                                                        {activity.activity_type === 'status_change' ? (
+                                                        {(activity.activity_type === 'status_change' ||
+                                                            activity.activity_type === 'lead_created' ||
+                                                            activity.activity_type === 'owner_assigned' ||
+                                                            activity.activity_type === 'customer_message' ||
+                                                            activity.activity_type === 'sale_reply') ? (
                                                             <div className="space-y-2">
                                                                 <div className="flex items-center gap-2 mb-1">
                                                                     <span className="text-xs font-medium text-primary">
                                                                         {formatDateTime(activity.created_at)}
                                                                     </span>
-                                                                    <Badge variant="outline" className="text-xs">
-                                                                        Đổi trạng thái
+                                                                    <Badge
+                                                                        variant="outline"
+                                                                        className={`text-[10px] h-4 leading-none uppercase ${activity.activity_type === 'lead_created' ? 'border-orange-200 text-orange-700 bg-orange-50' :
+                                                                            activity.activity_type === 'owner_assigned' ? 'border-indigo-200 text-indigo-700 bg-indigo-50' :
+                                                                                activity.activity_type === 'customer_message' ? 'border-cyan-200 text-cyan-700 bg-cyan-50' :
+                                                                                    activity.activity_type === 'sale_reply' ? 'border-emerald-200 text-emerald-700 bg-emerald-50' :
+                                                                                        'border-blue-200 text-blue-700 bg-blue-50'
+                                                                            }`}
+                                                                    >
+                                                                        {activity.activity_type === 'lead_created' ? 'Tạo Lead' :
+                                                                            activity.activity_type === 'owner_assigned' ? 'Gán Sale' :
+                                                                                activity.activity_type === 'customer_message' ? 'Khách nhắn' :
+                                                                                    activity.activity_type === 'sale_reply' ? 'Sale trả lời' :
+                                                                                        'Đổi trạng thái'
+                                                                        }
                                                                     </Badge>
                                                                 </div>
-                                                                <p className="text-sm">
-                                                                    <span className="font-medium">{activity.created_by_name || 'Hệ thống'}</span>
-                                                                    <span className="text-muted-foreground"> đã chuyển trạng thái</span>
-                                                                </p>
-                                                                <div className="flex items-center gap-2 flex-wrap">
-                                                                    <Badge variant="outline" className="text-xs">
-                                                                        {getStatusLabel(activity.old_status)}
-                                                                    </Badge>
-                                                                    <span className="text-muted-foreground">→</span>
-                                                                    <Badge className="text-xs">
-                                                                        {getStatusLabel(activity.new_status)}
-                                                                    </Badge>
-                                                                </div>
+
+                                                                {activity.activity_type === 'status_change' ? (
+                                                                    <>
+                                                                        <p className="text-sm">
+                                                                            <span className="font-medium">{activity.created_by_name || 'Hệ thống'}</span>
+                                                                            <span className="text-muted-foreground"> đã chuyển trạng thái</span>
+                                                                        </p>
+                                                                        <div className="flex items-center gap-2 flex-wrap">
+                                                                            <Badge variant="outline" className="text-xs">
+                                                                                {getStatusLabel(activity.old_status)}
+                                                                            </Badge>
+                                                                            <span className="text-muted-foreground">→</span>
+                                                                            <Badge className="text-xs">
+                                                                                {getStatusLabel(activity.new_status)}
+                                                                            </Badge>
+                                                                        </div>
+                                                                    </>
+                                                                ) : (
+                                                                    <div className="bg-muted/30 rounded-lg py-2 px-3 border border-muted/50">
+                                                                        <p className="text-sm font-medium mb-1">
+                                                                            {activity.created_by_name || (activity.activity_type === 'customer_message' ? 'Khách hàng' : 'Hệ thống')}
+                                                                        </p>
+                                                                        <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+                                                                            {activity.content}
+                                                                        </p>
+                                                                    </div>
+                                                                )}
                                                             </div>
                                                         ) : (
                                                             <div className="space-y-2">
