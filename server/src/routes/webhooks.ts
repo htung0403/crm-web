@@ -167,7 +167,7 @@ async function handleLeadUpsert(data: any) {
         name, phone, email, source, company, address, notes, assigned_to, lead_type,
         fb_thread_id, pancake_conversation_id, facebook_name, avatar_url,
         last_message_text, last_message_time, last_actor,
-        ai_suggested_reply, customer_id: pancake_customer_id
+        ai_suggested_reply, pancake_customer_id
     } = data;
 
     if (!name && !fb_thread_id && !pancake_conversation_id) {
@@ -219,6 +219,7 @@ async function handleLeadUpsert(data: any) {
     if (existing) {
         // Nếu đã tồn tại, chuyển sang update thay vì skip hoàn toàn (hoặc chỉ skip tạo mới)
         console.log(`[Webhook] Lead đã tồn tại (ID: ${existing.id}), chuyển sang update...`);
+        // Quan trọng: Phải truyền đúng object data từ n8n vào
         return await handleLeadUpdate({ id: existing.id, ...data });
     }
 
@@ -311,10 +312,23 @@ async function handleLeadUpsert(data: any) {
 
 async function handleLeadUpdate(data: any) {
     const { 
-        id, phone, fb_thread_id, pancake_conversation_id, pancake_customer_id,
-        last_message_text, last_message_time, last_actor,
-        status, pipeline_stage, assigned_to, ai_suggested_reply, ...otherFields 
+        id, 
+        phone: incomingPhone, 
+        fb_thread_id, 
+        pancake_conversation_id, 
+        pancake_customer_id, 
+        last_message_text, 
+        last_message_time, 
+        last_actor,
+        status, 
+        pipeline_stage, 
+        assigned_to, 
+        ai_suggested_reply, 
+        ...otherFields 
     } = data;
+
+    // Log để kiểm tra dữ liệu nhận được từ n8n (Debug)
+    console.log(`[Webhook] Update Lead ID: ${id || data.id}, Phone: ${incomingPhone || data.phone}`);
 
     // 1. Tìm leadId
     let leadId = id;
@@ -322,8 +336,8 @@ async function handleLeadUpdate(data: any) {
 
     if (!leadId) {
         let query = supabaseAdmin.from('leads').select('id, assigned_to, name, facebook_name');
-        if (phone) query = query.eq('phone', phone);
-        else if (pancake_customer_id) query = query.eq('pancake_customer_id', pancake_customer_id);
+        if (data.phone) query = query.eq('phone', data.phone);
+        else if (data.pancake_customer_id) query = query.eq('pancake_customer_id', data.pancake_customer_id);
         else if (fb_thread_id) query = query.eq('fb_thread_id', fb_thread_id);
         else if (pancake_conversation_id) query = query.eq('pancake_conversation_id', pancake_conversation_id);
         
@@ -360,7 +374,7 @@ async function handleLeadUpdate(data: any) {
     };
 
     // Các trường định danh và meta quan trọng
-    addIfValid('phone', phone);
+    addIfValid('phone', incomingPhone);
     addIfValid('fb_thread_id', fb_thread_id);
     addIfValid('pancake_conversation_id', pancake_conversation_id);
     addIfValid('pancake_customer_id', pancake_customer_id);
