@@ -166,7 +166,8 @@ async function handleLeadUpsert(data: any) {
     const { 
         name, phone, email, source, company, address, notes, assigned_to, lead_type,
         fb_thread_id, pancake_conversation_id, facebook_name, avatar_url,
-        last_message_text, last_message_time, last_actor
+        last_message_text, last_message_time, last_actor,
+        ai_suggested_reply, customer_id: pancake_customer_id
     } = data;
 
     if (!name && !fb_thread_id && !pancake_conversation_id) {
@@ -178,6 +179,8 @@ async function handleLeadUpsert(data: any) {
     
     if (phone) {
         query = query.eq('phone', phone);
+    } else if (pancake_customer_id) {
+        query = query.eq('pancake_customer_id', pancake_customer_id);
     } else if (fb_thread_id) {
         query = query.eq('fb_thread_id', fb_thread_id);
     } else if (pancake_conversation_id) {
@@ -213,14 +216,16 @@ async function handleLeadUpsert(data: any) {
             lead_type: lead_type || 'individual',
             fb_thread_id: fb_thread_id || null,
             pancake_conversation_id: pancake_conversation_id || null,
+            pancake_customer_id: pancake_customer_id || null,
+            ai_suggested_reply: ai_suggested_reply || null,
             fb_profile_name: facebook_name || null,
             facebook_name: facebook_name || null,
             avatar_url: avatar_url || null,
             last_message_text: last_message_text || null,
             last_message_time: last_message_time || new Date().toISOString(),
             last_actor: last_actor || null,
-            t_last_inbound: last_actor === 'lead' ? new Date().toISOString() : null,
-            t_last_outbound: last_actor === 'sale' ? new Date().toISOString() : null,
+            t_last_inbound: last_actor === 'lead' ? (last_message_time || new Date().toISOString()) : null,
+            t_last_outbound: last_actor === 'sale' ? (last_message_time || new Date().toISOString()) : null,
             assign_state: resolvedAssignedTo ? 'assigned' : 'unassigned',
         })
         .select()
@@ -272,9 +277,9 @@ async function handleLeadUpsert(data: any) {
 
 async function handleLeadUpdate(data: any) {
     const { 
-        id, phone, fb_thread_id, pancake_conversation_id, 
+        id, phone, fb_thread_id, pancake_conversation_id, pancake_customer_id,
         last_message_text, last_message_time, last_actor,
-        status, pipeline_stage, assigned_to, ...otherFields 
+        status, pipeline_stage, assigned_to, ai_suggested_reply, ...otherFields 
     } = data;
 
     // 1. Tìm leadId
@@ -284,6 +289,7 @@ async function handleLeadUpdate(data: any) {
     if (!leadId) {
         let query = supabaseAdmin.from('leads').select('id, assigned_to, name, facebook_name');
         if (phone) query = query.eq('phone', phone);
+        else if (pancake_customer_id) query = query.eq('pancake_customer_id', pancake_customer_id);
         else if (fb_thread_id) query = query.eq('fb_thread_id', fb_thread_id);
         else if (pancake_conversation_id) query = query.eq('pancake_conversation_id', pancake_conversation_id);
         
@@ -318,6 +324,8 @@ async function handleLeadUpdate(data: any) {
 
     if (status) updateData.status = status;
     if (pipeline_stage) updateData.pipeline_stage = pipeline_stage;
+    if (ai_suggested_reply) updateData.ai_suggested_reply = ai_suggested_reply;
+    if (pancake_customer_id) updateData.pancake_customer_id = pancake_customer_id;
     
     // Logic Ownership: Chỉ gán khi lead chưa có chủ
     if (assigned_to && !currentLead.assigned_to) {
