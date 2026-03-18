@@ -54,11 +54,10 @@ router.post('/n8n', verifyWebhookSecret, async (req: Request, res: Response, nex
         let result: any;
 
         switch (event) {
+            case 'lead.upsert':
             case 'lead.create':
-                result = await handleLeadCreate(data);
-                break;
             case 'lead.update':
-                result = await handleLeadUpdate(data);
+                result = await handleLeadUpsert(data);
                 break;
             case 'customer.create':
                 result = await handleCustomerCreate(data);
@@ -163,7 +162,7 @@ async function resolveUserByName(nameOrId: string): Promise<string | null> {
     return data.id;
 }
 
-async function handleLeadCreate(data: any) {
+async function handleLeadUpsert(data: any) {
     const { 
         name, phone, email, source, company, address, notes, assigned_to, lead_type,
         fb_thread_id, pancake_conversation_id, facebook_name, avatar_url,
@@ -222,6 +221,7 @@ async function handleLeadCreate(data: any) {
             last_actor: last_actor || null,
             t_last_inbound: last_actor === 'lead' ? new Date().toISOString() : null,
             t_last_outbound: last_actor === 'sale' ? new Date().toISOString() : null,
+            assign_state: resolvedAssignedTo ? 'assigned' : 'unassigned',
         })
         .select()
         .single();
