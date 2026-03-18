@@ -49,15 +49,13 @@ router.post('/n8n', verifyWebhookSecret, async (req: Request, res: Response, nex
             throw new ApiError('Thiếu trường "event" hoặc "data" trong request body', 400);
         }
 
-        console.log(`[Webhook] Nhận event: ${event}`, JSON.stringify(data).substring(0, 200));
-
         let result: any;
 
         switch (event) {
             case 'lead.upsert':
             case 'lead.create':
             case 'lead.update':
-                result = await handleLeadUpsert(data);
+                result = await handleLeadUpsert(data, event);
                 break;
             case 'customer.create':
                 result = await handleCustomerCreate(data);
@@ -209,7 +207,7 @@ async function resolveUserByName(nameOrId: string): Promise<string | null> {
     return data.id;
 }
 
-async function handleLeadUpsert(data: any) {
+async function handleLeadUpsert(data: any, event?: string) {
     const {
         name, phone, email, source, company, address, notes, assigned_to, lead_type,
         fb_thread_id, pancake_conversation_id, facebook_name, avatar_url,
@@ -368,8 +366,9 @@ async function handleLeadUpdate(data: any) {
         last_message_time,
         last_actor,
         status,
-        pipeline_stage,
+        pipeline_stage: _ignored_stage, // Luôn bỏ qua pipeline_stage vì sale cập nhật thủ công
         assigned_to,
+        assign_state, // Bôi đậm trạng thái gán
         ai_suggested_reply,
         ...otherFields
     } = data;
@@ -426,7 +425,6 @@ async function handleLeadUpdate(data: any) {
     addIfValid('pancake_conversation_id', pancake_conversation_id);
     addIfValid('pancake_customer_id', pancake_customer_id);
     addIfValid('status', status);
-    addIfValid('pipeline_stage', pipeline_stage);
 
     // Các trường tự do khác
     Object.keys(otherFields).forEach(key => {
@@ -446,8 +444,21 @@ async function handleLeadUpdate(data: any) {
         });
     }
 
-    // Logic Ownership: Chỉ gán khi lead chưa có chủ
-    if (assigned_to && !currentLead.assigned_to) {
+    // Logic Ownership:
+    // 1. Trường hợp đặc biệt: Thu hồi lead (Unassign) từ n8n (Tuần tra SLA)
+    if (assign_state === 'unassigned' && assigned_to === null) {
+        updateData.assigned_to = null;
+        updateData.assign_state = 'unassigned';
+
+        // Log sự kiện thu hồi lead
+        await logLeadActivity(leadId, {
+            type: 'owner_unassigned',
+            content: `Lead đã được thu hồi và đưa về trạng thái tự do (Hệ thống quét SLA)`,
+            userName: 'Hệ thống'
+        });
+    }
+    // 2. Gán Sale mới: Chỉ gán khi lead chưa có chủ và có tên Sale mới gửi vào
+    else if (assigned_to && !currentLead.assigned_to) {
         const resolvedId = await resolveUserByName(assigned_to);
         if (resolvedId) {
             updateData.assigned_to = resolvedId;
