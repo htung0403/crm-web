@@ -348,17 +348,33 @@ async function handleLeadUpdate(data: any) {
         currentLead = found;
     }
 
-    // 3. Chuẩn bị dữ liệu update (Bỏ notes ra khỏi update trực tiếp)
-    const { notes: incomingNotes, ...updateFields } = otherFields;
-
+    // 3. Chuẩn bị dữ liệu update (Lọc bỏ các giá trị null hoặc rỗng để tránh ghi đè dữ liệu cũ)
     const updateData: any = {
-        ...updateFields,
         updated_at: new Date().toISOString(),
     };
 
-    if (status) updateData.status = status;
-    if (pipeline_stage) updateData.pipeline_stage = pipeline_stage;
-    if (ai_suggested_reply) {
+    const addIfValid = (key: string, value: any) => {
+        if (value !== undefined && value !== null && value !== "") {
+            updateData[key] = value;
+        }
+    };
+
+    // Các trường định danh và meta quan trọng
+    addIfValid('phone', phone);
+    addIfValid('fb_thread_id', fb_thread_id);
+    addIfValid('pancake_conversation_id', pancake_conversation_id);
+    addIfValid('pancake_customer_id', pancake_customer_id);
+    addIfValid('status', status);
+    addIfValid('pipeline_stage', pipeline_stage);
+    
+    // Các trường tự do khác
+    Object.keys(otherFields).forEach(key => {
+        if (key !== 'notes') {
+            addIfValid(key, otherFields[key]);
+        }
+    });
+
+    if (ai_suggested_reply && ai_suggested_reply !== "") {
         updateData.ai_suggested_reply = ai_suggested_reply;
 
         // Log gợi ý AI
@@ -368,7 +384,6 @@ async function handleLeadUpdate(data: any) {
             userName: 'AI Assistant'
         });
     }
-    if (pancake_customer_id) updateData.pancake_customer_id = pancake_customer_id;
     
     // Logic Ownership: Chỉ gán khi lead chưa có chủ
     if (assigned_to && !currentLead.assigned_to) {
@@ -426,10 +441,11 @@ async function handleLeadUpdate(data: any) {
     }
 
     // 4. Lưu ghi chú vào lịch sử hoạt động nếu có
-    if (incomingNotes) {
+    const notesFromData = data.notes; 
+    if (notesFromData && notesFromData !== "") {
         await logLeadActivity(leadId, {
             type: 'note',
-            content: incomingNotes,
+            content: notesFromData,
             userId: currentLead?.assigned_to || undefined,
             userName: 'n8n'
         });
