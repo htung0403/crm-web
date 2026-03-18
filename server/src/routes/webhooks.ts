@@ -105,11 +105,13 @@ router.get('/leads/sla', verifyWebhookSecret, async (req: Request, res: Response
             .from('leads')
             .select(`
                 id,
+                name,
+                phone,
                 t_last_inbound,
                 t_last_outbound,
                 pipeline_stage,
                 assigned_to,
-                assigned_to_user: users!leads_assigned_to_fkey(full_name)
+                assigned_to_user: users!leads_assigned_to_fkey(name)
             `)
             .eq('assign_state', 'assigned')
             .not('assigned_to', 'is', null);
@@ -121,8 +123,10 @@ router.get('/leads/sla', verifyWebhookSecret, async (req: Request, res: Response
         // Format data
         const leads = data.map((lead: any) => ({
             id: lead.id,
+            name: lead.name,
+            phone: lead.phone,
             assigned_to: lead.assigned_to,
-            assigned_to_name: lead.assigned_to_user?.full_name || 'Hệ thống',
+            assigned_to_name: lead.assigned_to_user?.name || 'Hệ thống',
             t_last_inbound: lead.t_last_inbound,
             t_last_outbound: lead.t_last_outbound,
             pipeline_stage: lead.pipeline_stage
@@ -186,7 +190,7 @@ const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab
  */
 async function resolveUserByName(nameOrId: string): Promise<string | null> {
     if (!nameOrId) return null;
-    
+
     // Nếu đã là UUID thì dùng luôn
     if (isUUID(nameOrId)) return nameOrId;
 
@@ -201,12 +205,12 @@ async function resolveUserByName(nameOrId: string): Promise<string | null> {
         console.warn(`[Webhook] Không tìm thấy hoặc có nhiều user với tên: ${nameOrId}`);
         return null;
     }
-    
+
     return data.id;
 }
 
 async function handleLeadUpsert(data: any) {
-    const { 
+    const {
         name, phone, email, source, company, address, notes, assigned_to, lead_type,
         fb_thread_id, pancake_conversation_id, facebook_name, avatar_url,
         last_message_text, last_message_time, last_actor,
@@ -354,20 +358,20 @@ async function handleLeadUpsert(data: any) {
 }
 
 async function handleLeadUpdate(data: any) {
-    const { 
-        id, 
-        phone: incomingPhone, 
-        fb_thread_id, 
-        pancake_conversation_id, 
-        pancake_customer_id, 
-        last_message_text, 
-        last_message_time, 
+    const {
+        id,
+        phone: incomingPhone,
+        fb_thread_id,
+        pancake_conversation_id,
+        pancake_customer_id,
+        last_message_text,
+        last_message_time,
         last_actor,
-        status, 
-        pipeline_stage, 
-        assigned_to, 
-        ai_suggested_reply, 
-        ...otherFields 
+        status,
+        pipeline_stage,
+        assigned_to,
+        ai_suggested_reply,
+        ...otherFields
     } = data;
 
     // Log để kiểm tra dữ liệu nhận được từ n8n (Debug)
@@ -383,7 +387,7 @@ async function handleLeadUpdate(data: any) {
         else if (data.pancake_customer_id) query = query.eq('pancake_customer_id', data.pancake_customer_id);
         else if (fb_thread_id) query = query.eq('fb_thread_id', fb_thread_id);
         else if (pancake_conversation_id) query = query.eq('pancake_conversation_id', pancake_conversation_id);
-        
+
         const { data: found } = await query.maybeSingle();
         if (found) {
             leadId = found.id;
@@ -423,7 +427,7 @@ async function handleLeadUpdate(data: any) {
     addIfValid('pancake_customer_id', pancake_customer_id);
     addIfValid('status', status);
     addIfValid('pipeline_stage', pipeline_stage);
-    
+
     // Các trường tự do khác
     Object.keys(otherFields).forEach(key => {
         if (key !== 'notes') {
@@ -441,7 +445,7 @@ async function handleLeadUpdate(data: any) {
             userName: 'AI Assistant'
         });
     }
-    
+
     // Logic Ownership: Chỉ gán khi lead chưa có chủ
     if (assigned_to && !currentLead.assigned_to) {
         const resolvedId = await resolveUserByName(assigned_to);
@@ -467,7 +471,7 @@ async function handleLeadUpdate(data: any) {
 
         if (last_actor === 'lead') {
             updateData.t_last_inbound = updateData.last_message_time;
-            
+
             // Log tin nhắn khách
             await logLeadActivity(leadId, {
                 type: 'customer_message',
@@ -498,7 +502,7 @@ async function handleLeadUpdate(data: any) {
     }
 
     // 4. Lưu ghi chú vào lịch sử hoạt động nếu có
-    const notesFromData = data.notes; 
+    const notesFromData = data.notes;
     if (notesFromData && notesFromData !== "") {
         await logLeadActivity(leadId, {
             type: 'note',
@@ -527,7 +531,7 @@ async function handleLeadUpdate(data: any) {
 async function logLeadMessage(leadId: string, messageData: any) {
     try {
         const { content, sender_type, sender_name, created_at, message_id, message_type, metadata } = messageData;
-        
+
         await supabaseAdmin
             .from('lead_messages')
             .insert({
@@ -638,7 +642,7 @@ async function logLeadActivity(leadId: string, activityData: {
 }) {
     try {
         const { type, content, userId, userName, metadata } = activityData;
-        
+
         await supabaseAdmin
             .from('lead_activities')
             .insert({
