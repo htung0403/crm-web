@@ -174,22 +174,47 @@ async function handleLeadUpsert(data: any) {
         throw new ApiError('Lead cần có ít nhất tên hoặc thông tin định danh (Facebook ID/Pancake ID)', 400);
     }
 
-    // 1. Kiểm tra lead đã tồn tại chưa (Duplicate Check)
-    let query = supabaseAdmin.from('leads').select('id, assigned_to');
-    
-    if (phone) {
-        query = query.eq('phone', phone);
-    } else if (pancake_customer_id) {
-        query = query.eq('pancake_customer_id', pancake_customer_id);
-    } else if (fb_thread_id) {
-        query = query.eq('fb_thread_id', fb_thread_id);
-    } else if (pancake_conversation_id) {
-        query = query.eq('pancake_conversation_id', pancake_conversation_id);
-    } else {
-        // Nếu không có phone/fb_id thì không thể duplicate check chính xác, tạo mới luôn
+    // 1. Kiểm tra lead đã tồn tại chưa (Duplicate Check theo ưu tiên)
+    let existing: any = null;
+
+    // Ưu tiên 1: Theo fb_thread_id
+    if (fb_thread_id) {
+        const { data } = await supabaseAdmin
+            .from('leads')
+            .select('id, assigned_to')
+            .eq('fb_thread_id', fb_thread_id)
+            .maybeSingle();
+        if (data) existing = data;
     }
 
-    const { data: existing } = await query.maybeSingle();
+    // Ưu tiên 2: Theo phone (nếu chưa tìm thấy)
+    if (!existing && phone) {
+        const { data } = await supabaseAdmin
+            .from('leads')
+            .select('id, assigned_to')
+            .eq('phone', phone)
+            .maybeSingle();
+        if (data) existing = data;
+    }
+
+    // Ưu tiên 3: Theo các ID Pancake khác (nếu vẫn chưa thấy)
+    if (!existing && pancake_customer_id) {
+        const { data } = await supabaseAdmin
+            .from('leads')
+            .select('id, assigned_to')
+            .eq('pancake_customer_id', pancake_customer_id)
+            .maybeSingle();
+        if (data) existing = data;
+    }
+
+    if (!existing && pancake_conversation_id) {
+        const { data } = await supabaseAdmin
+            .from('leads')
+            .select('id, assigned_to')
+            .eq('pancake_conversation_id', pancake_conversation_id)
+            .maybeSingle();
+        if (data) existing = data;
+    }
 
     if (existing) {
         // Nếu đã tồn tại, chuyển sang update thay vì skip hoàn toàn (hoặc chỉ skip tạo mới)
