@@ -96,6 +96,49 @@ router.post('/n8n', verifyWebhookSecret, async (req: Request, res: Response, nex
 });
 
 // ============================================================
+// GET /api/webhooks/leads/sla
+// Lấy danh sách Leads đang được gán (assigned) để kiểm tra SLA
+// ============================================================
+router.get('/leads/sla', verifyWebhookSecret, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const { data, error } = await supabaseAdmin
+            .from('leads')
+            .select(`
+                id,
+                t_last_inbound,
+                t_last_outbound,
+                pipeline_stage,
+                assigned_to,
+                assigned_to_user: users!leads_assigned_to_fkey(full_name)
+            `)
+            .eq('assign_state', 'assigned')
+            .not('assigned_to', 'is', null);
+
+        if (error) {
+            throw new ApiError('Lỗi truy vấn Leads SLA: ' + error.message, 500);
+        }
+
+        // Format data
+        const leads = data.map((lead: any) => ({
+            id: lead.id,
+            assigned_to: lead.assigned_to,
+            assigned_to_name: lead.assigned_to_user?.full_name || 'Hệ thống',
+            t_last_inbound: lead.t_last_inbound,
+            t_last_outbound: lead.t_last_outbound,
+            pipeline_stage: lead.pipeline_stage
+        }));
+
+        res.json({
+            status: 'success',
+            count: leads.length,
+            data: leads
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+// ============================================================
 // POST /api/webhooks/n8n/raw
 // Endpoint nhận raw data từ n8n (không cần format event/data)
 // Data sẽ được lưu trực tiếp vào bảng webhook_logs
