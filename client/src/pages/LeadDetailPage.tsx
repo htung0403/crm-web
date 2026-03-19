@@ -4,7 +4,7 @@ import {
     ArrowLeft, Phone, MessageCircle, Copy, Check, ArrowRightLeft,
     Loader2, User, Building, Calendar, Tag, UserCheck, Mail,
     Clock, MessageSquare, TrendingUp, Timer, Facebook, ExternalLink, CalendarClock,
-    ShoppingBag, Globe,
+    ShoppingBag, Globe, Zap, AlertTriangle, Flame,
     Image as ImageIcon,
     Smile,
     Paperclip,
@@ -651,8 +651,104 @@ export function LeadDetailPage() {
                             )}
                         </CardContent>
                     </Card>
+ 
+                    {/* AI Analysis Card */}
+                    {(lead.lead_score !== undefined || lead.loss_risk || lead.next_action) && (
+                        <Card className="border-indigo-100 bg-gradient-to-br from-indigo-50/50 to-white overflow-hidden shadow-sm">
+                            <CardHeader className="pb-3 border-b border-indigo-50 bg-indigo-50/30">
+                                <CardTitle className="text-xs font-extrabold flex items-center justify-between text-indigo-800 uppercase tracking-wider">
+                                    <div className="flex items-center gap-2">
+                                        <Zap className="h-4 w-4 fill-indigo-500 text-indigo-500" />
+                                        Phân tích AI từ n8n
+                                    </div>
+                                    {lead.lead_score !== undefined && lead.lead_score >= 80 && (
+                                        <Badge className="bg-red-500 hover:bg-red-600 animate-pulse border-none text-[10px]">🔥 HOT LEAD</Badge>
+                                    )}
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="p-4 space-y-5">
+                                <div className="grid grid-cols-2 gap-4">
+                                    {/* Lead Heat Score */}
+                                    <div className="space-y-2">
+                                        <p className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                                            <TrendingUp className="h-3 w-3" />
+                                            Lead Heat Score
+                                        </p>
+                                        <div className="flex items-center gap-2">
+                                            <div className="relative flex items-center justify-center">
+                                                <Flame className={`h-8 w-8 ${
+                                                    (lead.lead_score || 0) >= 80 ? 'text-red-500 fill-red-500 animate-bounce' :
+                                                    (lead.lead_score || 0) >= 60 ? 'text-orange-500 fill-orange-500' :
+                                                    'text-blue-400 fill-blue-500/20'
+                                                }`} />
+                                                <span className="absolute text-[10px] font-black text-white p-1">
+                                                    {lead.lead_score || 0}
+                                                </span>
+                                            </div>
+                                            <div className="flex-1 space-y-1">
+                                                <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                                                    <div 
+                                                        className={`h-full transition-all duration-1000 ${
+                                                            (lead.lead_score || 0) >= 80 ? 'bg-red-500' :
+                                                            (lead.lead_score || 0) >= 60 ? 'bg-orange-500' :
+                                                            'bg-blue-400'
+                                                        }`}
+                                                        style={{ width: `${lead.lead_score || 0}%` }}
+                                                    />
+                                                </div>
+                                                <p className={`text-[10px] font-bold ${
+                                                    (lead.lead_score || 0) >= 80 ? 'text-red-600' :
+                                                    (lead.lead_score || 0) >= 60 ? 'text-orange-600' :
+                                                    'text-blue-600'
+                                                }`}>
+                                                    {(lead.lead_score || 0) >= 80 ? 'Rất tiềm năng' :
+                                                     (lead.lead_score || 0) >= 60 ? 'Tiềm năng trung bình' :
+                                                     'Cần nuôi dưỡng thêm'}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Loss Risk */}
+                                    <div className="space-y-2">
+                                        <p className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                                            <AlertTriangle className="h-3 w-3" />
+                                            Nguy cơ rớt khách
+                                        </p>
+                                        <div className="pt-1">
+                                            {lead.loss_risk?.toLowerCase() === 'high' ? (
+                                                <div className="bg-red-600 text-white text-[10px] font-black px-2 py-1.5 rounded shadow-lg animate-pulse flex items-center gap-1 w-fit rotate-[-2deg]">
+                                                    <AlertTriangle className="h-3 w-3" />
+                                                    NGUY CƠ RỚT KHÁCH
+                                                </div>
+                                            ) : lead.loss_risk?.toLowerCase() === 'medium' ? (
+                                                <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">Trung bình</Badge>
+                                            ) : (
+                                                <Badge variant="outline" className="border-green-200 bg-green-50 text-green-700 text-[10px]">Rủi ro thấp</Badge>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
 
-
+                                {/* Next Best Action */}
+                                {lead.next_action && (
+                                    <div className="p-3 bg-white border-2 border-dashed border-indigo-200 rounded-xl relative overflow-hidden group hover:border-indigo-400 transition-colors shadow-sm">
+                                        <div className="absolute top-0 right-0 p-1 opacity-10 group-hover:opacity-20 transition-opacity">
+                                            <Zap className="h-10 w-10 text-indigo-400" />
+                                        </div>
+                                        <p className="text-[11px] font-black text-indigo-700 mb-1.5 flex items-center gap-1 uppercase tracking-tighter">
+                                            <ArrowRightLeft className="h-3 w-3" />
+                                            Gợi ý hành động:
+                                        </p>
+                                        <p className="text-sm font-bold text-slate-800 leading-relaxed pl-1">
+                                            {lead.next_action}
+                                        </p>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    )}
+ 
                     {/* Edit Info Card */}
                     <Card>
                         <CardHeader className="pb-3">
@@ -996,7 +1092,18 @@ export function LeadDetailPage() {
                                                                         </div>
                                                                     </>
                                                                 ) : (
-                                                                    <div className={`rounded-lg py-2 px-3 border ${activity.activity_type === 'ai_suggestion' ? 'bg-purple-50/50 border-purple-100 italic' : 'bg-muted/30 border-muted/50'}`}>
+                                                                    <div className={`rounded-lg py-2 px-3 border ${activity.activity_type === 'ai_suggestion' ? 'bg-purple-50/50 border-purple-100 italic shadow-sm' : 'bg-muted/30 border-muted/50'}`}>
+                                                                        {activity.activity_type === 'ai_suggestion' && lead.next_action && (
+                                                                            <div className="mb-2 pb-2 border-b border-purple-100 flex items-center gap-2 not-italic">
+                                                                                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-purple-100">
+                                                                                    <Zap className="h-3 w-3 text-purple-600 fill-purple-600" />
+                                                                                </div>
+                                                                                <p className="text-xs font-bold text-slate-800">
+                                                                                    <span className="text-purple-700 uppercase tracking-tighter mr-1">Gợi ý hành động:</span> 
+                                                                                    {lead.next_action}
+                                                                                </p>
+                                                                            </div>
+                                                                        )}
                                                                         <p className="text-sm font-medium mb-1">
                                                                             {activity.created_by_name || (activity.activity_type === 'customer_message' ? 'Khách hàng' : (activity.activity_type === 'ai_suggestion' ? 'AI Assistant' : 'Hệ thống'))}
                                                                         </p>

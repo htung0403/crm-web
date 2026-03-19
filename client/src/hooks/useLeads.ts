@@ -57,6 +57,11 @@ export interface Lead {
     fb_profile_pic?: string | null;
     fb_link?: string;
 
+    // AI Analysis (new)
+    lead_score?: number;
+    loss_risk?: string;
+    next_action?: string;
+
     // Follow-up (new)
     next_followup_time?: string;
     care_note?: string;

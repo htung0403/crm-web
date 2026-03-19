@@ -263,7 +263,8 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
         id, name, phone, email, source, company, address, notes, assigned_to, lead_type,
         fb_thread_id, pancake_conversation_id, facebook_name, avatar_url,
         last_message_text, last_message_time, last_actor,
-        ai_suggested_reply, pancake_customer_id
+        ai_suggested_reply, pancake_customer_id,
+        lead_score, loss_risk, next_action
     } = data;
 
     // Nếu đã có ID (chủ động update) thì được phép thiếu thông tin Social
@@ -432,6 +433,9 @@ async function handleLeadUpdate(data: any) {
         assigned_to,
         assign_state, // Bôi đậm trạng thái gán
         ai_suggested_reply,
+        lead_score,
+        loss_risk,
+        next_action,
         lead: _ignored_lead, // Bỏ qua key "lead" để không bị nhầm là cột database
         ...otherFields
     } = data;
@@ -497,8 +501,7 @@ async function handleLeadUpdate(data: any) {
     });
 
     if (ai_suggested_reply && ai_suggested_reply !== "") {
-        updateData.ai_suggested_reply = ai_suggested_reply;
-
+        addIfValid('ai_suggested_reply', ai_suggested_reply);
         // Log gợi ý AI
         await logLeadActivity(leadId, {
             type: 'ai_suggestion',
@@ -506,6 +509,9 @@ async function handleLeadUpdate(data: any) {
             userName: 'AI Assistant'
         });
     }
+    addIfValid('lead_score', lead_score);
+    addIfValid('loss_risk', loss_risk);
+    addIfValid('next_action', next_action);
 
     // Logic Ownership:
     // 1. Trường hợp đặc biệt: Thu hồi lead (Unassign) từ n8n (Tuần tra SLA)

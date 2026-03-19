@@ -1,5 +1,5 @@
 import { Draggable } from '@hello-pangea/dnd';
-import { Eye, Trash2 } from 'lucide-react';
+import { Eye, Trash2, Flame, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { formatTimeAgo } from '@/lib/utils';
@@ -49,13 +49,39 @@ export function LeadCard({ lead, index, onClick, onDelete }: LeadCardProps) {
                                     {lead.name.charAt(0)}
                                 </AvatarFallback>
                             </Avatar>
-                            <div className="min-w-0">
-                                <p className="font-medium text-sm text-foreground truncate">
-                                    {lead.name}
-                                </p>
-                                <p className="text-xs text-muted-foreground truncate">
-                                    {lead.phone}
-                                </p>
+                             <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5 mb-0.5">
+                                    <p className="font-bold text-sm text-foreground truncate">
+                                        {lead.name}
+                                    </p>
+                                    {lead.lead_score !== undefined && lead.lead_score > 0 && (
+                                        <div className="flex items-center gap-0.5 shrink-0 bg-slate-50 px-1 rounded-md border border-slate-100" title={`Heat Score: ${lead.lead_score}`}>
+                                            <Flame className={`h-3 w-3 ${
+                                                lead.lead_score >= 80 ? 'text-red-500 fill-red-500 animate-pulse' :
+                                                lead.lead_score >= 60 ? 'text-orange-500 fill-orange-500' :
+                                                'text-blue-400 fill-blue-400'
+                                            }`} />
+                                            <span className={`text-[9px] font-black ${
+                                                lead.lead_score >= 80 ? 'text-red-600' :
+                                                lead.lead_score >= 60 ? 'text-orange-600' :
+                                                'text-blue-600'
+                                            }`}>
+                                                {lead.lead_score}
+                                            </span>
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex flex-col gap-1">
+                                    <p className="text-[11px] text-muted-foreground truncate font-medium">
+                                        {lead.phone}
+                                    </p>
+                                    {lead.loss_risk?.toLowerCase() === 'high' && (
+                                        <div className="inline-flex items-center gap-1 bg-red-600 text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-sm shadow-sm animate-bounce w-fit mt-0.5">
+                                            <AlertTriangle className="h-2.5 w-2.5" />
+                                            NGUY CƠ RỚT KHÁCH
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
