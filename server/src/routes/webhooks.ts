@@ -187,6 +187,86 @@ router.get('/leads/sla', verifyWebhookSecret, async (req: Request, res: Response
 });
 
 // ============================================================
+// GET /api/webhooks/leads/daily-summary
+// Báo cáo tổng hợp hằng ngày cho AI:
+// - Top 5 Heat Score chưa chốt
+// - Khách High Risk trong 24h
+// - Số khách mới hôm qua
+// - Sale để khách chờ quá hạn SLA (>3 phút)
+// ============================================================
+router.get('/leads/daily-summary', verifyWebhookSecret, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const now = new Date();
+        const yesterday = new Date(now);
+        yesterday.setDate(now.getDate() - 1);
+        
+        const startOfYesterday = new Date(yesterday);
+        startOfYesterday.setHours(0, 0, 0, 0);
+        
+        const endOfYesterday = new Date(yesterday);
+        endOfYesterday.setHours(23, 59, 59, 999);
+        
+        const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+        // 1. Top 5 Heat Score chưa chốt
+        const { data: topPotentials } = await supabaseAdmin
+            .from('leads')
+            .select('id, name, phone, lead_score, pipeline_stage')
+            .neq('pipeline_stage', 'chot_don')
+            .order('lead_score', { ascending: false })
+            .limit(5);
+
+        // 2. High Risk 24h
+        const { data: highRisks } = await supabaseAdmin
+            .from('leads')
+            .select('id, name, phone, loss_risk, updated_at')
+            .ilike('loss_risk', 'high')
+            .gt('updated_at', last24h.toISOString());
+
+        // 3. Khách mới hôm qua
+        const { count: newLeadsYesterday } = await supabaseAdmin
+            .from('leads')
+            .select('*', { count: 'exact', head: true })
+            .gte('created_at', startOfYesterday.toISOString())
+            .lte('created_at', endOfYesterday.toISOString());
+
+        // 4. Sale để khách quá hạn SLA (>3p)
+        const { data: slaData } = await supabaseAdmin
+            .from('leads')
+            .select('id, name, t_last_inbound, t_last_outbound, assigned_to_user: users!leads_assigned_to_fkey(name)')
+            .eq('assign_state', 'assigned')
+            .not('assigned_to', 'is', null);
+
+        const overdueSales = new Set<string>();
+        if (slaData) {
+            slaData.forEach((l: any) => {
+                const lastIn = l.t_last_inbound ? new Date(l.t_last_inbound) : null;
+                const lastOut = l.t_last_outbound ? new Date(l.t_last_outbound) : null;
+                if (lastIn && (!lastOut || lastIn > lastOut)) {
+                    const waitMin = (now.getTime() - lastIn.getTime()) / 60000;
+                    if (waitMin > 3) {
+                        overdueSales.add(l.assigned_to_user?.name || 'Ẩn danh');
+                    }
+                }
+            });
+        }
+
+        res.json({
+            status: 'success',
+            report_date: now.toISOString(),
+            summary: {
+                top_potentials: topPotentials || [],
+                high_risks_24h: highRisks || [],
+                new_leads_yesterday_count: newLeadsYesterday || 0,
+                sales_with_overdue_leads: Array.from(overdueSales)
+            }
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+// ============================================================
 // POST /api/webhooks/n8n/raw
 // Endpoint nhận raw data từ n8n (không cần format event/data)
 // Data sẽ được lưu trực tiếp vào bảng webhook_logs
@@ -264,7 +344,7 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
         fb_thread_id, pancake_conversation_id, facebook_name, avatar_url,
         last_message_text, last_message_time, last_actor,
         ai_suggested_reply, pancake_customer_id,
-        lead_score, loss_risk, next_action
+        lead_score, loss_risk, next_action, customer_insight
     } = data;
 
     // Nếu đã có ID (chủ động update) thì được phép thiếu thông tin Social
@@ -361,6 +441,7 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
             t_last_inbound: last_actor === 'lead' ? (last_message_time || new Date().toISOString()) : null,
             t_last_outbound: last_actor === 'sale' ? (last_message_time || new Date().toISOString()) : null,
             assign_state: resolvedAssignedTo ? 'assigned' : 'unassigned',
+            customer_insight: customer_insight || null,
         })
         .select()
         .single();

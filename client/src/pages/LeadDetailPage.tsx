@@ -653,7 +653,7 @@ export function LeadDetailPage() {
                     </Card>
  
                     {/* AI Analysis Card */}
-                    {(lead.lead_score !== undefined || lead.loss_risk || lead.next_action) && (
+                    {(lead.lead_score !== undefined || lead.loss_risk || lead.next_action || lead.customer_insight) && (
                         <Card className="border-indigo-100 bg-gradient-to-br from-indigo-50/50 to-white overflow-hidden shadow-sm">
                             <CardHeader className="pb-3 border-b border-indigo-50 bg-indigo-50/30">
                                 <CardTitle className="text-xs font-extrabold flex items-center justify-between text-indigo-800 uppercase tracking-wider">
@@ -743,6 +743,21 @@ export function LeadDetailPage() {
                                         <p className="text-sm font-bold text-slate-800 leading-relaxed pl-1">
                                             {lead.next_action}
                                         </p>
+                                    </div>
+                                )}
+
+                                {/* AI Memory (Customer Insight) */}
+                                {lead.customer_insight && (
+                                    <div className="space-y-2 pt-1 border-t border-indigo-50">
+                                        <p className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                                            <Globe className="h-3 w-3 text-indigo-500" />
+                                            Trí nhớ AI (Customer Insight)
+                                        </p>
+                                        <div className="bg-amber-50/50 p-3 rounded-lg border border-amber-100/50">
+                                            <p className="text-xs text-amber-900 leading-relaxed whitespace-pre-wrap font-medium">
+                                                {lead.customer_insight}
+                                            </p>
+                                        </div>
                                     </div>
                                 )}
                             </CardContent>

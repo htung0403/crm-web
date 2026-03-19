@@ -61,6 +61,7 @@ export interface Lead {
     lead_score?: number;
     loss_risk?: string;
     next_action?: string;
+    customer_insight?: string;
 
     // Follow-up (new)
     next_followup_time?: string;
