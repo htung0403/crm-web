@@ -51,22 +51,33 @@ router.post('/n8n', verifyWebhookSecret, async (req: Request, res: Response, nex
 
         let result: any;
 
-        switch (event) {
-            case 'lead.upsert':
-            case 'lead.create':
-            case 'lead.update':
-                result = await handleLeadUpsert(data, event);
-                break;
-            case 'customer.create':
-                result = await handleCustomerCreate(data);
-                break;
-            case 'order.create':
-                result = await handleOrderCreate(data);
-                break;
-            default:
-                // Lưu data vào bảng webhook_logs cho event chưa xử lý
-                result = await logWebhookEvent(event, data);
-                break;
+        const processEvent = async (evt: string, item: any) => {
+            switch (evt) {
+                case 'lead.upsert':
+                case 'lead.create':
+                case 'lead.update':
+                    return await handleLeadUpsert(item, evt);
+                case 'customer.create':
+                    return await handleCustomerCreate(item);
+                case 'order.create':
+                    return await handleOrderCreate(item);
+                default:
+                    return await logWebhookEvent(evt, item);
+            }
+        };
+
+        let finalData = data;
+        // Hỗ trợ "Cách 2": n8n gửi một object có key "lead" chứa mảng dữ liệu (VD: { lead: [...] })
+        if (!Array.isArray(data) && data && typeof data === 'object' && Array.isArray(data.lead)) {
+            console.log(`[Webhook] Phát hiện mảng bên trong key "lead" với ${data.lead.length} items`);
+            finalData = data.lead;
+        }
+
+        if (Array.isArray(finalData)) {
+            console.log(`[Webhook] Xử lý mảng ${finalData.length} items cho event: ${event}`);
+            result = await Promise.all(finalData.map(item => processEvent(event, item)));
+        } else {
+            result = await processEvent(event, finalData);
         }
 
         // Log webhook vào database
@@ -211,7 +222,12 @@ async function resolveUserByName(nameOrId: string): Promise<string | null> {
     return data.id;
 }
 
-async function handleLeadUpsert(data: any, event?: string) {
+async function handleLeadUpsert(incomingData: any, event?: string) {
+    // Tự động xử lý nếu dữ liệu bị bọc trong key "lead" (giúp n8n linh hoạt hơn)
+    const data = (incomingData && incomingData.lead) 
+        ? { ...incomingData, ...incomingData.lead } 
+        : incomingData;
+
     const {
         id, name, phone, email, source, company, address, notes, assigned_to, lead_type,
         fb_thread_id, pancake_conversation_id, facebook_name, avatar_url,
