@@ -105,6 +105,8 @@ router.get('/leads/sla', verifyWebhookSecret, async (req: Request, res: Response
                 id,
                 name,
                 phone,
+                fb_thread_id,
+                pancake_conversation_id,
                 t_last_inbound,
                 t_last_outbound,
                 pipeline_stage,
@@ -123,6 +125,8 @@ router.get('/leads/sla', verifyWebhookSecret, async (req: Request, res: Response
             id: lead.id,
             name: lead.name,
             phone: lead.phone,
+            fb_thread_id: lead.fb_thread_id,
+            pancake_conversation_id: lead.pancake_conversation_id,
             assigned_to: lead.assigned_to,
             assigned_to_name: lead.assigned_to_user?.name || 'Hệ thống',
             t_last_inbound: lead.t_last_inbound,
@@ -209,18 +213,29 @@ async function resolveUserByName(nameOrId: string): Promise<string | null> {
 
 async function handleLeadUpsert(data: any, event?: string) {
     const {
-        name, phone, email, source, company, address, notes, assigned_to, lead_type,
+        id, name, phone, email, source, company, address, notes, assigned_to, lead_type,
         fb_thread_id, pancake_conversation_id, facebook_name, avatar_url,
         last_message_text, last_message_time, last_actor,
         ai_suggested_reply, pancake_customer_id
     } = data;
 
-    if (!name && !fb_thread_id && !pancake_conversation_id) {
-        throw new ApiError('Lead cần có ít nhất tên hoặc thông tin định danh (Facebook ID/Pancake ID)', 400);
+    // Nếu đã có ID (chủ động update) thì được phép thiếu thông tin Social
+    if (!id && !name && !fb_thread_id && !pancake_conversation_id) {
+        throw new ApiError('Lead cần có ít nhất tên hoặc thông tin định danh (ID/Facebook ID/Pancake ID)', 400);
     }
 
     // 1. Kiểm tra lead đã tồn tại chưa (Duplicate Check theo ưu tiên)
     let existing: any = null;
+
+    // Ưu tiên 0: Theo ID nếu có gửi lên trực tiếp
+    if (id) {
+        const { data } = await supabaseAdmin
+            .from('leads')
+            .select('id, assigned_to')
+            .eq('id', id)
+            .maybeSingle();
+        if (data) existing = data;
+    }
 
     // Ưu tiên 1: Theo fb_thread_id
     if (fb_thread_id) {
