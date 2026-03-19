@@ -401,6 +401,7 @@ async function handleLeadUpdate(data: any) {
         assigned_to,
         assign_state, // Bôi đậm trạng thái gán
         ai_suggested_reply,
+        lead: _ignored_lead, // Bỏ qua key "lead" để không bị nhầm là cột database
         ...otherFields
     } = data;
 
@@ -459,7 +460,7 @@ async function handleLeadUpdate(data: any) {
 
     // Các trường tự do khác
     Object.keys(otherFields).forEach(key => {
-        if (key !== 'notes') {
+        if (key !== 'notes' && key !== 'lead') {
             addIfValid(key, otherFields[key]);
         }
     });
