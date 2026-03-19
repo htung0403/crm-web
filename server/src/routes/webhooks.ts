@@ -131,23 +131,54 @@ router.get('/leads/sla', verifyWebhookSecret, async (req: Request, res: Response
             throw new ApiError('Lỗi truy vấn Leads SLA: ' + error.message, 500);
         }
 
-        // Format data
-        const leads = data.map((lead: any) => ({
-            id: lead.id,
-            name: lead.name,
-            phone: lead.phone,
-            fb_thread_id: lead.fb_thread_id,
-            pancake_conversation_id: lead.pancake_conversation_id,
-            assigned_to: lead.assigned_to,
-            assigned_to_name: lead.assigned_to_user?.name || 'Hệ thống',
-            t_last_inbound: lead.t_last_inbound,
-            t_last_outbound: lead.t_last_outbound,
-            pipeline_stage: lead.pipeline_stage
-        }));
+        // 2. Logic tính toán SLA (Mặc định 3 phút)
+        const SLA_MINUTES = 3;
+        const WARN_MINUTES = 2;
+        const now = new Date();
+
+        // Format data và tính toán hành động
+        const leads = data.map((lead: any) => {
+            const lastIn = lead.t_last_inbound ? new Date(lead.t_last_inbound) : null;
+            const lastOut = lead.t_last_outbound ? new Date(lead.t_last_outbound) : null;
+            
+            let waitMinutes = 0;
+            let action_type = 'NONE';
+            
+            // Chỉ tính nếu khách có nhắn (inbound)
+            if (lastIn) {
+                // Khách nhắn sau khi Sale trả lời cuối (hoặc chưa từng trả lời)
+                if (!lastOut || lastIn > lastOut) {
+                    waitMinutes = Math.floor((now.getTime() - lastIn.getTime()) / 60000);
+                    
+                    if (waitMinutes >= SLA_MINUTES) {
+                        action_type = 'RECLAIM';
+                    } else if (waitMinutes >= WARN_MINUTES) {
+                        action_type = 'SLA_WARN';
+                    }
+                }
+            }
+
+            return {
+                id: lead.id,
+                name: lead.name,
+                phone: lead.phone,
+                fb_thread_id: lead.fb_thread_id,
+                pancake_conversation_id: lead.pancake_conversation_id,
+                assigned_to: lead.assigned_to,
+                assigned_to_name: lead.assigned_to_user?.name || 'Hệ thống',
+                t_last_inbound: lead.t_last_inbound,
+                t_last_outbound: lead.t_last_outbound,
+                pipeline_stage: lead.pipeline_stage,
+                waitMinutes,
+                action_type,
+                sla_label: action_type === 'RECLAIM' ? `${SLA_MINUTES} phút (Thu hồi)` : `${WARN_MINUTES} phút (Cảnh báo)`
+            };
+        }).filter((l: any) => l.action_type !== 'NONE');
 
         res.json({
             status: 'success',
             count: leads.length,
+            server_time: now.toISOString(),
             data: leads
         });
     } catch (err) {
