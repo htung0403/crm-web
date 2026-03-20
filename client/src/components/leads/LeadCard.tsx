@@ -42,35 +42,17 @@ export function LeadCard({ lead, index, onClick, onDelete }: LeadCardProps) {
                 >
                     {/* Header */}
                     <div className="flex items-start justify-between gap-2 mb-2">
-                        <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex items-start gap-2 min-w-0">
                             <Avatar className="h-8 w-8 shrink-0">
                                 {lead.fb_profile_pic && <AvatarImage src={lead.fb_profile_pic} alt={lead.name} />}
                                 <AvatarFallback className="text-xs bg-primary/10 text-primary font-medium">
                                     {lead.name.charAt(0)}
                                 </AvatarFallback>
                             </Avatar>
-                             <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-1.5 mb-0.5">
-                                    <p className="font-bold text-sm text-foreground truncate">
-                                        {lead.name}
-                                    </p>
-                                    {lead.lead_score !== undefined && lead.lead_score > 0 && (
-                                        <div className="flex items-center gap-0.5 shrink-0 bg-slate-50 px-1 rounded-md border border-slate-100" title={`Heat Score: ${lead.lead_score}`}>
-                                            <Flame className={`h-3 w-3 ${
-                                                lead.lead_score >= 80 ? 'text-red-500 fill-red-500 animate-pulse' :
-                                                lead.lead_score >= 60 ? 'text-orange-500 fill-orange-500' :
-                                                'text-blue-400 fill-blue-400'
-                                            }`} />
-                                            <span className={`text-[9px] font-black ${
-                                                lead.lead_score >= 80 ? 'text-red-600' :
-                                                lead.lead_score >= 60 ? 'text-orange-600' :
-                                                'text-blue-600'
-                                            }`}>
-                                                {lead.lead_score}
-                                            </span>
-                                        </div>
-                                    )}
-                                </div>
+                            <div className="min-w-0 flex-1">
+                                <p className="font-bold text-sm text-foreground mb-0.5 leading-tight">
+                                    {lead.name}
+                                </p>
                                 <div className="flex flex-col gap-1">
                                     <p className="text-[11px] text-muted-foreground truncate font-medium">
                                         {lead.phone}
@@ -111,6 +93,22 @@ export function LeadCard({ lead, index, onClick, onDelete }: LeadCardProps) {
 
                     {/* Tags */}
                     <div className="flex items-center gap-1.5 flex-wrap mb-2">
+                        {lead.lead_score !== undefined && lead.lead_score > 0 && (
+                            <div className="flex items-center gap-0.5 shrink-0 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100" title={`Heat Score: ${lead.lead_score}`}>
+                                <Flame className={`h-3 w-3 ${
+                                    lead.lead_score >= 80 ? 'text-red-500 fill-red-500 animate-pulse' :
+                                    lead.lead_score >= 60 ? 'text-orange-500 fill-orange-500' :
+                                    'text-blue-400 fill-blue-400'
+                                }`} />
+                                <span className={`text-[10px] font-black ${
+                                    lead.lead_score >= 80 ? 'text-red-600' :
+                                    lead.lead_score >= 60 ? 'text-orange-600' :
+                                    'text-blue-600'
+                                }`}>
+                                    {lead.lead_score}
+                                </span>
+                            </div>
+                        )}
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${source.color}`}>
                             {source.label}
                         </span>

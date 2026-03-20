@@ -68,8 +68,8 @@ export function LeadsPage() {
     // Filter leads
     const filteredLeads = useMemo(() => {
         return leads.filter(lead => {
-            const matchesSearch = lead.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                lead.phone.includes(searchTerm);
+            const matchesSearch = (lead.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
+                (lead.phone || '').includes(searchTerm);
             const matchesSource = selectedSource === 'all' || lead.source === selectedSource;
             const matchesEmployee = selectedEmployee === 'all' || lead.assigned_to === selectedEmployee;
             return matchesSearch && matchesSource && matchesEmployee;
