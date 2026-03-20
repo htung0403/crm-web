@@ -10,6 +10,7 @@ import {
     Paperclip,
     X,
     Trash2,
+    Camera,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -47,6 +48,8 @@ export function LeadDetailPage() {
     const [pickerTab, setPickerTab] = useState<'emoji' | 'sticker'>('emoji');
     const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const avatarInputRef = useRef<HTMLInputElement>(null);
+    const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
     const [selectedStatus, setSelectedStatus] = useState('');
     const [isSaving, setIsSaving] = useState(false);
@@ -61,7 +64,13 @@ export function LeadDetailPage() {
     const [editFbName, setEditFbName] = useState('');
     const [editNextFollowup, setEditNextFollowup] = useState('');
     const [editAppointment, setEditAppointment] = useState('');
+    const [editPhone, setEditPhone] = useState('');
+    const [editEmail, setEditEmail] = useState('');
+    const [editCompany, setEditCompany] = useState('');
+    const [editAddress, setEditAddress] = useState('');
+    const [editDob, setEditDob] = useState('');
     const [isEditingInfo, setIsEditingInfo] = useState(false);
+    const [isEditingContact, setIsEditingContact] = useState(false);
 
     // Fetch lead data
     useEffect(() => {
@@ -98,6 +107,11 @@ export function LeadDetailPage() {
             setEditFbName(lead.fb_profile_name || '');
             setEditNextFollowup(lead.next_followup_time ? new Date(lead.next_followup_time).toISOString().slice(0, 16) : '');
             setEditAppointment(lead.appointment_time ? new Date(lead.appointment_time).toISOString().slice(0, 16) : '');
+            setEditPhone(lead.phone || '');
+            setEditEmail(lead.email || '');
+            setEditCompany(lead.company || '');
+            setEditAddress(lead.address || '');
+            setEditDob(lead.dob || '');
         }
     }, [lead]);
 
@@ -261,6 +275,34 @@ export function LeadDetailPage() {
         }
     };
 
+    const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file || !lead) return;
+
+        if (!file.type.startsWith('image/')) {
+            toast.error('Vui lòng chọn file hình ảnh');
+            return;
+        }
+
+        setUploadingAvatar(true);
+        try {
+            const { url, error } = await uploadFile('products', `leads/${lead.id}/avatars`, file);
+            if (error) {
+                toast.error('Lỗi khi tải ảnh lên');
+                return;
+            }
+
+            await updateLead(lead.id, { avatar_url: url || undefined });
+            setLead(prev => prev ? { ...prev, avatar_url: url || undefined } : null);
+            toast.success('Đã cập nhật ảnh đại diện');
+        } catch (err) {
+            toast.error('Lỗi khi cập nhật ảnh đại diện');
+        } finally {
+            setUploadingAvatar(false);
+            if (avatarInputRef.current) avatarInputRef.current.value = '';
+        }
+    };
+
     const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
@@ -340,6 +382,11 @@ export function LeadDetailPage() {
                 fb_profile_name: editFbName || undefined,
                 next_followup_time: editNextFollowup ? new Date(editNextFollowup).toISOString() : undefined,
                 appointment_time: editAppointment ? new Date(editAppointment).toISOString() : undefined,
+                phone: editPhone || undefined,
+                email: editEmail || undefined,
+                company: editCompany || undefined,
+                address: editAddress || undefined,
+                dob: editDob || undefined,
             };
 
             await updateLead(lead.id, updateData);
@@ -347,6 +394,7 @@ export function LeadDetailPage() {
             // Update local state
             setLead(prev => prev ? { ...prev, ...updateData } : null);
             setIsEditingInfo(false);
+            setIsEditingContact(false);
             toast.success('Đã cập nhật thông tin');
         } catch {
             toast.error('Lỗi khi cập nhật thông tin');
@@ -364,14 +412,37 @@ export function LeadDetailPage() {
                         <ArrowLeft className="h-5 w-5" />
                     </Button>
                     <div className="flex items-center gap-3 sm:gap-4 flex-1">
-                        <Avatar className="h-12 w-12 sm:h-14 sm:w-14 shrink-0 border-2 border-slate-100">
-                            {lead.fb_profile_pic ? (
-                                <AvatarImage src={lead.fb_profile_pic} alt={lead.name} className="object-cover" />
-                            ) : null}
-                            <AvatarFallback className={`${column.color} text-white text-lg sm:text-xl font-semibold`}>
-                                {lead.name.charAt(0)}
-                            </AvatarFallback>
-                        </Avatar>
+                        <div className="relative group cursor-pointer" onClick={() => avatarInputRef.current?.click()}>
+                            <Avatar className="h-12 w-12 sm:h-14 sm:w-14 shrink-0 border-2 border-slate-100 overflow-hidden ring-2 ring-transparent group-hover:ring-primary/20 transition-all">
+                                {lead.avatar_url || lead.fb_profile_pic ? (
+                                    <AvatarImage src={lead.avatar_url || lead.fb_profile_pic || ''} alt={lead.name} className="object-cover" />
+                                ) : null}
+                                <AvatarFallback className={`${column.color} text-white text-lg sm:text-xl font-semibold`}>
+                                    {lead.name.charAt(0)}
+                                </AvatarFallback>
+                            </Avatar>
+                            
+                            {/* Hover Overlay */}
+                            <div className="absolute inset-0 bg-black/50 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all duration-200">
+                                {uploadingAvatar ? (
+                                    <Loader2 className="h-5 w-5 text-white animate-spin" />
+                                ) : (
+                                    <div className="flex flex-col items-center">
+                                        <Camera className="h-5 w-5 text-white" />
+                                        <span className="text-[8px] text-white font-bold uppercase mt-0.5">Tải lên</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Hidden Input */}
+                            <input
+                                type="file"
+                                ref={avatarInputRef}
+                                onChange={handleAvatarChange}
+                                accept="image/*"
+                                className="hidden"
+                            />
+                        </div>
                         <div className="flex-1 min-w-0">
                             <div className="flex flex-wrap items-center gap-2 mb-1">
                                 <h1 className="text-xl sm:text-2xl font-bold truncate pr-2">{lead.name}</h1>
@@ -382,6 +453,16 @@ export function LeadDetailPage() {
                                     <div className="flex items-center gap-1.5 px-2 py-0.5 sm:py-1 bg-orange-100 text-orange-700 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap">
                                         <Timer className="h-3.5 w-3.5" />
                                         <span>{elapsedTime}</span>
+                                    </div>
+                                )}
+                                {lead.next_followup_time && (
+                                    <div className={`flex items-center gap-1.5 px-2 py-0.5 sm:py-1 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap ${
+                                        new Date(lead.next_followup_time) < new Date()
+                                        ? 'bg-red-100 text-red-700 animate-pulse border border-red-200'
+                                        : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                                    }`}>
+                                        <CalendarClock className="h-3.5 w-3.5" />
+                                        <span>{formatDateTime(lead.next_followup_time)}</span>
                                     </div>
                                 )}
                             </div>
@@ -456,196 +537,282 @@ export function LeadDetailPage() {
                     {/* Contact Info Card */}
                     <Card>
                         <CardHeader className="pb-3">
-                            <CardTitle className="text-base flex items-center gap-2">
-                                <User className="h-4 w-4 text-primary" />
-                                Thông tin liên hệ
-                            </CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            {/* Phone */}
                             <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 rounded-lg bg-blue-100">
-                                        <Phone className="h-4 w-4 text-blue-600" />
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Số điện thoại</p>
-                                        <p className="font-medium">{lead.phone}</p>
-                                    </div>
-                                </div>
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleCopyPhone}>
-                                    {phoneCopied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+                                <CardTitle className="text-base flex items-center gap-2">
+                                    <User className="h-4 w-4 text-primary" />
+                                    Thông tin liên hệ
+                                </CardTitle>
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => setIsEditingContact(!isEditingContact)}
+                                    className="text-xs"
+                                >
+                                    {isEditingContact ? 'Hủy' : 'Chỉnh sửa'}
                                 </Button>
+                            </div>
+                        </CardHeader>
+                        <CardContent className="space-y-2.5">
+                            {/* Phone */}
+                            <div className="flex items-center gap-3 group">
+                                <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                    <Phone className="h-3.5 w-3.5 text-blue-500" />
+                                    Điện thoại
+                                </div>
+                                <div className="flex-1 bg-slate-50/80 rounded-lg border border-transparent group-hover:border-slate-200 transition-all flex justify-between items-center min-h-[36px] px-0 overflow-hidden">
+                                    {isEditingContact ? (
+                                        <Input
+                                            value={editPhone}
+                                            onChange={(e) => setEditPhone(e.target.value)}
+                                            className="h-9 border-none bg-transparent text-sm font-bold focus-visible:ring-0 shadow-none"
+                                        />
+                                    ) : (
+                                        <div className="flex flex-1 justify-between items-center pl-3 pr-1">
+                                            {lead.phone}
+                                            <Button variant="ghost" size="icon" className="h-6 w-6 opacity-40 hover:opacity-100" onClick={handleCopyPhone}>
+                                                {phoneCopied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                                            </Button>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
                             {/* Email */}
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 rounded-lg bg-purple-100">
-                                        <Mail className="h-4 w-4 text-purple-600" />
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Email</p>
-                                        <p className="font-medium">{lead.email || '-'}</p>
-                                    </div>
+                            <div className="flex items-center gap-3 group">
+                                <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                    <Mail className="h-3.5 w-3.5 text-purple-500" />
+                                    Email
                                 </div>
-                                {lead.email && (
-                                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleCopyEmail}>
-                                        {emailCopied ? <Check className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
-                                    </Button>
-                                )}
+                                <div className="flex-1 bg-slate-50/80 rounded-lg border border-transparent group-hover:border-slate-200 transition-all flex justify-between items-center min-h-[36px] px-0 overflow-hidden">
+                                    {isEditingContact ? (
+                                        <Input
+                                            value={editEmail}
+                                            onChange={(e) => setEditEmail(e.target.value)}
+                                            className="h-9 border-none bg-transparent text-sm font-bold focus-visible:ring-0 shadow-none"
+                                        />
+                                    ) : (
+                                        <div className="flex flex-1 justify-between items-center pl-3 pr-1">
+                                            <span className="truncate">{lead.email || '-'}</span>
+                                            {lead.email && (
+                                                <Button variant="ghost" size="icon" className="h-6 w-6 opacity-40 hover:opacity-100" onClick={handleCopyEmail}>
+                                                    {emailCopied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
+                                                </Button>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
                             {/* Company */}
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 rounded-lg bg-amber-100">
-                                    <Building className="h-4 w-4 text-amber-600" />
+                            <div className="flex items-center gap-3 group">
+                                <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                    <Building className="h-3.5 w-3.5 text-amber-500" />
+                                    Công ty
                                 </div>
-                                <div>
-                                    <p className="text-xs text-muted-foreground">Công ty</p>
-                                    <p className="font-medium">{lead.company || '-'}</p>
+                                <div className="flex-1 bg-slate-50/80 rounded-lg border border-transparent group-hover:border-slate-200 transition-all min-h-[36px] flex items-center px-0 overflow-hidden">
+                                    {isEditingContact ? (
+                                        <Input
+                                            value={editCompany}
+                                            onChange={(e) => setEditCompany(e.target.value)}
+                                            className="h-9 border-none bg-transparent text-sm font-bold focus-visible:ring-0 shadow-none"
+                                        />
+                                    ) : (
+                                        <div className="px-3 py-1.5 text-sm font-bold truncate">{lead.company || '-'}</div>
+                                    )}
                                 </div>
                             </div>
 
                             {/* Source */}
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 rounded-lg bg-green-100">
-                                    <Tag className="h-4 w-4 text-green-600" />
+                            <div className="flex items-center gap-3 group">
+                                <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                    <Tag className="h-3.5 w-3.5 text-green-500" />
+                                    Nguồn/Kênh
                                 </div>
-                                <div>
-                                    <p className="text-xs text-muted-foreground">Nguồn/Kênh</p>
-                                    <p className="font-medium">
+                                <div className="flex-1 bg-slate-50/80 px-3 py-1.5 rounded-lg text-sm font-bold text-slate-900 border border-transparent group-hover:border-slate-200 transition-all min-h-[36px] flex items-center">
+                                    <Badge variant="outline" className="bg-white text-[10px] font-bold uppercase border-slate-200">
                                         {sourceLabels[lead.channel || lead.source || '']?.label || lead.channel || lead.source || '-'}
-                                    </p>
+                                    </Badge>
                                 </div>
                             </div>
 
                             {/* Assigned User */}
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 rounded-lg bg-indigo-100">
-                                    <UserCheck className="h-4 w-4 text-indigo-600" />
+                            <div className="flex items-center gap-3 group">
+                                <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                    <UserCheck className="h-3.5 w-3.5 text-indigo-500" />
+                                    Người phụ trách
                                 </div>
-                                <div>
-                                    <p className="text-xs text-muted-foreground">Nhân viên phụ trách</p>
-                                    <p className="font-medium">{lead.assigned_user?.name || '-'}</p>
+                                <div className="flex-1 bg-slate-50/80 px-3 py-1.5 rounded-lg text-sm font-bold text-slate-900 border border-transparent group-hover:border-slate-200 transition-all min-h-[36px] flex items-center">
+                                    <span className="truncate">{lead.assigned_user?.name || '-'}</span>
                                 </div>
                             </div>
 
                             {/* Created Date */}
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 rounded-lg bg-slate-100">
-                                    <Calendar className="h-4 w-4 text-slate-600" />
+                            <div className="flex items-center gap-3 group">
+                                <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                    <Calendar className="h-3.5 w-3.5 text-slate-400" />
+                                    Ngày tạo
                                 </div>
-                                <div className="flex-1">
-                                    <p className="text-xs text-muted-foreground">Ngày tạo</p>
-                                    <p className="font-medium">{formatDateTime(lead.created_at)}</p>
+                                <div className="flex-1 bg-slate-50/80 px-3 py-1.5 rounded-lg text-sm font-bold text-slate-900 border border-transparent group-hover:border-slate-200 transition-all min-h-[36px] flex items-center">
+                                    {formatDateTime(lead.created_at)}
                                 </div>
                             </div>
 
                             {/* Date of Birth */}
-                            {lead.dob && (
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 rounded-lg bg-red-50 text-red-600">
-                                        <Calendar className="h-4 w-4" />
-                                    </div>
-                                    <div className="flex-1">
-                                        <p className="text-xs text-muted-foreground">Ngày sinh</p>
-                                        <p className="font-medium">{new Date(lead.dob).toLocaleDateString('vi-VN')}</p>
-                                    </div>
+                            <div className="flex items-center gap-3 group">
+                                <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                    <Calendar className="h-3.5 w-3.5 text-rose-500" />
+                                    Ngày sinh
                                 </div>
-                            )}
+                                <div className="flex-1 bg-slate-50/80 rounded-lg border border-transparent group-hover:border-slate-200 transition-all min-h-[36px] flex items-center px-0 overflow-hidden">
+                                    {isEditingContact ? (
+                                        <Input
+                                            type="date"
+                                            value={editDob ? editDob.split('T')[0] : ''}
+                                            onChange={(e) => setEditDob(e.target.value)}
+                                            className="h-9 border-none bg-transparent text-sm font-bold focus-visible:ring-0 shadow-none"
+                                        />
+                                    ) : (
+                                        <div className="px-3 py-1.5 text-sm font-bold">
+                                            {lead.dob ? new Date(lead.dob).toLocaleDateString('vi-VN') : '-'}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
 
                             {/* Address */}
-                            {lead.address && (
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 rounded-lg bg-slate-100">
-                                        <Globe className="h-4 w-4 text-slate-600" />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-xs text-muted-foreground">Địa chỉ</p>
-                                        <p className="font-medium text-sm leading-snug">{lead.address}</p>
-                                    </div>
+                            <div className="flex items-start gap-3 group">
+                                <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0 pt-2">
+                                    <Globe className="h-3.5 w-3.5 text-slate-400" />
+                                    Địa chỉ
                                 </div>
-                            )}
+                                <div className="flex-1 bg-slate-50/80 rounded-lg border border-transparent group-hover:border-slate-200 transition-all min-h-[36px] px-0 overflow-hidden">
+                                    {isEditingContact ? (
+                                        <textarea
+                                            value={editAddress}
+                                            onChange={(e) => setEditAddress(e.target.value)}
+                                            className="w-full min-h-[80px] bg-transparent text-sm font-bold p-3 border-none focus:outline-none focus:ring-0 resize-none"
+                                            placeholder="Địa chỉ khách hàng..."
+                                        />
+                                    ) : (
+                                        <div className="px-3 py-2 text-sm font-bold text-slate-900 leading-snug">
+                                            {lead.address || '-'}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
 
-                            {/* Facebook Link */}
+                            {/* Facebook Profile */}
                             {(lead.fb_link || lead.link_message) && (
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className="p-2 rounded-lg bg-blue-100">
-                                            <Facebook className="h-4 w-4 text-blue-600" />
-                                        </div>
-                                        <div>
-                                            <p className="text-xs text-muted-foreground">Link Facebook</p>
-                                            <p className="font-medium text-sm truncate max-w-[180px]">
-                                                {lead.fb_profile_name || 'Xem profile'}
-                                            </p>
-                                        </div>
+                                <div className="flex items-center gap-3 group">
+                                    <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                        <Facebook className="h-3.5 w-3.5 text-blue-600" />
+                                        Facebook
                                     </div>
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-8 w-8"
-                                        onClick={() => window.open(lead.fb_link || lead.link_message, '_blank')}
-                                    >
-                                        <ExternalLink className="h-4 w-4" />
-                                    </Button>
+                                    <div className="flex-1 bg-slate-50/80 px-3 py-1.5 rounded-lg text-sm font-bold text-slate-900 border border-transparent group-hover:border-slate-200 transition-all flex justify-between items-center min-h-[36px]">
+                                        <span className="truncate max-w-[150px]">{lead.fb_profile_name || 'Trang cá nhân'}</span>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-6 w-6 opacity-40 hover:opacity-100"
+                                            onClick={() => window.open(lead.fb_link || lead.link_message, '_blank')}
+                                        >
+                                            <ExternalLink className="h-3.5 w-3.5" />
+                                        </Button>
+                                    </div>
                                 </div>
                             )}
 
-                            {/* Last Message Time */}
+                            {/* Last Message */}
                             {lead.last_message_time && (
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 rounded-lg bg-cyan-100">
-                                        <MessageCircle className="h-4 w-4 text-cyan-600" />
+                                <div className="flex items-center gap-3 group">
+                                    <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                        <MessageCircle className="h-3.5 w-3.5 text-cyan-500" />
+                                        Tin nhắn cuối
                                     </div>
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Tin nhắn cuối</p>
-                                        <p className="font-medium">{formatDateTime(lead.last_message_time)}</p>
-                                        {lead.last_actor && (
-                                            <p className="text-xs text-muted-foreground">
-                                                {lead.last_actor === 'lead' ? 'Từ khách' : 'Từ sale'}
-                                            </p>
-                                        )}
+                                    <div className="flex-1 bg-slate-50/80 px-3 py-1.5 rounded-lg text-sm font-bold text-slate-900 border border-transparent group-hover:border-slate-200 transition-all min-h-[36px] flex flex-col justify-center">
+                                        <div className="flex items-center justify-between">
+                                            <span>{formatDateTime(lead.last_message_time)}</span>
+                                            {lead.last_actor && (
+                                                <span className={`text-[9px] uppercase px-1 rounded ${lead.last_actor === 'lead' ? 'bg-blue-100 text-blue-700' : 'bg-slate-200 text-slate-700'}`}>
+                                                    {lead.last_actor === 'lead' ? 'Khách' : 'Sale'}
+                                                </span>
+                                            )}
+                                        </div>
                                     </div>
                                 </div>
                             )}
 
                             {/* Next Follow-up Time */}
-                            {lead.next_followup_time && (
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 rounded-lg bg-orange-100">
-                                        <CalendarClock className="h-4 w-4 text-orange-600" />
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Hẹn liên hệ tiếp</p>
-                                        <p className="font-medium">{formatDateTime(lead.next_followup_time)}</p>
-                                    </div>
+                            <div className="flex items-center gap-3 group">
+                                <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                    <CalendarClock className="h-3.5 w-3.5 text-orange-500" />
+                                    Hẹn chăm sóc
                                 </div>
-                            )}
+                                <div className="flex-1 bg-slate-50/80 rounded-lg border border-transparent group-hover:border-slate-200 transition-all min-h-[36px] flex items-center px-0 overflow-hidden">
+                                    {isEditingContact ? (
+                                        <Input
+                                            type="datetime-local"
+                                            value={editNextFollowup}
+                                            onChange={(e) => setEditNextFollowup(e.target.value)}
+                                            className="h-9 border-none bg-transparent text-sm font-bold focus-visible:ring-0 shadow-none"
+                                        />
+                                    ) : (
+                                        <div className={`flex-1 px-3 py-1.5 rounded-lg text-sm font-bold transition-all min-h-[36px] flex items-center ${
+                                            lead.next_followup_time 
+                                            ? (new Date(lead.next_followup_time) < new Date()
+                                                ? 'bg-red-50 text-red-700 animate-pulse'
+                                                : 'bg-emerald-50 text-emerald-700')
+                                            : ''
+                                        }`}>
+                                            {lead.next_followup_time ? formatDateTime(lead.next_followup_time) : '-'}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
 
                             {/* Appointment Time */}
-                            {lead.appointment_time && (
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 rounded-lg bg-pink-100">
-                                        <CalendarClock className="h-4 w-4 text-pink-600" />
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Hẹn lịch chăm sóc</p>
-                                        <p className="font-medium">{formatDateTime(lead.appointment_time)}</p>
-                                    </div>
+                            <div className="flex items-center gap-3 group">
+                                <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                    <Clock className="h-3.5 w-3.5 text-pink-500" />
+                                    Hẹn lịch họp
                                 </div>
+                                <div className="flex-1 bg-slate-50/80 rounded-lg border border-transparent group-hover:border-slate-200 transition-all min-h-[36px] flex items-center px-0 overflow-hidden">
+                                    {isEditingContact ? (
+                                        <Input
+                                            type="datetime-local"
+                                            value={editAppointment}
+                                            onChange={(e) => setEditAppointment(e.target.value)}
+                                            className="h-9 border-none bg-transparent text-sm font-bold focus-visible:ring-0 shadow-none"
+                                        />
+                                    ) : (
+                                        <div className="px-3 py-1.5 text-sm font-bold">
+                                            {lead.appointment_time ? formatDateTime(lead.appointment_time) : '-'}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Save Button */}
+                            {isEditingContact && (
+                                <Button
+                                    className="w-full mt-4 bg-primary text-white font-bold shadow-lg shadow-primary/20 transition-all hover:scale-[1.01] active:scale-[0.99]"
+                                    onClick={handleSaveInfo}
+                                    disabled={isSaving}
+                                >
+                                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Check className="h-4 w-4 mr-2" />}
+                                    Lưu thay đổi
+                                </Button>
                             )}
 
                             {/* Owner Sale */}
                             {lead.owner_sale && (
-                                <div className="flex items-center gap-3">
-                                    <div className="p-2 rounded-lg bg-violet-100">
-                                        <UserCheck className="h-4 w-4 text-violet-600" />
+                                <div className="flex items-center gap-3 group">
+                                    <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                        <UserCheck className="h-3.5 w-3.5 text-violet-500" />
+                                        Sale phụ trách
                                     </div>
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Sale chăm sóc</p>
-                                        <p className="font-medium">{lead.owner_sale}</p>
+                                    <div className="flex-1 bg-slate-50/80 px-3 py-1.5 rounded-lg text-sm font-bold text-slate-900 border border-transparent group-hover:border-slate-200 transition-all min-h-[36px] flex items-center">
+                                        {lead.owner_sale}
                                     </div>
                                 </div>
                             )}
@@ -782,88 +949,115 @@ export function LeadDetailPage() {
                                 </Button>
                             </div>
                         </CardHeader>
-                        <CardContent className="space-y-3">
+                        <CardContent className="space-y-2.5">
                             {/* Facebook Link */}
-                            <div className="flex items-center justify-between py-1 border-b border-slate-50 last:border-0">
-                                <Label className="text-xs text-muted-foreground font-normal shrink-0">Link Facebook</Label>
-                                {isEditingInfo ? (
-                                    <Input
-                                        value={editFbLink}
-                                        onChange={(e) => setEditFbLink(e.target.value)}
-                                        placeholder="https://facebook.com/..."
-                                        className="h-7 text-xs max-w-[200px]"
-                                    />
-                                ) : (
-                                    <p className="text-xs font-medium truncate ml-4 max-w-[200px] text-blue-600">
-                                        {lead.fb_link || lead.link_message || '-'}
-                                    </p>
-                                )}
+                            <div className="flex items-center gap-3 group">
+                                <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                    <Facebook className="h-3.5 w-3.5 text-blue-500" />
+                                    Link Facebook
+                                </div>
+                                <div className="flex-1 bg-slate-50/80 rounded-lg border border-transparent group-hover:border-slate-200 transition-all min-h-[36px] flex items-center px-0 overflow-hidden">
+                                    {isEditingInfo ? (
+                                        <Input
+                                            value={editFbLink}
+                                            onChange={(e) => setEditFbLink(e.target.value)}
+                                            placeholder="https://facebook.com/..."
+                                            className="h-9 border-none bg-transparent text-sm font-bold focus-visible:ring-0 shadow-none"
+                                        />
+                                    ) : (
+                                        <div className="px-3 py-1.5 text-sm font-bold truncate max-w-[200px] text-blue-600">
+                                            {lead.fb_link || lead.link_message || '-'}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
                             {/* FB Profile Name */}
-                            <div className="flex items-center justify-between py-1 border-b border-slate-50 last:border-0">
-                                <Label className="text-xs text-muted-foreground font-normal shrink-0">Tên Facebook</Label>
-                                {isEditingInfo ? (
-                                    <Input
-                                        value={editFbName}
-                                        onChange={(e) => setEditFbName(e.target.value)}
-                                        placeholder="Tên profile"
-                                        className="h-7 text-xs max-w-[200px]"
-                                    />
-                                ) : (
-                                    <p className="text-xs font-medium truncate ml-4 max-w-[200px]">{lead.fb_profile_name || '-'}</p>
-                                )}
+                            <div className="flex items-center gap-3 group">
+                                <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                    <User className="h-3.5 w-3.5 text-slate-400" />
+                                    Tên Facebook
+                                </div>
+                                <div className="flex-1 bg-slate-50/80 rounded-lg border border-transparent group-hover:border-slate-200 transition-all min-h-[36px] flex items-center px-0 overflow-hidden">
+                                    {isEditingInfo ? (
+                                        <Input
+                                            value={editFbName}
+                                            onChange={(e) => setEditFbName(e.target.value)}
+                                            placeholder="Tên profile"
+                                            className="h-9 border-none bg-transparent text-sm font-bold focus-visible:ring-0 shadow-none"
+                                        />
+                                    ) : (
+                                        <div className="px-3 py-1.5 text-sm font-bold truncate">
+                                            {lead.fb_profile_name || '-'}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
                             {/* FB Thread ID */}
-                            <div className="flex items-center justify-between py-1 border-b border-slate-50 last:border-0">
-                                <Label className="text-xs text-muted-foreground font-normal shrink-0">Mã hội thoại (Thread ID)</Label>
-                                <p className="text-xs font-mono text-slate-500 ml-4 truncate max-w-[200px]">{lead.fb_thread_id || '-'}</p>
+                            <div className="flex items-center gap-3 group">
+                                <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                    <MessageSquare className="h-3.5 w-3.5 text-slate-400" />
+                                    Mã hội thoại
+                                </div>
+                                <div className="flex-1 bg-slate-50/80 px-3 py-1.5 rounded-lg text-sm font-mono font-bold text-slate-500 border border-transparent group-hover:border-slate-200 transition-all min-h-[36px] flex items-center truncate">
+                                    {lead.fb_thread_id || '-'}
+                                </div>
                             </div>
 
                             {/* Next Follow-up */}
-                            <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Hẹn liên hệ tiếp</Label>
-                                {isEditingInfo ? (
-                                    <Input
-                                        type="datetime-local"
-                                        value={editNextFollowup}
-                                        onChange={(e) => setEditNextFollowup(e.target.value)}
-                                        className="h-9"
-                                    />
-                                ) : (
-                                    <p className="text-sm font-medium">
-                                        {lead.next_followup_time ? formatDateTime(lead.next_followup_time) : '-'}
-                                    </p>
-                                )}
+                            <div className="flex items-center gap-3 group">
+                                <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                    <CalendarClock className="h-3.5 w-3.5 text-orange-500" />
+                                    Hẹn liên hệ
+                                </div>
+                                <div className="flex-1 bg-slate-50/80 rounded-lg border border-transparent group-hover:border-slate-200 transition-all min-h-[36px] flex items-center px-0 overflow-hidden">
+                                    {isEditingInfo ? (
+                                        <Input
+                                            type="datetime-local"
+                                            value={editNextFollowup}
+                                            onChange={(e) => setEditNextFollowup(e.target.value)}
+                                            className="h-9 border-none bg-transparent text-sm font-bold focus-visible:ring-0 shadow-none mr-2"
+                                        />
+                                    ) : (
+                                        <div className="px-3 py-1.5 text-sm font-bold">
+                                            {lead.next_followup_time ? formatDateTime(lead.next_followup_time) : '-'}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
                             {/* Appointment Time */}
-                            <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Hẹn lịch chăm sóc</Label>
-                                {isEditingInfo ? (
-                                    <Input
-                                        type="datetime-local"
-                                        value={editAppointment}
-                                        onChange={(e) => setEditAppointment(e.target.value)}
-                                        className="h-9"
-                                    />
-                                ) : (
-                                    <p className="text-sm font-medium">
-                                        {lead.appointment_time ? formatDateTime(lead.appointment_time) : '-'}
-                                    </p>
-                                )}
+                            <div className="flex items-center gap-3 group">
+                                <div className="w-[110px] sm:w-[130px] flex items-center gap-2 text-[11px] text-slate-500 font-bold uppercase tracking-tight shrink-0">
+                                    <Clock className="h-3.5 w-3.5 text-pink-500" />
+                                    Hẹn lịch họp
+                                </div>
+                                <div className="flex-1 bg-slate-50/80 rounded-lg border border-transparent group-hover:border-slate-200 transition-all min-h-[36px] flex items-center px-0 overflow-hidden">
+                                    {isEditingInfo ? (
+                                        <Input
+                                            type="datetime-local"
+                                            value={editAppointment}
+                                            onChange={(e) => setEditAppointment(e.target.value)}
+                                            className="h-9 border-none bg-transparent text-sm font-bold focus-visible:ring-0 shadow-none mr-2"
+                                        />
+                                    ) : (
+                                        <div className="px-3 py-1.5 text-sm font-bold">
+                                            {lead.appointment_time ? formatDateTime(lead.appointment_time) : '-'}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
 
                             {/* Save Button */}
                             {isEditingInfo && (
                                 <Button
-                                    className="w-full mt-2"
+                                    className="w-full mt-4 bg-primary text-white font-bold shadow-lg shadow-primary/20 transition-all hover:scale-[1.01] active:scale-[0.99]"
                                     onClick={handleSaveInfo}
                                     disabled={isSaving}
                                 >
-                                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                                    Lưu thông tin
+                                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Check className="h-4 w-4 mr-2" />}
+                                    Lưu thay đổi
                                 </Button>
                             )}
                         </CardContent>

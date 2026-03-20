@@ -66,6 +66,7 @@ export interface Lead {
     // Follow-up (new)
     next_followup_time?: string;
     care_note?: string;
+    avatar_url?: string | null;
 }
 
 export interface UseLeadsReturn {

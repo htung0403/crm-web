@@ -1,8 +1,8 @@
 import { Draggable } from '@hello-pangea/dnd';
-import { Eye, Trash2, Flame, AlertTriangle } from 'lucide-react';
+import { Eye, Trash2, Flame, AlertTriangle, CalendarClock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { formatTimeAgo } from '@/lib/utils';
+import { formatTimeAgo, formatDateTime } from '@/lib/utils';
 import type { Lead } from '@/hooks/useLeads';
 import { sourceLabels } from './constants';
 import { useAuth } from '@/contexts/AuthContext';
@@ -44,7 +44,9 @@ export function LeadCard({ lead, index, onClick, onDelete }: LeadCardProps) {
                     <div className="flex items-start justify-between gap-2 mb-2">
                         <div className="flex items-start gap-2 min-w-0">
                             <Avatar className="h-8 w-8 shrink-0">
-                                {lead.fb_profile_pic && <AvatarImage src={lead.fb_profile_pic} alt={lead.name} />}
+                                {(lead.avatar_url || lead.fb_profile_pic) && (
+                                    <AvatarImage src={(lead.avatar_url || lead.fb_profile_pic)!} alt={lead.name} />
+                                )}
                                 <AvatarFallback className="text-xs bg-primary/10 text-primary font-medium">
                                     {lead.name.charAt(0)}
                                 </AvatarFallback>
@@ -107,6 +109,16 @@ export function LeadCard({ lead, index, onClick, onDelete }: LeadCardProps) {
                                 }`}>
                                     {lead.lead_score}
                                 </span>
+                            </div>
+                        )}
+                        {lead.next_followup_time && (
+                            <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${
+                                new Date(lead.next_followup_time) < new Date() 
+                                ? 'bg-red-50 text-red-600 border-red-100 animate-pulse' 
+                                : 'bg-emerald-50 text-emerald-600 border-emerald-100'
+                            }`} title="Thời gian chăm sóc tiếp theo">
+                                <CalendarClock className="h-2.5 w-2.5" />
+                                {formatDateTime(lead.next_followup_time)}
                             </div>
                         )}
                         <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${source.color}`}>
