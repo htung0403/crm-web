@@ -271,8 +271,8 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
         const userId = req.user?.id;
 
         const validStatuses = [
-            'pending', 'assigned', 'in_progress', 'completed', 'cancelled',
-            'step1', 'step2', 'step3', 'step4', 'step5'
+            'pending', 'assigned', 'in_progress', 'completed', 'cancelled', 'delivered',
+            'step1', 'step2', 'step3', 'step4', 'step5', 'after_sale'
         ];
 
         if (!validStatuses.includes(status)) {
@@ -308,34 +308,39 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
             }
         }
 
+        // Map status for DB compatibility
+        // services (order_items, order_product_services) don't have 'delivered', map to 'completed'
+        // products (order_products) have 'delivered', handled separately later
+        const targetStatus = (status === 'after_sale' || status === 'delivered') ? 'completed' : status;
+
         const updateData: any = {
-            status
+            status: targetStatus
         };
 
-        if (status === 'completed') {
-            updateData.completed_at = new Date().toISOString();
+        const updateDataWithTimes: any = { ...updateData };
+        if (status === 'completed' || status === 'after_sale' || status === 'delivered') {
+            updateDataWithTimes.completed_at = new Date().toISOString();
         } else if (status === 'in_progress') {
-            updateData.started_at = new Date().toISOString();
+            updateDataWithTimes.started_at = new Date().toISOString();
         }
 
         // Try V1
         let { data: item, error } = await supabaseAdmin
             .from('order_items')
-            .update(updateData)
+            .update(updateDataWithTimes)
             .eq('id', id)
             .select()
             .maybeSingle();
 
         if (error) {
             console.error('Error updating order_items(' + id + '): ', error);
-            // Ignore 500 here to try V2, but if it's a real error we might want to know
         }
 
         // Try V2 service
         if (!item) {
             const { data: v2Item, error: v2Error } = await supabaseAdmin
                 .from('order_product_services')
-                .update(updateData)
+                .update(updateDataWithTimes)
                 .eq('id', id)
                 .select()
                 .maybeSingle();
@@ -348,11 +353,20 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
             }
         }
 
-        // Try V2 product
+        // Try V2 product (Doesn't have started_at/completed_at, and uses 'processing' instead of 'in_progress' and 'delivered' for 'after_sale')
         if (!item) {
+            let productStatus = status;
+            const updateProductData: any = { ...updateData };
+            
+            if (status === 'in_progress') productStatus = 'processing';
+            else if (status === 'after_sale' || status === 'delivered') {
+                productStatus = 'delivered';
+                updateProductData.delivered_at = new Date().toISOString();
+            }
+
             const { data: v2Product, error: v2ProdError } = await supabaseAdmin
                 .from('order_products')
-                .update(updateData)
+                .update({ ...updateProductData, status: productStatus })
                 .eq('id', id)
                 .select()
                 .maybeSingle();
@@ -487,13 +501,12 @@ router.patch('/:id/start', authenticate, async (req: AuthenticatedRequest, res, 
             }
         }
 
-        // Try V2 product
+        // Try V2 product (Doesn't have started_at)
         if (!item) {
             const { data: v2Product, error: v2ProdError } = await supabaseAdmin
                 .from('order_products')
                 .update({
-                    status: 'in_progress',
-                    started_at: new Date().toISOString()
+                    status: 'processing'
                 })
                 .eq('id', id)
                 .select('order:orders(id, order_code, sales_id)')
@@ -1539,7 +1552,7 @@ router.patch('/:id/change-room', authenticate, async (req: AuthenticatedRequest,
 router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, stage } = req.body;
+        const { completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, stage, due_at } = req.body;
         const userId = req.user?.id;
 
         const updatePayload: any = { updated_at: new Date().toISOString() };

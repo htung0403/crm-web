@@ -401,6 +401,7 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
                         ref={fileInputRef}
                         type="file"
                         accept="image/*"
+                        capture="environment"
                         onChange={handleImageSelect}
                         className="hidden"
                     />

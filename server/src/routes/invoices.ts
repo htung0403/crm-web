@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireAccountant } from '../middleware/auth.js';
+import { syncOrderPayment } from '../utils/orderHelper.js';
 
 const router = Router();
 
@@ -100,15 +101,20 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
         const invoiceCode = `HD${Date.now().toString().slice(-8)}`;
 
         // Tạo hóa đơn
+        const amount = Number(req.body.amount);
+        const subtotal = amount || order.subtotal;
+        const total_amount = amount || order.total_amount;
+        const discount = amount ? 0 : order.discount;
+
         const { data: invoice, error } = await supabaseAdmin
             .from('invoices')
             .insert({
                 invoice_code: invoiceCode,
                 order_id,
                 customer_id: order.customer_id,
-                subtotal: order.subtotal,
-                discount: order.discount,
-                total_amount: order.total_amount,
+                subtotal,
+                discount,
+                total_amount,
                 payment_method: payment_method || 'cash',
                 status: 'draft',
                 notes,
@@ -163,11 +169,9 @@ router.patch('/:id/status', authenticate, requireAccountant, async (req: Authent
 
         // NOTE: Commission recording moved to orderHelper.ts (triggered when order status changes to 'done')
         // to avoid double-counting and ensure all services are finished.
-        /*
-        if (status === 'paid') {
-            // ... (removed logic)
+        if (status === 'paid' && invoice.order_id) {
+            await syncOrderPayment(invoice.order_id);
         }
-        */
 
         res.json({
             status: 'success',

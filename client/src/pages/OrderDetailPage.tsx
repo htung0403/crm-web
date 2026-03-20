@@ -175,7 +175,13 @@ export function OrderDetailPage() {
         fetchTechnicians();
         fetchSales();
         fetchDepartments();
-    }, [id, navigate, fetchTechnicians, fetchSales, fetchDepartments]);
+
+        // Set active tab from navigation state if present
+        const stateTab = (location.state as any)?.activeTab;
+        if (stateTab) {
+            setActiveTab(stateTab);
+        }
+    }, [id, navigate, fetchTechnicians, fetchSales, fetchDepartments, location.state]);
 
     // Tab switching logic for completed orders
     useEffect(() => {
@@ -526,6 +532,7 @@ export function OrderDetailPage() {
                         fetchKanbanLogs={fetchKanbanLogs}
                         onProductCardClick={handleOpenProductDialog}
                         workflowKanbanGroups={workflowKanbanGroups}
+                        onTabChange={setActiveTab}
                     />
                 )}
 
@@ -797,7 +804,12 @@ export function OrderDetailPage() {
                 onUpdateOrder={updateOrderAfterSale}
                 onUpdateItemAfterSaleData={updateItemAfterSaleData}
                 onReloadOrder={reloadOrder}
+                setActiveTab={setActiveTab}
                 highlightMessageId={highlightMessageId}
+                salesLogs={salesLogs}
+                workflowLogs={workflowLogs}
+                aftersaleLogs={aftersaleLogs}
+                careLogs={careLogs}
             />
 
             <UpsellDialog

@@ -11,7 +11,6 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { TabsContent } from '@/components/ui/tabs';
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils';
-import { orderItemsApi } from '@/lib/api';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import {
@@ -26,12 +25,13 @@ import {
 interface SalesTabProps {
     order: Order;
     salesLogs: any[];
-    updateOrderItemStatus: (itemId: string, status: string) => void;
+    updateOrderItemStatus: (itemId: string, status: string) => Promise<void>;
     updateOrderStatus: (orderId: string, status: string) => Promise<void>;
     reloadOrder: () => Promise<void>;
     fetchKanbanLogs: (orderId: string) => Promise<void>;
     onProductCardClick?: (group: { product: OrderItem | null; services: OrderItem[] }, roomId: string) => void;
     workflowKanbanGroups?: { product: OrderItem | null; services: OrderItem[] }[];
+    onTabChange?: (tab: string) => void;
 }
 
 const SalesCard = memo(({
@@ -43,7 +43,8 @@ const SalesCard = memo(({
     colIdx,
     updateOrderItemStatus,
     fetchKanbanLogs,
-    reloadOrder
+    reloadOrder,
+    onTabChange
 }: {
     group: { product: OrderItem | null; services: OrderItem[] };
     index: number;
@@ -51,9 +52,10 @@ const SalesCard = memo(({
     order: Order;
     onProductCardClick?: (group: any, roomId: string) => void;
     colIdx: number;
-    updateOrderItemStatus: (itemId: string, status: string) => void;
+    updateOrderItemStatus: (itemId: string, status: string) => Promise<void>;
     fetchKanbanLogs: (orderId: string) => Promise<void>;
     reloadOrder: () => Promise<void>;
+    onTabChange?: (tab: string) => void;
 }) => {
     const leadItem = group.product || group.services[0];
     const draggableId = group.product?.id ?? group.services.map((s: OrderItem) => s.id).join('-');
@@ -139,8 +141,7 @@ const SalesCard = memo(({
 
                                 try {
                                     for (const item of itemsToUpdate) {
-                                        updateOrderItemStatus(item.id, prevStep);
-                                        await orderItemsApi.updateStatus(item.id, prevStep);
+                                        await updateOrderItemStatus(item.id, prevStep);
                                     }
                                     toast.success(`Đã lùi nhóm về: ${SALES_STEPS[colIdx - 1].label}`);
                                     if (order?.id) fetchKanbanLogs(order.id);
@@ -166,10 +167,12 @@ const SalesCard = memo(({
 
                                 try {
                                     for (const item of itemsToUpdate) {
-                                        updateOrderItemStatus(item.id, nextStep);
-                                        await orderItemsApi.updateStatus(item.id, nextStep);
+                                        await updateOrderItemStatus(item.id, nextStep);
                                     }
                                     toast.success(`Đã chuyển nhóm sang: ${SALES_STEPS[colIdx + 1].label}`);
+                                    if (nextStep === 'step5') {
+                                        onTabChange?.('workflow');
+                                    }
                                     if (order?.id) fetchKanbanLogs(order.id);
                                 } catch {
                                     reloadOrder();
@@ -197,6 +200,7 @@ export function SalesTab({
     fetchKanbanLogs,
     onProductCardClick,
     workflowKanbanGroups,
+    onTabChange,
 }: SalesTabProps) {
     if (order?.status !== 'before_sale' && !['step1', 'step2', 'step3', 'step4', 'step5'].includes(order.status)) return null;
 
@@ -246,10 +250,12 @@ export function SalesTab({
 
                                         try {
                                             for (const item of itemsToUpdate) {
-                                                updateOrderItemStatus(item.id, newStatus);
-                                                await orderItemsApi.updateStatus(item.id, newStatus);
+                                                await updateOrderItemStatus(item.id, newStatus);
                                             }
                                             toast.success(`Đã chuyển nhóm sang: ${stepLabel}`);
+                                            if (newStatus === 'step5') {
+                                                onTabChange?.('workflow');
+                                            }
                                             if (order?.id) fetchKanbanLogs(order.id);
                                         } catch (error) {
                                             reloadOrder();
@@ -265,6 +271,8 @@ export function SalesTab({
                                             if (!leadItem) return false;
                                             const status = leadItem.status || 'step1';
                                             if (status === 'pending' && column.id === 'step1') return true;
+                                            // Hide items that are in step5 (Chốt đơn) from the Kanban board view
+                                            if (status === 'step5') return false;
                                             return status === column.id;
                                         }) || [];
 
@@ -312,6 +320,7 @@ export function SalesTab({
                                                                     updateOrderItemStatus={updateOrderItemStatus}
                                                                     fetchKanbanLogs={fetchKanbanLogs}
                                                                     reloadOrder={reloadOrder}
+                                                                    onTabChange={onTabChange}
                                                                 />
                                                             ))}
                                                             {provided.placeholder}

@@ -23,6 +23,7 @@ import {
     PaymentDialog,
     columns
 } from '@/components/orders';
+import { orderItemsApi } from '@/lib/api';
 
 export function OrdersPage() {
     const location = useLocation();
@@ -35,6 +36,7 @@ export function OrdersPage() {
     const { users: technicians, fetchTechnicians } = useUsers();
     const { departments, fetchDepartments } = useDepartments();
     const [payingOrder, setPayingOrder] = useState<Order | null>(null);
+    const [payingGroup, setPayingGroup] = useState<{ product: OrderItem | null; services: OrderItem[] } | null>(null);
     const [pendingDrop, setPendingDrop] = useState<{ orderId: string; targetStatus: string } | null>(null);
     const [newlyCreatedOrder, setNewlyCreatedOrder] = useState<Order | null>(null);
     const [columnSearch, setColumnSearch] = useState<{ [key: string]: string }>({});
@@ -70,24 +72,77 @@ export function OrdersPage() {
         if (destination.droppableId === source.droppableId && destination.index === source.index) return;
 
         const newStatus = destination.droppableId;
-        const orderId = draggableId.includes('__') ? draggableId.split('__')[0] : draggableId;
+        const [orderId, groupIndexStr] = draggableId.split('__');
         const order = orders.find(o => o.id === orderId);
 
-        // If dropping to after_sale, show payment dialog
-        if (newStatus === 'after_sale' && order) {
-            setPendingDrop({ orderId, targetStatus: newStatus });
-            setPayingOrder(order);
-            return;
+        if (!order) return;
+
+        const groups = getOrderProductGroups(order);
+        const groupIndex = parseInt(groupIndexStr, 10);
+        const group = groups[groupIndex];
+
+        if (!group) return;
+
+        // If dropping to after_sale, show payment dialog if order is not fully paid
+        if (newStatus === 'after_sale') {
+            if (order.payment_status !== 'paid') {
+                setPendingDrop({ orderId, targetStatus: newStatus });
+                setPayingOrder(order);
+                setPayingGroup(group);
+                return;
+            }
         }
 
         try {
-            await updateOrderStatus(orderId, newStatus);
-            toast.success('Đã cập nhật trạng thái đơn hàng');
+            // Identify all items in this group
+            const itemIds: string[] = [];
+            if (group.product) itemIds.push(group.product.id);
+            group.services.forEach(s => itemIds.push(s.id));
+
+            // Map target column status to valid item status for API
+            let targetStatus = newStatus;
+            if (newStatus === 'done') targetStatus = 'completed';
+            if (newStatus === 'before_sale') targetStatus = 'step1';
+
+            // Update status of all items in the group
+            await Promise.all(itemIds.map(id => orderItemsApi.updateStatus(id, targetStatus)));
+            
+            toast.success('Đã cập nhật trạng thái sản phẩm');
             await fetchOrders();
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Lỗi khi cập nhật trạng thái';
             toast.error(message);
         }
+    };
+
+    const getGroupStatus = (group: { product: OrderItem | null; services: OrderItem[] }, fallbackOrder: Order): string => {
+        const itemStatus = group.product?.status || group.services?.[0]?.status;
+        
+        // If item has no specific status or is in early steps, use the order's status as default
+        if (!itemStatus || ['step1', 'step2', 'step3', 'step4', 'pending'].includes(itemStatus)) {
+            return fallbackOrder.status;
+        }
+
+        // Map item statuses to Kanban columns
+        if (['assigned', 'in_progress', 'processing'].includes(itemStatus)) return 'in_progress';
+        if (['completed', 'done'].includes(itemStatus)) return 'done';
+        if (['delivered', 'after_sale'].includes(itemStatus)) return 'after_sale';
+        
+        return itemStatus;
+    };
+
+    const getCardsByStatus = (status: string) => {
+        const result: { order: Order; group: { product: OrderItem | null; services: OrderItem[] }; groupIndex: number }[] = [];
+        orders.forEach(order => {
+            const groups = getOrderProductGroups(order);
+            groups.forEach((group, index) => {
+                const groupStatus = getGroupStatus(group, order);
+                if (groupStatus === status) {
+                    result.push({ order, group, groupIndex: index });
+                }
+            });
+        });
+        return result;
     };
 
     const getOrdersByStatus = (status: OrderStatus) => {
@@ -188,9 +243,22 @@ export function OrdersPage() {
 
     const handlePaymentSuccess = async () => {
         try {
-            // Payment success. Backend will auto-complete order if all services are done.
-            // We just need to refetch to get the latest status.
             toast.success('Thanh toán thành công!');
+
+            // If there's a pending drop (waiting for payment), proceed with status update
+            if (pendingDrop) {
+                const { orderId, targetStatus } = pendingDrop;
+                const order = orders.find(o => o.id === orderId);
+                if (order && payingGroup) {
+                    const itemIds: string[] = [];
+                    if (payingGroup.product) itemIds.push(payingGroup.product.id);
+                    payingGroup.services.forEach(s => itemIds.push(s.id));
+
+                    // Update status of all items in the group
+                    await Promise.all(itemIds.map(id => orderItemsApi.updateStatus(id, targetStatus)));
+                }
+            }
+
             await fetchOrders();
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Lỗi khi cập nhật trạng thái đơn hàng';
@@ -198,12 +266,14 @@ export function OrdersPage() {
         } finally {
             setPendingDrop(null);
             setPayingOrder(null);
+            setPayingGroup(null);
         }
     };
 
     const handlePaymentClose = () => {
         setPendingDrop(null);
         setPayingOrder(null);
+        setPayingGroup(null);
     };
 
     if (loading && orders.length === 0) {
@@ -242,7 +312,7 @@ export function OrdersPage() {
                     {/* Stats */}
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
                         {columns.map((column) => {
-                            const count = getOrdersByStatus(column.id).length;
+                            const count = getCardsByStatus(column.id).length;
                             return (
                                 <Card key={column.id} className={`${column.bgColor} border-0`}>
                                     <CardContent className="p-3 sm:p-4">
@@ -270,10 +340,10 @@ export function OrdersPage() {
                                                 <Badge variant="secondary" className="bg-white/80">
                                                     {(() => {
                                                         const searchText = (columnSearch[column.id] || '').toLowerCase().trim();
-                                                        if (!searchText) return getOrdersByStatus(column.id).length;
-                                                        return getOrdersByStatus(column.id).filter(o =>
-                                                            o.customer?.name.toLowerCase().includes(searchText) ||
-                                                            o.customer?.phone?.includes(searchText)
+                                                        if (!searchText) return getCardsByStatus(column.id).length;
+                                                        return getCardsByStatus(column.id).filter(c =>
+                                                            c.order.customer?.name.toLowerCase().includes(searchText) ||
+                                                            c.order.customer?.phone?.includes(searchText)
                                                         ).length;
                                                     })()}
                                                 </Badge>
@@ -291,22 +361,14 @@ export function OrdersPage() {
                                         <CardContent className="p-2">
                                             <Droppable droppableId={column.id}>
                                                 {(provided, snapshot) => {
-                                                    const columnOrders = getOrdersByStatus(column.id);
+                                                    const cardsByStatus = getCardsByStatus(column.id);
                                                     const searchText = (columnSearch[column.id] || '').toLowerCase().trim();
-                                                    const filteredOrders = searchText
-                                                        ? columnOrders.filter(o =>
-                                                            o.customer?.name.toLowerCase().includes(searchText) ||
-                                                            o.customer?.phone?.includes(searchText)
+                                                    const filteredCards = searchText
+                                                        ? cardsByStatus.filter(c =>
+                                                            c.order.customer?.name.toLowerCase().includes(searchText) ||
+                                                            c.order.customer?.phone?.includes(searchText)
                                                         )
-                                                        : columnOrders;
-
-                                                    const cards: { order: Order; group: { product: OrderItem | null; services: OrderItem[] }; groupIndex: number }[] = [];
-                                                    filteredOrders.forEach((order) => {
-                                                        const groups = getOrderProductGroups(order);
-                                                        groups.forEach((group, groupIndex) => {
-                                                            cards.push({ order, group, groupIndex });
-                                                        });
-                                                    });
+                                                        : cardsByStatus;
                                                     return (
                                                         <div
                                                             ref={provided.innerRef}
@@ -314,20 +376,20 @@ export function OrdersPage() {
                                                             className={`kanban-column space-y-3 min-h-[100px] lg:min-h-[calc(100vh-300px)] p-1 rounded-lg transition-colors ${snapshot.isDraggingOver ? 'bg-white/50' : ''
                                                                 }`}
                                                         >
-                                                            {cards.map(({ order, group, groupIndex }, index) => (
-                                                                <OrderCard
-                                                                    key={`${order.id}__${groupIndex}`}
-                                                                    draggableId={`${order.id}__${groupIndex}`}
-                                                                    order={order}
-                                                                    productGroup={group}
-                                                                    columnId={column.id}
-                                                                    index={index}
-                                                                    onClick={() => navigate(`/orders/${order.id}`)}
-                                                                />
-                                                            ))}
+                                                                {filteredCards.map(({ order, group, groupIndex }, index) => (
+                                                                    <OrderCard
+                                                                        key={`${order.id}__${groupIndex}`}
+                                                                        draggableId={`${order.id}__${groupIndex}`}
+                                                                        order={order}
+                                                                        productGroup={group}
+                                                                        columnId={column.id}
+                                                                        index={index}
+                                                                        onClick={() => navigate(`/orders/${order.id}`)}
+                                                                    />
+                                                                ))}
                                                             {provided.placeholder}
 
-                                                            {cards.length === 0 && (
+                                                            {filteredCards.length === 0 && (
                                                                 <div className="flex items-center justify-center h-20 lg:h-32 text-muted-foreground text-sm">
                                                                     Không có đơn hàng
                                                                 </div>
@@ -349,6 +411,7 @@ export function OrdersPage() {
             <PaymentDialog
                 order={payingOrder}
                 open={!!payingOrder}
+                productGroup={payingGroup}
                 onClose={handlePaymentClose}
                 onSuccess={handlePaymentSuccess}
             />

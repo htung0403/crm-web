@@ -470,7 +470,7 @@ router.post('/:id/recalculate-status', authenticate, async (req: AuthenticatedRe
 router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, stage } = req.body;
+        const { completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, stage, due_at } = req.body;
         const userId = req.user?.id;
 
         const updatePayload: any = { updated_at: new Date().toISOString() };
@@ -480,6 +480,7 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
         if (delivery_carrier !== undefined) updatePayload.delivery_carrier = delivery_carrier;
         if (delivery_type !== undefined) updatePayload.delivery_type = delivery_type;
         if (stage !== undefined) updatePayload.after_sale_stage = stage;
+        if (due_at !== undefined) updatePayload.due_at = due_at ? new Date(due_at).toISOString() : null;
 
         // Get old stage first (for log)
         const { data: currentItem } = await supabaseAdmin.from('order_products').select('after_sale_stage, order_id').eq('id', id).single();

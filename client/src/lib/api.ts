@@ -290,6 +290,7 @@ export const orderProductsApi = {
         delivery_code?: string | null;
         delivery_carrier?: string | null;
         delivery_type?: string | null;
+        due_at?: string | null;
     }) => api.patch<ApiResponse<any>>(`/order-products/${id}/after-sale-data`, data),
 };
 
@@ -357,6 +358,7 @@ export const orderItemsApi = {
         delivery_code?: string | null;
         delivery_carrier?: string | null;
         delivery_type?: string | null;
+        due_at?: string | null;
     }) => api.patch<ApiResponse<any>>(`/order-items/${id}/after-sale-data`, data),
 };
 

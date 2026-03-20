@@ -38,8 +38,11 @@ export interface OrderItem {
     after_sale_stage?: string | null;
     completion_photos?: string[];
     packaging_photos?: string[];
+    due_at?: string;
     /** Workflow steps for room deadline calculation */
     order_item_steps?: OrderItemStep[];
+    surcharges?: Array<{ type: string; label: string; value: number; isPercent: boolean }>;
+    surcharge_amount?: number;
 }
 
 export interface Order {

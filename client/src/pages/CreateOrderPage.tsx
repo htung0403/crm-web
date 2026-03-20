@@ -66,6 +66,7 @@ interface CustomerProduct {
     condition_before: string;
     images: string[];
     notes: string;
+    due_at?: string;
     services: Array<{
         id: string;
         type: 'service' | 'package';
@@ -82,6 +83,7 @@ interface CustomerProduct {
             commission: number; // phần trăm hoa hồng
         }>;
     }>;
+    surcharges: Surcharge[];
 }
 
 const generateTempId = () => `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -107,13 +109,13 @@ export function CreateOrderPage() {
     const [customerId, setCustomerId] = useState('');
     const [customerSearch, setCustomerSearch] = useState('');
     const [products, setProducts] = useState<CustomerProduct[]>([]);
-    const [currentProductIndex, setCurrentProductIndex] = useState<number | null>(null);
+    const [currentProductId, setCurrentProductId] = useState<string | null>(null);
     const [notes, setNotes] = useState('');
     const [discount, setDiscount] = useState(0);
     const [discountType, setDiscountType] = useState<'amount' | 'percent'>('amount');
     const [surcharges, setSurcharges] = useState<Surcharge[]>([]);
     const [paidAmount, setPaidAmount] = useState(0);
-    const [dueAt, setDueAt] = useState<string>('');
+
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [createdOrder, setCreatedOrder] = useState<any>(null);
@@ -140,7 +142,7 @@ export function CreateOrderPage() {
     const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
 
     // Track confirmed products (products with info confirmed, ready for services)
-    const [confirmedProducts, setConfirmedProducts] = useState<Set<number>>(new Set());
+    const [confirmedProductIds, setConfirmedProductIds] = useState<Set<string>>(new Set());
 
     // Next order code for QR preview
     const [nextOrderCode, setNextOrderCode] = useState<string>('');
@@ -156,6 +158,7 @@ export function CreateOrderPage() {
             name: string;
             commission: number;
         }>;
+        surcharges: Surcharge[];
     }
     const [addOnProducts, setAddOnProducts] = useState<AddOnProduct[]>([]);
     const [addOnDialogOpen, setAddOnDialogOpen] = useState(false);
@@ -212,7 +215,7 @@ export function CreateOrderPage() {
                 setNotes(order.notes || '');
                 setDiscount(order.discount_value || order.discount || 0);
                 setDiscountType(order.discount_type || 'amount');
-                setDueAt(order.due_at ? new Date(order.due_at).toISOString().split('T')[0] : '');
+
 
                 // Map Customer Items (order_products + services)
                 const customerItems: CustomerProduct[] = (order.customer_items || []).map((item: any) => ({
@@ -226,6 +229,7 @@ export function CreateOrderPage() {
                     condition_before: item.condition_before || '',
                     images: item.images || [],
                     notes: item.notes || '',
+                    due_at: item.due_at ? new Date(item.due_at).toISOString().split('T')[0] : '',
                     services: (item.services || []).map((s: any) => ({
                         id: s.service_id || s.package_id || s.id,
                         type: s.item_type,
@@ -272,10 +276,9 @@ export function CreateOrderPage() {
                 }
 
                 // Mark all products as confirmed since it's an existing order
-                const confirmed = new Set<number>();
-                const totalProducts = customerItems.length;
-                for (let i = 0; i < totalProducts; i++) confirmed.add(i);
-                setConfirmedProducts(confirmed);
+                const confirmed = new Set<string>();
+                customerItems.forEach(item => confirmed.add(item.id));
+                setConfirmedProductIds(confirmed);
 
                 orderFetchedRef.current = true;
             }
@@ -402,10 +405,12 @@ export function CreateOrderPage() {
             condition_before: '',
             images: [],
             notes: '',
-            services: []
+            due_at: '',
+            services: [],
+            surcharges: []
         };
-        setProducts(prev => [...prev, newProduct]);
-        setCurrentProductIndex(products.length);
+        setProducts(prev => [newProduct, ...prev]);
+        setCurrentProductId(newProduct.id);
     };
 
     // Update product
@@ -415,11 +420,15 @@ export function CreateOrderPage() {
 
     // Remove product
     const handleRemoveProduct = (index: number) => {
+        const productToRemove = products[index];
         setProducts(prev => prev.filter((_, i) => i !== index));
-        if (currentProductIndex === index) {
-            setCurrentProductIndex(null);
-        } else if (currentProductIndex !== null && currentProductIndex > index) {
-            setCurrentProductIndex(currentProductIndex - 1);
+        if (currentProductId === productToRemove?.id) {
+            setCurrentProductId(null);
+        }
+        if (productToRemove) {
+            const nextConfirmed = new Set(confirmedProductIds);
+            nextConfirmed.delete(productToRemove.id);
+            setConfirmedProductIds(nextConfirmed);
         }
     };
 
@@ -623,13 +632,13 @@ export function CreateOrderPage() {
         if (existing) {
             setAddOnProducts(prev => prev.map(a => a.id === product.id ? { ...a, quantity: a.quantity + quantity } : a));
         } else {
-            const catalogProduct = catalogProducts.find(p => p.id === product.id);
             setAddOnProducts(prev => [...prev, {
                 id: product.id,
                 name: product.name,
                 price: product.price,
-                quantity,
-                sales: []
+                quantity: 1,
+                sales: [],
+                surcharges: []
             }]);
         }
         setAddOnDialogOpen(false);
@@ -696,11 +705,118 @@ export function CreateOrderPage() {
         }));
     };
 
+    // Product Surcharge handlers
+    const handleAddProductSurcharge = (productIndex: number, type: string) => {
+        const surchargeType = SURCHARGE_TYPES.find(s => s.value === type);
+        if (!surchargeType) return;
+        setProducts(prev => prev.map((p, i) => {
+            if (i !== productIndex) return p;
+            if ((p.surcharges || []).some(s => s.type === type)) return p;
+            return {
+                ...p,
+                surcharges: [...(p.surcharges || []), {
+                    id: `psurcharge_${Date.now()}`,
+                    type: type,
+                    label: surchargeType.label,
+                    value: 0,
+                    isPercent: false
+                }]
+            };
+        }));
+    };
+
+    const handleUpdateProductSurcharge = (productIndex: number, id: string, field: 'value' | 'isPercent', value: any) => {
+        setProducts(prev => prev.map((p, i) => {
+            if (i !== productIndex) return p;
+            return {
+                ...p,
+                surcharges: (p.surcharges || []).map(s => {
+                    if (s.id !== id) return s;
+                    if (field === 'value') {
+                        const val = parseFloat(value) || 0;
+                        return { ...s, value: s.isPercent ? Math.min(100, val) : val };
+                    }
+                    if (field === 'isPercent') {
+                        const isPercent = !!value;
+                        return { ...s, isPercent, value: isPercent && s.value > 100 ? 100 : s.value };
+                    }
+                    return s;
+                })
+            };
+        }));
+    };
+
+    const handleRemoveProductSurcharge = (productIndex: number, id: string) => {
+        setProducts(prev => prev.map((p, i) => {
+            if (i !== productIndex) return p;
+            return { ...p, surcharges: (p.surcharges || []).filter(s => s.id !== id) };
+        }));
+    };
+
+    // AddOn Surcharge handlers
+    const handleAddAddOnSurcharge = (addOnId: string, type: string) => {
+        const surchargeType = SURCHARGE_TYPES.find(s => s.value === type);
+        if (!surchargeType) return;
+        setAddOnProducts(prev => prev.map(a => {
+            if (a.id !== addOnId) return a;
+            if ((a.surcharges || []).some(s => s.type === type)) return a;
+            return {
+                ...a,
+                surcharges: [...(a.surcharges || []), {
+                    id: `asurcharge_${Date.now()}`,
+                    type,
+                    label: surchargeType.label,
+                    value: 0,
+                    isPercent: false
+                }]
+            };
+        }));
+    };
+
+    const handleUpdateAddOnSurcharge = (addOnId: string, id: string, field: 'value' | 'isPercent', value: any) => {
+        setAddOnProducts(prev => prev.map(a => {
+            if (a.id !== addOnId) return a;
+            return {
+                ...a,
+                surcharges: (a.surcharges || []).map(s => {
+                    if (s.id !== id) return s;
+                    if (field === 'value') {
+                        const val = parseFloat(value) || 0;
+                        return { ...s, value: s.isPercent ? Math.min(100, val) : val };
+                    }
+                    if (field === 'isPercent') {
+                        const isPercent = !!value;
+                        return { ...s, isPercent, value: isPercent && s.value > 100 ? 100 : s.value };
+                    }
+                    return s;
+                })
+            };
+        }));
+    };
+
+    const handleRemoveAddOnSurcharge = (addOnId: string, id: string) => {
+        setAddOnProducts(prev => prev.map(a => {
+            if (a.id !== addOnId) return a;
+            return { ...a, surcharges: (a.surcharges || []).filter(s => s.id !== id) };
+        }));
+    };
+
     // Calculate totals (sản phẩm khách + dịch vụ + sản phẩm bán kèm)
-    const subtotalFromCustomerProducts = products.reduce((sum, p) =>
-        sum + p.services.reduce((ssum, s) => ssum + s.price, 0), 0
-    );
-    const subtotalFromAddOns = addOnProducts.reduce((sum, a) => sum + a.price * a.quantity, 0);
+    const subtotalFromCustomerProducts = products.reduce((sum, p) => {
+        const servicesPrice = p.services.reduce((ssum, s) => ssum + s.price, 0);
+        const productSurcharges = (p.surcharges || []).reduce((ssum, s) => {
+            return ssum + (s.isPercent ? Math.round(servicesPrice * (s.value || 0) / 100) : (s.value || 0));
+        }, 0);
+        return sum + servicesPrice + productSurcharges;
+    }, 0);
+
+    const subtotalFromAddOns = addOnProducts.reduce((sum, a) => {
+        const basePrice = (a.price || 0) * (a.quantity || 1);
+        const addonSurcharges = (a.surcharges || []).reduce((asum, s) => {
+            return asum + (s.isPercent ? Math.round(basePrice * (s.value || 0) / 100) : (s.value || 0));
+        }, 0);
+        return sum + basePrice + addonSurcharges;
+    }, 0);
     const subtotal = subtotalFromCustomerProducts + subtotalFromAddOns;
 
     // Calculate discount amount
@@ -861,42 +977,59 @@ export function CreateOrderPage() {
             const payload = {
                 customer_id: customerId,
                 status: isEditMode ? undefined : status, // keep status if editing, or handle separately
-                customer_items: products.map(p => ({
-                    id: p.id.startsWith('temp_') ? undefined : p.id,
-                    name: p.name,
-                    type: p.type,
-                    brand: p.brand,
-                    color: p.color,
-                    size: p.size,
-                    material: p.material,
-                    condition_before: p.condition_before,
-                    images: p.images,
-                    notes: p.notes,
-                    services: p.services.map(s => ({
-                        id: s.id.startsWith('temp_') ? undefined : s.id,
-                        type: s.type,
-                        name: s.name,
-                        price: s.price,
-                        technicians: s.technicians.map(t => ({
-                            technician_id: t.id,
-                            commission: t.commission
-                        })),
-                        sales: s.sales.map(sl => ({
+                customer_items: products.map(p => {
+                    const servicesPrice = p.services.reduce((ssum, s) => ssum + s.price, 0);
+                    const surchargeAmount = (p.surcharges || []).reduce((ssum, s) => {
+                        return ssum + (s.isPercent ? Math.round(servicesPrice * (s.value || 0) / 100) : (s.value || 0));
+                    }, 0);
+                    return {
+                        id: p.id.startsWith('temp_') ? undefined : p.id,
+                        name: p.name,
+                        type: p.type,
+                        brand: p.brand,
+                        color: p.color,
+                        size: p.size,
+                        material: p.material,
+                        condition_before: p.condition_before,
+                        images: p.images,
+                        notes: p.notes,
+                        due_at: p.due_at ? new Date(p.due_at + 'T17:00:00').toISOString() : undefined,
+                        surcharges: p.surcharges || [],
+                        surcharge_amount: surchargeAmount,
+                        services: p.services.map(s => ({
+                            id: s.id.startsWith('temp_') ? undefined : s.id,
+                            type: s.type,
+                            name: s.name,
+                            price: s.price,
+                            technicians: s.technicians.map(t => ({
+                                technician_id: t.id,
+                                commission: t.commission
+                            })),
+                            sales: s.sales.map(sl => ({
+                                sale_id: sl.id,
+                                commission: sl.commission
+                            }))
+                        }))
+                    };
+                }),
+                sale_items: addOnProducts.map(a => {
+                    const basePrice = (a.price || 0) * (a.quantity || 1);
+                    const surchargeAmount = (a.surcharges || []).reduce((ssum, s) => {
+                        return ssum + (s.isPercent ? Math.round(basePrice * (s.value || 0) / 100) : (s.value || 0));
+                    }, 0);
+                    return {
+                        product_id: a.id,
+                        name: a.name,
+                        unit_price: a.price,
+                        quantity: a.quantity,
+                        surcharges: a.surcharges || [],
+                        surcharge_amount: surchargeAmount,
+                        sales: a.sales.map(sl => ({
                             sale_id: sl.id,
                             commission: sl.commission
                         }))
-                    }))
-                })),
-                sale_items: addOnProducts.map(a => ({
-                    product_id: a.id,
-                    name: a.name,
-                    unit_price: a.price,
-                    quantity: a.quantity,
-                    sales: a.sales.map(sl => ({
-                        sale_id: sl.id,
-                        commission: sl.commission
-                    }))
-                })),
+                    };
+                }),
                 notes,
                 discount: discountAmount,
                 discount_type: discountType,
@@ -909,7 +1042,7 @@ export function CreateOrderPage() {
                     amount: s.isPercent ? Math.round(subtotal * s.value / 100) : s.value
                 })),
                 paid_amount: paidAmount,
-                due_at: dueAt ? new Date(dueAt + 'T17:00:00').toISOString() : undefined
+
             };
 
             const response = isEditMode && id
@@ -1142,20 +1275,25 @@ export function CreateOrderPage() {
                             </Card>
                         ) : (
                             <div className="space-y-4">
-                                {products.map((product, index) => (
-                                    <Card key={product.id} className={currentProductIndex === index ? 'ring-2 ring-primary' : ''}>
+                                {products.map((product, index) => {
+                                    const productNumber = products.length - index;
+                                    const isCurrent = currentProductId === product.id;
+                                    const isConfirmed = confirmedProductIds.has(product.id);
+
+                                    return (
+                                    <Card key={product.id} className={isCurrent ? 'ring-2 ring-primary' : ''}>
                                         <CardHeader className="pb-3">
                                             <div className="flex items-center justify-between gap-3">
                                                 {/* QR Code on left for confirmed products */}
-                                                {confirmedProducts.has(index) && (
+                                                {isConfirmed && (
                                                     <div className="bg-white p-1 rounded border shadow-sm flex-shrink-0">
                                                         <QRCodeSVG
-                                                            value={`${nextOrderCode || 'A-1'}-${index + 1}`}
+                                                            value={`${nextOrderCode || 'A-1'}-${productNumber}`}
                                                             size={50}
                                                             level="M"
                                                         />
                                                         <p className="text-[10px] font-mono font-bold text-primary text-center mt-0.5">
-                                                            {nextOrderCode || 'A-1'}-{index + 1}
+                                                            {nextOrderCode || 'A-1'}-{productNumber}
                                                         </p>
                                                     </div>
                                                 )}
@@ -1165,29 +1303,34 @@ export function CreateOrderPage() {
                                                         {productTypes.find(t => t.code === product.type)?.name || 'Khác'}
                                                     </Badge>
                                                     <CardTitle className="text-base truncate">
-                                                        {product.name || `Sản phẩm ${index + 1}`}
+                                                        {product.name || `Sản phẩm ${productNumber}`}
                                                     </CardTitle>
                                                 </div>
-                                                <div className="flex items-center gap-2 flex-shrink-0">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="sm"
-                                                        onClick={() => {
-                                                            if (currentProductIndex === index) {
-                                                                setCurrentProductIndex(null);
-                                                            } else {
-                                                                setCurrentProductIndex(index);
-                                                                // If previously confirmed, un-confirm to allow editing
-                                                                if (confirmedProducts.has(index)) {
-                                                                    const next = new Set(confirmedProducts);
-                                                                    next.delete(index);
-                                                                    setConfirmedProducts(next);
+                                                <div className="flex items-center gap-4 flex-shrink-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <Calendar className="h-4 w-4 text-primary shrink-0" />
+                                                        <Input
+                                                            type="date"
+                                                            size={1}
+                                                            value={product.due_at || ''}
+                                                            onChange={(e) => handleUpdateProduct(index, 'due_at', e.target.value)}
+                                                            className="h-8 w-[140px] text-xs border-dashed focus:border-solid transition-all px-2"
+                                                        />
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
+                                                            onClick={() => {
+                                                                if (isCurrent) {
+                                                                    setCurrentProductId(null);
+                                                                } else {
+                                                                    setCurrentProductId(product.id);
                                                                 }
-                                                            }
-                                                        }}
-                                                    >
-                                                        {currentProductIndex === index ? 'Thu gọn' : 'Sửa'}
-                                                    </Button>
+                                                            }}
+                                                        >
+                                                            {isCurrent ? 'Thu gọn' : 'Sửa'}
+                                                        </Button>
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
@@ -1198,9 +1341,10 @@ export function CreateOrderPage() {
                                                     </Button>
                                                 </div>
                                             </div>
-                                        </CardHeader>
+                                        </div>
+                                    </CardHeader>
 
-                                        {currentProductIndex === index && !confirmedProducts.has(index) && (
+                                        {isCurrent && (
                                             <CardContent className="space-y-4 border-t pt-4">
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                                     <div className="space-y-2">
@@ -1296,6 +1440,7 @@ export function CreateOrderPage() {
                                                     />
                                                 </div>
 
+
                                                 <div className="space-y-2">
                                                     <Label>Ghi chú</Label>
                                                     <Textarea
@@ -1314,35 +1459,111 @@ export function CreateOrderPage() {
                                                                 toast.error('Vui lòng nhập tên sản phẩm');
                                                                 return;
                                                             }
-                                                            setConfirmedProducts(prev => new Set([...prev, index]));
-                                                            setCurrentProductIndex(null);
+                                                            setConfirmedProductIds(prev => new Set([...prev, product.id]));
+                                                            setCurrentProductId(null);
                                                         }}
                                                         className="bg-green-600 hover:bg-green-700"
                                                     >
                                                         <Check className="h-4 w-4 mr-2" />
-                                                        Xác nhận thông tin
+                                                        Xác nhận & Thu gọn
                                                     </Button>
                                                 </div>
                                             </CardContent>
                                         )}
 
-                                        {/* Show collapsed info with service selection for confirmed products */}
-                                        {currentProductIndex !== index && product.name && (
-                                            <CardContent className="pt-0 space-y-3">
-                                                {/* Product info badges */}
-                                                <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
-                                                    {product.brand && <Badge variant="outline">{product.brand}</Badge>}
-                                                    {product.color && <Badge variant="outline">{product.color}</Badge>}
-                                                    {product.size && <Badge variant="outline">Size {product.size}</Badge>}
-                                                    {confirmedProducts.has(index) && (
-                                                        <Badge className="bg-green-100 text-green-700">
-                                                            <Check className="h-3 w-3 mr-1" /> Đã xác nhận
-                                                        </Badge>
-                                                    )}
-                                                </div>
+                                        {/* Show service selection and product info when confirmed OR when name is entered */}
+                                        {(isConfirmed || (!isCurrent && product.name)) && (
+                                            <CardContent className={`${isCurrent ? 'pt-0 border-t-0' : 'pt-0'} space-y-3`}>
+                                                {/* Product info badges (only show when collapsed) */}
+                                                {!isCurrent && (
+                                                    <div className="flex flex-wrap gap-2 text-sm text-muted-foreground pb-2">
+                                                        {product.brand && <Badge variant="outline">{product.brand}</Badge>}
+                                                        {product.color && <Badge variant="outline">{product.color}</Badge>}
+                                                        {product.size && <Badge variant="outline">Size {product.size}</Badge>}
+                                                        {product.due_at && (
+                                                            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                                                                <Calendar className="h-3 w-3 mr-1" /> Trả: {new Date(product.due_at).toLocaleDateString('vi-VN')}
+                                                            </Badge>
+                                                        )}
+                                                        {isConfirmed && (
+                                                            <Badge className="bg-green-100 text-green-700">
+                                                                <Check className="h-3 w-3 mr-1" /> Đã xác nhận
+                                                            </Badge>
+                                                        )}
+                                                    </div>
+                                                )}
+
+                                                {/* Show service count for non-confirmed products */}
+                                                {!isConfirmed && product.services.length > 0 && (
+                                                    <Badge className="bg-green-100 text-green-700">
+                                                        {product.services.length} dịch vụ
+                                                    </Badge>
+                                                )}
+
+                                                {/* Surcharge section for product */}
+                                                {(isConfirmed || product.name) && (
+                                                    <div className="border-t pt-3 space-y-2">
+                                                        <div className="flex items-center justify-between">
+                                                            <p className="text-sm font-medium text-orange-700">Phụ phí cho sản phẩm:</p>
+                                                            <Select value="" onValueChange={(type) => handleAddProductSurcharge(index, type)}>
+                                                                <SelectTrigger className="h-7 w-[150px] text-[10px] bg-orange-50 border-orange-200">
+                                                                    <SelectValue placeholder="+ Thêm phụ phí" />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    {SURCHARGE_TYPES.filter(t => !(product.surcharges || []).some(ps => ps.type === t.value)).map(t => (
+                                                                        <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                                                                    ))}
+                                                                </SelectContent>
+                                                            </Select>
+                                                        </div>
+                                                        
+                                                        {product.surcharges && product.surcharges.length > 0 && (
+                                                            <div className="space-y-2">
+                                                                {product.surcharges.map((surcharge) => {
+                                                                    const servicesPrice = product.services.reduce((ssum, s) => ssum + s.price, 0);
+                                                                    const amount = surcharge.isPercent ? Math.round(servicesPrice * (surcharge.value || 0) / 100) : (surcharge.value || 0);
+                                                                    
+                                                                    return (
+                                                                        <div key={surcharge.id} className="flex items-center gap-2 bg-orange-50/50 p-2 rounded-lg border border-orange-200/50 text-xs">
+                                                                            <span className="flex-1 font-medium">{surcharge.label}</span>
+                                                                            <div className="flex items-center gap-1.5">
+                                                                                <Input
+                                                                                    type="number"
+                                                                                    value={surcharge.value}
+                                                                                    onFocus={(e) => e.target.select()}
+                                                                                    onChange={(e) => handleUpdateProductSurcharge(index, surcharge.id, 'value', e.target.value)}
+                                                                                    className="w-16 h-7 text-xs text-center"
+                                                                                />
+                                                                                <Button
+                                                                                    variant="ghost"
+                                                                                    size="sm"
+                                                                                    className={`h-7 px-2 text-[10px] ${surcharge.isPercent ? 'bg-orange-200 text-orange-800' : 'bg-gray-100'}`}
+                                                                                    onClick={() => handleUpdateProductSurcharge(index, surcharge.id, 'isPercent', !surcharge.isPercent)}
+                                                                                >
+                                                                                    {surcharge.isPercent ? '%' : 'đ'}
+                                                                                </Button>
+                                                                                <span className="font-semibold text-orange-600 min-w-[70px] text-right">
+                                                                                    = {formatCurrency(amount)}
+                                                                                </span>
+                                                                                <Button
+                                                                                    variant="ghost"
+                                                                                    size="icon"
+                                                                                    className="h-7 w-7 text-red-400"
+                                                                                    onClick={() => handleRemoveProductSurcharge(index, surcharge.id)}
+                                                                                >
+                                                                                    <X className="h-3.5 w-3.5" />
+                                                                                </Button>
+                                                                            </div>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
 
                                                 {/* Service selection for confirmed products */}
-                                                {confirmedProducts.has(index) && (
+                                                {isConfirmed && (
                                                     <div className="border-t pt-3 space-y-3">
                                                         {/* Added services list with technicians */}
                                                         {product.services.length > 0 && (
@@ -1515,17 +1736,11 @@ export function CreateOrderPage() {
                                                         </div>
                                                     </div>
                                                 )}
-
-                                                {/* Show service count for non-confirmed products */}
-                                                {!confirmedProducts.has(index) && product.services.length > 0 && (
-                                                    <Badge className="bg-green-100 text-green-700">
-                                                        {product.services.length} dịch vụ
-                                                    </Badge>
-                                                )}
                                             </CardContent>
                                         )}
                                     </Card>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
 
@@ -1629,6 +1844,65 @@ export function CreateOrderPage() {
                                                     </SelectContent>
                                                 </Select>
                                             </div>
+
+                                            {/* Surcharges for add-on */}
+                                            <div className="pt-2 mt-2 border-t border-amber-200/60">
+                                                <div className="flex items-center justify-between mb-2">
+                                                    <p className="text-[10px] font-medium text-amber-800 uppercase">Phụ phí sản phẩm</p>
+                                                    <Select value="" onValueChange={(type) => handleAddAddOnSurcharge(a.id, type)}>
+                                                        <SelectTrigger className="h-6 w-[120px] text-[9px] bg-white/40 border-amber-200/50">
+                                                            <SelectValue placeholder="+ Phụ phí" />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {SURCHARGE_TYPES.filter(t => !(a.surcharges || []).some(as => as.type === t.value)).map(t => (
+                                                                <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                
+                                                {a.surcharges && a.surcharges.length > 0 && (
+                                                    <div className="space-y-1.5">
+                                                        {a.surcharges.map((s) => {
+                                                            const basePrice = (a.price || 0) * (a.quantity || 1);
+                                                            const amount = s.isPercent ? Math.round(basePrice * (s.value || 0) / 100) : (s.value || 0);
+                                                            return (
+                                                                <div key={s.id} className="flex items-center gap-1.5 bg-white p-1.5 rounded border text-[10px]">
+                                                                    <span className="flex-1 font-medium">{s.label}</span>
+                                                                    <div className="flex items-center gap-1.5">
+                                                                        <Input
+                                                                            type="number"
+                                                                            value={s.value}
+                                                                            onFocus={(e) => e.target.select()}
+                                                                            onChange={(e) => handleUpdateAddOnSurcharge(a.id, s.id, 'value', e.target.value)}
+                                                                            className="w-12 h-6 text-[10px] text-center p-0.5"
+                                                                        />
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="sm"
+                                                                            className={`h-6 px-1 text-[9px] ${s.isPercent ? 'bg-amber-100' : 'bg-gray-50'}`}
+                                                                            onClick={() => handleUpdateAddOnSurcharge(a.id, s.id, 'isPercent', !s.isPercent)}
+                                                                        >
+                                                                            {s.isPercent ? '%' : 'đ'}
+                                                                        </Button>
+                                                                        <span className="font-semibold text-amber-700 min-w-[55px] text-right">
+                                                                            = {formatCurrency(amount)}
+                                                                        </span>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            className="h-6 w-6 text-red-400"
+                                                                            onClick={() => handleRemoveAddOnSurcharge(a.id, s.id)}
+                                                                        >
+                                                                            <X className="h-3 w-3" />
+                                                                        </Button>
+                                                                    </div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                     ))}
                                     <p className="text-sm text-muted-foreground pt-1">Tổng SP bán kèm: <span className="font-semibold text-foreground">{formatCurrency(subtotalFromAddOns)}</span></p>
@@ -1712,6 +1986,16 @@ export function CreateOrderPage() {
                                                     )}
                                                 </div>
 
+                                                {/* Due date */}
+                                                {product.due_at && (
+                                                    <div className="mt-2">
+                                                        <Badge variant="outline" className="text-xs py-0.5 px-2 bg-blue-50 text-blue-700 border-blue-200 gap-1">
+                                                            <Calendar className="h-3 w-3" />
+                                                            Hạn trả: {new Date(product.due_at).toLocaleDateString('vi-VN')}
+                                                        </Badge>
+                                                    </div>
+                                                )}
+
                                                 {/* Services */}
                                                 {product.services.length > 0 && (
                                                     <div className="mt-3 space-y-2">
@@ -1722,7 +2006,7 @@ export function CreateOrderPage() {
                                                                         <Sparkles className="h-4 w-4 text-purple-500 flex-shrink-0" />
                                                                         <span className="font-medium truncate">{s.name}</span>
                                                                     </div>
-                                                                    {s.technicians.length > 0 && (
+                                                                    {(s.technicians.length > 0 || (s.sales && s.sales.length > 0)) && (
                                                                         <div className="flex flex-wrap gap-1.5 mt-2">
                                                                             {s.technicians.map((tech, ti) => (
                                                                                 <span key={ti} className="text-[10px] text-blue-600 bg-blue-50 px-2 py-1 rounded-full whitespace-nowrap">
@@ -1736,19 +2020,33 @@ export function CreateOrderPage() {
                                                                             ))}
                                                                         </div>
                                                                     )}
-                                                                    {s.technicians.length === 0 && s.sales && s.sales.length > 0 && (
-                                                                        <div className="flex flex-wrap gap-1.5 mt-2">
-                                                                            {s.sales.map((sale, sai) => (
-                                                                                <span key={`s-${sai}`} className="text-[10px] text-amber-600 bg-amber-50 px-2 py-1 rounded-full whitespace-nowrap">
-                                                                                    Sales: {sale.name} ({sale.commission}%)
-                                                                                </span>
-                                                                            ))}
-                                                                        </div>
-                                                                    )}
                                                                 </div>
                                                                 <span className="font-bold text-green-600 text-base sm:text-lg flex-shrink-0">{formatCurrency(s.price)}</span>
                                                             </div>
                                                         ))}
+                                                    </div>
+                                                )}
+                                                
+                                                {/* Product Surcharges - Step 3 Review */}
+                                                {product.surcharges && product.surcharges.length > 0 && (
+                                                    <div className="mt-3 space-y-1.5 p-2 bg-orange-50/30 rounded-lg border border-dashed border-orange-200">
+                                                        <div className="flex items-center gap-1.5 mb-1">
+                                                            <div className="w-1 h-3 bg-orange-400 rounded-full" />
+                                                            <span className="text-[11px] font-bold text-orange-700 uppercase tracking-wider">Phụ phí sản phẩm</span>
+                                                        </div>
+                                                        {product.surcharges.map((surcharge) => {
+                                                            const servicesPrice = product.services.reduce((ssum, s) => ssum + s.price, 0);
+                                                            const amount = surcharge.isPercent ? Math.round(servicesPrice * (surcharge.value || 0) / 100) : (surcharge.value || 0);
+                                                            return (
+                                                                <div key={surcharge.id} className="flex justify-between items-center text-xs bg-white/50 px-2 py-1.5 rounded border border-orange-100/50">
+                                                                    <span className="text-orange-800 font-medium">
+                                                                        {surcharge.label} 
+                                                                        {surcharge.isPercent && <span className="ml-1 opacity-70">({surcharge.value}%)</span>}
+                                                                    </span>
+                                                                    <span className="font-bold text-orange-600">+{formatCurrency(amount)}</span>
+                                                                </div>
+                                                            );
+                                                        })}
                                                     </div>
                                                 )}
 
@@ -1774,6 +2072,22 @@ export function CreateOrderPage() {
                                                         <span className="font-medium">{a.name}</span>
                                                         <span className="text-amber-700 font-semibold">{a.quantity} × {formatCurrency(a.price)} = {formatCurrency(a.price * a.quantity)}</span>
                                                     </div>
+                                                    {a.surcharges && a.surcharges.length > 0 && (
+                                                        <div className="mt-2 space-y-1 pt-2 border-t border-dashed border-amber-200/40">
+                                                            {a.surcharges.map((s) => {
+                                                                const basePrice = (a.price || 0) * (a.quantity || 1);
+                                                                const amount = s.isPercent ? Math.round(basePrice * (s.value || 0) / 100) : (s.value || 0);
+                                                                return (
+                                                                    <div key={s.id} className="flex justify-between items-center text-[11px]">
+                                                                        <span className="text-amber-800 italic opacity-80">
+                                                                            {s.label} {s.isPercent ? `(${s.value}%)` : ''}
+                                                                        </span>
+                                                                        <span className="font-medium text-amber-700">+{formatCurrency(amount)}</span>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    )}
                                                     {a.sales && a.sales.length > 0 && (
                                                         <div className="flex flex-wrap gap-1 mt-1">
                                                             {a.sales.map((sale, sai) => (
@@ -1836,23 +2150,7 @@ export function CreateOrderPage() {
                             </CardContent>
                         </Card>
 
-                        {/* Ngày hẹn trả */}
-                        <Card>
-                            <CardHeader className="pb-2">
-                                <CardTitle className="text-sm flex items-center gap-2">
-                                    <Calendar className="h-4 w-4" />
-                                    Ngày hẹn trả
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <Input
-                                    type="date"
-                                    value={dueAt}
-                                    onChange={(e) => setDueAt(e.target.value)}
-                                    className="w-full"
-                                />
-                            </CardContent>
-                        </Card>
+
 
                         {/* Discount & Surcharges */}
                         <Card>
@@ -1868,6 +2166,7 @@ export function CreateOrderPage() {
                                             <Input
                                                 type="text"
                                                 value={discountType === 'amount' ? formatInputCurrency(discount) : (discount || '')}
+                                                onFocus={(e) => e.target.select()}
                                                 onChange={(e) => {
                                                     if (discountType === 'amount') {
                                                         setDiscount(parseInputCurrency(e.target.value));
@@ -1944,6 +2243,7 @@ export function CreateOrderPage() {
                                                             <Input
                                                                 type="text"
                                                                 value={surcharge.isPercent ? (surcharge.value || '') : formatInputCurrency(surcharge.value)}
+                                                                onFocus={(e) => e.target.select()}
                                                                 onChange={(e) => {
                                                                     if (surcharge.isPercent) {
                                                                         const val = Number(e.target.value.replace(/[^0-9]/g, '')) || 0;
@@ -2024,6 +2324,7 @@ export function CreateOrderPage() {
                                         <Input
                                             type="text"
                                             value={formatInputCurrency(paidAmount)}
+                                            onFocus={(e) => e.target.select()}
                                             onChange={(e) => setPaidAmount(parseInputCurrency(e.target.value))}
                                             placeholder="Số tiền khách trả"
                                             className="flex-1 border-green-200 focus:ring-green-500"

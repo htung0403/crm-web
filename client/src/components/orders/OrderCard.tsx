@@ -63,7 +63,7 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
         roomDeadline.label !== 'N/A';
 
     const receiveDate = order.confirmed_at || order.created_at;
-    const dueDate = order.due_at;
+    const dueDate = (effectiveProduct as any)?.due_at;
 
     const displayName = effectiveProduct?.item_name || effectiveServices[0]?.item_name || 'N/A';
     const displayServices = effectiveServices

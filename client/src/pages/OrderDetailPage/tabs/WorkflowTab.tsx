@@ -1,8 +1,9 @@
 import React, { memo, useMemo } from 'react';
 import {
     Layers, Loader2, ShoppingBag, Tag, FileText, Wrench, User as UserIcon,
-    Package, Truck, History
+    Package, Truck, History, Clock
 } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { TabsContent } from '@/components/ui/tabs';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
@@ -77,7 +78,13 @@ const WorkflowCard = memo(({
                         )}
                         <h3 className="font-bold text-gray-800 text-[13px] flex items-center gap-1.5 flex-wrap">
                             <ShoppingBag className="h-3.5 w-3.5 shrink-0 text-primary" />
-                            <span className="truncate">{productName}</span>
+                            <span className="truncate flex-1">{productName}</span>
+                            {group.product?.due_at && (
+                                <Badge variant="outline" className="text-[9px] py-0 h-3.5 bg-orange-50 text-orange-600 border-orange-200 gap-1 shrink-0">
+                                    <Clock className="h-2 w-2" />
+                                    {new Date(group.product.due_at).toLocaleDateString('vi-VN')}
+                                </Badge>
+                            )}
                         </h3>
                         {hasProductDetails && (
                             <div className="grid grid-cols-1 gap-1 text-[11px] text-gray-600">
@@ -305,12 +312,13 @@ export function WorkflowTab({
         { id: 'fail', title: 'Thất bại' }
     ], []);
 
-    // Khi order ở trạng thái before_sale, chỉ hiển thị nhóm đã được "Chốt đơn" (step5)
+    // Khi order ở trạng thái before_sale, hiển thị nhóm đã chốt đơn (step5) hoặc đã chuyển sang thực hiện
     const filteredGroups = useMemo(() => {
         if (order?.status !== 'before_sale') return workflowKanbanGroups;
         return workflowKanbanGroups.filter(g => {
             const leadItem = g.product || g.services[0];
-            return leadItem?.status === 'step5';
+            const status = leadItem?.status;
+            return status === 'step5' || status === 'processing' || status === 'in_progress' || status === 'completed';
         });
     }, [workflowKanbanGroups, order?.status]);
 

@@ -1,6 +1,75 @@
 import { supabaseAdmin } from '../config/supabase.js';
 
 /**
+ * Synchronizes an order's payment info (paid_amount, remaining_debt, payment_status)
+ * based on all 'paid' invoices associated with it.
+ */
+export async function syncOrderPayment(orderId: string): Promise<void> {
+    try {
+        console.log(`[PaymentSync] Syncing payment for order: ${orderId}`);
+
+        // 1. Fetch Order to get total_amount
+        const { data: order, error: orderError } = await supabaseAdmin
+            .from('orders')
+            .select('id, total_amount')
+            .eq('id', orderId)
+            .single();
+
+        if (orderError || !order) {
+            console.error('[PaymentSync] Order not found:', orderError);
+            return;
+        }
+
+        // 2. Fetch all PAID invoices for this order
+        const { data: invoices, error: invError } = await supabaseAdmin
+            .from('invoices')
+            .select('total_amount')
+            .eq('order_id', orderId)
+            .eq('status', 'paid');
+
+        if (invError) {
+            console.error('[PaymentSync] Error fetching invoices:', invError);
+            return;
+        }
+
+        const totalPaid = (invoices || []).reduce((sum, inv) => sum + (Number(inv.total_amount) || 0), 0);
+        const remainingDebt = Math.max(0, (order.total_amount || 0) - totalPaid);
+        
+        // Determine payment status
+        let paymentStatus: 'unpaid' | 'partial' | 'paid' = 'unpaid';
+        if (totalPaid >= (order.total_amount || 0)) {
+            paymentStatus = 'paid';
+        } else if (totalPaid > 0) {
+            paymentStatus = 'partial';
+        }
+
+        // 3. Update Order
+        const { error: updateError } = await supabaseAdmin
+            .from('orders')
+            .update({
+                paid_amount: totalPaid,
+                remaining_debt: remainingDebt,
+                payment_status: paymentStatus,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', orderId);
+
+        if (updateError) {
+            console.error('[PaymentSync] Error updating order:', updateError);
+            return;
+        }
+
+        console.log(`[PaymentSync] Successfully synced: Paid=${totalPaid}, Status=${paymentStatus}`);
+
+        // 4. Trigger auto-completion check
+        await checkAndCompleteOrder(orderId);
+
+    } catch (error) {
+        console.error('[PaymentSync] Unexpected error:', error);
+    }
+}
+
+/**
  * Checks if an order meets the criteria for auto-completion:
  * 1. Fully paid (remaining_debt <= 0)
  * 2. All services/items are completed, cancelled, or skipped.

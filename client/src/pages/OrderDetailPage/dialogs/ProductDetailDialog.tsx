@@ -10,7 +10,7 @@ import {
     ShoppingBag, Tag, FileText, Package, Truck, Wrench, Camera,
     User as UserIcon, CheckCircle2, MessageSquare, Receipt,
     History, Save, Loader2, Heart, ShieldCheck, ClipboardList, Sparkles,
-    ThumbsUp, ThumbsDown
+    ThumbsUp, ThumbsDown, Calendar, XCircle
 } from 'lucide-react';
 import { UpsellDialog } from '@/components/orders/UpsellDialog';
 import { Badge } from '@/components/ui/badge';
@@ -23,7 +23,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ProductChat } from '@/components/orders/workflow/ProductChat';
 import type { Order, OrderItem } from '@/hooks/useOrders';
-import { cn, formatCurrency, formatDateTime } from '@/lib/utils';
+import { cn, formatCurrency, formatDateTime, formatDate } from '@/lib/utils';
 import { SALES_STATUS_LABELS } from '../constants';
 import { orderItemsApi } from '@/lib/api';
 import { toast } from 'sonner';
@@ -42,6 +42,10 @@ interface ProductDetailDialogProps {
     onReloadOrder?: () => void;
     setActiveTab?: (tab: string) => void;
     highlightMessageId?: string;
+    salesLogs?: any[];
+    workflowLogs?: any[];
+    aftersaleLogs?: any[];
+    careLogs?: any[];
 }
 
 export function ProductDetailDialog({
@@ -56,6 +60,10 @@ export function ProductDetailDialog({
     onReloadOrder,
     setActiveTab,
     highlightMessageId,
+    salesLogs = [],
+    workflowLogs = [],
+    aftersaleLogs = [],
+    careLogs = [],
 }: ProductDetailDialogProps) {
     const [activeImageIdx, setActiveImageIdx] = useState(0);
     const [saving, setSaving] = useState(false);
@@ -63,6 +71,7 @@ export function ProductDetailDialog({
 
     // Local form state
     const [formData, setFormData] = useState<Partial<Order>>({});
+    const [dueAt, setDueAt] = useState<string>('');
 
     // Initialize form data when the dialog is opened or order ID changes
     useEffect(() => {
@@ -101,6 +110,13 @@ export function ProductDetailDialog({
             setActiveImageIdx(0);
         }
     }, [open, order?.id, group?.product?.id, group?.services?.[0]?.id]); // Only re-init when dialog opens or identity changes
+
+    useEffect(() => {
+        if (open) {
+            const item = group?.product || group?.services?.[0];
+            setDueAt((item as any)?.due_at ? new Date((item as any).due_at).toISOString().slice(0, 16) : '');
+        }
+    }, [open, group?.product?.id, group?.services?.[0]?.id]);
 
     const product = group?.product;
     const services = group?.services || [];
@@ -262,11 +278,56 @@ export function ProductDetailDialog({
         return 'Chi tiết sản phẩm';
     };
 
+    const getRoomLogs = () => {
+        const allLogs = [...salesLogs, ...workflowLogs, ...aftersaleLogs, ...careLogs];
+        return allLogs
+            .filter(log => log.entity_id === entityId || log.order_item_step_id) // simplified filter
+            .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    };
+
+    const roomLogs = getRoomLogs();
+
+    const [timeLeft, setTimeLeft] = useState<string>('');
+
+    useEffect(() => {
+        if (!open || !dueAt) return;
+
+        const updateCountdown = () => {
+            const now = new Date().getTime();
+            const target = new Date(dueAt).getTime();
+            const diff = target - now;
+
+            if (diff <= 0) {
+                setTimeLeft('ĐÃ QUÁ HẠN');
+                return;
+            }
+
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+            setTimeLeft(`${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
+        };
+
+        updateCountdown();
+        const timer = setInterval(updateCountdown, 1000);
+        return () => clearInterval(timer);
+    }, [open, dueAt]);
+
+    const getStageInstructions = () => {
+        if (roomId === 'step1') return "Kiểm tra kỹ tình trạng đồ của khách, chụp ảnh các vết trầy xước hoặc hư hỏng trước khi nhận.";
+        if (roomId === 'step2') return "Gắn Tag định danh cho từng sản phẩm. Đảm bảo Tag không làm hỏng chất liệu sản phẩm.";
+        if (roomId === 'step3') return "Trao đổi kỹ với bộ phận Kỹ thuật về phương án xử lý. Ghi chú lại các yêu cầu đặc biệt của khách.";
+        if (roomId === 'after1') return "Kiểm tra lại nợ cũ của khách. Chụp ảnh sản phẩm sau khi đã hoàn thiện để gửi khách.";
+        if (roomId.startsWith('after2')) return "Đóng gói cẩn thận, dán mã vận đơn rõ ràng. Chụp ảnh gói hàng trước khi giao shipper.";
+        return "Hoàn thành các nhiệm vụ trong giai đoạn này và cập nhật trạng thái.";
+    };
+
     if (!group) return null;
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-6xl p-0 overflow-hidden flex flex-col h-[90vh]">
+            <DialogContent className="max-w-none w-screen h-screen p-0 overflow-hidden flex flex-col rounded-none border-none">
                 <DialogHeader className="p-4 border-b">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
@@ -282,11 +343,30 @@ export function ProductDetailDialog({
                                 </DialogDescription>
                             </div>
                         </div>
-                        {product?.status && (
-                            <Badge variant="secondary" className="capitalize text-[10px] font-bold px-2 py-0">
-                                {product.status}
-                            </Badge>
-                        )}
+
+                        <div className="flex items-center gap-6">
+                            {dueAt && (
+                                <div className="text-right hidden sm:block">
+                                    <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest leading-none mb-1">Hạn trả sản phẩm</div>
+                                    <div className="flex items-center gap-2">
+                                        <Badge variant="outline" className="font-mono text-sm border-orange-200 text-orange-700 bg-orange-50 px-2 py-0.5">
+                                            {formatDate(dueAt)}
+                                        </Badge>
+                                        <Badge className={cn(
+                                            "font-mono text-sm px-2 py-0.5",
+                                            timeLeft === 'ĐÃ QUÁ HẠN' ? "bg-red-500 hover:bg-red-600" : "bg-blue-600 hover:bg-blue-700"
+                                        )}>
+                                            {timeLeft}
+                                        </Badge>
+                                    </div>
+                                </div>
+                            )}
+                            {product?.status && (
+                                <Badge variant="secondary" className="capitalize text-[10px] font-bold px-2 py-1">
+                                    {product.status}
+                                </Badge>
+                            )}
+                        </div>
                     </div>
                 </DialogHeader>
 
@@ -295,16 +375,18 @@ export function ProductDetailDialog({
                     <ScrollArea className="flex-1 p-4 md:max-w-[50%] border-r">
                         <div className="space-y-4">
                             {allImages?.length > 0 && (
-                                <div className="space-y-4">
-                                    <div className="rounded-2xl overflow-hidden border-4 border-white shadow-xl bg-gray-50 aspect-video relative group">
+                                <div className="flex flex-col xl:flex-row gap-4">
+                                    {/* Main Large Image */}
+                                    <div className="flex-[3] rounded-2xl overflow-hidden border-4 border-white shadow-xl bg-gray-50 max-h-[400px] xl:max-h-[500px] aspect-video relative group shrink-0">
                                         <img
                                             src={allImages[activeImageIdx]}
                                             alt={`${productName}-${activeImageIdx}`}
-                                            className="w-full h-full object-cover transition-transform group-hover:scale-105 duration-700"
+                                            className="w-full h-full object-contain transition-transform group-hover:scale-105 duration-700"
                                         />
                                     </div>
 
-                                    <div className="space-y-4">
+                                    {/* Scrollable Thumbnails Right Side */}
+                                    <div className="flex-1 space-y-4 max-h-[400px] xl:max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
                                         {/* Row 1: Original Product Photos */}
                                         {originalImages.length > 0 && (
                                             <div className="space-y-1.5">
@@ -420,6 +502,55 @@ export function ProductDetailDialog({
                                 </div>
                             </div>
 
+                            {/* Staff Info Card */}
+                            <div className="space-y-3">
+                                <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Nhân sự phụ trách</h3>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex items-center gap-3">
+                                        <div className="h-8 w-8 rounded-lg bg-orange-50 flex items-center justify-center shrink-0">
+                                            <UserIcon className="h-4 w-4 text-orange-500" />
+                                        </div>
+                                        <div className="flex flex-col min-w-0">
+                                            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tight">HĐ TẠO BỞI</span>
+                                            <span className="text-xs font-bold text-gray-800 truncate">{(order as any).created_by_user?.name || 'Hệ thống'}</span>
+                                        </div>
+                                    </div>
+                                    <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex items-center gap-3">
+                                        <div className="h-8 w-8 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                                            <ShieldCheck className="h-4 w-4 text-blue-500" />
+                                        </div>
+                                        <div className="flex flex-col min-w-0">
+                                            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tight">SALE CHỐT</span>
+                                            <span className="text-xs font-bold text-gray-800 truncate">{order?.sales_user?.name || 'N/A'}</span>
+                                        </div>
+                                    </div>
+                                    {services.some(s => (s as any).technician) && (
+                                        <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex items-center gap-3 sm:col-span-2">
+                                            <div className="h-8 w-8 rounded-lg bg-purple-50 flex items-center justify-center shrink-0">
+                                                <Wrench className="h-4 w-4 text-purple-500" />
+                                            </div>
+                                            <div className="flex flex-col min-w-0">
+                                                <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tight">KỸ THUẬT VIÊN</span>
+                                                <span className="text-xs font-bold text-gray-800 truncate">
+                                                    {Array.from(new Set(services.filter(s => (s as any).technician).map(s => (s as any).technician.name))).join(', ')}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Stage Instructions Card */}
+                            <div className="bg-primary/5 p-4 rounded-xl border border-primary/10 space-y-2">
+                                <div className="flex items-center gap-2">
+                                    <Sparkles className="h-4 w-4 text-primary" />
+                                    <h3 className="font-bold text-xs uppercase tracking-tight text-primary">Hướng dẫn Giai đoạn này</h3>
+                                </div>
+                                <p className="text-xs text-gray-600 leading-relaxed font-medium">
+                                    {getStageInstructions()}
+                                </p>
+                            </div>
+
                             <div className="space-y-3">
                                 <div className="flex items-center justify-between">
                                     <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Dịch vụ yêu cầu</h3>
@@ -458,6 +589,47 @@ export function ProductDetailDialog({
                     {/* Contextual Right Sidebar */}
                     <ScrollArea className="flex-1 bg-gray-50/40">
                         <div className="p-4 flex flex-col gap-4 min-h-full">
+                            {/* Product Specific Due Date (Available in all steps) */}
+                            <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-3">
+                                <div className="flex items-center gap-2 text-xs font-bold text-gray-400 uppercase tracking-widest">
+                                    <Calendar className="h-3.5 w-3.5" /> Hẹn trả sản phẩm này
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <Input
+                                        type="datetime-local"
+                                        className="h-9 text-xs rounded-xl"
+                                        value={dueAt}
+                                        onChange={(e) => setDueAt(e.target.value)}
+                                    />
+                                    <Button
+                                        size="sm"
+                                        className="h-9 px-3 rounded-xl gap-2 font-bold"
+                                        onClick={async () => {
+                                            const itemId = product?.id || services[0]?.id;
+                                            if (!itemId || !onUpdateItemAfterSaleData) return;
+                                            setSaving(true);
+                                            try {
+                                                await onUpdateItemAfterSaleData(itemId, !!product, {
+                                                    due_at: dueAt ? new Date(dueAt).toISOString() : null
+                                                });
+                                                toast.success('Đã cập nhật ngày hẹn trả sản phẩm');
+                                            } catch (e) {
+                                                toast.error('Lỗi khi cập nhật ngày hẹn');
+                                            } finally {
+                                                setSaving(false);
+                                            }
+                                        }}
+                                        disabled={saving}
+                                    >
+                                        {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                                        LƯU
+                                    </Button>
+                                </div>
+                                <p className="text-[10px] text-muted-foreground italic pl-1">
+                                    * Mặc định sẽ lấy hạn trả của toàn đơn nếu để trống.
+                                </p>
+                            </div>
+
                             {isAftersale && order ? (
                                 <div className="flex-1 flex flex-col gap-4">
                                     {/* Only show Payment info in after1 and after4 */}
@@ -1135,11 +1307,93 @@ export function ProductDetailDialog({
 
                                     {/* Chat section for all sales steps */}
                                     {entityId && (
-                                        <div className="flex-1 flex flex-col min-h-[250px]">
-                                            <div className="flex items-center gap-2 mb-2">
-                                                <MessageSquare className="h-3.5 w-3.5 text-gray-400" />
-                                                <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Trao đổi nội bộ</h4>
+                                        <div className="flex-1 flex flex-col min-h-[400px] gap-4">
+                                            <div className="flex-1 flex flex-col min-h-[150px]">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <History className="h-3.5 w-3.5 text-gray-400" />
+                                                    <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Lịch sử thay đổi</h4>
+                                                </div>
+                                                <ScrollArea className="flex-1 bg-white rounded-xl border border-gray-100 p-3">
+                                                    <div className="space-y-3">
+                                                        {roomLogs.length > 0 ? roomLogs.map((log: any) => (
+                                                            <div key={log.id} className="text-[11px] border-b border-gray-50 pb-2 last:border-0">
+                                                                <div className="flex justify-between items-start mb-1">
+                                                                    <span className="font-bold text-gray-700 uppercase">
+                                                                        {log.from_status || log.from_stage || 'START'} → {log.to_status || log.to_stage}
+                                                                    </span>
+                                                                    <span className="text-[9px] text-gray-400 tabular-nums">{formatDateTime(log.created_at)}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1.5 text-gray-500">
+                                                                    <div className="h-3 w-3 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-[8px] font-bold">
+                                                                        {log.created_by_user?.name?.charAt(0) || '?'}
+                                                                    </div>
+                                                                    {log.created_by_user?.name || 'Hệ thống'}
+                                                                </div>
+                                                            </div>
+                                                        )) : (
+                                                            <div className="text-center py-8 text-gray-400 italic text-[11px]">Chưa có lịch sử thay đổi</div>
+                                                        )}
+                                                    </div>
+                                                </ScrollArea>
                                             </div>
+
+                                            <div className="flex-1 flex flex-col min-h-[250px]">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <MessageSquare className="h-3.5 w-3.5 text-gray-400" />
+                                                    <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Trao đổi nội bộ</h4>
+                                                </div>
+                                                <ProductChat
+                                                    orderId={order?.id || ''}
+                                                    entityId={entityId}
+                                                    entityType={entityType}
+                                                    roomId={roomId}
+                                                    currentUserId={currentUserId}
+                                                    highlightMessageId={highlightMessageId}
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="flex-1 flex flex-col gap-4 min-h-0">
+                                    <div className="flex-1 flex flex-col min-h-[150px]">
+                                        <div className="flex items-center gap-2 mb-2">
+                                            <History className="h-3.5 w-3.5 text-gray-400" />
+                                            <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Lịch sử thay đổi</h4>
+                                        </div>
+                                        <ScrollArea className="flex-1 bg-white rounded-xl border border-gray-100 p-3">
+                                            <div className="space-y-3">
+                                                {roomLogs.length > 0 ? roomLogs.map((log: any) => (
+                                                    <div key={log.id} className="text-[11px] border-b border-gray-50 pb-2 last:border-0">
+                                                        <div className="flex justify-between items-start mb-1">
+                                                            <span className="font-bold text-gray-700 uppercase">
+                                                                {log.from_status || log.from_stage || 'START'} → {log.to_status || log.to_stage}
+                                                            </span>
+                                                            <span className="text-[9px] text-gray-400 tabular-nums">{formatDateTime(log.created_at)}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-1.5 text-gray-500">
+                                                            <div className="h-3 w-3 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-[8px] font-bold">
+                                                                {log.created_by_user?.name?.charAt(0) || '?'}
+                                                            </div>
+                                                            {log.created_by_user?.name || 'Hệ thống'}
+                                                        </div>
+                                                    </div>
+                                                )) : (
+                                                    <div className="text-center py-8 text-gray-400 italic text-[11px]">Chưa có lịch sử thay đổi</div>
+                                                )}
+                                            </div>
+                                        </ScrollArea>
+                                    </div>
+
+                                    <div className="flex-1 flex flex-col min-h-[250px]">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Trao đổi nội bộ</h3>
+                                            <Badge variant="secondary" className="text-[10px] px-2 py-0 font-bold">
+                                                {SALES_STATUS_LABELS[roomId]?.toUpperCase() || `PHÒNG ${roomId.toUpperCase()}`}
+                                            </Badge>
+                                        </div>
+
+                                        {entityId && (
                                             <ProductChat
                                                 orderId={order?.id || ''}
                                                 entityId={entityId}
@@ -1148,27 +1402,23 @@ export function ProductDetailDialog({
                                                 currentUserId={currentUserId}
                                                 highlightMessageId={highlightMessageId}
                                             />
-                                        </div>
-                                    )}
-                                </div>
-                            ) : (
-                                <div className="flex-1 flex flex-col gap-4 min-h-0">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Trao đổi nội bộ</h3>
-                                        <Badge variant="secondary" className="text-[10px] px-2 py-0 font-bold">
-                                            {SALES_STATUS_LABELS[roomId]?.toUpperCase() || `PHÒNG ${roomId.toUpperCase()}`}
-                                        </Badge>
+                                        )}
                                     </div>
 
-                                    {entityId && (
-                                        <ProductChat
-                                            orderId={order?.id || ''}
-                                            entityId={entityId}
-                                            entityType={entityType}
-                                            roomId={roomId}
-                                            currentUserId={currentUserId}
-                                            highlightMessageId={highlightMessageId}
-                                        />
+                                    {/* Mark Failed Button - Only for Workflow stages */}
+                                    {!isSalesStep && !isAftersale && !isCareFlow && (
+                                        <div className="pt-4 mt-auto">
+                                            <Button
+                                                variant="outline"
+                                                className="w-full h-10 rounded-xl border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 font-bold gap-2 text-xs"
+                                                onClick={() => {
+                                                    toast.info("Vui lòng sử dụng nút 'Thất bại' bên ngoài Kanban để ghi nhận chi tiết.");
+                                                }}
+                                            >
+                                                <XCircle className="h-4 w-4" />
+                                                ĐÁNH DẤU THẤT BẠI
+                                            </Button>
+                                        </div>
                                     )}
                                 </div>
                             )}

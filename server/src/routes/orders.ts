@@ -127,7 +127,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                 const { data: v2Products } = await supabaseAdmin
                     .from('order_products')
                     .select(`
-                        id, order_id, product_code, name, type, images, status, sales_step_data, after_sale_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type,
+                        id, order_id, product_code, name, type, images, status, sales_step_data, after_sale_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, due_at, surcharges, surcharge_amount,
                         services:order_product_services(
                             id, item_name, item_type, unit_price, technician_id,
                             service:services(id, image, code),
@@ -184,6 +184,9 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                                 delivery_code: product.delivery_code || null,
                                 delivery_carrier: product.delivery_carrier || null,
                                 delivery_type: product.delivery_type || null,
+                                due_at: product.due_at || null,
+                                surcharges: product.surcharges || [],
+                                surcharge_amount: product.surcharge_amount || 0,
                             });
                             if (product.services?.length) {
                                 for (const s of product.services as any[]) {
@@ -274,7 +277,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
             const { data: v2Products } = await supabaseAdmin
                 .from('order_products')
                 .select(`
-                    id, order_id, product_code, name, type, images, status, sales_step_data, after_sale_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type,
+                    id, order_id, product_code, name, type, images, status, sales_step_data, after_sale_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, due_at, surcharges, surcharge_amount,
                     services:order_product_services(
                         id, item_name, item_type, unit_price, technician_id,
                         service:services(id, image, code),
@@ -329,6 +332,12 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                             after_sale_stage: product.after_sale_stage || null,
                             completion_photos: product.completion_photos || [],
                             packaging_photos: product.packaging_photos || [],
+                            delivery_code: product.delivery_code || null,
+                            delivery_carrier: product.delivery_carrier || null,
+                            delivery_type: product.delivery_type || null,
+                            due_at: product.due_at || null,
+                            surcharges: product.surcharges || [],
+                            surcharge_amount: product.surcharge_amount || 0,
                         });
                         if (product.services?.length) {
                             for (const s of product.services as any[]) {
@@ -397,6 +406,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         *,
         customer:customers(id, name, phone, email, address),
         sales_user:users!orders_sales_id_fkey(id, name),
+        created_by_user:users!orders_created_by_fkey(id, name),
         sale_items:order_items(
             *,
             sales_step_data,
@@ -508,7 +518,10 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                     sales_step_data: product.sales_step_data || null,
                     delivery_code: product.delivery_code || null,
                     delivery_carrier: product.delivery_carrier || null,
-                    delivery_type: product.delivery_type || null
+                    delivery_type: product.delivery_type || null,
+                    surcharges: product.surcharges || [],
+                    surcharge_amount: product.surcharge_amount || 0,
+                    due_at: product.due_at || null
                 });
 
                 if (product.services && product.services.length > 0) {
@@ -726,6 +739,8 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                         subtotalFromCustomerItems += Number(service.price) || 0;
                     }
                 }
+                // Add per-product surcharge
+                subtotalFromCustomerItems += Number(item.surcharge_amount) || 0;
             }
         }
 
@@ -735,6 +750,8 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                 const qty = Math.max(1, Number(item.quantity) || 1);
                 const price = Number(item.unit_price || item.price) || 0;
                 subtotalFromSaleItems += price * qty;
+                // Add per-item surcharge
+                subtotalFromSaleItems += Number(item.surcharge_amount) || 0;
             }
         }
 
@@ -805,7 +822,10 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                         condition_before: item.condition_before,
                         images: item.images || [],
                         notes: item.notes,
-                        status: 'pending'
+                        due_at: item.due_at || null,
+                        status: 'pending',
+                        surcharges: item.surcharges || [],
+                        surcharge_amount: Number(item.surcharge_amount) || 0
                     })
                     .select()
                     .single();
@@ -814,16 +834,21 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                     console.error('Error creating customer item:', productError);
                     continue;
                 }
-
-                if (item.services && Array.isArray(item.services)) {
-                    const servicesPayload = item.services.map((svc: any) => {
+                console.log(`[OrderCreate] Created product ${orderProduct.product_code} with ID ${orderProduct.id}`);
+                       if (item.services && Array.isArray(item.services)) {
+                    console.log(`[OrderCreate] Processing ${item.services.length} services for product ${orderProduct.product_code}`);
+                    
+                    const servicesPayload = item.services.map((svc: any, sIdx: number) => {
                         const hasTechs = svc.technicians && svc.technicians.length > 0;
                         const techId = svc.technician_id || (hasTechs ? svc.technicians[0].technician_id : null);
+                        const sId = svc.id || svc.service_id;
+
+                        console.log(`[OrderCreate] Mapping service ${sIdx}: name="${svc.name}", type="${svc.type}", id="${sId}", price=${svc.price}`);
 
                         return {
                             order_product_id: orderProduct.id,
-                            service_id: svc.type === 'service' ? (svc.id || svc.service_id) : null,
-                            package_id: svc.type === 'package' ? (svc.id || svc.package_id) : null,
+                            service_id: svc.type === 'service' ? sId : null,
+                            package_id: svc.type === 'package' ? sId : null,
                             item_name: svc.name,
                             item_type: svc.type,
                             unit_price: Number(svc.price) || 0,
@@ -831,24 +856,39 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                             status: hasTechs ? 'assigned' : 'pending',
                             assigned_at: hasTechs ? new Date().toISOString() : null,
                             _technicians: svc.technicians || [], // temp metadata
-                            _sales: svc.sales || [] // temp metadata
+                            _sales: svc.sales || [], // temp metadata
+                            _original_index: sIdx // for debugging
                         };
                     });
 
+                    // Log columns we are about to insert
+                    const insertData = servicesPayload.map((s: any) => {
+                        const { _technicians, _sales, _original_index, ...data } = s;
+                        return data;
+                    });
+                    console.log(`[OrderCreate] Inserting services into DB:`, JSON.stringify(insertData));
+
                     const { data: createdSvcs, error: svcsError } = await supabaseAdmin
                         .from('order_product_services')
-                        .insert(servicesPayload.map((s: any) => {
-                            const { _technicians, ...data } = s;
-                            return data;
-                        }))
+                        .insert(insertData)
                         .select();
+
+                    if (svcsError) {
+                        console.error('[OrderCreate] DB Error inserting services:', JSON.stringify(svcsError));
+                    } else {
+                        console.log(`[OrderCreate] DB Success: created ${createdSvcs?.length} services`);
+                    }
 
                     if (!svcsError && createdSvcs) {
                         // Handle multiple technicians
                         const techAssignments: any[] = [];
                         for (let j = 0; j < createdSvcs.length; j++) {
                             const createdSvc = createdSvcs[j];
-                            const originalSvc = servicesPayload[j];
+                            const originalSvc = servicesPayload.find((s: any) => s._original_index === j); // Match by original index
+                            if (!originalSvc) {
+                                console.warn(`[OrderCreate] Could not find original service for created service at index ${j}. Skipping tech assignments.`);
+                                continue;
+                            }
                             const techs = originalSvc._technicians || [];
                             for (const t of techs) {
                                 techAssignments.push({
@@ -870,7 +910,8 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                         const saleAssignments: any[] = [];
                         for (let j = 0; j < createdSvcs.length; j++) {
                             const createdSvc = createdSvcs[j];
-                            const originalSvc = servicesPayload[j];
+                            const originalSvc = servicesPayload.find((s: any) => s._original_index === j);
+                            if (!originalSvc) continue;
                             const sales = originalSvc._sales || [];
                             for (const s of sales) {
                                 saleAssignments.push({
@@ -941,7 +982,9 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                     unit_price: pValue,
                     total_price: totalValue,
                     item_code: `IT${baseTime}${idxValue.toString().padStart(2, '0')}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`,
-                    status: 'pending'
+                    status: 'pending',
+                    surcharges: itemValue.surcharges || [],
+                    surcharge_amount: Number(itemValue.surcharge_amount) || 0
                 });
 
                 // Decrement stock for catalog product
@@ -1152,6 +1195,7 @@ router.post('/:id/upsell', authenticate, requireSale, async (req: AuthenticatedR
                             condition_before: item.condition_before,
                             images: item.images || [],
                             notes: item.notes,
+                            due_at: item.due_at || null,
                             status: 'pending'
                         })
                         .select()
@@ -1548,11 +1592,15 @@ router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequ
                         subtotal += Number(svc.price) || 0;
                     }
                 }
+                // Add per-product surcharge
+                subtotal += Number(item.surcharge_amount) || 0;
             }
         }
         if (sale_items && Array.isArray(sale_items)) {
             for (const item of sale_items) {
                 subtotal += (Number(item.quantity) || 1) * (Number(item.unit_price) || 0);
+                // Add per-item surcharge
+                subtotal += Number(item.surcharge_amount) || 0;
             }
         }
 
@@ -1638,7 +1686,10 @@ router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequ
                         condition_before: item.condition_before,
                         images: item.images || [],
                         notes: item.notes,
-                        status: 'pending'
+                        due_at: item.due_at || null,
+                        status: 'pending',
+                        surcharges: item.surcharges || [],
+                        surcharge_amount: Number(item.surcharge_amount) || 0
                     })
                     .select()
                     .single();
@@ -1729,6 +1780,8 @@ router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequ
                 unit_price: Number(a.unit_price) || 0,
                 total_price: (Number(a.quantity) || 1) * (Number(a.unit_price) || 0),
                 item_code: a.item_code || `IT${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`,
+                surcharges: a.surcharges || [],
+                surcharge_amount: Number(a.surcharge_amount) || 0
             }));
             const { data: createdItems, error: itemsError } = await supabaseAdmin.from('order_items').insert(saleItemsPayload).select();
 

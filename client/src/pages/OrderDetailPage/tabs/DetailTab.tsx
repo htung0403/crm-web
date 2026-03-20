@@ -116,7 +116,9 @@ export function DetailTab({ order, productStatusSummary, onShowPrintDialog, onSh
                                                 {groups.map((group, gi) => {
                                                     if (group.product) {
                                                         const product = group.product;
+                                                        const productSurcharge = (product as any).surcharge_amount || 0;
                                                         const servicesTotal = group.services.reduce((sum, s) => sum + (s.total_price || 0), 0);
+                                                        const groupTotal = servicesTotal + productSurcharge;
                                                         return (
                                                             <React.Fragment key={gi}>
                                                                 <tr className="bg-muted/20 hover:bg-muted/30 border-l-2 border-l-primary">
@@ -141,7 +143,35 @@ export function DetailTab({ order, productStatusSummary, onShowPrintDialog, onSh
                                                                         </Badge>
                                                                     </td>
                                                                     <td className="p-4 font-medium align-top">
-                                                                        <div>{product.item_name}</div>
+                                                                        <div className="flex flex-wrap items-center gap-2">
+                                                                            <span>{product.item_name}</span>
+                                                                        </div>
+                                                                        {/* Per-product due date */}
+                                                                        {(product as any).due_at && (
+                                                                            <div className="mt-1.5">
+                                                                                <Badge variant="outline" className="text-[10px] py-0.5 px-1.5 h-auto bg-blue-50 text-blue-700 border-blue-200 gap-1">
+                                                                                    <Calendar className="h-2.5 w-2.5" />
+                                                                                    Hạn trả: {formatDateTime((product as any).due_at)}
+                                                                                </Badge>
+                                                                            </div>
+                                                                        )}
+                                                                        {/* Per-product surcharges */}
+                                                                        {(product as any).surcharges && (product as any).surcharges.length > 0 && (
+                                                                            <div className="mt-1.5 space-y-0.5">
+                                                                                {(product as any).surcharges.map((s: any, idx: number) => {
+                                                                                    const surchargeAmount = s.isPercent 
+                                                                                        ? Math.round(servicesTotal * (s.value || 0) / 100) 
+                                                                                        : (s.value || 0);
+                                                                                    return (
+                                                                                        <div key={idx} className="flex items-center gap-1.5">
+                                                                                            <Badge variant="outline" className="text-[10px] py-0.5 px-1.5 h-auto bg-orange-50 text-orange-700 border-orange-200">
+                                                                                                +{s.label}{s.isPercent ? ` (${s.value}%)` : ''}: {formatCurrency(surchargeAmount)}
+                                                                                            </Badge>
+                                                                                        </div>
+                                                                                    );
+                                                                                })}
+                                                                            </div>
+                                                                        )}
                                                                         {(product as any).sales?.length > 0 && (
                                                                             <div className="flex flex-wrap gap-1 mt-1">
                                                                                 {(product as any).sales.map((s: any, idx: number) => (
@@ -155,7 +185,12 @@ export function DetailTab({ order, productStatusSummary, onShowPrintDialog, onSh
                                                                     <td className="p-4 text-center align-top">{product.quantity}</td>
                                                                     <td className="p-4 text-right text-muted-foreground align-top">—</td>
                                                                     <td className="p-4 text-right font-semibold align-top">
-                                                                        {group.services.length > 0 ? formatCurrency(servicesTotal) : '—'}
+                                                                        <div>{formatCurrency(groupTotal)}</div>
+                                                                        {productSurcharge > 0 && (
+                                                                            <div className="text-[10px] text-orange-600 font-normal mt-0.5">
+                                                                                (phụ phí: +{formatCurrency(productSurcharge)})
+                                                                            </div>
+                                                                        )}
                                                                     </td>
                                                                 </tr>
                                                                 {group.services.map((svc, si) => (
@@ -182,6 +217,15 @@ export function DetailTab({ order, productStatusSummary, onShowPrintDialog, onSh
                                                                         </td>
                                                                         <td className="p-4 pl-8 text-muted-foreground">
                                                                             <div>{svc.item_name}</div>
+                                                                            {svc.surcharges && svc.surcharges.length > 0 && (
+                                                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                                                    {svc.surcharges.map((s: any, idx: number) => (
+                                                                                        <Badge key={idx} variant="outline" className="text-[10px] py-0 h-4 bg-orange-50 text-orange-700 border-orange-200">
+                                                                                            +{s.label}: {s.isPercent ? `${s.value}%` : formatCurrency(s.value)}
+                                                                                        </Badge>
+                                                                                    ))}
+                                                                                </div>
+                                                                            )}
                                                                             {((svc as any).technicians?.length > 0 || (svc as any).technician) && (
                                                                                 <div className="flex flex-wrap gap-1 mt-1">
                                                                                     {(svc as any).technicians?.length > 0 ? (svc as any).technicians.map((t: any, idx: number) => (
@@ -207,7 +251,7 @@ export function DetailTab({ order, productStatusSummary, onShowPrintDialog, onSh
                                                                         </td>
                                                                         <td className="p-4 text-center">{svc.quantity}</td>
                                                                         <td className="p-4 text-right text-muted-foreground">{formatCurrency(svc.unit_price)}</td>
-                                                                        <td className="p-4 text-right font-semibold">{formatCurrency(svc.total_price)}</td>
+                                                                        <td className="p-4 text-right font-semibold">{formatCurrency((svc.total_price || 0) + (svc.surcharge_amount || 0))}</td>
                                                                     </tr>
                                                                 ))}
                                                             </React.Fragment>
@@ -263,10 +307,19 @@ export function DetailTab({ order, productStatusSummary, onShowPrintDialog, onSh
                                                                         ))}
                                                                     </div>
                                                                 )}
+                                                                {item.surcharges && item.surcharges.length > 0 && (
+                                                                    <div className="flex flex-wrap gap-1 mt-1">
+                                                                        {item.surcharges.map((s: any, idx: number) => (
+                                                                            <Badge key={idx} variant="outline" className="text-[10px] py-0 h-4 bg-orange-50 text-orange-700 border-orange-200">
+                                                                                +{s.label}: {s.isPercent ? `${s.value}%` : formatCurrency(s.value)}
+                                                                            </Badge>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
                                                             </td>
                                                             <td className="p-4 text-center">{item.quantity}</td>
                                                             <td className="p-4 text-right text-muted-foreground">{formatCurrency(item.unit_price)}</td>
-                                                            <td className="p-4 text-right font-semibold">{formatCurrency(item.total_price)}</td>
+                                                            <td className="p-4 text-right font-semibold">{formatCurrency((item.total_price || 0) + (item.surcharge_amount || 0))}</td>
                                                         </tr>
                                                     );
                                                 })}
