@@ -5,7 +5,7 @@ import {
     ArrowLeft, ArrowRight, Plus, Trash2, Camera, Package, Sparkles,
     Loader2, User, Search, CheckCircle, ShoppingBag, QrCode, Image as ImageIcon,
     Tag, Palette, Layers, FileText, Check, Wrench, UserCheck, X, UserPlus,
-    Percent, DollarSign, ChevronDown, CreditCard, Calendar
+    Percent, DollarSign, ChevronDown, CreditCard, Calendar, Pencil
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Button } from '@/components/ui/button';
@@ -99,7 +99,7 @@ export function CreateOrderPage() {
     const [step, setStep] = useState(1);
 
     // Data hooks
-    const { customers, fetchCustomers, createCustomer } = useCustomers();
+    const { customers, fetchCustomers, createCustomer, updateCustomer } = useCustomers();
     const { products: catalogProducts, services, fetchProducts, fetchServices } = useProducts();
     const { packages, fetchPackages } = usePackages();
     const { users, fetchUsers, fetchTechnicians, fetchSales } = useUsers();
@@ -137,8 +137,9 @@ export function CreateOrderPage() {
         };
     } | null>(null);
 
-    // Create customer dialog state
+    // Create/Edit customer dialog state
     const [showCreateCustomerDialog, setShowCreateCustomerDialog] = useState(false);
+    const [isEditingCustomer, setIsEditingCustomer] = useState(false);
     const [customerDropdownOpen, setCustomerDropdownOpen] = useState(false);
 
     // Track confirmed products (products with info confirmed, ready for services)
@@ -299,12 +300,12 @@ export function CreateOrderPage() {
                 });
                 if (codeResponse.ok) {
                     const codeData = await codeResponse.json();
-                    setNextOrderCode(codeData.data?.nextOrderCode || 'A-1');
+                    setNextOrderCode(codeData.data?.nextOrderCode || 'HĐ1');
                 } else {
-                    setNextOrderCode('A-1');
+                    setNextOrderCode('HĐ1');
                 }
             } catch {
-                setNextOrderCode('A-1');
+                setNextOrderCode('HĐ1');
             }
         };
         fetchNextCode();
@@ -373,8 +374,7 @@ export function CreateOrderPage() {
         c.phone.includes(customerSearch)
     );
     const selectedCustomer = customers.find(c => c.id === customerId);
-    const activePackages = packages.filter(p => p.status === 'active');
-
+    
     // Handle create new customer
     const handleCreateCustomer = async (data: Parameters<typeof createCustomer>[0]) => {
         try {
@@ -387,6 +387,22 @@ export function CreateOrderPage() {
             return newCustomer;
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Lỗi khi tạo khách hàng';
+            toast.error(message);
+            throw error;
+        }
+    };
+    
+    // Handle edit existing customer
+    const handleUpdateCustomer = async (data: any) => {
+        if (!customerId) return;
+        try {
+            await updateCustomer(customerId, data);
+            toast.success('Đã cập nhật thông tin khách hàng!');
+            setShowCreateCustomerDialog(false);
+            setIsEditingCustomer(false);
+            await fetchCustomers({ status: 'active' });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Lỗi khi cập nhật khách hàng';
             toast.error(message);
             throw error;
         }
@@ -896,10 +912,23 @@ export function CreateOrderPage() {
             {selectedCustomer && (
                 <Card className="bg-gradient-to-br from-primary/5 to-primary/10 border-primary/20">
                     <CardHeader className="pb-2">
-                        <CardTitle className="text-sm flex items-center gap-2">
-                            <User className="h-4 w-4" />
-                            Khách hàng
-                        </CardTitle>
+                        <div className="flex items-center justify-between">
+                            <CardTitle className="text-sm flex items-center gap-2">
+                                <User className="h-4 w-4" />
+                                Khách hàng
+                            </CardTitle>
+                            <Button 
+                                variant="ghost" 
+                                size="icon" 
+                                className="h-8 w-8 text-primary hover:text-primary hover:bg-primary/10"
+                                onClick={() => {
+                                    setIsEditingCustomer(true);
+                                    setShowCreateCustomerDialog(true);
+                                }}
+                            >
+                                <Pencil className="h-4 w-4" />
+                            </Button>
+                        </div>
                     </CardHeader>
                     <CardContent className="space-y-2">
                         <div className="flex items-center gap-3">
@@ -1150,7 +1179,10 @@ export function CreateOrderPage() {
                             <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => setShowCreateCustomerDialog(true)}
+                                onClick={() => {
+                                    setIsEditingCustomer(false);
+                                    setShowCreateCustomerDialog(true);
+                                }}
                                 className="gap-2"
                             >
                                 <UserPlus className="h-4 w-4" />
@@ -1200,6 +1232,7 @@ export function CreateOrderPage() {
                                                         variant="outline"
                                                         size="sm"
                                                         onClick={() => {
+                                                            setIsEditingCustomer(false);
                                                             setShowCreateCustomerDialog(true);
                                                             setCustomerDropdownOpen(false);
                                                         }}
@@ -1288,12 +1321,12 @@ export function CreateOrderPage() {
                                                 {isConfirmed && (
                                                     <div className="bg-white p-1 rounded border shadow-sm flex-shrink-0">
                                                         <QRCodeSVG
-                                                            value={`${nextOrderCode || 'A-1'}-${productNumber}`}
+                                                            value={`${nextOrderCode || 'HĐ1'}.${productNumber}`}
                                                             size={50}
                                                             level="M"
                                                         />
                                                         <p className="text-[10px] font-mono font-bold text-primary text-center mt-0.5">
-                                                            {nextOrderCode || 'A-1'}-{productNumber}
+                                                            {nextOrderCode || 'HĐ1'}.{productNumber}
                                                         </p>
                                                     </div>
                                                 )}
@@ -1951,12 +1984,12 @@ export function CreateOrderPage() {
                                             {/* QR Code Preview */}
                                             <div className="shrink-0 p-2 bg-white rounded-lg border shadow-sm">
                                                 <QRCodeSVG
-                                                    value={`${nextOrderCode}-${index + 1}`}
+                                                    value={`${nextOrderCode}.${index + 1}`}
                                                     size={64}
                                                     level="M"
                                                 />
                                                 <p className="text-[10px] text-center text-muted-foreground mt-1 font-mono font-bold">
-                                                    {nextOrderCode}-{index + 1}
+                                                    {nextOrderCode}.{index + 1}
                                                 </p>
                                             </div>
 
@@ -2567,13 +2600,18 @@ export function CreateOrderPage() {
                 </DialogContent>
             </Dialog>
 
-            {/* Create Customer Dialog */}
+            {/* Create/Edit Customer Dialog */}
             <CreateCustomerDialog
                 open={showCreateCustomerDialog}
-                onClose={() => setShowCreateCustomerDialog(false)}
-                onSubmit={handleCreateCustomer}
-                initialName={/^[a-zA-Z\sÀ-ỹ]+$/.test(customerSearch) ? customerSearch : ''}
-                initialPhone={/^[0-9\s.+]+$/.test(customerSearch) && customerSearch.replace(/[^0-9]/g, '').length >= 9 ? customerSearch : ''}
+                onClose={() => {
+                    setShowCreateCustomerDialog(false);
+                    setIsEditingCustomer(false);
+                }}
+                customer={isEditingCustomer ? selectedCustomer : null}
+                onSubmit={isEditingCustomer ? handleUpdateCustomer : handleCreateCustomer}
+                initialName={!isEditingCustomer && /^[a-zA-Z\sÀ-ỹ]+$/.test(customerSearch) ? customerSearch : ''}
+                initialPhone={!isEditingCustomer && /^[0-9\s.+]+$/.test(customerSearch) && customerSearch.replace(/[^0-9]/g, '').length >= 9 ? customerSearch : ''}
+                employees={availableSales}
             />
 
             {/* Sản phẩm bán kèm Dialog */}

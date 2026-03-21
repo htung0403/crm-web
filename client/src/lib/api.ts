@@ -347,7 +347,7 @@ export const orderItemsApi = {
     fail: (id: string, reason: string) =>
         api.patch<ApiResponse<any>>(`/order-items/${id}/fail`, { reason }),
 
-    changeRoom: (id: string, data: { targetRoomId: string; reason: string; deadline_days: number }) =>
+    changeRoom: (id: string, data: { targetRoomId: string; reason: string; deadline_days: number; technician_id?: string | null; note?: string; photos?: string[] }) =>
         api.patch<ApiResponse<any>>(`/order-items/${id}/change-room`, data),
 
     // Update after-sale data independently (photos, stage, etc)

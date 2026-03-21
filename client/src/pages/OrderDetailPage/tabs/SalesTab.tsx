@@ -2,13 +2,14 @@ import React, { memo } from 'react';
 import {
     ArrowLeft, ArrowRight, ShoppingBag, CreditCard,
     Wrench, Clock, CheckCircle, Sparkles, Copy, Bot, History, RotateCw,
-    User as UserIcon, Tag, FileText, Package, Truck
+    User as UserIcon, Tag, FileText, Package, Truck, Search, Filter
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { TabsContent } from '@/components/ui/tabs';
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
@@ -44,7 +45,8 @@ const SalesCard = memo(({
     updateOrderItemStatus,
     fetchKanbanLogs,
     reloadOrder,
-    onTabChange
+    onTabChange,
+    salesLogs
 }: {
     group: { product: OrderItem | null; services: OrderItem[] };
     index: number;
@@ -56,6 +58,7 @@ const SalesCard = memo(({
     fetchKanbanLogs: (orderId: string) => Promise<void>;
     reloadOrder: () => Promise<void>;
     onTabChange?: (tab: string) => void;
+    salesLogs: any[];
 }) => {
     const leadItem = group.product || group.services[0];
     const draggableId = group.product?.id ?? group.services.map((s: OrderItem) => s.id).join('-');
@@ -70,6 +73,38 @@ const SalesCard = memo(({
 
     const productName = group.product?.item_name || group.services[0]?.item_name || 'Hạng mục';
 
+    const remainingTime = React.useMemo(() => {
+        const col = column as any;
+        if (!leadItem?.id || !col.id || col.id === 'cancelled' || !col.estimated_minutes) return null;
+
+        // Find most recent log for THIS status entry
+        const logs = (salesLogs || []).filter((l: any) => l.entity_id === leadItem.id && l.to_status === col.id);
+        if (logs.length === 0) return null;
+
+        const lastLog = [...logs].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+        const enterTime = new Date(lastLog.created_at).getTime();
+
+        const limitMs = (col.estimated_minutes as number) * 60 * 1000;
+        const now = Date.now();
+        const remainingMs = limitMs - (now - enterTime);
+
+        const totalAbsMinutes = Math.floor(Math.abs(remainingMs) / 60000);
+        const hours = Math.floor(totalAbsMinutes / 60);
+        const minutes = totalAbsMinutes % 60;
+
+        let label = '';
+        if (remainingMs > 0) {
+            label = `Còn ${hours > 0 ? `${hours}h` : ''}${minutes}m`;
+        } else {
+            label = `Trễ ${hours > 0 ? `${hours}h` : ''}${minutes}m`;
+        }
+
+        return {
+            label,
+            isOverdue: remainingMs <= 0,
+        };
+    }, [leadItem?.id, column, salesLogs]);
+
     return (
         <Draggable key={draggableId} draggableId={draggableId} index={index}>
             {(provided, snapshot) => (
@@ -78,14 +113,21 @@ const SalesCard = memo(({
                     {...provided.draggableProps}
                     {...provided.dragHandleProps}
                     className={cn(
-                        "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all cursor-grab active:cursor-grabbing",
+                        "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all cursor-grab active:cursor-grabbing relative",
                         snapshot.isDragging ? "shadow-lg ring-2 ring-primary/20 scale-105" : "",
-                        column.id === 'step4' ? "border-red-400 hover:border-red-600" :
-                            column.id === 'step5' ? "border-green-400 hover:border-green-600" :
-                                "border-blue-400 hover:border-blue-600"
+                        remainingTime?.isOverdue ? "bg-red-50 border-red-500 ring-2 ring-red-100" :
+                            column.id === 'step4' ? "border-red-400 hover:border-red-600" :
+                                column.id === 'step5' ? "border-green-400 hover:border-green-600" :
+                                    column.id === 'cancelled' ? "border-gray-400 hover:border-gray-600" :
+                                        "border-blue-400 hover:border-blue-600"
                     )}
                     onClick={() => onProductCardClick?.(group, column.id)}
                 >
+                    {remainingTime?.isOverdue && (
+                        <div className="absolute top-1.5 right-1.5 bg-red-600 text-white text-[8px] font-black px-1.5 py-0.5 rounded shadow-sm z-10 animate-pulse">
+                            KPI CHẬM
+                        </div>
+                    )}
                     <div className="flex justify-between items-start mb-2">
                         <span className="text-xs font-semibold text-gray-400">#{order.order_code}</span>
                         <span className="text-xs font-bold text-muted-foreground text-[10px]">
@@ -127,6 +169,19 @@ const SalesCard = memo(({
                     )}
 
                     <div className="flex items-center justify-between mt-3 pt-2 border-t border-dashed">
+                        {remainingTime && (
+                            <div className={cn(
+                                "flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border",
+                                remainingTime.isOverdue 
+                                    ? "bg-red-50 text-red-600 border-red-200 animate-pulse" 
+                                    : "bg-blue-50 text-blue-600 border-blue-200"
+                            )}>
+                                <Clock className="h-2.5 w-2.5" />
+                                <span>{remainingTime.label}</span>
+                            </div>
+                        )}
+                        <div className="flex-1" />
+                        <div className="flex items-center gap-1">
                         <Button
                             variant="ghost"
                             size="icon"
@@ -182,6 +237,7 @@ const SalesCard = memo(({
                         >
                             <ArrowRight className="h-4 w-4" />
                         </Button>
+                        </div>
                     </div>
                 </div>
             )}
@@ -202,6 +258,8 @@ export function SalesTab({
     workflowKanbanGroups,
     onTabChange,
 }: SalesTabProps) {
+    const [searchTerm, setSearchTerm] = React.useState('');
+
     if (order?.status !== 'before_sale' && !['step1', 'step2', 'step3', 'step4', 'step5'].includes(order.status)) return null;
 
     return (
@@ -211,21 +269,37 @@ export function SalesTab({
                 <Card>
                     <CardHeader className="pb-3">
                         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                            <div>
+                            <div className="flex-1">
                                 <CardTitle className="text-xl font-bold flex items-center gap-2">
                                     <RotateCw className="h-5 w-5 text-primary" />
                                     Quy trình Lên đơn (Sales Kanban)
                                 </CardTitle>
-                                <p className="text-sm text-muted-foreground">
+                                <p className="text-sm text-muted-foreground mt-1">
                                     Kiểm tra thông tin → Tư vấn thêm → Chốt gói. Kéo thả thẻ hạng mục vào cột để chuyển bước.
                                 </p>
                             </div>
-                            <div className="flex items-center gap-2 bg-muted/50 p-2 rounded-lg">
-                                <span className="text-[11px] font-bold px-2 py-1 rounded bg-blue-100 text-blue-700">1-3: Chuẩn bị</span>
-                                <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                                <span className="text-[11px] font-bold px-2 py-1 rounded bg-red-100 text-red-700">4: Phê duyệt</span>
-                                <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                                <span className="text-[11px] font-bold px-2 py-1 rounded bg-green-100 text-green-700">5: Chốt đơn</span>
+                            <div className="flex flex-wrap items-center gap-3">
+                                <div className="relative w-64 mr-2">
+                                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                                    <Input
+                                        placeholder="Tìm theo số HĐ, tên NV, SĐT..."
+                                        className="pl-9 h-9 text-xs bg-muted/30 border-none ring-offset-background"
+                                        value={searchTerm}
+                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                    />
+                                </div>
+                                <div className="flex items-center gap-2 bg-muted/50 p-1.5 rounded-lg border border-dashed border-muted-foreground/20">
+                                    <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-white shadow-sm border border-gray-100">
+                                        <Package className="h-3.5 w-3.5 text-primary" />
+                                        <span className="text-[11px] font-bold text-gray-700">Tổng số sp: {workflowKanbanGroups?.length || 0}</span>
+                                    </div>
+                                    <div className="h-4 w-px bg-muted-foreground/20 mx-1" />
+                                    <span className="text-[11px] font-bold px-2 py-1 rounded bg-blue-100 text-blue-700">1-3: Quy trình Sales</span>
+                                    <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                                    <span className="text-[11px] font-bold px-2 py-1 rounded bg-red-100 text-red-700">4: Kỹ thuật xét</span>
+                                    <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                                    <span className="text-[11px] font-bold px-2 py-1 rounded bg-green-100 text-green-700">5: Chốt đơn</span>
+                                </div>
                             </div>
                         </div>
                     </CardHeader>
@@ -269,10 +343,27 @@ export function SalesTab({
                                         const columnGroups = workflowKanbanGroups?.filter(group => {
                                             const leadItem = group.product || group.services[0];
                                             if (!leadItem) return false;
+
+                                            // Status filtering logic
                                             const status = leadItem.status || 'step1';
                                             if (status === 'pending' && column.id === 'step1') return true;
-                                            // Hide items that are in step5 (Chốt đơn) from the Kanban board view
-                                            if (status === 'step5') return false;
+
+                                            // Search filtering logic
+                                            if (searchTerm) {
+                                                const term = searchTerm.toLowerCase();
+                                                const matchesSearch =
+                                                    leadItem.item_name?.toLowerCase().includes(term) ||
+                                                    leadItem.item_code?.toLowerCase().includes(term) ||
+                                                    group.services?.some(s => s.item_name?.toLowerCase().includes(term) || s.item_code?.toLowerCase().includes(term)) ||
+                                                    order.order_code?.toLowerCase().includes(term) ||
+                                                    order.customer?.name?.toLowerCase().includes(term) ||
+                                                    order.customer?.phone?.toLowerCase().includes(term) ||
+                                                    order.sales_user?.name?.toLowerCase().includes(term);
+                                                if (!matchesSearch) return false;
+                                            }
+
+                                            // Column mapping logic
+                                            if (status === 'step5') return false; 
                                             return status === column.id;
                                         }) || [];
 
@@ -283,9 +374,10 @@ export function SalesTab({
                                                         <div className={cn("w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white",
                                                             column.id === 'step4' ? "bg-red-500" :
                                                                 column.id === 'step5' ? "bg-green-500" :
-                                                                    "bg-blue-500"
+                                                                    column.id === 'cancelled' ? "bg-gray-500" :
+                                                                        "bg-blue-500"
                                                         )}>
-                                                            {colIdx + 1}
+                                                            {column.id === 'cancelled' ? 'X' : colIdx + 1}
                                                         </div>
                                                         <h3 className="font-bold text-xs uppercase tracking-widest text-gray-700">{column.title}</h3>
                                                     </div>
@@ -304,7 +396,8 @@ export function SalesTab({
                                                                 snapshot.isDraggingOver ?
                                                                     (column.id === 'step4' ? "bg-red-50 border-red-300" :
                                                                         column.id === 'step5' ? "bg-green-50 border-green-300" :
-                                                                            "bg-blue-50 border-blue-300") :
+                                                                            column.id === 'cancelled' ? "bg-gray-100 border-gray-300" :
+                                                                                "bg-blue-50 border-blue-300") :
                                                                     "bg-gray-100 border-transparent"
                                                             )}
                                                         >
@@ -321,6 +414,7 @@ export function SalesTab({
                                                                     fetchKanbanLogs={fetchKanbanLogs}
                                                                     reloadOrder={reloadOrder}
                                                                     onTabChange={onTabChange}
+                                                                    salesLogs={salesLogs}
                                                                 />
                                                             ))}
                                                             {provided.placeholder}

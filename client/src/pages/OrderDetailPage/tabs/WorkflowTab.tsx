@@ -1,8 +1,9 @@
-import React, { memo, useMemo } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import {
     Layers, Loader2, ShoppingBag, Tag, FileText, Wrench, User as UserIcon,
-    Package, Truck, History, Clock
+    Package, Truck, History, Clock, Maximize2, ExternalLink
 } from 'lucide-react';
+import { WorkflowLogDetailDialog } from '@/components/orders/workflow/WorkflowLogDetailDialog';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { TabsContent } from '@/components/ui/tabs';
@@ -11,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { formatDateTime } from '@/lib/utils';
 import { TECH_ROOMS, ACCESSORY_LABELS, PARTNER_LABELS } from '@/components/orders/constants';
 import type { Order, OrderItem } from '@/hooks/useOrders';
+import { Button } from '@/components/ui/button';
 
 interface WorkflowCardProps {
     group: { product: OrderItem | null; services: OrderItem[] };
@@ -303,6 +305,9 @@ export function WorkflowTab({
     handleOpenSaleAssignDialog,
     onProductCardClick
 }: WorkflowTabProps) {
+    const [selectedLogDetail, setSelectedLogDetail] = useState<any>(null);
+    const [showLogDetailDialog, setShowLogDetailDialog] = useState(false);
+
     if (order?.status === 'done') return null;
 
     const rooms = useMemo(() => [
@@ -401,26 +406,104 @@ export function WorkflowTab({
                                     <h3 className="text-sm font-bold flex items-center gap-2 mb-3">
                                         <History className="h-4 w-4 text-primary" /> Lịch sử chuyển bước (Quy trình)
                                     </h3>
-                                    {workflowLogs.length === 0 ? (
-                                        <p className="text-xs text-muted-foreground italic py-2">Chưa có lịch sử.</p>
+                                    {workflowLogs.filter((l: any) => l.action === 'assigned' || l.action === 'failed').length === 0 ? (
+                                        <p className="text-xs text-muted-foreground italic py-2">Chưa có lịch sử dời phòng.</p>
                                     ) : (
                                         <ul className="space-y-2 max-h-48 overflow-y-auto">
-                                            {workflowLogs.map((log: any) => (
-                                                <li key={log.id} className="text-xs flex items-center gap-2 py-1.5 border-b border-dashed last:border-0">
-                                                    <span className="text-muted-foreground shrink-0">{formatDateTime(log.created_at)}</span>
-                                                    <span className="font-medium">{log.created_by_user?.name ?? 'Hệ thống'}</span>
-                                                    <span className="text-muted-foreground">
-                                                        {log.step_name ? `${log.step_name}: ` : ''}{log.action === 'completed' ? 'Hoàn thành' : log.action === 'started' ? 'Bắt đầu' : 'Bỏ qua'}
-                                                    </span>
+                                            {workflowLogs.filter((l: any) => l.action === 'assigned' || l.action === 'failed').map((log: any) => (
+                                                <li key={log.id} className="text-xs py-2 border-b border-dashed last:border-0">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <span className="text-muted-foreground shrink-0">{formatDateTime(log.created_at)}</span>
+                                                        <span className="font-bold text-primary/80">{log.created_by_user?.name ?? 'Hệ thống'}</span>
+                                                        <span className="text-muted-foreground">
+                                                            {log.order_item_step_id ? (
+                                                                <span className={log.action === 'failed' ? "text-red-500" : "text-blue-700 font-medium"}>
+                                                                    {log.action === 'failed' && <span className="mr-1 font-bold">THẤT BẠI:</span>}
+                                                                    {log.step_name}
+                                                                </span>
+                                                            ) : (
+                                                                `${log.from_status || log.from_stage || 'START'} → ${log.to_status || log.to_stage}`
+                                                            )}
+                                                        </span>
+                                                        <Button 
+                                                            variant="ghost" 
+                                                            size="sm" 
+                                                            className="h-6 px-2 ml-auto text-[10px] text-primary hover:bg-primary/10 font-bold border border-primary/20 rounded-md"
+                                                            onClick={() => {
+                                                                setSelectedLogDetail(log);
+                                                                setShowLogDetailDialog(true);
+                                                            }}
+                                                        >
+                                                            <Maximize2 className="h-3 w-3 mr-1" />
+                                                            Chi tiết
+                                                        </Button>
+                                                    </div>
+                                                    
+                                                    {log.action === 'assigned' && (
+                                                        <div className="mt-1.5 ml-1 space-y-1 bg-blue-50/50 p-2 rounded-lg border border-blue-50">
+                                                            {log.reason && (
+                                                                <div className="flex gap-2">
+                                                                    <span className="font-semibold text-gray-500 min-w-[65px]">Lý do:</span>
+                                                                    <span className="text-gray-700">{log.reason}</span>
+                                                                </div>
+                                                            )}
+                                                            <div className="flex gap-2">
+                                                                <span className="font-semibold text-gray-500 min-w-[65px]">KTV:</span>
+                                                                <span className="font-medium text-blue-700">{log.assigned_tech?.name || 'Chưa phân công'}</span>
+                                                            </div>
+                                                            {log.deadline_days > 0 && (
+                                                                <div className="flex gap-2">
+                                                                    <span className="font-semibold text-gray-500 min-w-[65px]">Hạn:</span>
+                                                                    <span className="text-gray-700">{log.deadline_days} ngày</span>
+                                                                </div>
+                                                            )}
+                                                            {log.notes && (
+                                                                <div className="flex gap-2 mt-1 pt-1 border-t border-blue-100/50">
+                                                                    <span className="font-semibold text-gray-500 min-w-[65px]">Ghi chú:</span>
+                                                                    <span className="text-gray-700 italic">{log.notes}</span>
+                                                                </div>
+                                                            )}
+                                                            {log.photos && log.photos.length > 0 && (
+                                                                <div className="flex flex-wrap gap-1 mt-1 pt-1 border-t border-blue-100/50">
+                                                                    {log.photos.map((url: string, idx: number) => (
+                                                                        <a key={idx} href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>
+                                                                            <img src={url} alt={`Evidence ${idx}`} className="h-8 w-8 object-cover rounded shadow-sm border border-gray-200" />
+                                                                        </a>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                    {log.action === 'failed' && log.notes && (
+                                                        <div className="mt-1.5 ml-1 bg-red-50 p-2 rounded-lg border border-red-100 text-red-700 italic flex flex-col gap-1">
+                                                            <span>{log.notes}</span>
+                                                            {log.photos && log.photos.length > 0 && (
+                                                                <div className="flex flex-wrap gap-1 mt-1 pt-1 border-t border-red-100">
+                                                                    {log.photos.map((url: string, idx: number) => (
+                                                                        <a key={idx} href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>
+                                                                            <img src={url} alt={`Evidence ${idx}`} className="h-8 w-8 object-cover rounded shadow-sm border border-red-200" />
+                                                                        </a>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                 </li>
                                             ))}
                                         </ul>
+
                                     )}
                                 </div>
                             </div>
                         )}
                     </CardContent>
                 </Card>
+
+                <WorkflowLogDetailDialog 
+                    open={showLogDetailDialog} 
+                    onOpenChange={setShowLogDetailDialog} 
+                    log={selectedLogDetail} 
+                />
             </div>
         </TabsContent>
     );

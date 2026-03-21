@@ -41,8 +41,9 @@ export function useWorkflowKanban(
         });
 
         // 2. Add remaining items as standalone groups (Sale items or leftover services)
+        // Filter to only include customer items (main products/services)
         items.forEach((item) => {
-            if (!processedIds.has(item.id)) {
+            if (!processedIds.has(item.id) && item.is_customer_item) {
                 if (item.item_type === 'product') {
                     groups.push({ product: item, services: [] });
                 } else if (item.item_type === 'service' || item.item_type === 'package') {
@@ -61,7 +62,13 @@ export function useWorkflowKanban(
         const inProgress = steps.find((s: any) => s.status === 'in_progress');
         const firstPending = steps.find((s: any) => s.status === 'pending' || s.status === 'assigned');
         const step = inProgress || firstPending;
-        return step ? { id: step.id, step_name: step.step_name, status: step.status, department: step.department } : null;
+        return step ? { 
+            id: step.id, 
+            step_name: step.step_name, 
+            status: step.status, 
+            department: step.department,
+            technician_id: step.technician_id 
+        } : null;
     }, [allWorkflowSteps]);
 
     // Hạn hoàn thành bước dịch vụ: từ started_at + estimated_duration (ngày) của bước hiện tại

@@ -10,18 +10,14 @@ const router = Router();
 // ORDER CODE GENERATION HELPERS
 // =====================================================
 
-/**
- * Generate next order code in format A-1, A-2, A-3...
- * Queries database for the highest existing number and increments
- */
 async function generateNextOrderCode(): Promise<string> {
-    const prefix = 'A';
+    const prefix = 'HĐ';
 
-    // Get the latest order with A-X pattern
+    // Get the latest order with HĐ pattern
     const { data: orders } = await supabaseAdmin
         .from('orders')
         .select('order_code')
-        .like('order_code', `${prefix}-%`)
+        .like('order_code', `${prefix}%`)
         .order('created_at', { ascending: false })
         .limit(100);
 
@@ -29,8 +25,8 @@ async function generateNextOrderCode(): Promise<string> {
 
     if (orders && orders.length > 0) {
         for (const order of orders) {
-            // Parse A-X format to extract number
-            const match = order.order_code.match(/^A-(\d+)$/);
+            // Parse HĐ format to extract number
+            const match = order.order_code.match(/^HĐ(\d+)$/);
             if (match) {
                 const num = parseInt(match[1], 10);
                 if (num > maxNumber) maxNumber = num;
@@ -38,15 +34,15 @@ async function generateNextOrderCode(): Promise<string> {
         }
     }
 
-    return `${prefix}-${maxNumber + 1}`;
+    return `${prefix}${maxNumber + 1}`;
 }
 
 /**
- * Generate product code in format A-1-1, A-1-2...
+ * Generate product code in format HĐ1.1, HĐ1.2...
  * Based on order code and product index
  */
 function generateProductCode(orderCode: string, productIndex: number): string {
-    return `${orderCode}-${productIndex + 1}`;
+    return `${orderCode}.${productIndex + 1}`;
 }
 
 // Get next order code (for preview on client)
@@ -679,7 +675,7 @@ router.get('/:id/kanban-logs', authenticate, async (req: AuthenticatedRequest, r
             }
             const { data: logs, error } = await supabaseAdmin
                 .from('order_workflow_step_log')
-                .select('id, order_item_step_id, action, step_name, step_order, created_by, created_at, created_by_user:users!order_workflow_step_log_created_by_fkey(id, name)')
+                .select('id, order_item_step_id, action, step_name, step_order, notes, photos, reason, deadline_days, technician_id, created_by, created_at, created_by_user:users!order_workflow_step_log_created_by_fkey(id, name), assigned_tech:users!order_workflow_step_log_technician_id_fkey(id, name)')
                 .in('order_item_step_id', ids)
                 .order('created_at', { ascending: false })
                 .limit(100);

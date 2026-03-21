@@ -548,6 +548,7 @@ router.patch('/:id/complete', authenticate, async (req: AuthenticatedRequest, re
     try {
         const { id } = req.params;
         const { notes } = req.body;
+        const userId = req.user?.id;
 
         // Try V1
         let { data: item, error } = await supabaseAdmin
@@ -601,6 +602,26 @@ router.patch('/:id/complete', authenticate, async (req: AuthenticatedRequest, re
 
         if (stepsUpdateError) {
             console.error('[CompleteItem] Error updating steps:', stepsUpdateError);
+        }
+
+        // Add log entry for completion
+        const { data: lastStep } = await supabaseAdmin
+            .from('order_item_steps')
+            .select('*')
+            .match(stepFilter)
+            .order('step_order', { ascending: false })
+            .limit(1)
+            .single();
+
+        if (lastStep) {
+            await supabaseAdmin.from('order_workflow_step_log').insert({
+                order_item_step_id: lastStep.id,
+                action: 'completed',
+                step_name: lastStep.step_name,
+                step_order: lastStep.step_order,
+                notes: notes ? `Hoàn thành hạng mục: ${notes}` : 'Hoàn thành hạng mục',
+                created_by: userId
+            });
         }
 
         // Create notification for sales user
@@ -973,6 +994,7 @@ router.patch('/steps/:stepId/complete', authenticate, async (req: AuthenticatedR
                 action: 'completed',
                 step_name: step?.step_name ?? null,
                 step_order: step?.step_order ?? null,
+                notes: notes || null,
                 created_by: userId ?? null
             });
         } catch (logErr) {
@@ -1373,6 +1395,27 @@ router.patch('/:id/fail', authenticate, async (req: AuthenticatedRequest, res, n
                 .neq('status', 'completed');
         }
 
+        // 4. Log the failure in the workflow log
+        const lastStepFilter = entityType === 'order_item' ? { order_item_id: id } : { order_product_service_id: id };
+        const { data: lastStep } = await supabaseAdmin
+            .from('order_item_steps')
+            .select('*')
+            .match(lastStepFilter)
+            .order('step_order', { ascending: false })
+            .limit(1)
+            .single();
+
+        if (lastStep) {
+            await supabaseAdmin.from('order_workflow_step_log').insert({
+                order_item_step_id: lastStep.id,
+                action: 'failed',
+                step_name: lastStep.step_name,
+                step_order: lastStep.step_order,
+                notes: 'Hạng mục thất bại/bị hủy: ' + reason,
+                created_by: userId
+            });
+        }
+
         res.json({
             status: 'success',
             data: item,
@@ -1387,7 +1430,7 @@ router.patch('/:id/fail', authenticate, async (req: AuthenticatedRequest, res, n
 router.patch('/:id/change-room', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { targetRoomId, reason, deadline_days } = req.body;
+        const { targetRoomId, reason, deadline_days, technician_id, note, photos } = req.body;
         const userId = req.user?.id;
 
         if (!targetRoomId || !reason || !deadline_days) {
@@ -1395,7 +1438,6 @@ router.patch('/:id/change-room', authenticate, async (req: AuthenticatedRequest,
         }
 
         // Map targetRoomId to step order (assuming 1=Mạ, 2=Dán đế, 3=Da based on constants.ts TECH_ROOMS)
-        // Ideally this should be dynamic or passed as step_id, but for now we map based on fixed logic or fetch steps
         let targetStepOrder = 0;
         if (targetRoomId === 'phong_ma') targetStepOrder = 1;
         else if (targetRoomId === 'phong_dan_de') targetStepOrder = 2;
@@ -1425,7 +1467,17 @@ router.patch('/:id/change-room', authenticate, async (req: AuthenticatedRequest,
         if (stepsError || !steps) throw new ApiError('Lỗi lấy danh sách bước', 500);
 
         // 3. Forcefully handle Room Transition
-        // Strategy: 
+        let techName = '';
+        if (technician_id) {
+            const { data: tech } = await supabaseAdmin.from('users').select('name').eq('id', technician_id).single();
+            if (tech) techName = tech.name;
+        }
+
+        const displayPhotos = (Array.isArray(photos) && photos.length > 0) ? `\nẢnh bằng chứng: ${photos.join(', ')}` : '';
+        const deadlineInfo = deadline_days ? `\nHạn hoàn thành: ${deadline_days} ngày` : '';
+        const techInfo = techName ? `\nKỹ thuật viên: ${techName}` : '';
+        const finalNotes = `${reason}${note ? `\nLưu ý: ${note}` : ''}${deadlineInfo}${techInfo}${displayPhotos}`;
+
         // a. Map targetRoomId to a search pattern for department
         let deptSearch = '';
         if (targetRoomId === 'phong_ma') deptSearch = 'Mạ';
@@ -1441,26 +1493,22 @@ router.patch('/:id/change-room', authenticate, async (req: AuthenticatedRequest,
             return n.includes(searchStr);
         });
 
+        // c. Get Transition details
+        const activeItemStep = steps.find(s => ['assigned', 'in_progress', 'started'].includes(s.status));
+        const fromRoom = activeItemStep?.step_name || 'Khởi tạo';
+        const toRoom = targetDept?.name || deptSearch;
+
         // c. Mark ALL currently active/pending steps as 'skipped'
-        const activeSteps = steps.filter(s => ['pending', 'assigned', 'in_progress'].includes(s.status));
-        for (const step of activeSteps) {
+        const pendingSteps = steps.filter(s => ['pending', 'assigned', 'in_progress', 'started'].includes(s.status));
+        for (const step of pendingSteps) {
             const { error: skipError } = await supabaseAdmin.from('order_item_steps')
                 .update({
                     status: 'skipped',
-                    notes: `Chuyển quy trình sang bước ${targetRoomId}: ` + reason,
+                    notes: `Chuyển sang ${toRoom}: ${finalNotes}`,
                     completed_at: new Date().toISOString()
                 })
                 .eq('id', step.id);
             if (skipError) console.error(`[ChangeRoom] Error skipping step ${step.id}:`, skipError);
-
-            // Log skipped action
-            await supabaseAdmin.from('order_workflow_step_log').insert({
-                order_item_step_id: step.id,
-                action: 'skipped',
-                step_name: step.step_name,
-                step_order: step.step_order,
-                created_by: userId
-            });
         }
 
         // d. Find Target Step or Create New
@@ -1479,7 +1527,6 @@ router.patch('/:id/change-room', authenticate, async (req: AuthenticatedRequest,
         let activatedStepId = targetStep?.id;
 
         if (targetStep) {
-            // Update existing step
             const { error: updateError } = await supabaseAdmin
                 .from('order_item_steps')
                 .update({
@@ -1487,8 +1534,8 @@ router.patch('/:id/change-room', authenticate, async (req: AuthenticatedRequest,
                     estimated_duration: deadline_days,
                     started_at: null,
                     completed_at: null,
-                    technician_id: null,
-                    notes: reason,
+                    technician_id: technician_id || null,
+                    notes: finalNotes,
                     department_id: targetDept?.id || targetStep.department_id // Ensure department matches
                 })
                 .eq('id', targetStep.id);
@@ -1508,7 +1555,8 @@ router.patch('/:id/change-room', authenticate, async (req: AuthenticatedRequest,
                     department_id: targetDept.id,
                     status: 'assigned',
                     estimated_duration: deadline_days,
-                    notes: reason
+                    technician_id: technician_id || null,
+                    notes: finalNotes
                 })
                 .select()
                 .single();
@@ -1517,23 +1565,46 @@ router.patch('/:id/change-room', authenticate, async (req: AuthenticatedRequest,
             activatedStepId = newStep.id;
         }
 
-        // Also update the PARENT item status to 'in_progress'
+        // 4. Also update the PARENT item status and technician
+        const parentUpdate: any = { status: 'in_progress' };
+        if (technician_id) parentUpdate.technician_id = technician_id;
+
         if (isV1) {
-            await supabaseAdmin.from('order_items').update({ status: 'in_progress' }).eq('id', id);
+            await supabaseAdmin.from('order_items').update(parentUpdate).eq('id', id);
         } else {
-            await supabaseAdmin.from('order_product_services').update({ status: 'in_progress' }).eq('id', id);
+            await supabaseAdmin.from('order_product_services').update(parentUpdate).eq('id', id);
+
+            // Also update junction table for V2 multi-tech support
+            if (technician_id) {
+                // Delete existing assignments for this service (assuming room change resets assignment or moves to new lead tech)
+                await supabaseAdmin.from('order_product_service_technicians').delete().eq('order_product_service_id', id);
+                
+                // Insert new assignment
+                await supabaseAdmin.from('order_product_service_technicians').insert({
+                    order_product_service_id: id,
+                    technician_id: technician_id,
+                    assigned_by: userId,
+                    assigned_at: new Date().toISOString(),
+                    status: 'assigned'
+                });
+            }
         }
 
-        // Log the activation
+        // Log the transition / activation
         const { data: finalStep } = await supabaseAdmin.from('order_item_steps').select('*, department:departments(name)').eq('id', activatedStepId).single();
 
         if (finalStep) {
             await supabaseAdmin.from('order_workflow_step_log').insert({
                 order_item_step_id: finalStep.id,
                 action: 'assigned',
-                step_name: finalStep.step_name,
+                step_name: `${fromRoom} ➔ ${toRoom}`,
                 step_order: finalStep.step_order,
-                created_by: userId
+                notes: finalNotes,
+                photos: photos || [],
+                created_by: userId,
+                technician_id: technician_id || null,
+                deadline_days: deadline_days || null,
+                reason: reason || null
             });
         }
 

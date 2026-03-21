@@ -151,6 +151,7 @@ export function OrderDetailPage() {
     const [showMoveStepDialog, setShowMoveStepDialog] = useState(false);
     const [moveStepItemId, setMoveStepItemId] = useState<string>('');
     const [moveStepTargetRoom, setMoveStepTargetRoom] = useState<any>({});
+    const [moveStepInitialTechId, setMoveStepInitialTechId] = useState<string>('');
     const [showFailDialog, setShowFailDialog] = useState(false);
     const [failItemId, setFailItemId] = useState<string>('');
     const [showConfirmDoneDialog, setShowConfirmDoneDialog] = useState(false);
@@ -373,6 +374,8 @@ export function OrderDetailPage() {
             if (room) {
                 setMoveStepItemId(leadItem.id);
                 setMoveStepTargetRoom(room);
+                const currentStep = getItemCurrentStep(leadItem.id);
+                setMoveStepInitialTechId(currentStep?.technician_id || '');
                 setShowMoveStepDialog(true);
             }
         }
@@ -763,6 +766,8 @@ export function OrderDetailPage() {
                 itemId={moveStepItemId}
                 targetRoomId={moveStepTargetRoom?.id}
                 targetRoomName={moveStepTargetRoom?.title}
+                technicians={technicians}
+                initialTechnicianId={moveStepInitialTechId}
                 onSuccess={() => {
                     reloadOrder();
                     if (order?.id) fetchKanbanLogs(order.id);

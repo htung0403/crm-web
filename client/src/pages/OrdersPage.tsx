@@ -15,6 +15,13 @@ import { usePackages } from '@/hooks/usePackages';
 import { useVouchers } from '@/hooks/useVouchers';
 import { useUsers } from '@/hooks/useUsers';
 import { useDepartments } from '@/hooks/useDepartments';
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import type { OrderStatus } from '@/types';
 
 import {
@@ -33,13 +40,15 @@ export function OrdersPage() {
     const { products, services, fetchProducts, fetchServices } = useProducts();
     const { packages, fetchPackages } = usePackages();
     const { vouchers, fetchVouchers } = useVouchers();
-    const { users: technicians, fetchTechnicians } = useUsers();
+    const { technicians, salesPersons, fetchTechnicians, fetchSales } = useUsers();
     const { departments, fetchDepartments } = useDepartments();
     const [payingOrder, setPayingOrder] = useState<Order | null>(null);
     const [payingGroup, setPayingGroup] = useState<{ product: OrderItem | null; services: OrderItem[] } | null>(null);
     const [pendingDrop, setPendingDrop] = useState<{ orderId: string; targetStatus: string } | null>(null);
     const [newlyCreatedOrder, setNewlyCreatedOrder] = useState<Order | null>(null);
     const [columnSearch, setColumnSearch] = useState<{ [key: string]: string }>({});
+    const [globalSearch, setGlobalSearch] = useState('');
+    const [selectedStaffId, setSelectedStaffId] = useState<string>('all');
 
     // Fetch data on mount and when navigating back to this page
     useEffect(() => {
@@ -50,8 +59,9 @@ export function OrdersPage() {
         fetchPackages();
         fetchVouchers();
         fetchTechnicians();
+        fetchSales();
         fetchDepartments();
-    }, [location.pathname, fetchOrders, fetchCustomers, fetchProducts, fetchServices, fetchPackages, fetchVouchers, fetchTechnicians, fetchDepartments]);
+    }, [location.pathname, fetchOrders, fetchCustomers, fetchProducts, fetchServices, fetchPackages, fetchVouchers, fetchTechnicians, fetchSales, fetchDepartments]);
 
     // Refetch orders when page becomes visible (e.g., after navigation)
     useEffect(() => {
@@ -132,7 +142,7 @@ export function OrdersPage() {
     };
 
     const getCardsByStatus = (status: string) => {
-        const result: { order: Order; group: { product: OrderItem | null; services: OrderItem[] }; groupIndex: number }[] = [];
+        let result: { order: Order; group: { product: OrderItem | null; services: OrderItem[] }; groupIndex: number }[] = [];
         orders.forEach(order => {
             const groups = getOrderProductGroups(order);
             groups.forEach((group, index) => {
@@ -142,6 +152,31 @@ export function OrdersPage() {
                 }
             });
         });
+
+        // Apply staff filter
+        if (selectedStaffId && selectedStaffId !== 'all') {
+            result = result.filter(v => {
+                const salesMatch = v.order.sales_id === selectedStaffId;
+                const techMatch = 
+                    v.group.product?.technician_id === selectedStaffId ||
+                    v.group.product?.technicians?.some(t => t.technician_id === selectedStaffId) ||
+                    v.group.services?.some(s => s.technician_id === selectedStaffId || s.technicians?.some(t => t.technician_id === selectedStaffId));
+                
+                return salesMatch || techMatch;
+            });
+        }
+
+        // Apply global search
+        if (globalSearch) {
+            const gTerm = globalSearch.toLowerCase().trim();
+            return result.filter(v => 
+                v.order.order_code?.toLowerCase().includes(gTerm) ||
+                v.order.customer?.name?.toLowerCase().includes(gTerm) ||
+                v.order.customer?.phone?.includes(gTerm) ||
+                v.order.sales_user?.name?.toLowerCase().includes(gTerm)
+            );
+        }
+
         return result;
     };
 
@@ -291,15 +326,52 @@ export function OrdersPage() {
                 {/* Page Header + Stats Container - Contained width */}
                 <div className="space-y-6">
                     {/* Page Header */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
                         <div className="min-w-0 flex-1">
                             <h1 className="text-2xl font-bold text-foreground">Quản lý đơn hàng</h1>
                             <p className="text-muted-foreground">Theo dõi và xử lý đơn hàng theo trạng thái</p>
                         </div>
-                        <Button onClick={() => navigate('/orders/new')} className="shrink-0 w-full sm:w-auto">
-                            <Plus className="h-4 w-4 mr-2" />
-                            Tạo đơn hàng
-                        </Button>
+                        <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+                            <div className="flex-1 sm:min-w-[200px]">
+                                <Select value={selectedStaffId} onValueChange={setSelectedStaffId}>
+                                    <SelectTrigger className="h-10 w-full bg-white">
+                                        <SelectValue placeholder="Lọc theo nhân viên" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">Tất cả nhân viên</SelectItem>
+                                        {salesPersons.length > 0 && (
+                                            <>
+                                                <div className="px-2 py-1.5 text-xs font-bold text-muted-foreground uppercase bg-muted/50">Sales</div>
+                                                {salesPersons.map(s => (
+                                                    <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                                                ))}
+                                            </>
+                                        )}
+                                        {technicians.length > 0 && (
+                                            <>
+                                                <div className="px-2 py-1.5 text-xs font-bold text-muted-foreground uppercase bg-muted/50">Kỹ thuật</div>
+                                                {technicians.map(t => (
+                                                    <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                                                ))}
+                                            </>
+                                        )}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="relative flex-1 sm:min-w-[250px]">
+                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                <Input
+                                    placeholder="Số HĐ, tên NV, SĐT khách..."
+                                    className="pl-10 h-10 w-full bg-white"
+                                    value={globalSearch}
+                                    onChange={(e) => setGlobalSearch(e.target.value)}
+                                />
+                            </div>
+                            <Button onClick={() => navigate('/orders/new')} className="shrink-0 h-10 px-6">
+                                <Plus className="h-4 w-4 mr-2" />
+                                Tạo đơn
+                            </Button>
+                        </div>
                     </div>
 
                     {/* Error Message */}
@@ -340,10 +412,13 @@ export function OrdersPage() {
                                                 <Badge variant="secondary" className="bg-white/80">
                                                     {(() => {
                                                         const searchText = (columnSearch[column.id] || '').toLowerCase().trim();
-                                                        if (!searchText) return getCardsByStatus(column.id).length;
-                                                        return getCardsByStatus(column.id).filter(c =>
+                                                        const statusCards = getCardsByStatus(column.id);
+                                                        if (!searchText) return statusCards.length;
+                                                        return statusCards.filter(c =>
                                                             c.order.customer?.name.toLowerCase().includes(searchText) ||
-                                                            c.order.customer?.phone?.includes(searchText)
+                                                            c.order.customer?.phone?.includes(searchText) ||
+                                                            c.order.order_code?.toLowerCase().includes(searchText) ||
+                                                            c.order.sales_user?.name?.toLowerCase().includes(searchText)
                                                         ).length;
                                                     })()}
                                                 </Badge>
@@ -366,7 +441,9 @@ export function OrdersPage() {
                                                     const filteredCards = searchText
                                                         ? cardsByStatus.filter(c =>
                                                             c.order.customer?.name.toLowerCase().includes(searchText) ||
-                                                            c.order.customer?.phone?.includes(searchText)
+                                                            c.order.customer?.phone?.includes(searchText) ||
+                                                            c.order.order_code?.toLowerCase().includes(searchText) ||
+                                                            c.order.sales_user?.name?.toLowerCase().includes(searchText)
                                                         )
                                                         : cardsByStatus;
                                                     return (

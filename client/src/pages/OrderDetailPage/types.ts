@@ -22,6 +22,7 @@ export interface CurrentStepInfo {
         id: string;
         name: string;
     };
+    technician_id?: string;
 }
 
 export interface OrderDetailPageProps {

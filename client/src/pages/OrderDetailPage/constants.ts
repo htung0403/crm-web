@@ -24,19 +24,20 @@ export const EXTENSION_LABELS: Record<string, string> = {
 };
 
 export const SALES_STEPS = [
-    { id: 'step1', label: '1. Nhận đồ', title: 'Nhận đồ', color: 'text-blue-500', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
-    { id: 'step2', label: '2. Gắn Tag', title: 'Gắn Tag', color: 'text-blue-500', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
-    { id: 'step3', label: '3. Trao đổi KT', title: 'Trao đổi KT', color: 'text-blue-500', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
-    { id: 'step4', label: '4. Phê duyệt', title: 'Phê duyệt', color: 'text-red-500', bgColor: 'bg-red-50', borderColor: 'border-red-200', isAlert: true },
-    { id: 'step5', label: '5. Chốt đơn', title: 'Chốt đơn', color: 'text-green-500', bgColor: 'bg-green-50', borderColor: 'border-green-200', isSuccess: true },
+    { id: 'step1', label: '1. Nhận đồ & Chụp ảnh', title: 'Nhận đồ & Chụp ảnh', color: 'text-blue-500', bgColor: 'bg-blue-50', borderColor: 'border-blue-200', estimated_minutes: 30 },
+    { id: 'step2', label: '2. TAGS+FORM TÚI+SHOESTREE', title: 'TAGS+FORM TÚI+SHOESTREE', color: 'text-blue-500', bgColor: 'bg-blue-50', borderColor: 'border-blue-200', estimated_minutes: 20 },
+    { id: 'step3', label: '3. Trao đổi KT', title: 'Trao đổi KT', color: 'text-blue-500', bgColor: 'bg-blue-50', borderColor: 'border-blue-200', estimated_minutes: 30 },
+    { id: 'step4', label: '4. Chờ kỹ thuật xem xét', title: 'Chờ kỹ thuật xem xét', color: 'text-red-500', bgColor: 'bg-red-50', borderColor: 'border-red-200', isAlert: true, estimated_minutes: 60 },
+    { id: 'step5', label: '5. Chốt đơn', title: 'Chốt đơn', color: 'text-green-500', bgColor: 'bg-green-50', borderColor: 'border-green-200', isSuccess: true, estimated_minutes: 240 },
+    { id: 'cancelled', label: 'X. Hủy đơn', title: 'Hủy đơn', color: 'text-gray-500', bgColor: 'bg-gray-50', borderColor: 'border-gray-200', isCancelled: true },
 ];
 
 export const SALES_STATUS_LABELS: Record<string, string> = {
     pending: 'Đơn nháp',
-    step1: '1. Nhận đồ',
-    step2: '2. Gắn Tag',
+    step1: '1. Nhận đồ & Chụp ảnh',
+    step2: '2. TAGS+FORM TÚI+SHOESTREE',
     step3: '3. Trao đổi KT',
-    step4: '4. Phê duyệt',
+    step4: '4. Chờ kỹ thuật xem xét',
     step5: '5. Chốt đơn',
     assigned: 'Đã phân công',
     in_progress: 'Đang thực hiện',
