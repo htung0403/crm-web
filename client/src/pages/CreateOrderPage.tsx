@@ -410,6 +410,11 @@ export function CreateOrderPage() {
 
     // Add new product
     const handleAddProduct = () => {
+        // Tự động xác nhận sản phẩm hiện tại trước khi thêm sản phẩm mới
+        if (currentProductId) {
+            setConfirmedProductIds(prev => new Set([...prev, currentProductId]));
+        }
+
         const newProduct: CustomerProduct = {
             id: generateTempId(),
             name: '',
@@ -1356,8 +1361,14 @@ export function CreateOrderPage() {
                                                             size="sm"
                                                             onClick={() => {
                                                                 if (isCurrent) {
+                                                                    // Tự động xác nhận khi thu gọn
+                                                                    setConfirmedProductIds(prev => new Set([...prev, product.id]));
                                                                     setCurrentProductId(null);
                                                                 } else {
+                                                                    // Nếu đang mở sản phẩm khác, xác nhận sản phẩm đó trước khi chuyển
+                                                                    if (currentProductId) {
+                                                                        setConfirmedProductIds(prev => new Set([...prev, currentProductId]));
+                                                                    }
                                                                     setCurrentProductId(product.id);
                                                                 }
                                                             }}
