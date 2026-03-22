@@ -161,13 +161,18 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         if (req.body.fb_profile_pic !== undefined) updateData.fb_profile_pic = req.body.fb_profile_pic;
         if (req.body.avatar_url !== undefined) updateData.avatar_url = req.body.avatar_url;
         if (req.body.next_followup_time !== undefined) updateData.next_followup_time = req.body.next_followup_time;
-        if (req.body.appointment_time !== undefined) updateData.appointment_time = req.body.appointment_time;
         if (req.body.care_note !== undefined) updateData.care_note = req.body.care_note;
         if (req.body.lead_score !== undefined) updateData.lead_score = req.body.lead_score;
         if (req.body.loss_risk !== undefined) updateData.loss_risk = req.body.loss_risk;
         if (req.body.next_action !== undefined) updateData.next_action = req.body.next_action;
         if (req.body.customer_insight !== undefined) updateData.customer_insight = req.body.customer_insight;
         if (req.body.note !== undefined) updateData.note = req.body.note;
+
+        // SLA Shield: Reset round_index if appointment_time is updated
+        if (req.body.appointment_time !== undefined) {
+            updateData.appointment_time = req.body.appointment_time;
+            updateData.round_index = 0;
+        }
 
         const { data: lead, error } = await supabaseAdmin
             .from('leads')

@@ -28,6 +28,7 @@ interface Employee extends User {
     commission?: number;
     bankAccount?: string;
     bankName?: string;
+    telegramChatId?: string;
 }
 
 const roleLabels: Record<UserRole, string> = {
@@ -76,6 +77,7 @@ function EmployeeFormDialog({
     const [commission, setCommission] = useState(0);
     const [bankAccount, setBankAccount] = useState('');
     const [bankName, setBankName] = useState('');
+    const [telegramChatId, setTelegramChatId] = useState('');
     const [joinDate, setJoinDate] = useState(new Date().toISOString().split('T')[0]);
     const [submitting, setSubmitting] = useState(false);
 
@@ -105,6 +107,7 @@ function EmployeeFormDialog({
             setCommission(employee.commission || 0);
             setBankAccount(employee.bankAccount || '');
             setBankName(employee.bankName || '');
+            setTelegramChatId(employee.telegramChatId || '');
             setJoinDate(employee.joinDate || new Date().toISOString().split('T')[0]);
             setPassword(''); // Don't show password for editing
         } else {
@@ -118,6 +121,7 @@ function EmployeeFormDialog({
             setCommission(0);
             setBankAccount('');
             setBankName('');
+            setTelegramChatId('');
             setJoinDate(new Date().toISOString().split('T')[0]);
         }
     }, [employee, open]);
@@ -146,6 +150,7 @@ function EmployeeFormDialog({
                 commission,
                 bankAccount,
                 bankName,
+                telegramChatId,
                 joinDate,
                 status: employee?.status || 'active'
             };
@@ -287,6 +292,10 @@ function EmployeeFormDialog({
                         <div className="space-y-2">
                             <Label>Số tài khoản</Label>
                             <Input value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} placeholder="Số tài khoản" />
+                        </div>
+                        <div className="col-span-2 space-y-2">
+                            <Label>Telegram Chat ID (Dùng cho n8n thông báo)</Label>
+                            <Input value={telegramChatId} onChange={(e) => setTelegramChatId(e.target.value)} placeholder="VD: 123456789" />
                         </div>
                     </div>
 
@@ -470,6 +479,10 @@ function EmployeeDetailDialog({
                                             {employee.joinDate || 'Chưa cập nhật'}
                                         </p>
                                     </div>
+                                    <div className="space-y-1">
+                                        <p className="text-xs text-muted-foreground">Telegram Chat ID</p>
+                                        <p className="text-sm font-medium">{employee.telegramChatId || 'Chưa cập nhật'}</p>
+                                    </div>
                                 </div>
 
                                 {/* Salary Info */}
@@ -598,6 +611,7 @@ export function EmployeesPage() {
         commission: user.commission || 0,
         bankAccount: user.bankAccount,
         bankName: user.bankName,
+        telegramChatId: (user as any).telegramChatId,
     }));
 
     const filteredEmployees = employees.filter(emp => {

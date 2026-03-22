@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireAccountant, requireManager } from '../middleware/auth.js';
+import { fireWebhook } from '../utils/webhookNotifier.js';
 
 const router = Router();
 
@@ -369,6 +370,67 @@ router.patch('/:id/pay', authenticate, requireAccountant, async (req: Authentica
         res.json({
             status: 'success',
             data: { salary },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// POST /api/salary/send-payroll — Chốt bảng lương & gửi Telegram/n8n
+router.post('/send-payroll', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { month, year } = req.body;
+
+        if (!month || !year) {
+            throw new ApiError('Thiếu tháng hoặc năm', 400);
+        }
+
+        // Lấy toàn bộ bảng lương tháng đó
+        const { data: salaries, error } = await supabaseAdmin
+            .from('salary_records')
+            .select(`
+                *,
+                user:users!salary_records_user_id_fkey(id, name, email, role, department)
+            `)
+            .eq('month', month)
+            .eq('year', year);
+
+        if (error) {
+            throw new ApiError('Lỗi khi lấy bảng lương: ' + error.message, 500);
+        }
+
+        if (!salaries || salaries.length === 0) {
+            throw new ApiError('Không có dữ liệu lương cho tháng này', 404);
+        }
+
+        // Format payroll data cho n8n
+        const payrollData = salaries.map((s: any) => ({
+            employee_name: s.user?.name || 'N/A',
+            department: s.user?.department || 'N/A',
+            role: s.user?.role || 'N/A',
+            base_salary: s.base_salary,
+            commission: s.commission,
+            kpi_achievement: s.kpi_achievement,
+            bonus: s.bonus,
+            deduction: s.deduction,
+            gross_salary: s.gross_salary,
+            net_salary: s.net_salary,
+            status: s.status,
+        }));
+
+        // 🔔 WH8: Fire webhook — Chốt Bảng Lương
+        fireWebhook('payroll.finalized', {
+            month,
+            year,
+            total_employees: payrollData.length,
+            total_net: salaries.reduce((sum: number, s: any) => sum + (s.net_salary || 0), 0),
+            payroll: payrollData,
+        });
+
+        res.json({
+            status: 'success',
+            message: `Đã gửi bảng lương tháng ${month}/${year} (${payrollData.length} nhân viên)`,
+            data: { count: payrollData.length },
         });
     } catch (error) {
         next(error);

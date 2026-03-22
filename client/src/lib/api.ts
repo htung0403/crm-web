@@ -172,6 +172,10 @@ export const ordersApi = {
         feedback_requested?: boolean;
         care_warranty_flow?: string | null;
         care_warranty_stage?: string | null;
+        delivery_creator_name?: string | null;
+        delivery_shipper_phone?: string | null;
+        delivery_staff_name?: string | null;
+        delivery_received_at?: string | null;
     }) => api.patch<ApiResponse<{ order: any }>>(`/orders/${id}`, data),
 
     updateAfterSaleStage: (orderId: string, stage: string | null) =>
@@ -291,6 +295,8 @@ export const orderProductsApi = {
         delivery_carrier?: string | null;
         delivery_type?: string | null;
         due_at?: string | null;
+        care_warranty_flow?: string | null;
+        care_warranty_stage?: string | null;
     }) => api.patch<ApiResponse<any>>(`/order-products/${id}/after-sale-data`, data),
 };
 
@@ -334,14 +340,17 @@ export const orderItemsApi = {
     skipStep: (stepId: string, notes?: string) =>
         api.patch<ApiResponse<any>>(`/order-items/steps/${stepId}/skip`, { notes }),
 
-    updateAccessory: (orderItemId: string, data: { status: string; notes?: string }) =>
+    updateAccessory: (orderItemId: string, data: { status: string; notes?: string; metadata?: Record<string, any> }) =>
         api.patch<ApiResponse<any>>(`/order-items/${orderItemId}/accessory`, data),
 
-    updatePartner: (orderItemId: string, data: { status: string; notes?: string }) =>
+    updatePartner: (orderItemId: string, data: { status: string; notes?: string; metadata?: Record<string, any> }) =>
         api.patch<ApiResponse<any>>(`/order-items/${orderItemId}/partner`, data),
 
     updateSalesStepData: (orderItemId: string, data: Record<string, any>) =>
         api.patch<ApiResponse<any>>(`/order-items/${orderItemId}/sales-step-data`, { sales_step_data: data }),
+
+    createExtensionRequest: (orderItemId: string, data: { reason: string; new_due_at?: string }) =>
+        api.post<ApiResponse<any>>(`/order-items/${orderItemId}/extension-request`, data),
 
     // New Kanban Actions
     fail: (id: string, reason: string) =>
@@ -359,6 +368,8 @@ export const orderItemsApi = {
         delivery_carrier?: string | null;
         delivery_type?: string | null;
         due_at?: string | null;
+        care_warranty_flow?: string | null;
+        care_warranty_stage?: string | null;
     }) => api.patch<ApiResponse<any>>(`/order-items/${id}/after-sale-data`, data),
 };
 
@@ -370,6 +381,12 @@ export const requestsApi = {
         api.get<ApiResponse<any[]>>('/requests/partners'),
     getExtensions: () =>
         api.get<ApiResponse<any[]>>('/requests/extensions'),
+    createAccessory: (data: { order_item_id?: string; order_product_id?: string; order_product_service_id?: string; notes?: string; metadata?: Record<string, any> }) =>
+        api.post<ApiResponse<any>>('/order-items/accessories', data),
+    updateAccessory: (id: string, data: { status?: string; notes?: string; metadata?: Record<string, any> }) =>
+        api.patch<ApiResponse<any>>(`/requests/accessories/${id}`, data),
+    updatePartner: (id: string, data: { status?: string; notes?: string; metadata?: Record<string, any> }) =>
+        api.patch<ApiResponse<any>>(`/requests/partners/${id}`, data),
 };
 
 // Upsell Tickets API (admin/manager)

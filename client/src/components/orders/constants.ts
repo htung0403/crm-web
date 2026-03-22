@@ -207,3 +207,31 @@ export const PARTNER_LABELS: Record<string, string> = {
     ship_back: 'Ship về Shop',
     done: 'Done',
 };
+
+export const EXTENSION_LABELS: Record<string, string> = {
+    requested: 'Đã yêu cầu',
+    manager_approved: 'QL đã duyệt',
+    sale_contacted: 'Sale đã liên hệ',
+    notified_tech: 'Đã báo KT',
+};
+
+export const REQUEST_SLA: Record<string, number> = {
+    // Accessory (in hours)
+    need_buy: 24,
+    bought: 24,
+    waiting_ship: 144, // 6 days
+    shipped: 12,
+
+    // Partner (in hours)
+    ship_to_partner: 24,
+    partner_doing: 0,
+    ship_back: 24,
+
+    // Extension
+    requested: -3, // warning 3h before
+    manager_approved: 1,
+    sale_contacted: 1,
+    notified_tech: 1,
+    rejected: 0,
+};
+

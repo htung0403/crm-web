@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { supabase, supabaseAdmin } from '../config/supabase.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { checkAndCompleteOrder } from '../utils/orderHelper.js';
+import { fireWebhook } from '../utils/webhookNotifier.js';
 
 const router = Router();
 
@@ -1586,6 +1587,24 @@ router.put('/:id/feedback', async (req: AuthenticatedRequest, res: Response, nex
             .single();
 
         if (error) throw error;
+
+        // 🔔 WH6: Fire webhook — Nhận Feedback
+        if (customer_feedback || rating) {
+            // Lấy thêm thông tin đơn hàng
+            const { data: taskInfo } = await supabase
+                .from('technician_tasks')
+                .select('task_code, order:orders(order_code)')
+                .eq('id', id)
+                .single();
+            const orderCode = (taskInfo?.order as any)?.order_code || 'N/A';
+            fireWebhook('feedback.received', {
+                task_code: taskInfo?.task_code || id,
+                order_code: orderCode,
+                classification: rating >= 4 ? 'Tốt' : rating <= 2 ? 'Xấu' : 'Trung bình',
+                rating,
+                feedback_content: customer_feedback || '',
+            });
+        }
 
         res.json(data);
     } catch (error) {

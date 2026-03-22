@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
+import { fireWebhook } from '../utils/webhookNotifier.js';
 
 const router = Router();
 
@@ -247,6 +248,16 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
 
         if (error) {
             throw new ApiError('Lỗi khi cập nhật trạng thái', 500);
+        }
+
+        // 🔔 WH7: Fire webhook — Duyệt phiếu Thu/Chi
+        if (status === 'approved' && transaction) {
+            fireWebhook('transaction.approved', {
+                code: transaction.code,
+                type: transaction.type === 'income' ? 'Thu' : 'Chi',
+                amount: transaction.amount,
+                payment_method: transaction.payment_method,
+            });
         }
 
         res.json({

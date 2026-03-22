@@ -23,6 +23,7 @@ interface WorkflowCardProps {
     getStepDeadlineDisplay: (itemId: string) => { label: string; dueAt: Date | null };
     handleOpenAccessory: (item: OrderItem) => void;
     handleOpenPartner: (item: OrderItem) => void;
+    handleOpenExtension: (item: OrderItem) => void;
     handleOpenAssignDialog: (item: OrderItem) => void;
     handleOpenSaleAssignDialog: (item: OrderItem) => void;
     onCardClick: (group: { product: OrderItem | null; services: OrderItem[] }, roomId: string) => void;
@@ -37,6 +38,7 @@ const WorkflowCard = memo(({
     getStepDeadlineDisplay,
     handleOpenAccessory,
     handleOpenPartner,
+    handleOpenExtension,
     handleOpenAssignDialog,
     handleOpenSaleAssignDialog,
     onCardClick
@@ -151,36 +153,27 @@ const WorkflowCard = memo(({
                                 <span className="text-gray-500">Hết hạn bước:</span>
                                 <span className={cn("font-semibold", itemLate ? "text-red-600" : stepDeadline.dueAt ? "text-emerald-600" : "text-gray-400")}>{stepDeadline.label}</span>
                             </div>
-                            <div className="mt-3 pt-2 border-t border-gray-100 flex flex-wrap gap-1.5">
+                            <div className="mt-3 pt-2 border-t border-gray-100 grid grid-cols-3 gap-1">
                                 <button
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); leadItem && handleOpenAccessory(leadItem); }}
-                                    className={cn(
-                                        'inline-flex items-center gap-1 p-1 px-2 rounded-md text-[10px] font-medium transition-all',
-                                        (leadItem as any)?.accessory?.status ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-700 border border-blue-200'
-                                    )}
+                                    className="inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
                                 >
-                                    <Package className="h-3 w-3" />
-                                    <span>
-                                        {(leadItem as any)?.accessory?.status
-                                            ? ACCESSORY_LABELS[(leadItem as any).accessory.status] || 'Đang xử lý PK'
-                                            : 'Cần PK'}
-                                    </span>
+                                    <span className="truncate">Mua PK</span>
                                 </button>
                                 <button
                                     type="button"
                                     onClick={(e) => { e.stopPropagation(); leadItem && handleOpenPartner(leadItem); }}
-                                    className={cn(
-                                        'inline-flex items-center gap-1 p-1 px-2 rounded-md text-[10px] font-medium transition-all',
-                                        (leadItem as any)?.partner?.status ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-700 border border-amber-200'
-                                    )}
+                                    className="inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7 bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
                                 >
-                                    <Truck className="h-3 w-3" />
-                                    <span>
-                                        {(leadItem as any)?.partner?.status
-                                            ? PARTNER_LABELS[(leadItem as any).partner.status] || 'Đang xử lý ĐT'
-                                            : 'Gửi ĐT'}
-                                    </span>
+                                    <span className="truncate">Gửi ĐT</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); leadItem && handleOpenExtension(leadItem); }}
+                                    className="inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100"
+                                >
+                                    <span className="truncate">Gia hạn</span>
                                 </button>
                             </div>
                         </>
@@ -201,6 +194,7 @@ interface WorkflowColumnProps {
     getStepDeadlineDisplay: (itemId: string) => { label: string; dueAt: Date | null };
     handleOpenAccessory: (item: OrderItem) => void;
     handleOpenPartner: (item: OrderItem) => void;
+    handleOpenExtension: (item: OrderItem) => void;
     handleOpenAssignDialog: (item: OrderItem) => void;
     handleOpenSaleAssignDialog: (item: OrderItem) => void;
     onCardClick: (group: { product: OrderItem | null; services: OrderItem[] }, roomId: string) => void;
@@ -214,6 +208,7 @@ const WorkflowColumn = ({
     getStepDeadlineDisplay,
     handleOpenAccessory,
     handleOpenPartner,
+    handleOpenExtension,
     handleOpenAssignDialog,
     handleOpenSaleAssignDialog,
     onCardClick
@@ -254,6 +249,7 @@ const WorkflowColumn = ({
                                 getStepDeadlineDisplay={getStepDeadlineDisplay}
                                 handleOpenAccessory={handleOpenAccessory}
                                 handleOpenPartner={handleOpenPartner}
+                                handleOpenExtension={handleOpenExtension}
                                 handleOpenAssignDialog={handleOpenAssignDialog}
                                 handleOpenSaleAssignDialog={handleOpenSaleAssignDialog}
                                 onCardClick={onCardClick}
@@ -284,6 +280,7 @@ interface WorkflowTabProps {
     getStepDeadlineDisplay: (itemId: string) => { label: string; dueAt: Date | null };
     handleOpenAccessory: (item: OrderItem) => void;
     handleOpenPartner: (item: OrderItem) => void;
+    handleOpenExtension: (item: OrderItem) => void;
     handleOpenAssignDialog: (item: OrderItem) => void;
     handleOpenSaleAssignDialog: (item: OrderItem) => void;
     onProductCardClick: (group: { product: OrderItem | null; services: OrderItem[] }, roomId: string) => void;
@@ -301,6 +298,7 @@ export function WorkflowTab({
     getStepDeadlineDisplay,
     handleOpenAccessory,
     handleOpenPartner,
+    handleOpenExtension,
     handleOpenAssignDialog,
     handleOpenSaleAssignDialog,
     onProductCardClick
@@ -375,6 +373,7 @@ export function WorkflowTab({
                                                 getStepDeadlineDisplay={getStepDeadlineDisplay}
                                                 handleOpenAccessory={handleOpenAccessory}
                                                 handleOpenPartner={handleOpenPartner}
+                                                handleOpenExtension={handleOpenExtension}
                                                 handleOpenAssignDialog={handleOpenAssignDialog}
                                                 handleOpenSaleAssignDialog={handleOpenSaleAssignDialog}
                                                 onCardClick={onProductCardClick}
@@ -425,9 +424,9 @@ export function WorkflowTab({
                                                                 `${log.from_status || log.from_stage || 'START'} → ${log.to_status || log.to_stage}`
                                                             )}
                                                         </span>
-                                                        <Button 
-                                                            variant="ghost" 
-                                                            size="sm" 
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="sm"
                                                             className="h-6 px-2 ml-auto text-[10px] text-primary hover:bg-primary/10 font-bold border border-primary/20 rounded-md"
                                                             onClick={() => {
                                                                 setSelectedLogDetail(log);
@@ -438,7 +437,7 @@ export function WorkflowTab({
                                                             Chi tiết
                                                         </Button>
                                                     </div>
-                                                    
+
                                                     {log.action === 'assigned' && (
                                                         <div className="mt-1.5 ml-1 space-y-1 bg-blue-50/50 p-2 rounded-lg border border-blue-50">
                                                             {log.reason && (
@@ -499,10 +498,10 @@ export function WorkflowTab({
                     </CardContent>
                 </Card>
 
-                <WorkflowLogDetailDialog 
-                    open={showLogDetailDialog} 
-                    onOpenChange={setShowLogDetailDialog} 
-                    log={selectedLogDetail} 
+                <WorkflowLogDetailDialog
+                    open={showLogDetailDialog}
+                    onOpenChange={setShowLogDetailDialog}
+                    log={selectedLogDetail}
                 />
             </div>
         </TabsContent>

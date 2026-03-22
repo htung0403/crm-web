@@ -34,7 +34,7 @@ interface AftersaleTabProps {
 const AFTER_COLS = [
     { id: 'after1', title: 'Kiểm nợ & Ảnh hoàn thiện', color: 'text-purple-700' },
     { id: 'after2', title: 'Đóng gói & Giao hàng', color: 'text-purple-700' },
-    { id: 'after3', title: 'Nhắn HD & Feedback', color: 'text-purple-700' },
+    { id: 'after3', title: 'Nhắn HD Bảo Quản & Feedback', color: 'text-purple-700' },
     { id: 'after4', title: 'Lưu Trữ', color: 'text-green-700' },
 ] as const;
 
@@ -176,6 +176,40 @@ export function AftersaleTab({
 
         toast.success(`Đã chuyển sản phẩm "${draggedGroup.product.item_name}" sang bước mới`);
 
+        // Validation: If moving from 'after1' (Kiểm nợ) to 'after2' (Đóng gói), 
+        // require debt check fields and completion photos.
+        if (result.source.droppableId === 'after1' && newStage === 'after2') {
+            const hasPhotos = draggedGroup.product.completion_photos && draggedGroup.product.completion_photos.length > 0;
+            const hasNames = order.debt_checked_by_name && order.aftersale_receiver_name;
+            const isDebtChecked = order.debt_checked;
+
+            if (!isDebtChecked || !hasNames || !hasPhotos) {
+                let errorMsg = "Vui lòng hoàn thành các yêu cầu sau để chuyển bước:";
+                if (!isDebtChecked) errorMsg += "\n- Cần \"Xác nhận đã kiểm nợ\"";
+                if (!hasNames) errorMsg += "\n- Phải điền tên người Kiểm nợ và người Nhận hàng";
+                if (!hasPhotos) errorMsg += "\n- Cần upload ít nhất một \"Ảnh hoàn thiện/kiểm nợ\"";
+                
+                toast.error(errorMsg, { duration: 5000 });
+                return;
+            }
+        }
+
+        // Add validation for transition from after2 to after3
+        if (result.source.droppableId === 'after2' && newStage === 'after3') {
+            const arePhotosOk = draggedGroup.product.packaging_photos && draggedGroup.product.packaging_photos.length > 0;
+            const areFieldsOk = order.delivery_creator_name && order.delivery_shipper_phone && 
+                                order.delivery_staff_name && order.delivery_received_at;
+            
+            if (!areFieldsOk || !arePhotosOk) {
+                let errorMsg = "Vui lòng hoàn thành các yêu cầu sau để chuyển bước:";
+                if (!areFieldsOk) errorMsg += "\n- Nhập đầy đủ: NV Tạo đơn, SĐT Liên hệ, NV Giao đồ và Thời gian nhận đồ";
+                if (!arePhotosOk) errorMsg += "\n- Cần ít nhất một \"Ảnh đóng gói/trả đồ\"";
+                
+                toast.error(errorMsg, { duration: 5000 });
+                return;
+            }
+        }
+
         const apiPromise = isCustomerItem
             ? orderProductsApi.updateAfterSaleData(itemId, { stage: newStage })
             : orderItemsApi.updateAfterSaleData(itemId, { stage: newStage });
@@ -264,7 +298,7 @@ export function AftersaleTab({
                         {order && ((order as any).after_sale_stage ?? 'after1') === 'after3' && (
                             <div className="mt-6 p-6 bg-purple-50 rounded-2xl border border-purple-100 space-y-6">
                                 <div>
-                                    <h3 className="text-xs font-bold text-purple-800 uppercase mb-3 tracking-widest">Đã nhắn HD & Xin feedback</h3>
+                                    <h3 className="text-xs font-bold text-purple-800 uppercase mb-3 tracking-widest">Đã nhắn HD Bảo Quản & Xin feedback</h3>
                                     <div className="flex flex-wrap gap-6">
                                         <label className="flex items-center gap-2 cursor-pointer">
                                             <input

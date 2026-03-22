@@ -58,6 +58,7 @@ export function LeadDetailPage() {
     const [activities, setActivities] = useState<any[]>([]);
     const [loadingActivities, setLoadingActivities] = useState(false);
     const [elapsedTime, setElapsedTime] = useState('');
+    const [appointmentCountdown, setAppointmentCountdown] = useState('');
 
     // Edit lead fields state
     const [editFbLink, setEditFbLink] = useState('');
@@ -161,6 +162,36 @@ export function LeadDetailPage() {
 
         return () => clearInterval(interval);
     }, [lead?.created_at]);
+
+    // Timer for appointment countdown
+    useEffect(() => {
+        if (!lead?.appointment_time) {
+            setAppointmentCountdown('');
+            return;
+        }
+
+        const calculateCountdown = () => {
+            const appointDate = new Date(lead.appointment_time as string);
+            const now = new Date();
+            const diff = appointDate.getTime() - now.getTime();
+
+            if (diff <= 0) {
+                setAppointmentCountdown('');
+                return;
+            }
+
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+            setAppointmentCountdown(`${hours.toString().padStart(2, '0')}h:${minutes.toString().padStart(2, '0')}p:${seconds.toString().padStart(2, '0')}s`);
+        };
+
+        calculateCountdown();
+        const interval = setInterval(calculateCountdown, 1000);
+
+        return () => clearInterval(interval);
+    }, [lead?.appointment_time]);
 
     if (loading) {
         return (
@@ -785,8 +816,17 @@ export function LeadDetailPage() {
                                             className="h-9 border-none bg-transparent text-sm font-bold focus-visible:ring-0 shadow-none"
                                         />
                                     ) : (
-                                        <div className="px-3 py-1.5 text-sm font-bold">
-                                            {lead.appointment_time ? formatDateTime(lead.appointment_time) : '-'}
+                                        <div className="px-3 py-1.5 text-sm font-bold flex flex-col">
+                                            {lead.appointment_time ? (
+                                                <>
+                                                    <span>{formatDateTime(lead.appointment_time)}</span>
+                                                    {appointmentCountdown && (
+                                                        <span className="text-xs text-pink-600 animate-pulse">
+                                                            Còn lại : {appointmentCountdown}
+                                                        </span>
+                                                    )}
+                                                </>
+                                            ) : '-'}
                                         </div>
                                     )}
                                 </div>

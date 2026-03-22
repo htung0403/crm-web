@@ -3,8 +3,69 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { checkAndCompleteOrder } from '../utils/orderHelper.js';
+import { fireWebhook } from '../utils/webhookNotifier.js';
 
 const router = Router();
+console.log('📦 Order Items Router Loaded');
+
+router.use((req, res, next) => {
+    console.log(`[Top Order Items Router] Hit: ${req.method} ${req.url}`);
+    next();
+});
+
+// POST /api/order-items/accessories - Tạo yêu cầu mua phụ kiện mới (Moved to top to avoid shadowing)
+router.post('/accessories', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { order_item_id, order_product_id, order_product_service_id, notes, metadata } = req.body;
+        const userId = req.user?.id;
+
+        const payload = {
+            order_item_id: order_item_id || null,
+            order_product_id: order_product_id || null,
+            order_product_service_id: order_product_service_id || null,
+            status: 'need_buy',
+            notes: notes || null,
+            metadata: metadata || {},
+            updated_by: userId
+        };
+
+        const { data, error } = await supabaseAdmin
+            .from('order_item_accessories')
+            .insert(payload)
+            .select(`
+                id,
+                order_item_id,
+                order_product_id,
+                order_product_service_id,
+                status,
+                notes,
+                metadata,
+                created_at,
+                updated_at,
+                order_item:order_items(
+                    id,
+                    item_name,
+                    item_code,
+                    order:orders(id, order_code),
+                    product:products(id, image)
+                ),
+                order_product:order_products(id, name, product_code, images, order:orders(id, order_code)),
+                order_product_service:order_product_services(
+                    id,
+                    order_product:order_products(name, product_code, images, order:orders(id, order_code))
+                )
+            `)
+            .single();
+
+        if (error) {
+            throw new ApiError('Không thể tạo yêu cầu mua phụ kiện: ' + error.message, 500);
+        }
+
+        res.status(201).json({ status: 'success', data });
+    } catch (e) {
+        next(e);
+    }
+});
 
 // Assign technician(s) to order item
 router.patch('/:id/assign', authenticate, async (req: AuthenticatedRequest, res, next) => {
@@ -403,6 +464,25 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
             } catch (logErr) {
                 console.error('order_item_status_log insert error:', logErr);
             }
+
+            // 🔔 WH3: Fire webhook — Đổi trạng thái Kanban phòng ban
+            try {
+                const { data: orderForWh } = await supabaseAdmin
+                    .from('orders')
+                    .select('order_code')
+                    .eq('id', orderIdForLog)
+                    .single();
+
+                fireWebhook('kanban.status_changed', {
+                    order_code: orderForWh?.order_code || 'N/A',
+                    entity_type: entityType,
+                    entity_id: id,
+                    from_status: oldStatus,
+                    to_status: status,
+                });
+            } catch (whErr) {
+                console.error('WH3 webhook error:', whErr);
+            }
         }
 
         // Trigger manager notification for approval (step4)
@@ -792,6 +872,87 @@ router.patch('/:id/sales-step-data', authenticate, async (req: AuthenticatedRequ
     }
 });
 
+/**
+ * POST /api/order-items/:id/extension-request
+ * Tạo yêu cầu gia hạn cho từng hạng mục cụ thể
+ */
+router.post('/:id/extension-request', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { reason, new_due_at } = req.body;
+
+        if (!reason || typeof reason !== 'string' || !reason.trim()) {
+            throw new ApiError('Lý do gia hạn là bắt buộc', 400);
+        }
+
+        // Tìm order_id liên quan
+        let orderId: string | null = null;
+        let itemName = '';
+
+        // Thử V1
+        const { data: v1 } = await supabaseAdmin
+            .from('order_items')
+            .select('order_id, item_name')
+            .eq('id', id)
+            .maybeSingle();
+
+        if (v1) {
+            orderId = v1.order_id;
+            itemName = v1.item_name;
+        } else {
+            // Thử V2 (Service -> Product -> Order)
+            const { data: v2 } = await supabaseAdmin
+                .from('order_product_services')
+                .select('item_name, order_product:order_products(order_id)')
+                .eq('id', id)
+                .maybeSingle();
+            
+            if (v2) {
+                orderId = (v2.order_product as any)?.order_id;
+                itemName = v2.item_name;
+            }
+        }
+
+        if (!orderId) {
+            throw new ApiError('Không tìm thấy hạng mục hoặc thông tin đơn hàng', 404);
+        }
+
+        // Tạo yêu cầu trong bảng chung: order_extension_requests
+        const { data: row, error } = await supabaseAdmin
+            .from('order_extension_requests')
+            .insert({
+                order_id: orderId,
+                requested_by: req.user!.id,
+                reason: `${itemName}: ${reason.trim()}`,
+                new_due_at: new_due_at || null,
+                status: 'requested'
+            })
+            .select()
+            .single();
+
+        if (error) throw new ApiError('Lỗi tạo yêu cầu gia hạn: ' + error.message, 500);
+
+        // 🔔 WH4: Fire webhook — Kỹ thuật xin gia hạn
+        const { data: orderForWh } = await supabaseAdmin.from('orders').select('order_code').eq('id', orderId).single();
+        const { data: techUser } = await supabaseAdmin.from('users').select('name').eq('id', req.user!.id).single();
+        fireWebhook('extension.requested', {
+            order_code: orderForWh?.order_code || 'N/A',
+            technician_name: techUser?.name || 'N/A',
+            item_name: itemName,
+            reason: reason.trim(),
+            new_due_at: new_due_at || null,
+        });
+
+        res.status(201).json({
+            status: 'success',
+            data: row,
+            message: 'Đã gửi yêu cầu gia hạn cho hạng mục: ' + itemName,
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 // =====================================================
 // ORDER ITEM STEPS ROUTES
 // =====================================================
@@ -1173,7 +1334,7 @@ const ACCESSORY_STATUSES = ['need_buy', 'bought', 'waiting_ship', 'shipped', 'de
 router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { status, notes } = req.body;
+        const { status, notes, metadata } = req.body;
 
         if (!status || !ACCESSORY_STATUSES.includes(status)) {
             throw new ApiError('Trạng thái không hợp lệ. Chọn: need_buy, bought, waiting_ship, shipped, delivered_to_tech', 400);
@@ -1193,12 +1354,13 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
             order_product_service_id: isV2 ? id : null,
             status,
             notes: notes || null,
+            metadata: metadata || {},
             updated_by: req.user!.id,
         };
 
         const existingQuery = supabaseAdmin
             .from('order_item_accessories')
-            .select('id')
+            .select('id, metadata')
             .order('updated_at', { ascending: false })
             .limit(1);
         const existingResult = isV1
@@ -1209,7 +1371,13 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
         if (existing) {
             const { data: updated, error } = await supabaseAdmin
                 .from('order_item_accessories')
-                .update({ status, notes: notes || null, updated_by: req.user!.id, updated_at: new Date().toISOString() })
+                .update({ 
+                    status, 
+                    notes: notes || null, 
+                    metadata: metadata ? { ...(existing.metadata || {}), ...metadata } : (existing.metadata || {}),
+                    updated_by: req.user!.id, 
+                    updated_at: new Date().toISOString() 
+                })
                 .eq('id', existing.id)
                 .select()
                 .single();
@@ -1242,7 +1410,7 @@ const PARTNER_STATUSES = ['ship_to_partner', 'partner_doing', 'ship_back', 'done
 router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { status, notes } = req.body;
+        const { status, notes, metadata } = req.body;
 
         if (!status || !PARTNER_STATUSES.includes(status)) {
             throw new ApiError('Trạng thái không hợp lệ. Chọn: ship_to_partner, partner_doing, ship_back, done', 400);
@@ -1262,12 +1430,13 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
             order_product_service_id: isV2 ? id : null,
             status,
             notes: notes || null,
+            metadata: metadata || {},
             updated_by: req.user!.id,
         };
 
         const existingQuery = supabaseAdmin
             .from('order_item_partner')
-            .select('id')
+            .select('id, metadata')
             .order('updated_at', { ascending: false })
             .limit(1);
         const existingResult = isV1
@@ -1278,7 +1447,13 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
         if (existing) {
             const { data: updated, error } = await supabaseAdmin
                 .from('order_item_partner')
-                .update({ status, notes: notes || null, updated_by: req.user!.id, updated_at: new Date().toISOString() })
+                .update({ 
+                    status, 
+                    notes: notes || null, 
+                    metadata: metadata ? { ...(existing.metadata || {}), ...metadata } : (existing.metadata || {}),
+                    updated_by: req.user!.id, 
+                    updated_at: new Date().toISOString() 
+                })
                 .eq('id', existing.id)
                 .select()
                 .single();
@@ -1623,7 +1798,11 @@ router.patch('/:id/change-room', authenticate, async (req: AuthenticatedRequest,
 router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, stage, due_at } = req.body;
+        const { 
+            completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, 
+            stage, due_at, sales_step_data,
+            care_warranty_flow, care_warranty_stage
+        } = req.body;
         const userId = req.user?.id;
 
         const updatePayload: any = { updated_at: new Date().toISOString() };
@@ -1633,6 +1812,10 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
         if (delivery_carrier !== undefined) updatePayload.delivery_carrier = delivery_carrier;
         if (delivery_type !== undefined) updatePayload.delivery_type = delivery_type;
         if (stage !== undefined) updatePayload.after_sale_stage = stage;
+        if (due_at !== undefined) updatePayload.due_at = due_at ? new Date(due_at).toISOString() : null;
+        if (sales_step_data !== undefined) updatePayload.sales_step_data = sales_step_data;
+        if (care_warranty_flow !== undefined) updatePayload.care_warranty_flow = care_warranty_flow;
+        if (care_warranty_stage !== undefined) updatePayload.care_warranty_stage = care_warranty_stage;
 
         // Get old stage first (for log)
         const { data: currentItem } = await supabaseAdmin.from('order_items').select('after_sale_stage, order_id').eq('id', id).single();
@@ -1668,6 +1851,75 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
         });
     } catch (error) {
         next(error);
+    }
+});
+
+// Debug middleware for order-items router
+router.use((req, res, next) => {
+    console.log(`[Order Items Router] Hit: ${req.method} ${req.url}`);
+    next();
+});
+
+// Create item-level extension request
+router.post('/:id/extension-request', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    console.log(`[API] Creating extension request for item: ${req.params.id}`);
+    try {
+        const { id } = req.params;
+        const { reason, new_due_at } = req.body;
+        const userId = req.user?.id;
+
+        if (!reason || !new_due_at) {
+            throw new ApiError('Thiếu lý do gia hạn hoặc hạn mới', 400);
+        }
+
+        const [{ data: v1Item }, { data: v2Item }] = await Promise.all([
+            supabaseAdmin.from('order_items').select('id, item_name, order_id').eq('id', id).maybeSingle(),
+            // Assuming order_product_services has an item name. Actually we can join with order_products.
+            supabaseAdmin.from('order_product_services').select('id, name, order_product:order_products(order_id, name)').eq('id', id).maybeSingle()
+        ]);
+
+        if (!v1Item && !v2Item) {
+            throw new ApiError('Không tìm thấy hạng mục', 404);
+        }
+
+        const isV2 = !!v2Item;
+        const v2OrderProduct = v2Item?.order_product ? (Array.isArray(v2Item.order_product) ? v2Item.order_product[0] : v2Item.order_product) : null;
+        
+        const orderId = isV2 ? v2OrderProduct?.order_id : v1Item!.order_id;
+        const itemName = isV2 ? (v2Item.name || v2OrderProduct?.name) : v1Item!.item_name;
+
+        // Append item name to reason to let the manager know which item needs extension
+        const finalReason = `[${itemName || 'Linh kiện'}] ${reason}`;
+
+        // Insert new request
+        const { data, error } = await supabaseAdmin.from('order_extension_requests').insert({
+            order_id: orderId,
+            order_item_id: !isV2 ? id : null,
+            order_product_service_id: isV2 ? id : null,
+            reason: finalReason,
+            new_due_at: new Date(new_due_at).toISOString(),
+            status: 'requested',
+            created_by: userId
+        }).select().single();
+
+        if (error) {
+            throw new ApiError('Lỗi tạo yêu cầu gia hạn: ' + error.message, 500);
+        }
+
+        // 🔔 WH4: Fire webhook — Kỹ thuật xin gia hạn (endpoint #2)
+        const { data: orderForWh2 } = await supabaseAdmin.from('orders').select('order_code').eq('id', orderId).single();
+        const { data: techUser2 } = await supabaseAdmin.from('users').select('name').eq('id', userId!).single();
+        fireWebhook('extension.requested', {
+            order_code: orderForWh2?.order_code || 'N/A',
+            technician_name: techUser2?.name || 'N/A',
+            item_name: itemName,
+            reason,
+            new_due_at,
+        });
+
+        res.status(201).json({ status: 'success', data });
+    } catch (e) {
+        next(e);
     }
 });
 

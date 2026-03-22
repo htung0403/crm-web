@@ -20,12 +20,13 @@ interface CareTabProps {
     fetchKanbanLogs: (orderId: string) => Promise<void>;
     getCareWarrantyStageLabel: (stage: string) => string;
     onProductCardClick: (group: any, roomId: string) => void;
+    onUpdateItemAfterSaleData: (itemId: string, isCustomerItem: boolean, data: any) => Promise<void>;
 }
 
 const CARE_WAR_COLS = [
     { id: 'war1' as const, title: '1. Tiếp nhận', color: 'border-red-400', flow: 'warranty' as const },
     { id: 'war2' as const, title: '2. Xử lý', color: 'border-red-400', flow: 'warranty' as const },
-    { id: 'war3' as const, title: '3. Hoàn tất', color: 'border-green-400', flow: 'warranty' as const },
+    { id: 'war3' as const, title: '3. Đã tạo HD Bảo hành', color: 'border-green-400', flow: 'warranty' as const },
     { id: 'care6' as const, title: 'Mốc 6 Tháng', color: 'border-teal-400', flow: 'care' as const },
     { id: 'care12' as const, title: 'Mốc 12 Tháng', color: 'border-teal-400', flow: 'care' as const },
     { id: 'care-custom' as const, title: 'Lịch Riêng', color: 'border-teal-400', flow: 'care' as const },
@@ -47,7 +48,7 @@ const CareCard = memo(({
     const productItem = group.product;
     const productName = productItem?.item_name || 'Sản phẩm';
     const productImage = (productItem as any)?.product?.image || (group.services[0] as any)?.service?.image;
-    const draggableId = `${order.id}-${productItem?.id || index}-${col.flow}`;
+    const draggableId = `${order.id}::${productItem?.id || index}::${col.flow}`;
 
     return (
         <Draggable key={draggableId} draggableId={draggableId} index={index}>
@@ -118,23 +119,59 @@ export function CareTab({
     reloadOrder,
     fetchKanbanLogs,
     getCareWarrantyStageLabel,
-    onProductCardClick
+    onProductCardClick,
+    onUpdateItemAfterSaleData
 }: CareTabProps) {
     if (!order) return null;
+    
 
     const currentFlow = (order as any).care_warranty_flow ?? null;
     const currentStage = (order as any).care_warranty_stage ?? null;
-    const orderInCareFlow = currentFlow && currentStage;
+    const someProductInCareFlow = groups.some(g => {
+        const item = (g.product || g.services?.[0]) as any;
+        return item?.care_warranty_flow === 'care' || item?.care_warranty_flow === 'warranty';
+    });
+    const orderInCareFlow = (currentFlow && currentStage) || someProductInCareFlow;
 
     const handleCareDragEnd = (result: DropResult) => {
         if (!order || !result.destination || result.destination.droppableId === result.source.droppableId) return;
+        
         const toStage = result.destination.droppableId as string;
         const toFlow = ['war1', 'war2', 'war3'].includes(toStage) ? 'warranty' : 'care';
-        updateOrderAfterSale({ care_warranty_flow: toFlow, care_warranty_stage: toStage });
-        toast.success('Đã chuyển bước Chăm sóc/Bảo hành');
-        ordersApi.patch(order.id, { care_warranty_flow: toFlow, care_warranty_stage: toStage }).then(() => fetchKanbanLogs(order.id)).catch((e: any) => {
-            reloadOrder();
-            toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
+        
+        // Extract original itemId from draggableId (format: orderId::itemId::flow)
+        const parts = result.draggableId.split('::');
+        if (parts.length < 2) return;
+        const itemId = parts[1];
+        
+        // Find which group/product is being moved
+        const group = groups.find(g => g.product?.id === itemId);
+        if (!group || !group.product) return;
+        
+        const isCustomerItem = !!(group.product as any).is_customer_item;
+
+        // Optimistic UI: update local order state immediately so card moves instantly
+        if (order.items) {
+            const updatedItems = order.items.map((item: any) => {
+                if (item.id === itemId || (item.is_customer_item && item.id === group.product?.id)) {
+                    return { ...item, care_warranty_flow: toFlow, care_warranty_stage: toStage };
+                }
+                return item;
+            });
+            // Mutate order in place for immediate re-render
+            (order as any).items = updatedItems;
+        }
+        
+        // Fire API call in background — no await needed for perceived speed
+        onUpdateItemAfterSaleData(itemId, isCustomerItem, {
+            care_warranty_flow: toFlow,
+            care_warranty_stage: toStage
+        }).then(() => {
+            fetchKanbanLogs(order.id);
+            toast.success('Đã chuyển bước Chăm sóc/Bảo hành');
+        }).catch((e: any) => {
+            toast.error('Lỗi cập nhật — đang khôi phục...');
+            reloadOrder(); // Revert on failure
         });
     };
 
@@ -173,12 +210,19 @@ export function CareTab({
                                 </h3>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     {CARE_WAR_COLS.filter((c) => c.flow === 'warranty').map((col) => {
-                                        const isActive = orderInCareFlow && col.id === currentStage;
+                                        const colGroups = groups.filter(g => {
+                                            const itemWithFlow = (g.product as any)?.care_warranty_flow ? g.product : g.services?.find(s => (s as any).care_warranty_flow);
+                                            const item = (itemWithFlow || g.product || g.services?.[0]) as any;
+                                            const itemFlow = item?.care_warranty_flow || (order as any).care_warranty_flow;
+                                            const itemStage = item?.care_warranty_stage || (order as any).care_warranty_stage;
+                                            return itemFlow === 'warranty' && itemStage === col.id;
+                                        });
+                                        const hasActive = colGroups.length > 0;
                                         return (
                                             <div key={col.id} className="flex flex-col min-w-[140px]">
                                                 <div className="flex justify-between items-center mb-4 px-2">
                                                     <h4 className="font-bold text-[10px] uppercase tracking-widest text-gray-500">{col.title}</h4>
-                                                    {isActive && <Badge className="bg-red-500 h-2 w-2 p-0 rounded-full" />}
+                                                    {hasActive && <Badge className="bg-red-500 h-2 w-2 p-0 rounded-full" />}
                                                 </div>
                                                 <Droppable droppableId={col.id}>
                                                     {(provided, snapshot) => (
@@ -187,10 +231,10 @@ export function CareTab({
                                                             {...provided.droppableProps}
                                                             className={cn(
                                                                 "min-h-[200px] p-2 rounded-xl flex-1 border-2 border-dashed transition-colors",
-                                                                snapshot.isDraggingOver ? "bg-red-50 border-red-300" : isActive ? "bg-red-50/30 border-transparent" : "bg-gray-100 border-transparent"
+                                                                snapshot.isDraggingOver ? "bg-red-50 border-red-300" : hasActive ? "bg-red-50/30 border-transparent" : "bg-gray-100 border-transparent"
                                                             )}
                                                         >
-                                                            {isActive && groups.map((group, index) => (
+                                                            {colGroups.map((group, index) => (
                                                                 <CareCard
                                                                     key={group.product?.id || index}
                                                                     group={group}
@@ -217,12 +261,19 @@ export function CareTab({
                                 </h3>
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     {CARE_WAR_COLS.filter((c) => c.flow === 'care').map((col) => {
-                                        const isActive = orderInCareFlow && col.id === currentStage;
+                                        const colGroups = groups.filter(g => {
+                                            const itemWithFlow = (g.product as any)?.care_warranty_flow ? g.product : g.services?.find(s => (s as any).care_warranty_flow);
+                                            const item = (itemWithFlow || g.product || g.services?.[0]) as any;
+                                            const itemFlow = item?.care_warranty_flow || (order as any).care_warranty_flow;
+                                            const itemStage = item?.care_warranty_stage || (order as any).care_warranty_stage;
+                                            return itemFlow === 'care' && itemStage === col.id;
+                                        });
+                                        const hasActive = colGroups.length > 0;
                                         return (
                                             <div key={col.id} className="flex flex-col min-w-[140px]">
                                                 <div className="flex justify-between items-center mb-4 px-2">
                                                     <h4 className="font-bold text-[10px] uppercase tracking-widest text-gray-500">{col.title}</h4>
-                                                    {isActive && <Badge className="bg-teal-500 h-2 w-2 p-0 rounded-full" />}
+                                                    {hasActive && <Badge className="bg-teal-500 h-2 w-2 p-0 rounded-full" />}
                                                 </div>
                                                 <Droppable droppableId={col.id}>
                                                     {(provided, snapshot) => (
@@ -231,10 +282,10 @@ export function CareTab({
                                                             {...provided.droppableProps}
                                                             className={cn(
                                                                 "min-h-[200px] p-2 rounded-xl flex-1 border-2 border-dashed transition-colors",
-                                                                snapshot.isDraggingOver ? "bg-teal-50 border-teal-300" : isActive ? "bg-teal-50/30 border-transparent" : "bg-gray-100 border-transparent"
+                                                                snapshot.isDraggingOver ? "bg-teal-50 border-teal-300" : hasActive ? "bg-teal-50/30 border-transparent" : "bg-gray-100 border-transparent"
                                                             )}
                                                         >
-                                                            {isActive && groups.map((group, index) => (
+                                                            {colGroups.map((group, index) => (
                                                                 <CareCard
                                                                     key={group.product?.id || index}
                                                                     group={group}

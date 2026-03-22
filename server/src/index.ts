@@ -58,6 +58,7 @@ app.get('/api/health', (req, res) => {
     });
 });
 
+
 // API Routes
 app.use('/api/auth', authRouter);
 app.use('/api/users', usersRouter);
@@ -82,7 +83,10 @@ app.use('/api/notifications', notificationsRouter);
 app.use('/api/workflows', workflowsRouter);
 app.use('/api/order-products', orderProductsRouter);
 app.use('/api/transactions', transactionsRouter);
-app.use('/api/requests', requestsRouter);
+app.use('/api/requests', (req, res, next) => {
+    console.log('📡 Request hitting /api/requests:', req.method, req.path);
+    next();
+}, requestsRouter);
 app.use('/api/product-chats', productChatsRouter);
 app.use('/api/product-types', productTypesRouter);
 app.use('/api/upsell-tickets', upsellTicketsRouter);
@@ -95,6 +99,7 @@ app.use(errorHandler);
 app.listen(config.port, () => {
     console.log(`🚀 Server running on http://localhost:${config.port}`);
     console.log(`📊 Environment: ${config.nodeEnv}`);
+    console.log(`🕒 Last Reload: ${new Date().toLocaleString()}`);
 });
 
 export default app;

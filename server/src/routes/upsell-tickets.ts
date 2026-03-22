@@ -2,6 +2,7 @@ import { Router, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
+import { fireWebhook } from '../utils/webhookNotifier.js';
 
 const router = Router();
 
@@ -344,6 +345,15 @@ router.post('/:id/approve', requireAdminOrManager, async (req: AuthenticatedRequ
                 total_amount: totalIncrement // Update the actual total amount approved
             })
             .eq('id', ticketId);
+
+        // 🔔 WH2: Fire webhook — Duyệt Upsell thành công
+        const { data: saleUser } = await supabaseAdmin.from('users').select('name').eq('id', ticket.sales_id).single();
+        fireWebhook('upsell.approved', {
+            order_code: order.order_code,
+            sale_name: saleUser?.name || 'N/A',
+            service_name: (customer_items || []).map((i: any) => i.name).concat((sale_items || []).map((i: any) => i.name)).join(', ') || 'Upsell',
+            amount: totalIncrement,
+        });
 
         res.json({
             status: 'success',

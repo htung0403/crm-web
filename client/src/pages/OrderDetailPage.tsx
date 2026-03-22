@@ -18,11 +18,18 @@ import {
     Plus,
     Calendar,
     Pencil,
+    Clock,
+    Hash,
+    Search,
+    Image as ImageIcon,
+    DollarSign,
+    CheckCircle2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { DropResult } from '@hello-pangea/dnd';
 
-import { ordersApi, orderItemsApi } from '@/lib/api';
+import { ordersApi, orderItemsApi, requestsApi } from '@/lib/api';
+import { uploadFile } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -77,6 +84,64 @@ import { ConfirmDoneDialog } from '@/components/orders/workflow/ConfirmDoneDialo
 import { ProductDetailDialog } from './OrderDetailPage/dialogs/ProductDetailDialog';
 import { UpsellDialog } from '@/components/orders/UpsellDialog';
 
+export function PhotoUpload({ label, value, onChange, disabled }: { label: string; value: string[]; onChange: (urls: string[]) => void; disabled?: boolean }) {
+    const [uploading, setUploading] = useState(false);
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files || files.length === 0) return;
+
+        setUploading(true);
+        try {
+            const uploadedUrls: string[] = [];
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const { url, error } = await uploadFile('orders', 'accessories', file);
+                if (error) throw error;
+                if (url) uploadedUrls.push(url);
+            }
+            onChange([...value, ...uploadedUrls]);
+            toast.success('Đã tải ảnh lên thành công');
+        } catch (error) {
+            console.error('Upload error:', error);
+            toast.error('Lỗi upload ảnh');
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    const removePhoto = (index: number) => {
+        const newValue = [...value];
+        newValue.splice(index, 1);
+        onChange(newValue);
+    };
+
+    return (
+        <div className="space-y-2">
+            <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">{label}</Label>
+            <div className="grid grid-cols-4 gap-2">
+                {value?.map((url, i) => (
+                    <div key={i} className="group relative aspect-square rounded-lg overflow-hidden border bg-white shadow-sm">
+                        <img src={url} alt="" className="w-full h-full object-cover" />
+                        {!disabled && (
+                            <button onClick={() => removePhoto(i)} className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Plus className="w-3 h-3 rotate-45" />
+                            </button>
+                        )}
+                    </div>
+                ))}
+                {!disabled && (
+                    <label className={`aspect-square rounded-lg border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-all ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                        {uploading ? <Loader2 className="w-5 h-5 animate-spin text-primary" /> : <ImageIcon className="w-6 h-6 text-slate-300" />}
+                        <span className="text-[10px] font-medium text-slate-400 mt-1">Tải ảnh</span>
+                        <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileChange} />
+                    </label>
+                )}
+            </div>
+        </div>
+    );
+}
+
 export function OrderDetailPage() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
@@ -130,8 +195,12 @@ export function OrderDetailPage() {
 
     const [showAccessoryDialog, setShowAccessoryDialog] = useState(false);
     const [accessoryItem, setAccessoryItem] = useState<OrderItem | null>(null);
-    const [accessoryStatus, setAccessoryStatus] = useState('');
-    const [accessoryNotes, setAccessoryNotes] = useState('');
+    const [newItemName, setNewItemName] = useState('');
+    const [newItemQuantity, setNewItemQuantity] = useState('1');
+    const [newItemPrice, setNewItemPrice] = useState('');
+    const [newItemOrderCode, setNewItemOrderCode] = useState('');
+    const [newItemNotes, setNewItemNotes] = useState('');
+    const [newItemPhotos, setNewItemPhotos] = useState<string[]>([]);
     const [accessoryLoading, setAccessoryLoading] = useState(false);
 
     const [showPartnerDialog, setShowPartnerDialog] = useState(false);
@@ -141,6 +210,7 @@ export function OrderDetailPage() {
     const [partnerLoading, setPartnerLoading] = useState(false);
 
     const [showExtensionDialog, setShowExtensionDialog] = useState(false);
+    const [extensionItem, setExtensionItem] = useState<OrderItem | null>(null);
     const [extensionReason, setExtensionReason] = useState('');
     const [extensionCustomerResult, setExtensionCustomerResult] = useState('');
     const [extensionNewDueAt, setExtensionNewDueAt] = useState('');
@@ -259,15 +329,48 @@ export function OrderDetailPage() {
     };
 
     const handleSubmitAccessory = async () => {
-        if (!accessoryItem) return;
+        if (!accessoryItem || !order) return;
+        if (!newItemName.trim()) {
+            toast.error('Vui lòng nhập tên linh kiện / sản phẩm');
+            return;
+        }
+
         setAccessoryLoading(true);
         try {
-            await orderItemsApi.updateAccessory(accessoryItem.id, { status: accessoryStatus, notes: accessoryNotes || undefined });
-            toast.success('Đã cập nhật trạng thái mua phụ kiện');
+            let order_item_id = undefined;
+            let order_product_id = undefined;
+            let order_product_service_id = undefined;
+
+            if ((accessoryItem as any).is_customer_item) {
+                if ((accessoryItem as any).item_type === 'product') {
+                    order_product_id = accessoryItem.id;
+                } else {
+                    order_product_service_id = accessoryItem.id;
+                }
+            } else {
+                order_item_id = accessoryItem.id;
+            }
+
+            const payload = {
+                notes: newItemNotes,
+                metadata: {
+                    item_name: newItemName,
+                    quantity: newItemQuantity,
+                    price_estimate: newItemPrice,
+                    photos: newItemPhotos,
+                    order_code: newItemOrderCode || order.order_code,
+                },
+                order_item_id,
+                order_product_id,
+                order_product_service_id
+            };
+
+            await requestsApi.createAccessory(payload);
+            toast.success('Đã tạo yêu cầu mua phụ kiện');
             await reloadOrder();
             setShowAccessoryDialog(false);
         } catch (e: any) {
-            toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
+            toast.error(e?.response?.data?.message || 'Lỗi tạo yêu cầu');
         } finally {
             setAccessoryLoading(false);
         }
@@ -275,8 +378,22 @@ export function OrderDetailPage() {
 
     const handleOpenAccessory = (item: OrderItem) => {
         setAccessoryItem(item);
-        setAccessoryStatus((item as any).accessory?.status || 'need_buy');
-        setAccessoryNotes((item as any).accessory?.notes || '');
+        setNewItemName('');
+        setNewItemQuantity('1');
+        setNewItemPrice('');
+        setNewItemNotes('');
+        setNewItemPhotos([]);
+
+        let relatedCode = order?.order_code || '';
+        if ((item as any).product?.product_code) {
+            relatedCode = (item as any).product.product_code;
+        } else if (item.item_code) {
+            relatedCode = item.item_code;
+        } else if ((item as any).order_product?.product_code) {
+            relatedCode = (item as any).order_product.product_code;
+        }
+
+        setNewItemOrderCode(relatedCode);
         setShowAccessoryDialog(true);
     };
 
@@ -291,7 +408,7 @@ export function OrderDetailPage() {
         if (!partnerItem) return;
         setPartnerLoading(true);
         try {
-            await orderItemsApi.updatePartner(partnerItem.id, { status: partnerStatus, notes: partnerNotes || undefined });
+            await orderItemsApi.updatePartner(partnerItem.id, { status: 'ship_to_partner', notes: partnerNotes || undefined });
             toast.success('Đã cập nhật trạng thái gửi đối tác');
             await reloadOrder();
             setShowPartnerDialog(false);
@@ -302,11 +419,18 @@ export function OrderDetailPage() {
         }
     };
 
-    const handleOpenExtension = () => {
-        setExtensionReason(order?.extension_request?.reason || '');
-        setExtensionCustomerResult(order?.extension_request?.customer_result || '');
-        setExtensionNewDueAt(order?.extension_request?.new_due_at ? order.extension_request.new_due_at.slice(0, 16) : '');
-        setExtensionValidReason(!!order?.extension_request?.valid_reason);
+    const handleOpenExtension = (item?: OrderItem | any) => {
+        if (item && item.id) {
+            setExtensionItem(item);
+            setExtensionReason((item as any).extension_request?.reason || '');
+            setExtensionNewDueAt((item as any).extension_request?.new_due_at ? (item as any).extension_request.new_due_at.slice(0, 16) : '');
+        } else {
+            setExtensionItem(null);
+            setExtensionReason(order?.extension_request?.reason || '');
+            setExtensionCustomerResult(order?.extension_request?.customer_result || '');
+            setExtensionNewDueAt(order?.extension_request?.new_due_at ? order.extension_request.new_due_at.slice(0, 16) : '');
+            setExtensionValidReason(!!order?.extension_request?.valid_reason);
+        }
         setShowExtensionDialog(true);
     };
 
@@ -314,7 +438,10 @@ export function OrderDetailPage() {
         if (!order?.id) return;
         setExtensionLoading(true);
         try {
-            if (order.extension_request?.id) {
+            const isItemExtension = !!extensionItem;
+            const currentRequest = isItemExtension ? (extensionItem as any).extension_request : order.extension_request;
+
+            if (currentRequest?.id) {
                 const payload: any = {};
                 if (user?.role === 'sale' || user?.role === 'manager' || user?.role === 'admin') {
                     payload.customer_result = extensionCustomerResult;
@@ -329,16 +456,30 @@ export function OrderDetailPage() {
                 toast.success('Đã cập nhật yêu cầu gia hạn');
             } else {
                 if (!extensionReason.trim()) {
-                    toast.error('Vui lòng nhập lý do gia hạn');
+                    toast.error('Vui lòng chọn hoặc nhập lý do gia hạn');
                     setExtensionLoading(false);
                     return;
                 }
-                const extensionData: { reason: string; new_due_at?: string } = { reason: extensionReason.trim() };
-                if (extensionNewDueAt) {
-                    extensionData.new_due_at = new Date(extensionNewDueAt).toISOString();
+                if (!extensionNewDueAt) {
+                    toast.error('Vui lòng chọn thời gian đề xuất gia hạn');
+                    setExtensionLoading(false);
+                    return;
                 }
-                await ordersApi.createExtensionRequest(order.id, extensionData);
+
+                const extensionData = {
+                    reason: extensionReason.trim(),
+                    new_due_at: new Date(extensionNewDueAt).toISOString()
+                };
+
+                if (isItemExtension && extensionItem) {
+                    await orderItemsApi.createExtensionRequest(extensionItem.id, extensionData);
+                } else {
+                    await ordersApi.createExtensionRequest(order.id, extensionData);
+                }
+
                 toast.success('Đã gửi yêu cầu gia hạn.');
+                // Chuyển sang bên yêu cầu
+                navigate('/requests', { state: { defaultTab: 'extensions' } });
             }
             await reloadOrder();
             setShowExtensionDialog(false);
@@ -551,6 +692,7 @@ export function OrderDetailPage() {
                     getStepDeadlineDisplay={(itemId: string) => getStepDeadlineDisplay(itemId)}
                     handleOpenAccessory={handleOpenAccessory}
                     handleOpenPartner={handleOpenPartner}
+                    handleOpenExtension={handleOpenExtension}
                     handleOpenAssignDialog={handleOpenAssignDialog}
                     handleOpenSaleAssignDialog={handleOpenSaleAssignDialog}
                     onProductCardClick={handleOpenProductDialog}
@@ -579,6 +721,7 @@ export function OrderDetailPage() {
                     fetchKanbanLogs={fetchKanbanLogs}
                     getCareWarrantyStageLabel={getCareWarrantyStageLabel}
                     onProductCardClick={handleOpenProductDialog}
+                    onUpdateItemAfterSaleData={updateItemAfterSaleData}
                 />
             </Tabs>
 
@@ -629,36 +772,94 @@ export function OrderDetailPage() {
 
             {/* Accessory Dialog */}
             <Dialog open={showAccessoryDialog} onOpenChange={setShowAccessoryDialog}>
-                <DialogContent>
-                    <DialogHeader><DialogTitle>Mua phụ kiện</DialogTitle></DialogHeader>
-                    {accessoryItem && (
-                        <div className="space-y-4">
-                            <div className="p-3 bg-muted rounded-lg"><p className="font-medium">{accessoryItem.item_name}</p></div>
-                            <div className="space-y-2">
-                                <Label>Trạng thái</Label>
-                                <Select value={accessoryStatus} onValueChange={setAccessoryStatus}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="need_buy">Cần mua</SelectItem>
-                                        <SelectItem value="bought">Đã mua</SelectItem>
-                                        <SelectItem value="waiting_ship">Chờ ship</SelectItem>
-                                        <SelectItem value="shipped">Ship tới</SelectItem>
-                                        <SelectItem value="delivered_to_tech">Giao kỹ thuật</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Ghi chú</Label>
-                                <Textarea value={accessoryNotes} onChange={e => setAccessoryNotes(e.target.value)} />
-                            </div>
-                            <DialogFooter>
-                                <Button onClick={handleSubmitAccessory} disabled={accessoryLoading}>
-                                    {accessoryLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                    Cập nhật
-                                </Button>
-                            </DialogFooter>
+                <DialogContent className="max-w-md p-0 overflow-hidden rounded-2xl border-none shadow-2xl">
+                    <DialogHeader className="p-6 pb-4 bg-slate-50/50 border-b">
+                        <DialogTitle className="text-xl font-bold flex items-center gap-2">
+                            <Plus className="w-6 h-6 text-primary" />
+                            Tạo yêu cầu mua phụ kiện
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+                        <div className="space-y-1.5">
+                            <Label className="text-xs font-bold text-slate-500">Tên phụ kiện *</Label>
+                            <Input
+                                value={newItemName}
+                                onChange={(e) => setNewItemName(e.target.value)}
+                                placeholder=""
+                                className="h-11 rounded-xl"
+                            />
                         </div>
-                    )}
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                                <Label className="text-xs font-bold text-slate-500">Số lượng</Label>
+                                <div className="relative">
+                                    <Input
+                                        value={newItemQuantity}
+                                        onChange={(e) => setNewItemQuantity(e.target.value)}
+                                        placeholder="1"
+                                        className="h-11 rounded-xl pl-10"
+                                    />
+                                    <Hash className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-400" />
+                                </div>
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label className="text-xs font-bold text-slate-500">Giá dự kiến</Label>
+                                <div className="relative">
+                                    <Input
+                                        value={newItemPrice}
+                                        onChange={(e) => {
+                                            const digits = e.target.value.replace(/\D/g, '');
+                                            if (!digits) setNewItemPrice('');
+                                            else setNewItemPrice(new Intl.NumberFormat('en-US').format(Number(digits)));
+                                        }}
+                                        placeholder="1,500,000"
+                                        className="h-11 rounded-xl pl-10"
+                                    />
+                                    <DollarSign className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-400" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <Label className="text-xs font-bold text-slate-500">Mã sản phẩm / đơn hàng</Label>
+                            <div className="relative">
+                                <Input
+                                    value={newItemOrderCode}
+                                    readOnly disabled
+                                    className="h-11 rounded-xl pl-10 bg-slate-50"
+                                />
+                                <Search className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-400" />
+                            </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <Label className="text-xs font-bold text-slate-500">Ghi chú chi tiết</Label>
+                            <Textarea
+                                value={newItemNotes}
+                                onChange={(e) => setNewItemNotes(e.target.value)}
+                                placeholder="Mô tả tình trạng, yêu cầu đặc biệt..."
+                                className="min-h-[80px] rounded-xl resize-none"
+                            />
+                        </div>
+
+                        <PhotoUpload
+                            label="Ảnh phụ kiện mẫu / Link sản phẩm"
+                            value={newItemPhotos}
+                            onChange={setNewItemPhotos}
+                        />
+                    </div>
+                    <DialogFooter className="p-6 bg-slate-50/50 border-t flex items-center justify-between gap-3">
+                        <Button variant="ghost" onClick={() => setShowAccessoryDialog(false)} className="rounded-xl px-6">Hủy</Button>
+                        <Button
+                            onClick={handleSubmitAccessory}
+                            disabled={accessoryLoading || !newItemName}
+                            className="rounded-xl px-10 font-bold shadow-lg shadow-primary/20"
+                        >
+                            {accessoryLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
+                            Gửi yêu cầu
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
 
@@ -670,16 +871,9 @@ export function OrderDetailPage() {
                         <div className="space-y-4">
                             <div className="p-3 bg-muted rounded-lg"><p className="font-medium">{partnerItem.item_name}</p></div>
                             <div className="space-y-2">
-                                <Label>Trạng thái</Label>
-                                <Select value={partnerStatus} onValueChange={setPartnerStatus}>
-                                    <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="ship_to_partner">Ship đối tác</SelectItem>
-                                        <SelectItem value="partner_doing">Đối tác làm</SelectItem>
-                                        <SelectItem value="ship_back">Ship về Shop</SelectItem>
-                                        <SelectItem value="done">Done</SelectItem>
-                                    </SelectContent>
-                                </Select>
+                                <div className="p-2.5 border rounded-lg bg-amber-50 text-amber-800 font-medium text-sm">
+                                    Xác nhận gửi đối tác
+                                </div>
                             </div>
                             <div className="space-y-2">
                                 <Label>Ghi chú</Label>
@@ -688,7 +882,7 @@ export function OrderDetailPage() {
                             <DialogFooter>
                                 <Button onClick={handleSubmitPartner} disabled={partnerLoading}>
                                     {partnerLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                    Cập nhật
+                                    Xác nhận
                                 </Button>
                             </DialogFooter>
                         </div>
@@ -705,31 +899,60 @@ export function OrderDetailPage() {
                         </DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4">
-                        {!order.extension_request ? (
+                        {!order.extension_request && !(extensionItem as any)?.extension_request ? (
                             <>
+                                {extensionItem && (
+                                    <div className="p-3 bg-muted rounded-lg mb-4">
+                                        <p className="text-sm font-bold text-primary flex items-center gap-2">
+                                            <Layers className="h-4 w-4" />
+                                            {extensionItem.item_name}
+                                        </p>
+                                    </div>
+                                )}
                                 <div className="space-y-2">
-                                    <Label>Lý do thay đổi hạn trả (Gia hạn)</Label>
-                                    <Textarea
-                                        placeholder="Nhập lý do lùi deadline hoặc thay đổi hạn trả..."
-                                        value={extensionReason}
-                                        onChange={e => setExtensionReason(e.target.value)}
-                                    />
+                                    <Label>Lý do xin gia hạn</Label>
+                                    <Select value={['MẤT ĐIỆN', 'HẾT NVL', 'QUÊN CHƯA LÀM'].includes(extensionReason) ? extensionReason : extensionReason ? 'other' : ''} onValueChange={(val) => {
+                                        if (val === 'other') setExtensionReason('');
+                                        else setExtensionReason(val);
+                                    }}>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Chọn lý do..." />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="MẤT ĐIỆN">1. Mất điện</SelectItem>
+                                            <SelectItem value="HẾT NVL">2. Hết nguyên vật liệu</SelectItem>
+                                            <SelectItem value="QUÊN CHƯA LÀM">3. Quên chưa làm</SelectItem>
+                                            <SelectItem value="other">Ghi chú khác...</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    {(extensionReason === '' || !['MẤT ĐIỆN', 'HẾT NVL', 'QUÊN CHƯA LÀM'].includes(extensionReason)) && (
+                                        <Textarea
+                                            placeholder="Nhập lý do chi tiết..."
+                                            value={extensionReason}
+                                            onChange={e => setExtensionReason(e.target.value)}
+                                            className="mt-2"
+                                        />
+                                    )}
                                 </div>
                                 <div className="space-y-2">
-                                    <Label>Gia hạn đến (Không bắt buộc)</Label>
+                                    <Label className="flex items-center gap-2">
+                                        <Clock className="h-4 w-4 text-red-500" />
+                                        THỜI GIAN ĐỀ XUẤT XIN GIA HẠN <span className="text-red-500">*</span>
+                                    </Label>
                                     <Input
                                         type="datetime-local"
+                                        required
                                         value={extensionNewDueAt}
                                         onChange={e => setExtensionNewDueAt(e.target.value)}
                                     />
-                                    <p className="text-xs text-muted-foreground">Bạn có thể đề xuất ngày hoàn thành mới.</p>
+                                    <p className="text-[10px] text-muted-foreground italic">Phải có ngày giờ rõ ràng để tiếp tục quy trình.</p>
                                 </div>
                             </>
                         ) : (
                             <>
                                 <div className="p-3 bg-muted rounded-lg text-sm">
-                                    <p>Lý do: {order.extension_request.reason}</p>
-                                    <p>Trạng thái: {order.extension_request.status}</p>
+                                    <p>Lý do: {order.extension_request?.reason || (extensionItem as any)?.extension_request?.reason}</p>
+                                    <p>Trạng thái: {order.extension_request?.status || (extensionItem as any)?.extension_request?.status}</p>
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Kết quả liên hệ khách</Label>

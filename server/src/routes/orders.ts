@@ -102,7 +102,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                     customer:customers(id, name, phone, email),
                     sales_user:users!orders_sales_id_fkey(id, name),
                     items:order_items(
-                        id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data, after_sale_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type,
+                        id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type,
                         product:products(id, image, code),
                         service:services(id, image, code),
                         technician:users!order_product_services_technician_id_fkey(id, name),
@@ -123,7 +123,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                 const { data: v2Products } = await supabaseAdmin
                     .from('order_products')
                     .select(`
-                        id, order_id, product_code, name, type, images, status, sales_step_data, after_sale_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, due_at, surcharges, surcharge_amount,
+                        id, order_id, product_code, name, type, images, status, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, due_at, surcharges, surcharge_amount,
                         services:order_product_services(
                             id, item_name, item_type, unit_price, technician_id,
                             service:services(id, image, code),
@@ -175,6 +175,8 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                                 is_customer_item: true,
                                 sales_step_data: product.sales_step_data || null,
                                 after_sale_stage: product.after_sale_stage || null,
+                                care_warranty_flow: product.care_warranty_flow || null,
+                                care_warranty_stage: product.care_warranty_stage || null,
                                 completion_photos: product.completion_photos || [],
                                 packaging_photos: product.packaging_photos || [],
                                 delivery_code: product.delivery_code || null,
@@ -210,6 +212,8 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                                         is_customer_item: true,
                                         sales_step_data: product.sales_step_data,
                                         after_sale_stage: product.after_sale_stage || null,
+                                        care_warranty_flow: product.care_warranty_flow || null,
+                                        care_warranty_stage: product.care_warranty_stage || null,
                                         completion_photos: product.completion_photos || [],
                                         packaging_photos: product.packaging_photos || [],
                                         delivery_code: product.delivery_code || null,
@@ -246,7 +250,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
         customer:customers(id, name, phone, email),
         sales_user:users!orders_sales_id_fkey(id, name),
         items:order_items(
-            id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data, after_sale_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type,
+            id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type,
             product:products(id, image, code),
             service:services(id, image, code),
             technician:users!order_items_technician_id_fkey(id, name),
@@ -273,7 +277,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
             const { data: v2Products } = await supabaseAdmin
                 .from('order_products')
                 .select(`
-                    id, order_id, product_code, name, type, images, status, sales_step_data, after_sale_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, due_at, surcharges, surcharge_amount,
+                    id, order_id, product_code, name, type, images, status, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, due_at, surcharges, surcharge_amount,
                     services:order_product_services(
                         id, item_name, item_type, unit_price, technician_id,
                         service:services(id, image, code),
@@ -326,6 +330,8 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                             is_customer_item: true,
                             sales_step_data: product.sales_step_data || null,
                             after_sale_stage: product.after_sale_stage || null,
+                            care_warranty_flow: product.care_warranty_flow || null,
+                            care_warranty_stage: product.care_warranty_stage || null,
                             completion_photos: product.completion_photos || [],
                             packaging_photos: product.packaging_photos || [],
                             delivery_code: product.delivery_code || null,
@@ -360,6 +366,14 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                                     product: { id: product.id, image: product.images?.[0] || null, code: product.product_code },
                                     is_customer_item: true,
                                     sales_step_data: product.sales_step_data,
+                                    after_sale_stage: product.after_sale_stage || null,
+                                    care_warranty_flow: product.care_warranty_flow || null,
+                                    care_warranty_stage: product.care_warranty_stage || null,
+                                    completion_photos: product.completion_photos || [],
+                                    packaging_photos: product.packaging_photos || [],
+                                    delivery_code: product.delivery_code || null,
+                                    delivery_carrier: product.delivery_carrier || null,
+                                    delivery_type: product.delivery_type || null,
                                     order_item_steps: s.order_item_steps || [],
                                 });
                             }
@@ -501,6 +515,8 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                     },
                     is_customer_item: true,
                     after_sale_stage: product.after_sale_stage || null,
+                    care_warranty_flow: product.care_warranty_flow || null,
+                    care_warranty_stage: product.care_warranty_stage || null,
                     completion_photos: product.completion_photos || [],
                     packaging_photos: product.packaging_photos || [],
                     product_type: product.type || null,
@@ -553,6 +569,8 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                             is_customer_item: true, // Mark as customer item for grouping in OrderDetailPage
                             sales_step_data: product.sales_step_data, // Inherit from parent product
                             after_sale_stage: product.after_sale_stage || null,
+                            care_warranty_flow: product.care_warranty_flow || null,
+                            care_warranty_stage: product.care_warranty_stage || null,
                             completion_photos: product.completion_photos || [],
                             packaging_photos: product.packaging_photos || [],
                             delivery_code: product.delivery_code || null,
@@ -582,27 +600,30 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             .maybeSingle();
         (order as any).extension_request = extRequest || null;
 
-        // Attach accessories and partners for each flat item
-        if (order.items) {
+        // Attach accessories and partners for each flat item (batched, not N+1)
+        if (order.items && order.items.length > 0) {
+            const itemIds = order.items.map((i: any) => i.id).filter(Boolean);
+            
+            // Batch fetch all accessories and partners in 2 queries instead of 2N
+            const [{ data: allAccessories }, { data: allPartners }] = await Promise.all([
+                supabaseAdmin
+                    .from('order_item_accessories')
+                    .select('*')
+                    .or(itemIds.map((id: string) => `order_item_id.eq.${id},order_product_service_id.eq.${id}`).join(','))
+                    .order('updated_at', { ascending: false }),
+                supabaseAdmin
+                    .from('order_item_partner')
+                    .select('*')
+                    .or(itemIds.map((id: string) => `order_item_id.eq.${id},order_product_service_id.eq.${id}`).join(','))
+                    .order('updated_at', { ascending: false }),
+            ]);
+
+            // Map results back to items (take latest per item)
             for (const item of order.items) {
                 const itemId = item.id;
                 if (!itemId) continue;
-                const { data: acc } = await supabaseAdmin
-                    .from('order_item_accessories')
-                    .select('*')
-                    .or(`order_item_id.eq.${itemId},order_product_service_id.eq.${itemId}`)
-                    .order('updated_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-                const { data: part } = await supabaseAdmin
-                    .from('order_item_partner')
-                    .select('*')
-                    .or(`order_item_id.eq.${itemId},order_product_service_id.eq.${itemId}`)
-                    .order('updated_at', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-                (item as any).accessory = acc || null;
-                (item as any).partner = part || null;
+                (item as any).accessory = allAccessories?.find((a: any) => a.order_item_id === itemId || a.order_product_service_id === itemId) || null;
+                (item as any).partner = allPartners?.find((p: any) => p.order_item_id === itemId || p.order_product_service_id === itemId) || null;
             }
         }
 
@@ -1857,6 +1878,10 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
             care_warranty_flow,
             care_warranty_stage,
             after_sale_stage,
+            delivery_creator_name,
+            delivery_shipper_phone,
+            delivery_staff_name,
+            delivery_received_at,
         } = req.body;
 
         if (care_warranty_flow !== undefined || care_warranty_stage !== undefined || after_sale_stage !== undefined) {
@@ -1893,6 +1918,10 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
         if (delivery_fee !== undefined) updatePayload.delivery_fee = Number(delivery_fee) || 0;
         if (aftersale_return_user_name !== undefined) updatePayload.aftersale_return_user_name = aftersale_return_user_name ?? null;
         if (delivery_notes !== undefined) updatePayload.delivery_notes = delivery_notes ?? null;
+        if (delivery_creator_name !== undefined) updatePayload.delivery_creator_name = delivery_creator_name || null;
+        if (delivery_shipper_phone !== undefined) updatePayload.delivery_shipper_phone = delivery_shipper_phone || null;
+        if (delivery_staff_name !== undefined) updatePayload.delivery_staff_name = delivery_staff_name || null;
+        if (delivery_received_at !== undefined) updatePayload.delivery_received_at = delivery_received_at || null;
         if (hd_sent !== undefined) {
             updatePayload.hd_sent = !!hd_sent;
             updatePayload.hd_sent_at = !!hd_sent ? new Date().toISOString() : null;

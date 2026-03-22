@@ -43,6 +43,9 @@ export interface OrderItem {
     order_item_steps?: OrderItemStep[];
     surcharges?: Array<{ type: string; label: string; value: number; isPercent: boolean }>;
     surcharge_amount?: number;
+    sales_step_data?: any;
+    care_warranty_flow?: string | null;
+    care_warranty_stage?: string | null;
 }
 
 export interface Order {
@@ -87,6 +90,10 @@ export interface Order {
     delivery_address?: string | null;
     delivery_self_pickup?: boolean;
     delivery_notes?: string | null;
+    delivery_creator_name?: string | null;
+    delivery_shipper_phone?: string | null;
+    delivery_staff_name?: string | null;
+    delivery_received_at?: string | null;
     hd_sent?: boolean;
     hd_sent_at?: string | null;
     feedback_requested?: boolean;
@@ -97,6 +104,7 @@ export interface Order {
     customer_items?: any[];
     sale_items?: OrderItem[];
     items?: OrderItem[];
+    sales_step_data?: any;
     completed_at?: string;
     created_at: string;
     updated_at?: string;

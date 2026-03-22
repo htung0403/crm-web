@@ -55,7 +55,7 @@ export const AFTER_SALE_STAGE_LABELS: Record<string, string> = {
 export const CARE_WARRANTY_STAGE_LABELS: Record<string, string> = {
     war1: '1. Tiếp nhận',
     war2: '2. Xử lý',
-    war3: '3. Hoàn tất',
+    war3: '3. Đã tạo HD Bảo hành',
     care6: 'Mốc 6 Tháng',
     care12: 'Mốc 12 Tháng',
     'care-custom': 'Lịch Riêng',

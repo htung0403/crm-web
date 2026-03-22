@@ -59,7 +59,7 @@ router.get('/', authenticate, requireManager, async (req: AuthenticatedRequest, 
 
         let query = supabaseAdmin
             .from('users')
-            .select('id, email, name, role, phone, avatar, department, status, created_at, last_login, salary, commission, bank_account, bank_name')
+            .select('id, email, name, role, phone, avatar, department, status, created_at, last_login, salary, commission, bank_account, bank_name, telegram_chat_id')
             .order('created_at', { ascending: false });
 
         if (role) query = query.eq('role', role);
@@ -78,6 +78,7 @@ router.get('/', authenticate, requireManager, async (req: AuthenticatedRequest, 
             ...user,
             bankAccount: user.bank_account,
             bankName: user.bank_name,
+            telegramChatId: user.telegram_chat_id,
         }));
 
         res.json({
@@ -92,7 +93,7 @@ router.get('/', authenticate, requireManager, async (req: AuthenticatedRequest, 
 // Create new user (manager only) - Uses bcrypt for password hashing
 router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { email, password, name, phone, role, department, salary, commission, bankAccount, bankName } = req.body;
+        const { email, password, name, phone, role, department, salary, commission, bankAccount, bankName, telegramChatId } = req.body;
 
         if (!email || !password || !name) {
             throw new ApiError('Email, mật khẩu và tên là bắt buộc', 400);
@@ -131,10 +132,11 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
                 commission: commission || 0,
                 bank_account: bankAccount || null,
                 bank_name: bankName || null,
+                telegram_chat_id: telegramChatId || null,
                 status: 'active',
                 created_at: new Date().toISOString(),
             })
-            .select('id, email, name, role, phone, avatar, department, status, created_at, salary, commission, bank_account, bank_name')
+            .select('id, email, name, role, phone, avatar, department, status, created_at, salary, commission, bank_account, bank_name, telegram_chat_id')
             .single();
 
         if (insertError) {
@@ -146,6 +148,7 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
             ...user,
             bankAccount: user.bank_account,
             bankName: user.bank_name,
+            telegramChatId: user.telegram_chat_id,
         };
 
         res.status(201).json({
@@ -170,7 +173,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 
         const { data: user, error } = await supabaseAdmin
             .from('users')
-            .select('id, email, name, role, phone, avatar, department, status, created_at, last_login, salary, commission, bank_account, bank_name')
+            .select('id, email, name, role, phone, avatar, department, status, created_at, last_login, salary, commission, bank_account, bank_name, telegram_chat_id')
             .eq('id', id)
             .single();
 
@@ -180,7 +183,14 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 
         res.json({
             status: 'success',
-            data: { user },
+            data: { 
+                user: {
+                    ...user,
+                    bankAccount: user.bank_account,
+                    bankName: user.bank_name,
+                    telegramChatId: user.telegram_chat_id,
+                } 
+            },
         });
     } catch (error) {
         next(error);
@@ -191,7 +201,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { name, phone, avatar, department, status, role, salary, commission, bankAccount, bankName } = req.body;
+        const { name, phone, avatar, department, status, role, salary, commission, bankAccount, bankName, telegramChatId } = req.body;
 
         // Chỉ cho phép cập nhật thông tin của chính mình hoặc quản lý
         const isOwner = req.user!.id === id;
@@ -209,6 +219,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         if (name) updateData.name = name;
         if (phone) updateData.phone = phone;
         if (avatar) updateData.avatar = avatar;
+        if (telegramChatId !== undefined) updateData.telegram_chat_id = telegramChatId || null;
 
         // Chỉ manager mới được cập nhật role, status, department, salary, etc.
         if (isManager) {
@@ -225,7 +236,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             .from('users')
             .update(updateData)
             .eq('id', id)
-            .select('id, email, name, role, phone, avatar, department, status, salary, commission, bank_account, bank_name')
+            .select('id, email, name, role, phone, avatar, department, status, salary, commission, bank_account, bank_name, telegram_chat_id')
             .single();
 
         if (error) {
@@ -237,6 +248,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             ...user,
             bankAccount: user.bank_account,
             bankName: user.bank_name,
+            telegramChatId: user.telegram_chat_id,
         };
 
         res.json({

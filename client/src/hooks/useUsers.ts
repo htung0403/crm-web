@@ -13,6 +13,7 @@ interface CreateUserData {
     commission?: number;
     bankAccount?: string;
     bankName?: string;
+    telegramChatId?: string;
 }
 
 interface UpdateUserData {
@@ -25,6 +26,7 @@ interface UpdateUserData {
     commission?: number;
     bankAccount?: string;
     bankName?: string;
+    telegramChatId?: string;
 }
 
 interface UseUsersReturn {

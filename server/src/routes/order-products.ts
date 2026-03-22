@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { checkAndCompleteOrder } from '../utils/orderHelper.js';
+import { fireWebhook } from '../utils/webhookNotifier.js';
 
 const router = Router();
 
@@ -470,7 +471,11 @@ router.post('/:id/recalculate-status', authenticate, async (req: AuthenticatedRe
 router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, stage, due_at } = req.body;
+        const { 
+            completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, 
+            stage, due_at, sales_step_data,
+            care_warranty_flow, care_warranty_stage
+        } = req.body;
         const userId = req.user?.id;
 
         const updatePayload: any = { updated_at: new Date().toISOString() };
@@ -481,6 +486,9 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
         if (delivery_type !== undefined) updatePayload.delivery_type = delivery_type;
         if (stage !== undefined) updatePayload.after_sale_stage = stage;
         if (due_at !== undefined) updatePayload.due_at = due_at ? new Date(due_at).toISOString() : null;
+        if (sales_step_data !== undefined) updatePayload.sales_step_data = sales_step_data;
+        if (care_warranty_flow !== undefined) updatePayload.care_warranty_flow = care_warranty_flow;
+        if (care_warranty_stage !== undefined) updatePayload.care_warranty_stage = care_warranty_stage;
 
         // Get old stage first (for log)
         const { data: currentItem } = await supabaseAdmin.from('order_products').select('after_sale_stage, order_id').eq('id', id).single();
@@ -495,6 +503,27 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
 
         if (error) {
             throw new ApiError('Không thể cập nhật thông tin after-sale', 500);
+        }
+
+        // 🔔 WH1: Fire webhook — Lưu thông tin nhận đồ (khi sales_step_data được cập nhật)
+        if (sales_step_data !== undefined) {
+            // Lấy thông tin order để bắn webhook
+            const { data: orderInfo } = await supabaseAdmin
+                .from('orders')
+                .select('order_code, customer:customers(name)')
+                .eq('id', product.order_id)
+                .single();
+
+            const customerName = (orderInfo?.customer as any)?.name || 'N/A';
+            const stepDataObj = typeof sales_step_data === 'object' ? sales_step_data : {};
+
+            fireWebhook('pickup_info.saved', {
+                order_code: orderInfo?.order_code,
+                product_code: product.product_code,
+                product_name: product.name,
+                customer_name: customerName,
+                step_data: stepDataObj,
+            });
         }
 
         // Record log if stage changed

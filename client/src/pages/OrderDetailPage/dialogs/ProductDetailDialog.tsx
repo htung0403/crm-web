@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/dialog';
 import {
     ShoppingBag, Tag, FileText, Package, Truck, Wrench, Camera,
-    User as UserIcon, CheckCircle2, MessageSquare, Receipt,
+    User as UserIcon, CheckCircle2, MessageSquare, BookOpen,
     History, Save, Loader2, Heart, ShieldCheck, ClipboardList, Sparkles,
     ThumbsUp, ThumbsDown, Calendar, XCircle, Maximize2
 } from 'lucide-react';
@@ -25,10 +25,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ProductChat } from '@/components/orders/workflow/ProductChat';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import { cn, formatCurrency, formatDateTime, formatDate } from '@/lib/utils';
-import { SALES_STATUS_LABELS } from '../constants';
+import { SALES_STATUS_LABELS, getCareWarrantyStageLabel } from '../constants';
 import { orderItemsApi } from '@/lib/api';
 import { toast } from 'sonner';
 import { ImageUpload } from '@/components/products/ImageUpload';
+import { useUsers } from '@/hooks/useUsers';
 
 
 interface ProductDetailDialogProps {
@@ -69,6 +70,13 @@ export function ProductDetailDialog({
     const [activeImageIdx, setActiveImageIdx] = useState(0);
     const [saving, setSaving] = useState(false);
     const [showUpsellDialog, setShowUpsellDialog] = useState(false);
+    const { users, fetchUsers } = useUsers();
+
+    useEffect(() => {
+        if (open) {
+            fetchUsers();
+        }
+    }, [open, fetchUsers]);
 
     // Local form state
     const [formData, setFormData] = useState<Partial<Order>>({});
@@ -103,21 +111,31 @@ export function ProductDetailDialog({
                 aftersale_return_user_name: order.aftersale_return_user_name || '',
                 delivery_address: order.delivery_address || '',
                 delivery_notes: order.delivery_notes || '',
+                delivery_creator_name: order.delivery_creator_name || '',
+                delivery_shipper_phone: order.delivery_shipper_phone || '',
+                delivery_staff_name: order.delivery_staff_name || '',
+                delivery_received_at: order.delivery_received_at ? new Date(order.delivery_received_at).toISOString().slice(0, 16) : '',
                 hd_sent: order.hd_sent || false,
                 feedback_requested: order.feedback_requested || false,
                 notes: order.notes || '',
                 // Strict separation: Only use item-specific photos
                 completion_photos: itemCompPhotos,
                 packaging_photos: itemPackPhotos,
+                sales_step_data: (item as any)?.sales_step_data || {},
             });
+            
             setActiveImageIdx(0);
         }
     }, [open, order?.id, group?.product?.id, group?.services?.[0]?.id]); // Only re-init when dialog opens or identity changes
 
     useEffect(() => {
         if (open) {
-            const item = group?.product || group?.services?.[0];
-            setDueAt((item as any)?.due_at ? new Date((item as any).due_at).toISOString().slice(0, 16) : '');
+            const item = (group?.product || group?.services?.[0]) as any;
+            const existingPickupAt = item?.sales_step_data?.pickup_appointment_at;
+            const existingDueAt = item?.due_at;
+            
+            const initialDate = existingDueAt || existingPickupAt;
+            setDueAt(initialDate ? new Date(initialDate).toISOString().slice(0, 16) : '');
         }
     }, [open, group?.product?.id, group?.services?.[0]?.id]);
 
@@ -191,7 +209,31 @@ export function ProductDetailDialog({
         }
     };
 
+    // Removed handleSavePickupDate - Logic unified in the Due Date block onClick handler
+
     const handleSave = async () => {
+        // Validation: If debt_checked is true, require names and at least one image in completion_photos (in Aftersale steps)
+        if (isAftersale && roomId.startsWith('after1')) {
+            if (formData.debt_checked) {
+                if (!formData.debt_checked_by_name || !formData.aftersale_receiver_name) {
+                    toast.error("Vui lòng chọn Tên người kiểm nợ và Tên người nhận hàng");
+                    return;
+                }
+                const hasPhotos = formData.completion_photos && formData.completion_photos.length > 0;
+                if (!hasPhotos) {
+                    toast.error("Vui lòng upload ảnh hoàn thiện/kiểm nợ làm bằng chứng");
+                    return;
+                }
+            }
+        }
+
+        if (isAftersale && roomId.startsWith('after2')) {
+            if (!formData.delivery_creator_name || !formData.delivery_shipper_phone || !formData.delivery_staff_name || !formData.delivery_received_at) {
+                toast.error("Vui lòng nhập đầy đủ: NV Tạo đơn, SĐT Liên hệ, NV Giao đồ và Thời gian nhận đồ");
+                return;
+            }
+        }
+
         setSaving(true);
         try {
             if ((isAftersale || isCareFlow) && onUpdateItemAfterSaleData) {
@@ -200,9 +242,14 @@ export function ProductDetailDialog({
                     await onUpdateItemAfterSaleData(itemId, !!product, {
                         completion_photos: formData.completion_photos,
                         packaging_photos: formData.packaging_photos,
+                        shipping_photos: formData.packaging_photos, // mapping alias if needed
                         delivery_carrier: formData.delivery_carrier,
                         delivery_code: formData.delivery_code,
                         delivery_type: formData.delivery_type,
+                        delivery_creator_name: formData.delivery_creator_name,
+                        delivery_shipper_phone: formData.delivery_shipper_phone,
+                        delivery_staff_name: formData.delivery_staff_name,
+                        delivery_received_at: formData.delivery_received_at,
                     });
                 }
             }
@@ -229,28 +276,17 @@ export function ProductDetailDialog({
         try {
             setSaving(true);
 
-            // 1. Both move the item to 'after4' (Lưu trữ) stage in aftersale
+            // 1. Both move the item to 'after4' (Lưu trữ) stage AND set item-level care/warranty flow
             await onUpdateItemAfterSaleData(entityId, !!product, {
-                stage: 'after4'
+                stage: 'after4',
+                care_warranty_flow: isPositive ? 'care' : 'warranty',
+                care_warranty_stage: isPositive ? 'care6' : 'war1'
             });
 
-            // 2. Update the order flow for the Care/Warranty tab
-            if (onUpdateOrder) {
-                if (!isPositive) {
-                    // ThumbsDown (Chê/Góp ý) -> Warranty Flow
-                    await onUpdateOrder({
-                        care_warranty_flow: 'warranty',
-                        care_warranty_stage: 'war1'
-                    });
-                    toast.success('Đã chuyển sang mục Bảo hành và Lưu trữ');
-                } else {
-                    // ThumbsUp (Khen/Hài lòng) -> Care Flow
-                    await onUpdateOrder({
-                        care_warranty_flow: 'care',
-                        care_warranty_stage: 'care6'
-                    });
-                    toast.success('Đã ghi nhận Feedback và chuyển sang mục Chăm sóc & Lưu trữ');
-                }
+            if (isPositive) {
+                toast.success('Đã ghi nhận Feedback và chuyển sản phẩm sang mục Chăm sóc & Lưu trữ');
+            } else {
+                toast.success('Đã chuyển sản phẩm sang mục Bảo hành và Lưu trữ');
             }
 
             onOpenChange(false);
@@ -556,8 +592,6 @@ export function ProductDetailDialog({
                             </div>
 
                             <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                    <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Dịch vụ yêu cầu</h3>
                                     <Button
                                         variant="outline"
                                         size="sm"
@@ -585,7 +619,6 @@ export function ProductDetailDialog({
                                             )}
                                         </div>
                                     ))}
-                                </div>
                             </div>
                         </div>
                     </ScrollArea>
@@ -593,58 +626,93 @@ export function ProductDetailDialog({
                     {/* Contextual Right Sidebar */}
                     <ScrollArea className="flex-1 bg-gray-50/40">
                         <div className="p-4 flex flex-col gap-4 min-h-full">
-                            {/* Product Specific Due Date (Available in all steps) */}
-                            <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-3">
-                                <div className="flex items-center gap-2 text-xs font-bold text-gray-400 uppercase tracking-widest">
-                                    <Calendar className="h-3.5 w-3.5" /> Hẹn trả sản phẩm này
+                            {/* Consolidated Due Date / Pickup Block */}
+                            <div className={cn(
+                                "p-4 rounded-2xl border shadow-sm space-y-3",
+                                isAftersale ? "bg-blue-50/50 border-blue-100" : "bg-white border-gray-100"
+                            )}>
+                                <div className={cn(
+                                    "flex items-center gap-2 text-[11px] font-black uppercase tracking-tight",
+                                    isAftersale ? "text-blue-900" : "text-gray-400 font-bold tracking-widest text-xs"
+                                )}>
+                                    <div className={cn(
+                                        "h-6 w-6 rounded-lg flex items-center justify-center",
+                                        isAftersale ? "bg-blue-100" : "bg-gray-100"
+                                    )}>
+                                        <Calendar className={cn("h-3.5 w-3.5", isAftersale ? "text-blue-600" : "text-gray-400")} />
+                                    </div>
+                                    {isAftersale ? "LỊCH HẸN TRẢ ĐỒ (PICKUP)" : "Hẹn trả sản phẩm này"}
                                 </div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex gap-2">
                                     <Input
                                         type="datetime-local"
-                                        className="h-9 text-xs rounded-xl"
+                                        className={cn(
+                                            "h-9 text-xs rounded-xl",
+                                            isAftersale ? "bg-white border-blue-200" : "bg-white border-gray-200"
+                                        )}
                                         value={dueAt}
                                         onChange={(e) => setDueAt(e.target.value)}
                                     />
                                     <Button
                                         size="sm"
-                                        className="h-9 px-3 rounded-xl gap-2 font-bold"
+                                        className={cn(
+                                            "h-9 px-3 rounded-xl gap-2 font-bold",
+                                            isAftersale ? "bg-blue-600 hover:bg-blue-700 text-white" : "border-slate-200"
+                                        )}
                                         onClick={async () => {
                                             const itemId = product?.id || services[0]?.id;
                                             if (!itemId || !onUpdateItemAfterSaleData) return;
                                             setSaving(true);
                                             try {
-                                                await onUpdateItemAfterSaleData(itemId, !!product, {
+                                                const payload: any = {
                                                     due_at: dueAt ? new Date(dueAt).toISOString() : null
-                                                });
-                                                toast.success('Đã cập nhật ngày hẹn trả sản phẩm');
-                                            } catch (e) {
-                                                toast.error('Lỗi khi cập nhật ngày hẹn');
+                                                };
+                                                
+                                                if (isAftersale) {
+                                                    payload.sales_step_data = {
+                                                        ...(formData.sales_step_data || {}),
+                                                        pickup_appointment_at: dueAt ? new Date(dueAt).toISOString() : null
+                                                    };
+                                                }
+                                                
+                                                await onUpdateItemAfterSaleData(itemId, !!product, payload);
+                                                
+                                                if (isAftersale) {
+                                                    setFormData(prev => ({ ...prev, sales_step_data: payload.sales_step_data }));
+                                                }
+                                                
+                                                toast.success('Đã cập nhật lịch hẹn');
+                                            } catch (error) {
+                                                toast.error('Lỗi cập nhật lịch hẹn');
                                             } finally {
                                                 setSaving(false);
                                             }
                                         }}
                                         disabled={saving}
                                     >
-                                        {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-                                        LƯU
+                                        {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : (isAftersale ? 'LƯU' : <Save className="h-4 w-4" />)}
                                     </Button>
                                 </div>
-                                <p className="text-[10px] text-muted-foreground italic pl-1">
-                                    * Mặc định sẽ lấy hạn trả của toàn đơn nếu để trống.
-                                </p>
+                                {isAftersale ? (
+                                    <p className="text-[10px] text-blue-500 italic leading-tight">
+                                        * Hệ thống sẽ gửi tin nhắn nhắc nhở tự động 1 lần/ngày nếu khách quá hẹn chưa qua lấy đồ.
+                                    </p>
+                                ) : (
+                                    <p className="text-[10px] text-muted-foreground italic pl-1">
+                                        * Mặc định sẽ lấy hạn trả của toàn đơn nếu để trống.
+                                    </p>
+                                )}
                             </div>
 
                             {isAftersale && order ? (
                                 <div className="flex-1 flex flex-col gap-4">
-                                    {/* Only show Payment info in after1 and after4 */}
                                     {(roomId.startsWith('after1') || roomId.startsWith('after4')) && (
                                         <div className="space-y-3">
                                             <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-purple-800">Thông tin thanh toán</h3>
-
                                             <div className="bg-white p-4 rounded-2xl border border-purple-100 shadow-sm space-y-4">
                                                 <div className="flex justify-between items-center bg-purple-50/50 p-2.5 rounded-xl border border-purple-50">
                                                     <span className="text-xs font-semibold text-purple-700">NGƯỜI TRẢ ĐỒ:</span>
-                                                    <Badge className="bg-purple-600 font-bold hover:bg-purple-700 transition-colors">
+                                                    <Badge className="bg-purple-600 font-bold hover:bg-purple-700 transition-colors text-white">
                                                         {order.sales_user?.name || 'Sale'}
                                                     </Badge>
                                                 </div>
@@ -669,116 +737,122 @@ export function ProductDetailDialog({
                                                 </div>
                                             </div>
 
-                                            {(roomId.startsWith('after1') || roomId.startsWith('after4')) && (
-                                                <div className="space-y-3 pt-1">
-                                                    <div className="flex items-center space-x-2 bg-white p-3 rounded-xl border shadow-sm">
-                                                        <Checkbox
-                                                            id="debt_checked"
-                                                            checked={formData.debt_checked}
-                                                            onCheckedChange={(checked) => setFormData(prev => ({ ...prev, debt_checked: !!checked }))}
-                                                        />
-                                                        <Label htmlFor="debt_checked" className="text-sm font-semibold cursor-pointer">Xác nhận đã kiểm nợ</Label>
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <Label className="text-xs font-bold text-gray-500 uppercase">Ghi chú kiểm nợ</Label>
-                                                        <Textarea
-                                                            placeholder="Nhập ghi chú kiểm nợ nếu có..."
-                                                            className="bg-white min-h-[80px]"
-                                                            value={formData.debt_checked_notes || ''}
-                                                            onChange={(e) => setFormData(prev => ({ ...prev, debt_checked_notes: e.target.value }))}
-                                                        />
-                                                    </div>
-                                                    <div className="grid grid-cols-2 gap-4">
-                                                        <div className="space-y-2">
-                                                            <Label className="text-xs font-bold text-gray-500 uppercase">TÊN NGƯỜI KIỂM NỢ</Label>
-                                                            <Input
-                                                                placeholder="VD: Kiểm nợ A"
-                                                                className="bg-white"
-                                                                value={formData.debt_checked_by_name || ''}
-                                                                onChange={(e) => setFormData(prev => ({ ...prev, debt_checked_by_name: e.target.value }))}
-                                                            />
-                                                        </div>
-                                                        <div className="space-y-2">
-                                                            <Label className="text-xs font-bold text-gray-500 uppercase">TÊN NGƯỜI NHẬN HÀNG</Label>
-                                                            <Input
-                                                                placeholder="VD: Nguyễn Văn B"
-                                                                className="bg-white"
-                                                                value={formData.aftersale_receiver_name || ''}
-                                                                onChange={(e) => setFormData(prev => ({ ...prev, aftersale_receiver_name: e.target.value }))}
-                                                            />
-                                                        </div>
-                                                    </div>
+                                            <div className="space-y-3 pt-1">
+                                                <div className="flex items-center space-x-2 bg-white p-3 rounded-xl border shadow-sm">
+                                                    <Checkbox
+                                                        id="debt_checked"
+                                                        checked={formData.debt_checked}
+                                                        onCheckedChange={(checked) => setFormData(prev => ({ ...prev, debt_checked: !!checked }))}
+                                                    />
+                                                    <Label htmlFor="debt_checked" className="text-sm font-semibold cursor-pointer">Xác nhận đã kiểm nợ</Label>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <Label className="text-xs font-bold text-gray-500 uppercase">Ghi chú kiểm nợ</Label>
+                                                    <Textarea
+                                                        placeholder="Nhập ghi chú kiểm nợ nếu có..."
+                                                        className="bg-white min-h-[80px]"
+                                                        value={formData.debt_checked_notes || ''}
+                                                        onChange={(e) => setFormData(prev => ({ ...prev, debt_checked_notes: e.target.value }))}
+                                                    />
+                                                </div>
 
-                                                    <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100 shadow-sm space-y-3">
-                                                        <div className="flex items-center justify-between">
-                                                            <div className="flex items-center gap-2">
-                                                                <div className="h-7 w-7 rounded-lg bg-purple-100 flex items-center justify-center">
-                                                                    <Camera className="h-4 w-4 text-purple-600" />
-                                                                </div>
-                                                                <div className="flex flex-col">
-                                                                    <span className="text-[11px] font-black text-purple-900 uppercase tracking-tight">Ảnh hoàn thiện</span>
-                                                                    <span className="text-[9px] text-purple-500 font-medium">Chi tiết sản phẩm sau xử lý</span>
-                                                                </div>
+                                                {/* Proof Photos */}
+                                                <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100 shadow-sm space-y-3">
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="h-7 w-7 rounded-lg bg-purple-100 flex items-center justify-center">
+                                                                <Camera className="h-4 w-4 text-purple-600" />
                                                             </div>
-                                                            <Badge variant="outline" className="text-[9px] bg-white text-purple-600 border-purple-200">
-                                                                {(formData.completion_photos?.length || 0)} ảnh
-                                                            </Badge>
+                                                            <div className="flex flex-col">
+                                                                <span className="text-[11px] font-black text-purple-900 uppercase tracking-tight">ẢNH HOÀN THIỆN / KIỂM NỢ</span>
+                                                                <span className="text-[9px] text-purple-500 font-medium italic">Chụp bằng chứng CK hoặc tiền mặt</span>
+                                                            </div>
                                                         </div>
+                                                        <Badge variant="outline" className="text-[9px] bg-white text-purple-600 border-purple-200">
+                                                            {(formData.completion_photos?.length || 0)} ảnh
+                                                        </Badge>
+                                                    </div>
 
-                                                        <div className="flex flex-wrap gap-2 pt-1">
-                                                            {(Array.isArray(formData.completion_photos) ? formData.completion_photos : []).map((photo, idx) => (
-                                                                <ImageUpload
-                                                                    key={`comp-${idx}`}
-                                                                    value={photo}
-                                                                    onChange={(url) => {
-                                                                        setFormData(prev => {
-                                                                            const newPhotos = [...(prev.completion_photos || [])];
-                                                                            if (url) {
-                                                                                newPhotos[idx] = url;
-                                                                            } else {
-                                                                                newPhotos.splice(idx, 1);
-                                                                            }
-                                                                            return { ...prev, completion_photos: newPhotos };
-                                                                        });
-                                                                    }}
-                                                                    className="w-16 h-16 rounded-xl border-2"
-                                                                    bucket="orders"
-                                                                    folder="completion"
-                                                                    hideInfo
-                                                                />
-                                                            ))}
+                                                    <div className="flex flex-wrap gap-2 pt-1">
+                                                        {(Array.isArray(formData.completion_photos) ? formData.completion_photos : []).map((photo, idx) => (
                                                             <ImageUpload
-                                                                key="comp-new"
-                                                                value={null}
+                                                                key={`comp-${idx}`}
+                                                                value={photo}
                                                                 onChange={(url) => {
-                                                                    if (url) {
-                                                                        setFormData(prev => ({
-                                                                            ...prev,
-                                                                            completion_photos: [...(prev.completion_photos || []), url]
-                                                                        }));
-                                                                    }
+                                                                    setFormData(prev => {
+                                                                        const newPhotos = [...(prev.completion_photos || [])];
+                                                                        if (url) { newPhotos[idx] = url; } else { newPhotos.splice(idx, 1); }
+                                                                        return { ...prev, completion_photos: newPhotos };
+                                                                    });
                                                                 }}
-                                                                className="w-16 h-16 rounded-xl border-2 border-dashed"
-                                                                bucket="orders"
-                                                                folder="completion"
-                                                                placeholderIcon={<Camera className="h-6 w-6 text-purple-300" />}
-                                                                hideInfo
+                                                                className="w-16 h-16 rounded-xl border-2"
+                                                                bucket="orders" folder="completion" hideInfo
                                                             />
-                                                        </div>
+                                                        ))}
+                                                        <ImageUpload
+                                                            key="comp-new" value={null}
+                                                            onChange={(url) => {
+                                                                if (url) {
+                                                                    setFormData(prev => ({ ...prev, completion_photos: [...(prev.completion_photos || []), url] }));
+                                                                }
+                                                            }}
+                                                            className="w-16 h-16 rounded-xl border-2 border-dashed"
+                                                            bucket="orders" folder="completion" placeholderIcon={<Camera className="h-6 w-6 text-purple-300" />} hideInfo
+                                                        />
                                                     </div>
                                                 </div>
-                                            )}
+
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="space-y-2">
+                                                        <Label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1.5">
+                                                            TÊN NGƯỜI KIỂM NỢ
+                                                            {formData.debt_checked && <span className="text-rose-500">*</span>}
+                                                        </Label>
+                                                        <Select
+                                                            value={formData.debt_checked_by_name || ''}
+                                                            onValueChange={(val) => setFormData(prev => ({ ...prev, debt_checked_by_name: val }))}
+                                                        >
+                                                            <SelectTrigger className="bg-white h-9">
+                                                                <SelectValue placeholder="Chọn nhân viên..." />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {users.map(u => (
+                                                                    <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <Label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1.5">
+                                                            TÊN NGƯỜI NHẬN HÀNG
+                                                            {formData.debt_checked && <span className="text-rose-500">*</span>}
+                                                        </Label>
+                                                        <Select
+                                                            value={formData.aftersale_receiver_name || ''}
+                                                            onValueChange={(val) => setFormData(prev => ({ ...prev, aftersale_receiver_name: val }))}
+                                                        >
+                                                            <SelectTrigger className="bg-white h-9">
+                                                                <SelectValue placeholder="Chọn nhân viên..." />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                {users.map(u => (
+                                                                    <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                </div>
+                                            </div>
                                         </div>
                                     )}
 
-                                    {/* Delivery Info in after2 and after4 */}
+                                    {/* Delivery Info */}
                                     {(roomId.startsWith('after2') || roomId.startsWith('after4')) && (
                                         <div className="space-y-3">
                                             <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-blue-800">Giao hàng</h3>
                                             <div className="bg-white p-4 rounded-2xl border border-blue-50 shadow-sm space-y-4">
                                                 {roomId.startsWith('after2') ? (
                                                     <div className="space-y-4">
-                                                        {/* Delivery Type Toggle */}
                                                         <div className="flex p-1 bg-gray-100 rounded-xl">
                                                             <button
                                                                 type="button"
@@ -805,55 +879,178 @@ export function ProductDetailDialog({
                                                         </div>
 
                                                         {formData.delivery_type === 'pickup' ? (
-                                                            <div className="space-y-2 animate-in fade-in slide-in-from-top-1">
-                                                                <Label className="text-xs font-bold text-gray-500">NGƯỜI TRẢ HÀNG CHO KHÁCH</Label>
-                                                                <Input
-                                                                    placeholder="Tên nhân viên giao đồ..."
-                                                                    value={formData.aftersale_return_user_name || ''}
-                                                                    onChange={(e) => setFormData(prev => ({ ...prev, aftersale_return_user_name: e.target.value }))}
-                                                                />
-                                                            </div>
-                                                        ) : (
-                                                            <div className="space-y-4 animate-in fade-in slide-in-from-top-1">
-                                                                <div className="space-y-2">
-                                                                    <Label className="text-xs font-bold text-gray-500">ĐƠN VỊ VẬN CHUYỂN</Label>
-                                                                    <Input
-                                                                        placeholder="VD: GHTK, Viettel Post..."
-                                                                        value={formData.delivery_carrier || ''}
-                                                                        onChange={(e) => setFormData(prev => ({ ...prev, delivery_carrier: e.target.value }))}
-                                                                    />
-                                                                </div>
+                                                            <div className="space-y-4">
                                                                 <div className="grid grid-cols-2 gap-4">
                                                                     <div className="space-y-2">
-                                                                        <Label className="text-xs font-bold text-gray-500 uppercase">Mã vận đơn</Label>
-                                                                        <Input
-                                                                            placeholder="Nhập mã..."
-                                                                            value={formData.delivery_code || ''}
-                                                                            onChange={(e) => setFormData(prev => ({ ...prev, delivery_code: e.target.value }))}
-                                                                        />
+                                                                        <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
+                                                                            NV TẠO ĐƠN <span className="text-red-500">*</span>
+                                                                        </Label>
+                                                                        <Select
+                                                                            value={formData.delivery_creator_name || ''}
+                                                                            onValueChange={(val) => setFormData(prev => ({ ...prev, delivery_creator_name: val }))}
+                                                                        >
+                                                                            <SelectTrigger className="h-9 bg-white">
+                                                                                <SelectValue placeholder="Chọn..." />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                {users.map(u => (
+                                                                                    <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
+                                                                                ))}
+                                                                            </SelectContent>
+                                                                        </Select>
                                                                     </div>
                                                                     <div className="space-y-2">
-                                                                        <Label className="text-xs font-bold text-gray-500 uppercase">Phí Ship</Label>
+                                                                        <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
+                                                                            SĐT LIÊN HỆ <span className="text-red-500">*</span>
+                                                                        </Label>
                                                                         <Input
-                                                                            type="text"
-                                                                            placeholder="0"
-                                                                            value={formData.delivery_fee ? formData.delivery_fee.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".") : ""}
-                                                                            onChange={(e) => {
-                                                                                const val = e.target.value.replace(/\./g, "");
-                                                                                if (/^\d*$/.test(val)) {
-                                                                                    setFormData(prev => ({ ...prev, delivery_fee: val ? parseInt(val, 10) : 0 }));
-                                                                                }
-                                                                            }}
+                                                                            placeholder="Nhập SĐT..."
+                                                                            className="h-9"
+                                                                            value={formData.delivery_shipper_phone || ''}
+                                                                            onChange={(e) => setFormData(prev => ({ ...prev, delivery_shipper_phone: e.target.value }))}
                                                                         />
                                                                     </div>
                                                                 </div>
-                                                                <div className="space-y-2">
-                                                                    <Label className="text-xs font-bold text-gray-500 uppercase">ĐỊA CHỈ GIAO HÀNG</Label>
-                                                                    <Input
-                                                                        placeholder="Địa chỉ nhận đồ của khách..."
-                                                                        value={formData.delivery_address || ''}
-                                                                        onChange={(e) => setFormData(prev => ({ ...prev, delivery_address: e.target.value }))}
-                                                                    />
+
+                                                                <div className="grid grid-cols-2 gap-4">
+                                                                    <div className="space-y-2">
+                                                                        <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
+                                                                            NV GIAO ĐỒ <span className="text-red-500">*</span>
+                                                                        </Label>
+                                                                        <Select
+                                                                            value={formData.delivery_staff_name || ''}
+                                                                            onValueChange={(val) => setFormData(prev => ({ ...prev, delivery_staff_name: val }))}
+                                                                        >
+                                                                            <SelectTrigger className="h-9 bg-white">
+                                                                                <SelectValue placeholder="Chọn..." />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                {users.map(u => (
+                                                                                    <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
+                                                                                ))}
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                    </div>
+                                                                    <div className="space-y-2">
+                                                                        <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
+                                                                            THỜI GIAN NHẬN <span className="text-red-500">*</span>
+                                                                        </Label>
+                                                                        <Input
+                                                                            type="datetime-local"
+                                                                            className="h-9"
+                                                                            value={formData.delivery_received_at || ''}
+                                                                            onChange={(e) => setFormData(prev => ({ ...prev, delivery_received_at: e.target.value }))}
+                                                                        />
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="space-y-4">
+                                                                <div className="grid grid-cols-2 gap-4">
+                                                                    <div className="space-y-2">
+                                                                        <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
+                                                                            NV TẠO ĐƠN <span className="text-red-500">*</span>
+                                                                        </Label>
+                                                                        <Select
+                                                                            value={formData.delivery_creator_name || ''}
+                                                                            onValueChange={(val) => setFormData(prev => ({ ...prev, delivery_creator_name: val }))}
+                                                                        >
+                                                                            <SelectTrigger className="h-9 bg-white">
+                                                                                <SelectValue placeholder="Chọn..." />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                {users.map(u => (
+                                                                                    <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
+                                                                                ))}
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                    </div>
+                                                                    <div className="space-y-2">
+                                                                        <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
+                                                                            SDT SHIP LẤY HÀNG <span className="text-red-500">*</span>
+                                                                        </Label>
+                                                                        <Input
+                                                                            placeholder="09xx..."
+                                                                            className="h-9"
+                                                                            value={formData.delivery_shipper_phone || ''}
+                                                                            onChange={(e) => setFormData(prev => ({ ...prev, delivery_shipper_phone: e.target.value }))}
+                                                                        />
+                                                                    </div>
+                                                                </div>
+
+                                                                <div className="grid grid-cols-2 gap-4">
+                                                                    <div className="space-y-2">
+                                                                        <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
+                                                                            NHÂN VIÊN GIAO SHIP <span className="text-red-500">*</span>
+                                                                        </Label>
+                                                                        <Select
+                                                                            value={formData.delivery_staff_name || ''}
+                                                                            onValueChange={(val) => setFormData(prev => ({ ...prev, delivery_staff_name: val }))}
+                                                                        >
+                                                                            <SelectTrigger className="h-9 bg-white">
+                                                                                <SelectValue placeholder="Chọn..." />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                {users.map(u => (
+                                                                                    <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
+                                                                                ))}
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                    </div>
+                                                                    <div className="space-y-2">
+                                                                        <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
+                                                                            THỜI GIAN KHÁCH NHẬN <span className="text-red-500">*</span>
+                                                                        </Label>
+                                                                        <Input
+                                                                            type="datetime-local"
+                                                                            className="h-9"
+                                                                            value={formData.delivery_received_at || ''}
+                                                                            onChange={(e) => setFormData(prev => ({ ...prev, delivery_received_at: e.target.value }))}
+                                                                        />
+                                                                    </div>
+                                                                </div>
+
+                                                                <div className="space-y-4 border-t border-blue-50 pt-4">
+                                                                    <div className="space-y-2">
+                                                                        <Label className="text-xs font-bold text-gray-500">ĐƠN VỊ VẬN CHUYỂN</Label>
+                                                                        <Input
+                                                                            placeholder="VD: GHTK, Viettel Post..."
+                                                                            value={formData.delivery_carrier || ''}
+                                                                            onChange={(e) => setFormData(prev => ({ ...prev, delivery_carrier: e.target.value }))}
+                                                                        />
+                                                                    </div>
+                                                                    <div className="grid grid-cols-2 gap-4">
+                                                                        <div className="space-y-2">
+                                                                            <Label className="text-xs font-bold text-gray-500 uppercase">Mã vận đơn</Label>
+                                                                            <Input
+                                                                                placeholder="Nhập mã..."
+                                                                                value={formData.delivery_code || ''}
+                                                                                onChange={(e) => setFormData(prev => ({ ...prev, delivery_code: e.target.value }))}
+                                                                            />
+                                                                        </div>
+                                                                        <div className="space-y-2">
+                                                                            <Label className="text-xs font-bold text-gray-500 uppercase">Phí Ship</Label>
+                                                                            <Input
+                                                                                type="text"
+                                                                                placeholder="0"
+                                                                                value={formData.delivery_fee ? formData.delivery_fee.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".") : ""}
+                                                                                onChange={(e) => {
+                                                                                    const val = e.target.value.replace(/\./g, "");
+                                                                                    if (/^\d*$/.test(val)) {
+                                                                                        setFormData(prev => ({ ...prev, delivery_fee: val ? parseInt(val, 10) : 0 }));
+                                                                                    }
+                                                                                }}
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="space-y-2">
+                                                                        <Label className="text-xs font-bold text-gray-500 uppercase">ĐỊA CHỈ GIAO HÀNG</Label>
+                                                                        <Input
+                                                                            placeholder="Địa chỉ nhận đồ của khách..."
+                                                                            value={formData.delivery_address || ''}
+                                                                            onChange={(e) => setFormData(prev => ({ ...prev, delivery_address: e.target.value }))}
+                                                                        />
+                                                                    </div>
                                                                 </div>
                                                             </div>
                                                         )}
@@ -903,36 +1100,23 @@ export function ProductDetailDialog({
                                                                 onChange={(url) => {
                                                                     setFormData(prev => {
                                                                         const newPhotos = [...(prev.packaging_photos || [])];
-                                                                        if (url) {
-                                                                            newPhotos[idx] = url;
-                                                                        } else {
-                                                                            newPhotos.splice(idx, 1);
-                                                                        }
+                                                                        if (url) { newPhotos[idx] = url; } else { newPhotos.splice(idx, 1); }
                                                                         return { ...prev, packaging_photos: newPhotos };
                                                                     });
                                                                 }}
                                                                 className="w-16 h-16 rounded-xl border-2"
-                                                                bucket="orders"
-                                                                folder="packaging"
-                                                                hideInfo
+                                                                bucket="orders" folder="packaging" hideInfo
                                                             />
                                                         ))}
                                                         <ImageUpload
-                                                            key="pack-new"
-                                                            value={null}
+                                                            key="pack-new" value={null}
                                                             onChange={(url) => {
                                                                 if (url) {
-                                                                    setFormData(prev => ({
-                                                                        ...prev,
-                                                                        packaging_photos: [...(prev.packaging_photos || []), url]
-                                                                    }));
+                                                                    setFormData(prev => ({ ...prev, packaging_photos: [...(prev.packaging_photos || []), url] }));
                                                                 }
                                                             }}
                                                             className="w-16 h-16 rounded-xl border-2 border-dashed"
-                                                            bucket="orders"
-                                                            folder="packaging"
-                                                            placeholderIcon={<Package className="h-6 w-6 text-blue-300" />}
-                                                            hideInfo
+                                                            bucket="orders" folder="packaging" placeholderIcon={<Package className="h-6 w-6 text-blue-300" />} hideInfo
                                                         />
                                                     </div>
                                                 </div>
@@ -940,48 +1124,60 @@ export function ProductDetailDialog({
                                         </div>
                                     )}
 
-                                    {/* Feedback & HD status in after3 and after4 */}
+                                    {/* Feedback & Invoice */}
                                     {(roomId.startsWith('after3') || roomId.startsWith('after4')) && (
                                         <div className="space-y-4">
-                                            <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-green-800">HD & Phản hồi</h3>
+                                            <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-green-800">HD BẢO QUẢN & PHẢN HỒI</h3>
                                             <div className="space-y-3">
-                                                <div className="bg-white p-4 rounded-xl border border-green-50 shadow-sm flex items-center justify-between">
-                                                    <div className="flex items-center gap-3">
-                                                        <Receipt className={cn("h-5 w-5", formData.hd_sent ? "text-green-600" : "text-gray-300")} />
-                                                        <Label htmlFor="hd_sent" className="text-sm font-medium cursor-pointer">Đã gửi HD (Invoice)</Label>
-                                                    </div>
-                                                    {roomId.startsWith('after3') ? (
+                                                {roomId.startsWith('after3') ? (
+                                                    <label htmlFor="hd_sent" className="bg-white p-4 rounded-xl border border-green-50 shadow-sm flex items-center justify-between cursor-pointer hover:bg-green-50/30 transition-colors">
+                                                        <div className="flex items-center gap-3">
+                                                            <BookOpen className={cn("h-5 w-5", formData.hd_sent ? "text-green-600" : "text-gray-300")} />
+                                                            <span className="text-sm font-medium">Đã gửi hướng dẫn bảo quản</span>
+                                                        </div>
                                                         <Checkbox
                                                             id="hd_sent"
                                                             checked={formData.hd_sent}
                                                             onCheckedChange={(checked) => setFormData(prev => ({ ...prev, hd_sent: !!checked }))}
                                                         />
-                                                    ) : (
+                                                    </label>
+                                                ) : (
+                                                    <div className="bg-white p-4 rounded-xl border border-green-50 shadow-sm flex items-center justify-between">
+                                                        <div className="flex items-center gap-3">
+                                                            <BookOpen className={cn("h-5 w-5", formData.hd_sent ? "text-green-600" : "text-gray-300")} />
+                                                            <span className="text-sm font-medium">Đã gửi hướng dẫn bảo quản</span>
+                                                        </div>
                                                         <Badge variant="outline" className="bg-green-50 text-green-700">{order.hd_sent ? 'Đã gửi' : 'Chưa gửi'}</Badge>
-                                                    )}
-                                                </div>
-
-                                                <div className="bg-white p-4 rounded-xl border border-green-50 shadow-sm flex items-center justify-between">
-                                                    <div className="flex items-center gap-3">
-                                                        <MessageSquare className={cn("h-5 w-5", formData.feedback_requested ? "text-green-600" : "text-gray-300")} />
-                                                        <Label htmlFor="fb_req" className="text-sm font-medium cursor-pointer">Yêu cầu Feedback</Label>
                                                     </div>
-                                                    {roomId.startsWith('after3') ? (
+                                                )}
+
+                                                {roomId.startsWith('after3') ? (
+                                                    <label htmlFor="fb_req" className="bg-white p-4 rounded-xl border border-green-50 shadow-sm flex items-center justify-between cursor-pointer hover:bg-green-50/30 transition-colors">
+                                                        <div className="flex items-center gap-3">
+                                                            <MessageSquare className={cn("h-5 w-5", formData.feedback_requested ? "text-green-600" : "text-gray-300")} />
+                                                            <span className="text-sm font-medium">Yêu cầu Feedback</span>
+                                                        </div>
                                                         <Checkbox
                                                             id="fb_req"
                                                             checked={formData.feedback_requested}
                                                             onCheckedChange={(checked) => setFormData(prev => ({ ...prev, feedback_requested: !!checked }))}
                                                         />
-                                                    ) : (
+                                                    </label>
+                                                ) : (
+                                                    <div className="bg-white p-4 rounded-xl border border-green-50 shadow-sm flex items-center justify-between">
+                                                        <div className="flex items-center gap-3">
+                                                            <MessageSquare className={cn("h-5 w-5", formData.feedback_requested ? "text-green-600" : "text-gray-300")} />
+                                                            <span className="text-sm font-medium">Yêu cầu Feedback</span>
+                                                        </div>
                                                         <Badge variant="outline" className="bg-green-50 text-green-700">{order.feedback_requested ? 'Đã gửi' : 'Chưa gửi'}</Badge>
-                                                    )}
-                                                </div>
+                                                    </div>
+                                                )}
 
                                                 {roomId.startsWith('after3') && (
                                                     <div className="grid grid-cols-2 gap-3 pt-2">
                                                         <Button
                                                             variant="outline"
-                                                            className="h-14 rounded-2xl border-green-200 hover:bg-green-50 hover:text-green-700 hover:border-green-300 flex flex-col items-center justify-center gap-1 group"
+                                                            className="h-14 rounded-2xl border-green-200 hover:bg-green-50 hover:text-green-700 flex flex-col items-center justify-center gap-1 group"
                                                             onClick={() => handleFeedbackAction(true)}
                                                             disabled={saving}
                                                         >
@@ -990,7 +1186,7 @@ export function ProductDetailDialog({
                                                         </Button>
                                                         <Button
                                                             variant="outline"
-                                                            className="h-14 rounded-2xl border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300 flex flex-col items-center justify-center gap-1 group"
+                                                            className="h-14 rounded-2xl border-red-200 hover:bg-red-50 hover:text-red-700 flex flex-col items-center justify-center gap-1 group"
                                                             onClick={() => handleFeedbackAction(false)}
                                                             disabled={saving}
                                                         >
@@ -1015,137 +1211,112 @@ export function ProductDetailDialog({
                                     )}
                                 </div>
                             ) : isCareFlow && order ? (
-                                <div className="flex-1 flex flex-col gap-6">
-                                    <div className="space-y-4">
-                                        <h3 className={cn(
-                                            "font-semibold text-xs uppercase tracking-[0.2em] mb-4",
-                                            roomId.startsWith('war') ? "text-red-700" : "text-teal-700"
-                                        )}>
-                                            {roomId.startsWith('war') ? 'Trình trạng Bảo hành' : 'Trình trạng Chăm sóc'}
-                                        </h3>
+                                <div className="flex-1 flex flex-col gap-4">
+                                    <h3 className={cn(
+                                        "font-semibold text-xs uppercase tracking-[0.2em]",
+                                        roomId.startsWith('war') ? "text-red-700" : "text-teal-700"
+                                    )}>
+                                        {roomId.startsWith('war') ? 'Tình trạng Bảo hành' : 'Tình trạng Chăm sóc'}
+                                    </h3>
 
-                                        <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
-                                            <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
-                                                {roomId.startsWith('war') ? (
-                                                    <ShieldCheck className="h-5 w-5 text-red-500" />
-                                                ) : (
-                                                    <Heart className="h-5 w-5 text-teal-500" />
-                                                )}
-                                                <div className="flex flex-col">
-                                                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">TRẠNG THÁI HIỆN TẠI</span>
-                                                    <span className="text-sm font-black text-gray-800 capitalize">{(order as any).care_warranty_stage || 'N/A'}</span>
+                                    <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+                                        {/* Current stage badge */}
+                                        <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50">
+                                            {roomId.startsWith('war') ? (
+                                                <ShieldCheck className="h-5 w-5 text-red-500 shrink-0" />
+                                            ) : (
+                                                <Heart className="h-5 w-5 text-teal-500 shrink-0" />
+                                            )}
+                                            <div className="flex flex-col">
+                                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">TRẠNG THÁI HIỆN TẠI</span>
+                                                <span className="text-sm font-black text-gray-800">{getCareWarrantyStageLabel((productItem || (services?.[0] as any))?.care_warranty_stage)}</span>
+                                            </div>
+                                        </div>
+
+                                        {/* Staff info — warranty only */}
+                                        {roomId.startsWith('war') && (
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="bg-purple-50/60 p-3 rounded-xl border border-purple-100 flex items-center gap-2">
+                                                    <Wrench className="h-4 w-4 text-purple-500 shrink-0" />
+                                                    <div className="flex flex-col min-w-0">
+                                                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tight">Kỹ Thuật Viên</span>
+                                                        <span className="text-xs font-bold text-gray-800 truncate">
+                                                            {Array.from(new Set(services.filter(s => (s as any).technician).map(s => (s as any).technician.name))).join(', ') || '—'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <div className="bg-blue-50/60 p-3 rounded-xl border border-blue-100 flex items-center gap-2">
+                                                    <ShieldCheck className="h-4 w-4 text-blue-500 shrink-0" />
+                                                    <div className="flex flex-col min-w-0">
+                                                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tight">NV Sale</span>
+                                                        <span className="text-xs font-bold text-gray-800 truncate">{order?.sales_user?.name || '—'}</span>
+                                                    </div>
                                                 </div>
                                             </div>
+                                        )}
 
-                                            <div className="space-y-2">
-                                                <Label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Ghi chú tiến độ</Label>
-                                                <Textarea
-                                                    placeholder="Nhập ghi chú cập nhật tiến độ chăm sóc/bảo hành..."
-                                                    className="bg-gray-50/50 min-h-[120px]"
-                                                    value={formData.notes || ''}
-                                                    onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                                        {/* Single photo: "Ảnh Trước Bảo hành" (warranty) or "Ảnh Chăm sóc" (care) */}
+                                        <div className={cn(
+                                            "p-4 rounded-2xl border space-y-2",
+                                            roomId.startsWith('war') ? "bg-red-50/40 border-red-100" : "bg-teal-50/40 border-teal-100"
+                                        )}>
+                                            <div className="flex items-center gap-2">
+                                                <Camera className={cn("h-4 w-4", roomId.startsWith('war') ? "text-red-500" : "text-teal-500")} />
+                                                <span className={cn("text-[11px] font-black uppercase tracking-tight", roomId.startsWith('war') ? "text-red-900" : "text-teal-900")}>
+                                                    {roomId.startsWith('war') ? 'Ảnh Trước Bảo hành' : 'Ảnh Chăm sóc'}
+                                                </span>
+                                            </div>
+                                            <div className="flex gap-2 flex-wrap">
+                                                <ImageUpload
+                                                    key="care-main"
+                                                    value={(formData.completion_photos as string[])?.[0] || null}
+                                                    onChange={(url) => {
+                                                        setFormData(prev => ({ ...prev, completion_photos: url ? [url] : [] }));
+                                                    }}
+                                                    className="w-20 h-20 rounded-xl border-2"
+                                                    bucket="orders" folder="warranty" hideInfo
                                                 />
                                             </div>
-
-                                            {/* Photo management rows for Care/Warranty */}
-                                            <div className="grid grid-cols-2 gap-3 pt-2">
-                                                <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100 shadow-sm space-y-3">
-                                                    <div className="flex items-center justify-between">
-                                                        <div className="flex items-center gap-2">
-                                                            <div className="h-7 w-7 rounded-lg bg-purple-100 flex items-center justify-center">
-                                                                <Camera className="h-4 w-4 text-purple-600" />
-                                                            </div>
-                                                            <span className="text-[11px] font-black text-purple-900 uppercase tracking-tight">Ảnh hoàn thiện</span>
-                                                        </div>
-                                                        <Badge variant="outline" className="text-[9px] bg-white text-purple-600 border-purple-200">
-                                                            {(formData.completion_photos?.length || 0)}
-                                                        </Badge>
-                                                    </div>
-
-                                                    <div className="flex flex-wrap gap-2 pt-1">
-                                                        {(Array.isArray(formData.completion_photos) ? formData.completion_photos : []).map((photo, idx) => (
-                                                            <ImageUpload
-                                                                key={`comp-${idx}`}
-                                                                value={photo}
-                                                                onChange={(url) => {
-                                                                    setFormData(prev => {
-                                                                        const newPhotos = [...(prev.completion_photos || [])];
-                                                                        if (url) { newPhotos[idx] = url; } else { newPhotos.splice(idx, 1); }
-                                                                        return { ...prev, completion_photos: newPhotos };
-                                                                    });
-                                                                }}
-                                                                className="w-12 h-12 rounded-lg border-2"
-                                                                bucket="orders" folder="completion" hideInfo
-                                                            />
-                                                        ))}
-                                                        <ImageUpload
-                                                            key="comp-new" value={null}
-                                                            onChange={(url) => {
-                                                                if (url) {
-                                                                    setFormData(prev => ({ ...prev, completion_photos: [...(prev.completion_photos || []), url] }));
-                                                                }
-                                                            }}
-                                                            className="w-12 h-12 rounded-lg border-2 border-dashed"
-                                                            bucket="orders" folder="completion" placeholderIcon={<Camera className="h-4 w-4 text-purple-300" />} hideInfo
-                                                        />
-                                                    </div>
-                                                </div>
-
-                                                <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 shadow-sm space-y-3">
-                                                    <div className="flex items-center justify-between">
-                                                        <div className="flex items-center gap-2">
-                                                            <div className="h-7 w-7 rounded-lg bg-blue-100 flex items-center justify-center">
-                                                                <Package className="h-4 w-4 text-blue-600" />
-                                                            </div>
-                                                            <span className="text-[11px] font-black text-blue-900 uppercase tracking-tight">Ảnh đóng gói</span>
-                                                        </div>
-                                                        <Badge variant="outline" className="text-[9px] bg-white text-blue-600 border-blue-200">
-                                                            {(formData.packaging_photos?.length || 0)}
-                                                        </Badge>
-                                                    </div>
-
-                                                    <div className="flex flex-wrap gap-2 pt-1">
-                                                        {(Array.isArray(formData.packaging_photos) ? formData.packaging_photos : []).map((photo, idx) => (
-                                                            <ImageUpload
-                                                                key={`pack-${idx}`}
-                                                                value={photo}
-                                                                onChange={(url) => {
-                                                                    setFormData(prev => {
-                                                                        const newPhotos = [...(prev.packaging_photos || [])];
-                                                                        if (url) { newPhotos[idx] = url; } else { newPhotos.splice(idx, 1); }
-                                                                        return { ...prev, packaging_photos: newPhotos };
-                                                                    });
-                                                                }}
-                                                                className="w-12 h-12 rounded-lg border-2"
-                                                                bucket="orders" folder="packaging" hideInfo
-                                                            />
-                                                        ))}
-                                                        <ImageUpload
-                                                            key="pack-new" value={null}
-                                                            onChange={(url) => {
-                                                                if (url) {
-                                                                    setFormData(prev => ({ ...prev, packaging_photos: [...(prev.packaging_photos || []), url] }));
-                                                                }
-                                                            }}
-                                                            className="w-12 h-12 rounded-lg border-2 border-dashed"
-                                                            bucket="orders" folder="packaging" placeholderIcon={<Package className="h-4 w-4 text-blue-300" />} hideInfo
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                            <Button
-                                                className={cn(
-                                                    "w-full h-11 rounded-xl font-bold transition-all",
-                                                    roomId.startsWith('war') ? "bg-red-600 hover:bg-red-700" : "bg-teal-600 hover:bg-teal-700"
-                                                )}
-                                                onClick={handleSave}
-                                                disabled={saving}
-                                            >
-                                                {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
-                                                Lưu ghi chú
-                                            </Button>
                                         </div>
+
+                                        {/* Notes */}
+                                        <div className="space-y-1.5">
+                                            <Label className="text-xs font-bold text-gray-500 uppercase tracking-widest">Ghi chú tiến độ</Label>
+                                            <Textarea
+                                                placeholder="Nhập ghi chú cập nhật tiến độ chăm sóc/bảo hành..."
+                                                className="bg-gray-50/50 min-h-[80px] text-sm"
+                                                value={formData.notes || ''}
+                                                onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))}
+                                            />
+                                        </div>
+
+                                        {/* Tạo HD Bảo hành button — warranty only */}
+                                        {roomId.startsWith('war') && (
+                                            <Button
+                                                variant="outline"
+                                                className="w-full h-10 rounded-xl font-bold border-red-300 text-red-700 hover:bg-red-50 gap-2"
+                                                onClick={() => {
+                                                    const code = `HDBH${order?.order_code || ''}.1`;
+                                                    toast.success(`Đã tạo HD Bảo hành: ${code}`);
+                                                }}
+                                            >
+                                                <ClipboardList className="h-4 w-4" />
+                                                Tạo HD Bảo hành
+                                            </Button>
+                                        )}
+
+                                        {/* Save */}
+                                        <Button
+                                            className={cn(
+                                                "w-full h-11 rounded-xl font-bold transition-all",
+                                                roomId.startsWith('war') ? "bg-red-600 hover:bg-red-700" : "bg-teal-600 hover:bg-teal-700"
+                                            )}
+                                            onClick={handleSave}
+                                            disabled={saving}
+                                        >
+                                            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                                            Lưu ghi chú
+                                        </Button>
                                     </div>
 
                                     <div className="mt-auto bg-gray-100/50 p-4 rounded-xl space-y-3">
@@ -1164,6 +1335,7 @@ export function ProductDetailDialog({
                                         </div>
                                     </div>
                                 </div>
+
                             ) : isSalesStep ? (
                                 <div className="flex-1 flex flex-col gap-4 min-h-0">
                                     <div className="flex items-center justify-between mb-2">
@@ -1523,15 +1695,14 @@ export function ProductDetailDialog({
                         </div>
                     </ScrollArea>
                 </div>
-            </DialogContent>
 
-                <WorkflowLogDetailDialog 
-                    open={showLogDetailDialog} 
-                    onOpenChange={setShowLogDetailDialog} 
-                    log={selectedLogDetail} 
-                />
+            <WorkflowLogDetailDialog 
+                open={showLogDetailDialog} 
+                onOpenChange={setShowLogDetailDialog} 
+                log={selectedLogDetail} 
+            />
 
-                <UpsellDialog
+            <UpsellDialog
                 open={showUpsellDialog}
                 onOpenChange={setShowUpsellDialog}
                 orderId={order?.id || ''}
@@ -1544,6 +1715,7 @@ export function ProductDetailDialog({
                     if (onReloadOrder) await onReloadOrder();
                 }}
             />
-        </Dialog>
-    );
+        </DialogContent>
+    </Dialog>
+);
 }

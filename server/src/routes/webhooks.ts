@@ -122,7 +122,9 @@ router.get('/leads/sla', verifyWebhookSecret, async (req: Request, res: Response
                 t_last_outbound,
                 pipeline_stage,
                 assigned_to,
-                assigned_to_user: users!leads_assigned_to_fkey(name)
+                assigned_to_user: users!leads_assigned_to_fkey(name),
+                appointment_time,
+                round_index
             `)
             .eq('assign_state', 'assigned')
             .not('assigned_to', 'is', null);
@@ -169,6 +171,8 @@ router.get('/leads/sla', verifyWebhookSecret, async (req: Request, res: Response
                 t_last_inbound: lead.t_last_inbound,
                 t_last_outbound: lead.t_last_outbound,
                 pipeline_stage: lead.pipeline_stage,
+                appointment_time: lead.appointment_time,
+                round_index: lead.round_index,
                 waitMinutes,
                 action_type,
                 sla_label: action_type === 'RECLAIM' ? `${SLA_MINUTES} phút (Thu hồi)` : `${WARN_MINUTES} phút (Cảnh báo)`
@@ -285,6 +289,132 @@ router.post('/n8n/raw', verifyWebhookSecret, async (req: Request, res: Response,
         });
     } catch (error) {
         next(error);
+    }
+});
+
+// ============================================================
+// GET /api/webhooks/orders/overdue-pickup
+// Lấy danh sách đơn quá hạn trả đồ:
+// - order_products.due_at < Ngày hiện tại
+// - order_products.after_sale_stage != 'after4' (chưa Lưu Trữ)
+// ============================================================
+router.get('/orders/overdue-pickup', verifyWebhookSecret, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const now = new Date().toISOString();
+
+        // 1. Lấy order_products quá hạn và chưa lưu trữ
+        const { data: overdueProducts, error } = await supabaseAdmin
+            .from('order_products')
+            .select(`
+                id,
+                product_code,
+                name,
+                due_at,
+                after_sale_stage,
+                order:orders!inner(
+                    id,
+                    order_code,
+                    customer:customers!inner(id, name, phone),
+                    sales_user:users!orders_sales_id_fkey(id, name, telegram_chat_id)
+                )
+            `)
+            .lt('due_at', now)
+            .not('after_sale_stage', 'eq', 'after4');
+
+        if (error) {
+            throw new ApiError('Lỗi truy vấn đơn quá hạn: ' + error.message, 500);
+        }
+
+        // 2. Collect customer phones to look up Pancake conversation links
+        const customerPhones = [...new Set(
+            (overdueProducts || [])
+                .map((p: any) => p.order?.customer?.phone)
+                .filter(Boolean)
+        )];
+
+        let leadsByPhone: Record<string, string> = {};
+        if (customerPhones.length > 0) {
+            const { data: leads } = await supabaseAdmin
+                .from('leads')
+                .select('phone, pancake_conversation_id')
+                .in('phone', customerPhones)
+                .not('pancake_conversation_id', 'is', null);
+
+            if (leads) {
+                for (const lead of leads) {
+                    if (lead.phone && lead.pancake_conversation_id) {
+                        leadsByPhone[lead.phone] = lead.pancake_conversation_id;
+                    }
+                }
+            }
+        }
+
+        // 3. Format response
+        const results = (overdueProducts || []).map((p: any) => {
+            const order = p.order;
+            const customerPhone = order?.customer?.phone;
+            const pancakeId = customerPhone ? leadsByPhone[customerPhone] : null;
+
+            return {
+                order_code: order?.order_code,
+                product_code: p.product_code,
+                product_name: p.name,
+                customer_name: order?.customer?.name,
+                customer_phone: customerPhone,
+                sale_name: order?.sales_user?.name || 'N/A',
+                sale_telegram_id: order?.sales_user?.telegram_chat_id || null,
+                due_at: p.due_at,
+                after_sale_stage: p.after_sale_stage,
+                pancake_link: pancakeId
+                    ? `https://pages.pancake.vn/conversations/${pancakeId}`
+                    : null,
+            };
+        });
+
+        res.json({
+            status: 'success',
+            count: results.length,
+            server_time: now,
+            data: results,
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+// ============================================================
+// GET /api/webhooks/customers/birthdays
+// Lấy danh sách khách có sinh nhật trong ngày hôm nay
+// ============================================================
+router.get('/customers/birthdays', verifyWebhookSecret, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const now = new Date();
+        const month = now.getMonth() + 1; // 1-12
+        const day = now.getDate();
+
+        // Pad month and day for string matching (dob format: YYYY-MM-DD)
+        const monthStr = String(month).padStart(2, '0');
+        const dayStr = String(day).padStart(2, '0');
+        const pattern = `%-${monthStr}-${dayStr}%`;
+
+        const { data: customers, error } = await supabaseAdmin
+            .from('customers')
+            .select('id, name, phone, email, dob')
+            .like('dob', pattern)
+            .eq('status', 'active');
+
+        if (error) {
+            throw new ApiError('Lỗi truy vấn sinh nhật: ' + error.message, 500);
+        }
+
+        res.json({
+            status: 'success',
+            count: customers?.length || 0,
+            today: `${now.getFullYear()}-${monthStr}-${dayStr}`,
+            data: customers || [],
+        });
+    } catch (err) {
+        next(err);
     }
 });
 
