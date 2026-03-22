@@ -35,6 +35,7 @@ import { CreateLeadPage } from '@/pages/CreateLeadPage';
 import { CreatePackagePage } from '@/pages/CreatePackagePage';
 import { CreateProductPage } from '@/pages/CreateProductPage';
 import { UpsellManagementPage } from '@/pages/UpsellManagementPage';
+import { LeaveRequestsPage } from '@/pages/LeaveRequestsPage';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import type { UserRole, User } from '@/types';
@@ -85,6 +86,7 @@ const pagePermissions: Record<string, UserRole[]> = {
   reports: ['admin', 'manager', 'accountant'],
   'upsell-management': ['admin', 'manager'],
   settings: ['admin', 'manager'],
+  'leave-requests': ['admin', 'manager', 'accountant', 'sale', 'technician'],
 };
 
 // Protected Route Component
@@ -336,6 +338,12 @@ function AppContent() {
             <Route path="/requests" element={
               <ProtectedRoute allowedRoles={pagePermissions.requests}>
                 <RequestsPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/leave-requests" element={
+              <ProtectedRoute allowedRoles={pagePermissions['leave-requests']}>
+                <LeaveRequestsPage />
               </ProtectedRoute>
             } />
 

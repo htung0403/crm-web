@@ -13,6 +13,8 @@ import { formatDateTime } from '@/lib/utils';
 import { TECH_ROOMS, ACCESSORY_LABELS, PARTNER_LABELS } from '@/components/orders/constants';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import { Button } from '@/components/ui/button';
+import { BackwardMoveDialog } from '@/components/orders/BackwardMoveDialog';
+import { toast } from 'sonner';
 
 interface WorkflowCardProps {
     group: { product: OrderItem | null; services: OrderItem[] };
@@ -175,6 +177,19 @@ const WorkflowCard = memo(({
                                 >
                                     <span className="truncate">Gia hạn</span>
                                 </button>
+                                {roomId === 'waiting' && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => { 
+                                            e.stopPropagation(); 
+                                            (group as any).handleOpenBackwardMove?.(group);
+                                        }}
+                                        className="col-span-3 mt-1 inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7 bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100"
+                                    >
+                                        <ExternalLink className="h-3 w-3 mr-1" />
+                                        <span className="truncate">Trả về Sales</span>
+                                    </button>
+                                )}
                             </div>
                         </>
                     )}
@@ -198,6 +213,7 @@ interface WorkflowColumnProps {
     handleOpenAssignDialog: (item: OrderItem) => void;
     handleOpenSaleAssignDialog: (item: OrderItem) => void;
     onCardClick: (group: { product: OrderItem | null; services: OrderItem[] }, roomId: string) => void;
+    handleOpenBackwardMove: (group: any) => void;
 }
 
 const WorkflowColumn = ({
@@ -211,7 +227,8 @@ const WorkflowColumn = ({
     handleOpenExtension,
     handleOpenAssignDialog,
     handleOpenSaleAssignDialog,
-    onCardClick
+    onCardClick,
+    handleOpenBackwardMove
 }: WorkflowColumnProps) => {
     return (
         <div className="flex flex-col min-w-[240px]">
@@ -253,6 +270,7 @@ const WorkflowColumn = ({
                                 handleOpenAssignDialog={handleOpenAssignDialog}
                                 handleOpenSaleAssignDialog={handleOpenSaleAssignDialog}
                                 onCardClick={onCardClick}
+                                {...({ group: { ...group, handleOpenBackwardMove } } as any)}
                             />
                         ))}
                         {provided.placeholder}
@@ -274,6 +292,7 @@ interface WorkflowTabProps {
     allWorkflowSteps: any[];
     workflowKanbanGroups: { product: OrderItem | null; services: OrderItem[] }[];
     workflowLogs: any[];
+    salesLogs: any[];
     onWorkflowDragEnd: (result: DropResult) => void;
     getGroupCurrentTechRoom: (group: any) => string;
     getItemCurrentStep: (itemId: string) => any;
@@ -284,6 +303,8 @@ interface WorkflowTabProps {
     handleOpenAssignDialog: (item: OrderItem) => void;
     handleOpenSaleAssignDialog: (item: OrderItem) => void;
     onProductCardClick: (group: { product: OrderItem | null; services: OrderItem[] }, roomId: string) => void;
+    updateOrderItemStatus: (id: string, status: string, reason?: string, photos?: string[], notes?: string) => Promise<void>;
+    fetchKanbanLogs: (orderId: string) => Promise<void>;
 }
 
 export function WorkflowTab({
@@ -292,6 +313,7 @@ export function WorkflowTab({
     allWorkflowSteps,
     workflowKanbanGroups,
     workflowLogs,
+    salesLogs,
     onWorkflowDragEnd,
     getGroupCurrentTechRoom,
     getItemCurrentStep,
@@ -301,15 +323,55 @@ export function WorkflowTab({
     handleOpenExtension,
     handleOpenAssignDialog,
     handleOpenSaleAssignDialog,
-    onProductCardClick
+    onProductCardClick,
+    updateOrderItemStatus,
+    fetchKanbanLogs
 }: WorkflowTabProps) {
     const [selectedLogDetail, setSelectedLogDetail] = useState<any>(null);
     const [showLogDetailDialog, setShowLogDetailDialog] = useState(false);
+    const [showBackwardMoveDialog, setShowBackwardMoveDialog] = useState(false);
+    const [backwardMoveGroup, setBackwardMoveGroup] = useState<any>(null);
+    const [viewLogData, setViewLogData] = useState<any>(null);
+
+    const handleOpenBackwardMove = (group: any) => {
+        setBackwardMoveGroup(group);
+        setShowBackwardMoveDialog(true);
+    };
+
+    const handleBackwardMoveConfirm = async (reason: string, photos: string[], notes?: string) => {
+        if (!backwardMoveGroup || !order?.id) return;
+        const itemId = backwardMoveGroup.product?.id || backwardMoveGroup.services?.[0]?.id;
+        if (!itemId) return;
+
+        try {
+            await updateOrderItemStatus(itemId, 'step4', reason, photos, notes);
+            toast.success('Đã chuyển sản phẩm về Sales');
+            await fetchKanbanLogs(order.id);
+        } catch (error) {
+            console.error('Backward move error:', error);
+        }
+    };
+
+    const displayLogs = useMemo(() => {
+        const logs = [
+            ...workflowLogs.filter((l: any) => l.action === 'assigned' || l.action === 'failed'),
+            ...salesLogs.filter((l: any) => l.to_status === 'step4').map((l: any) => {
+                const item = order?.items?.find((i: any) => i.id === l.entity_id);
+                return {
+                    ...l,
+                    action: 'backward_move',
+                    step_name: 'Trả về Sales',
+                    product_info: item ? `${item.item_code} - ${item.item_name}` : ''
+                };
+            })
+        ];
+        return logs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    }, [workflowLogs, salesLogs]);
 
     if (order?.status === 'done') return null;
 
     const rooms = useMemo(() => [
-        { id: 'waiting', title: 'Chờ tiếp nhận' },
+        { id: 'waiting', title: 'Chờ phân công' },
         ...TECH_ROOMS,
         { id: 'done', title: 'Hoàn thành' },
         { id: 'fail', title: 'Thất bại' }
@@ -377,6 +439,7 @@ export function WorkflowTab({
                                                 handleOpenAssignDialog={handleOpenAssignDialog}
                                                 handleOpenSaleAssignDialog={handleOpenSaleAssignDialog}
                                                 onCardClick={onProductCardClick}
+                                                handleOpenBackwardMove={handleOpenBackwardMove}
                                             />
                                         ))}
                                     </div>
@@ -405,17 +468,21 @@ export function WorkflowTab({
                                     <h3 className="text-sm font-bold flex items-center gap-2 mb-3">
                                         <History className="h-4 w-4 text-primary" /> Lịch sử chuyển bước (Quy trình)
                                     </h3>
-                                    {workflowLogs.filter((l: any) => l.action === 'assigned' || l.action === 'failed').length === 0 ? (
+                                    {displayLogs.length === 0 ? (
                                         <p className="text-xs text-muted-foreground italic py-2">Chưa có lịch sử dời phòng.</p>
                                     ) : (
                                         <ul className="space-y-2 max-h-48 overflow-y-auto">
-                                            {workflowLogs.filter((l: any) => l.action === 'assigned' || l.action === 'failed').map((log: any) => (
+                                            {displayLogs.map((log: any) => (
                                                 <li key={log.id} className="text-xs py-2 border-b border-dashed last:border-0">
                                                     <div className="flex items-center gap-2 mb-1">
                                                         <span className="text-muted-foreground shrink-0">{formatDateTime(log.created_at)}</span>
                                                         <span className="font-bold text-primary/80">{log.created_by_user?.name ?? 'Hệ thống'}</span>
                                                         <span className="text-muted-foreground">
-                                                            {log.order_item_step_id ? (
+                                                            {log.action === 'backward_move' ? (
+                                                                <span className="text-orange-600 font-bold">
+                                                                    {log.product_info}: {log.step_name}
+                                                                </span>
+                                                            ) : log.order_item_step_id ? (
                                                                 <span className={log.action === 'failed' ? "text-red-500" : "text-blue-700 font-medium"}>
                                                                     {log.action === 'failed' && <span className="mr-1 font-bold">THẤT BẠI:</span>}
                                                                     {log.step_name}
@@ -429,8 +496,22 @@ export function WorkflowTab({
                                                             size="sm"
                                                             className="h-6 px-2 ml-auto text-[10px] text-primary hover:bg-primary/10 font-bold border border-primary/20 rounded-md"
                                                             onClick={() => {
-                                                                setSelectedLogDetail(log);
-                                                                setShowLogDetailDialog(true);
+                                                                if (log.action === 'backward_move') {
+                                                                    // Set data for BackwardMoveDialog view mode
+                                                                    const groupName = workflowKanbanGroups?.find(g =>
+                                                                        g.product?.id === log.entity_id || g.services.some(s => s.id === log.entity_id)
+                                                                    )?.product?.item_name || 'Sản phẩm';
+
+                                                                    setViewLogData({
+                                                                        reason: log.reason,
+                                                                        photos: log.photos || [],
+                                                                        notes: log.notes,
+                                                                        itemName: groupName
+                                                                    });
+                                                                } else {
+                                                                    setSelectedLogDetail(log);
+                                                                    setShowLogDetailDialog(true);
+                                                                }
                                                             }}
                                                         >
                                                             <Maximize2 className="h-3 w-3 mr-1" />
@@ -490,7 +571,6 @@ export function WorkflowTab({
                                                 </li>
                                             ))}
                                         </ul>
-
                                     )}
                                 </div>
                             </div>
@@ -502,6 +582,29 @@ export function WorkflowTab({
                     open={showLogDetailDialog}
                     onOpenChange={setShowLogDetailDialog}
                     log={selectedLogDetail}
+                />
+
+                <BackwardMoveDialog
+                    open={showBackwardMoveDialog}
+                    onClose={() => {
+                        setShowBackwardMoveDialog(false);
+                        setBackwardMoveGroup(null);
+                    }}
+                    onConfirm={handleBackwardMoveConfirm}
+                    itemName={backwardMoveGroup?.product?.item_name || backwardMoveGroup?.services?.[0]?.item_name}
+                    mode="create"
+                />
+
+                <BackwardMoveDialog
+                    open={!!viewLogData}
+                    onClose={() => setViewLogData(null)}
+                    itemName={viewLogData?.itemName}
+                    mode="view"
+                    initialData={viewLogData ? {
+                        reason: viewLogData.reason,
+                        photos: viewLogData.photos,
+                        notes: viewLogData.notes
+                    } : undefined}
                 />
             </div>
         </TabsContent>

@@ -137,7 +137,12 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
 
     useEffect(() => {
         if (scrollRef.current) {
-            scrollRef.current.scrollIntoView({ behavior: 'smooth' });
+            const viewport = scrollRef.current.closest('[data-radix-scroll-area-viewport]');
+            if (viewport) {
+                viewport.scrollTop = viewport.scrollHeight;
+            } else {
+                scrollRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
         }
     }, [messages]);
 

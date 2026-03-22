@@ -321,8 +321,8 @@ export const orderItemsApi = {
     complete: (id: string, notes?: string) =>
         api.patch<ApiResponse<{ allItemsCompleted: boolean }>>(`/order-items/${id}/complete`, { notes }),
 
-    updateStatus: (id: string, status: string) =>
-        api.patch<ApiResponse<any>>(`/order-items/${id}/status`, { status }),
+    updateStatus: (id: string, status: string, reason?: string, photos?: string[]) =>
+        api.patch<ApiResponse<any>>(`/order-items/${id}/status`, { status, reason, photos }),
 
     // Order Item Steps (Workflow Steps)
     getSteps: (orderItemId: string) =>

@@ -652,7 +652,7 @@ router.get('/:id/kanban-logs', authenticate, async (req: AuthenticatedRequest, r
         if (tab === 'sales') {
             const { data: logs, error } = await supabaseAdmin
                 .from('order_item_status_log')
-                .select('id, entity_type, entity_id, from_status, to_status, created_by, created_at, created_by_user:users!order_item_status_log_created_by_fkey(id, name)')
+                .select('id, entity_type, entity_id, from_status, to_status, reason, photos, created_by, created_at, created_by_user:users!order_item_status_log_created_by_fkey(id, name)')
                 .eq('order_id', orderId)
                 .order('created_at', { ascending: false })
                 .limit(100);

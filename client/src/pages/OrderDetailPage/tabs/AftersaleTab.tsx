@@ -176,8 +176,6 @@ export function AftersaleTab({
 
         toast.success(`Đã chuyển sản phẩm "${draggedGroup.product.item_name}" sang bước mới`);
 
-        // Validation: If moving from 'after1' (Kiểm nợ) to 'after2' (Đóng gói), 
-        // require debt check fields and completion photos.
         if (result.source.droppableId === 'after1' && newStage === 'after2') {
             const hasPhotos = draggedGroup.product.completion_photos && draggedGroup.product.completion_photos.length > 0;
             const hasNames = order.debt_checked_by_name && order.aftersale_receiver_name;
@@ -190,6 +188,7 @@ export function AftersaleTab({
                 if (!hasPhotos) errorMsg += "\n- Cần upload ít nhất một \"Ảnh hoàn thiện/kiểm nợ\"";
                 
                 toast.error(errorMsg, { duration: 5000 });
+                onProductCardClick(draggedGroup, 'after1');
                 return;
             }
         }
@@ -206,6 +205,7 @@ export function AftersaleTab({
                 if (!arePhotosOk) errorMsg += "\n- Cần ít nhất một \"Ảnh đóng gói/trả đồ\"";
                 
                 toast.error(errorMsg, { duration: 5000 });
+                onProductCardClick(draggedGroup, 'after2');
                 return;
             }
         }

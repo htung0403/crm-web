@@ -1,8 +1,8 @@
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
 import {
     ArrowLeft, ArrowRight, ShoppingBag, CreditCard,
     Wrench, Clock, CheckCircle, Sparkles, Copy, Bot, History, RotateCw,
-    User as UserIcon, Tag, FileText, Package, Truck, Search, Filter
+    User as UserIcon, Tag, FileText, Package, Truck, Search, Filter, Camera
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -22,11 +22,14 @@ import {
     getItemTypeLabel,
     getItemTypeColor,
 } from '../utils';
+import { BackwardMoveDialog } from '@/components/orders/BackwardMoveDialog';
+import { ImageIcon } from 'lucide-react';
+import { UpsellDialog } from '@/components/orders/UpsellDialog';
 
 interface SalesTabProps {
     order: Order;
     salesLogs: any[];
-    updateOrderItemStatus: (itemId: string, status: string) => Promise<void>;
+    updateOrderItemStatus: (itemId: string, status: string, reason?: string, photos?: string[]) => Promise<void>;
     updateOrderStatus: (orderId: string, status: string) => Promise<void>;
     reloadOrder: () => Promise<void>;
     fetchKanbanLogs: (orderId: string) => Promise<void>;
@@ -46,7 +49,9 @@ const SalesCard = memo(({
     fetchKanbanLogs,
     reloadOrder,
     onTabChange,
-    salesLogs
+    salesLogs,
+    onBackwardMove,
+    onUpsell
 }: {
     group: { product: OrderItem | null; services: OrderItem[] };
     index: number;
@@ -54,11 +59,13 @@ const SalesCard = memo(({
     order: Order;
     onProductCardClick?: (group: any, roomId: string) => void;
     colIdx: number;
-    updateOrderItemStatus: (itemId: string, status: string) => Promise<void>;
+    salesLogs: any[];
+    onBackwardMove?: (group: any, targetStepId: string) => void;
+    onUpsell?: (group: any) => void;
+    updateOrderItemStatus: (itemId: string, status: string, reason?: string, photos?: string[]) => Promise<void>;
     fetchKanbanLogs: (orderId: string) => Promise<void>;
     reloadOrder: () => Promise<void>;
     onTabChange?: (tab: string) => void;
-    salesLogs: any[];
 }) => {
     const leadItem = group.product || group.services[0];
     const draggableId = group.product?.id ?? group.services.map((s: OrderItem) => s.id).join('-');
@@ -150,11 +157,29 @@ const SalesCard = memo(({
                             <ShoppingBag className="h-3.5 w-3.5 shrink-0 text-primary" />
                             <span className="truncate">{productName}</span>
                         </h3>
-                        {group.product && (
-                            <Badge className={cn("text-[10px] px-1 h-4", getItemTypeColor('product'))}>
-                                {getItemTypeLabel('product')}
-                            </Badge>
-                        )}
+                        <div className="flex items-center justify-between gap-2">
+                            <div>
+                                {group.product && (
+                                    <Badge className={cn("text-[10px] px-1 h-4", getItemTypeColor('product'))}>
+                                        {getItemTypeLabel('product')}
+                                    </Badge>
+                                )}
+                            </div>
+                            {column.id === 'step4' && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-5 px-1.5 text-[9px] py-0 font-bold text-violet-600 border-violet-200 bg-violet-50 hover:bg-violet-100 hover:text-violet-700 rounded-lg"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (onUpsell) onUpsell(group);
+                                    }}
+                                >
+                                    <Sparkles className="h-2.5 w-2.5 mr-1" />
+                                    Upsell
+                                </Button>
+                            )}
+                        </div>
                     </div>
 
                     {group.services.length > 0 && (
@@ -182,6 +207,7 @@ const SalesCard = memo(({
                         )}
                         <div className="flex-1" />
                         <div className="flex items-center gap-1">
+
                         <Button
                             variant="ghost"
                             size="icon"
@@ -189,20 +215,9 @@ const SalesCard = memo(({
                             disabled={colIdx === 0}
                             onClick={async (e) => {
                                 e.stopPropagation();
-                                const prevStep = SALES_STEPS[colIdx - 1].id;
-                                const itemsToUpdate = [];
-                                if (group.product) itemsToUpdate.push(group.product);
-                                if (group.services) itemsToUpdate.push(...group.services);
-
-                                try {
-                                    for (const item of itemsToUpdate) {
-                                        await updateOrderItemStatus(item.id, prevStep);
-                                    }
-                                    toast.success(`Đã lùi nhóm về: ${SALES_STEPS[colIdx - 1].label}`);
-                                    if (order?.id) fetchKanbanLogs(order.id);
-                                } catch {
-                                    reloadOrder();
-                                    toast.error('Lỗi khi cập nhật trạng thái');
+                                const prevStepId = SALES_STEPS[colIdx - 1].id;
+                                if (onBackwardMove) {
+                                    onBackwardMove(group, prevStepId);
                                 }
                             }}
                         >
@@ -215,16 +230,28 @@ const SalesCard = memo(({
                             disabled={colIdx === SALES_STEPS.length - 1}
                             onClick={async (e) => {
                                 e.stopPropagation();
-                                const nextStep = SALES_STEPS[colIdx + 1].id;
+                                const nextStepIdx = colIdx + 1;
+                                const nextStep = SALES_STEPS[nextStepIdx].id;
                                 const itemsToUpdate = [];
-                                if (group.product) itemsToUpdate.push(group.product);
-                                if (group.services) itemsToUpdate.push(...group.services);
+                                const leadItem = group.product || group.services[0];
+                                if (leadItem) itemsToUpdate.push(leadItem);
+
+                                // Step 1 validation
+                                if (column.id === 'step1') {
+                                    const firstItem = itemsToUpdate[0];
+                                    const stepData = firstItem?.sales_step_data || {};
+                                    if (!stepData.step1_receiver_name || !stepData.step1_evidence_photos?.length) {
+                                        toast.error('Vui lòng vào chi tiết cập nhật "NV Sale nhận" và "Ảnh bẳng chứng" ở bước 1 trước khi chuyển');
+                                        onProductCardClick?.(group, 'step1');
+                                        return;
+                                    }
+                                }
 
                                 try {
                                     for (const item of itemsToUpdate) {
                                         await updateOrderItemStatus(item.id, nextStep);
                                     }
-                                    toast.success(`Đã chuyển nhóm sang: ${SALES_STEPS[colIdx + 1].label}`);
+                                    toast.success(`Đã chuyển nhóm sang: ${SALES_STEPS[nextStepIdx].label}`);
                                     if (nextStep === 'step5') {
                                         onTabChange?.('workflow');
                                     }
@@ -256,13 +283,60 @@ export function SalesTab({
     fetchKanbanLogs,
     onProductCardClick,
     workflowKanbanGroups,
-    onTabChange,
+    onTabChange
 }: SalesTabProps) {
-    const [searchTerm, setSearchTerm] = React.useState('');
+    const [searchTerm, setSearchTerm] = useState('');
+    const [pendingMove, setPendingMove] = useState<{ group: any; targetStepId: string } | null>(null);
+    const [backwardDialogOpen, setBackwardDialogOpen] = useState(false);
+    const [viewLogData, setViewLogData] = useState<{ reason?: string; photos?: string[]; itemName?: string } | null>(null);
+    const [upsellGroup, setUpsellGroup] = useState<any>(null);
 
-    if (order?.status !== 'before_sale' && !['step1', 'step2', 'step3', 'step4', 'step5'].includes(order.status)) return null;
+    const displayedLogs = React.useMemo(() => {
+        return (salesLogs || []).reduce((acc: any[], log: any) => {
+            const existing = acc.find(
+                (l: any) => l.from_status === log.from_status && 
+                       l.to_status === log.to_status && 
+                       l.created_by === log.created_by &&
+                       Math.abs(new Date(l.created_at).getTime() - new Date(log.created_at).getTime()) < 5000
+            );
+            if (!existing) acc.push(log);
+            return acc;
+        }, []);
+    }, [salesLogs]);
+
+    const handleBackwardMoveConfirm = async (reason: string, photos: string[]) => {
+        if (!pendingMove) return;
+        const { group, targetStepId } = pendingMove;
+        const itemsToUpdate = [];
+        const leadItem = group.product || group.services[0];
+        if (leadItem) itemsToUpdate.push(leadItem);
+
+        const stepLabel = SALES_STEPS.find((s: any) => s.id === targetStepId)?.label || targetStepId;
+
+        try {
+            for (const item of itemsToUpdate) {
+                await updateOrderItemStatus(item.id, targetStepId, reason, photos);
+            }
+            toast.success(`Đã lùi nhóm về: ${stepLabel}`);
+            if (order?.id) fetchKanbanLogs(order.id);
+            setPendingMove(null);
+            setBackwardDialogOpen(false);
+        } catch {
+            reloadOrder();
+            toast.error('Lỗi khi cập nhật trạng thái');
+        }
+    };
+
+    const hasSalesItem = workflowKanbanGroups?.some(g => {
+        const leadItem = g.product || g.services?.[0];
+        const status = leadItem?.status || 'step1';
+        return ['pending', 'step1', 'step2', 'step3', 'step4', 'step5'].includes(status);
+    });
+
+    if (order?.status !== 'before_sale' && !['step1', 'step2', 'step3', 'step4', 'step5', 'in_progress'].includes(order.status) && !hasSalesItem) return null;
 
     return (
+        <>
         <TabsContent value="sales">
             <div className="space-y-6">
                 {/* Kanban Board Header */}
@@ -318,9 +392,30 @@ export function SalesTab({
                                     );
 
                                     if (group) {
+                                        const sourceIdx = SALES_STEPS.findIndex(s => s.id === result.source.droppableId);
+                                        const destIdx = SALES_STEPS.findIndex(s => s.id === newStatus);
+
+                                        if (destIdx < sourceIdx) {
+                                            // Backward move
+                                            setPendingMove({ group, targetStepId: newStatus });
+                                            setBackwardDialogOpen(true);
+                                            return;
+                                        }
+
                                         const itemsToUpdate = [];
-                                        if (group.product) itemsToUpdate.push(group.product);
-                                        if (group.services) itemsToUpdate.push(...group.services);
+                                        const leadItem = group.product || group.services[0];
+                                        if (leadItem) itemsToUpdate.push(leadItem);
+
+                                        // Step 1 validation
+                                        if (result.source.droppableId === 'step1' && destIdx > sourceIdx) {
+                                            const firstItem = itemsToUpdate[0];
+                                            const stepData = firstItem?.sales_step_data || {};
+                                            if (!stepData.step1_receiver_name || !stepData.step1_evidence_photos?.length) {
+                                                toast.error('Vui lòng hoàn thành thông tin nhân viên Sale và ảnh/video bằng chứng bước 1 trước khi chuyển');
+                                                onProductCardClick?.(group, 'step1');
+                                                return;
+                                            }
+                                        }
 
                                         try {
                                             for (const item of itemsToUpdate) {
@@ -363,7 +458,7 @@ export function SalesTab({
                                             }
 
                                             // Column mapping logic
-                                            if (status === 'step5') return false; 
+                                            if (status === 'step5') return false;
                                             return status === column.id;
                                         }) || [];
 
@@ -415,6 +510,11 @@ export function SalesTab({
                                                                     reloadOrder={reloadOrder}
                                                                     onTabChange={onTabChange}
                                                                     salesLogs={salesLogs}
+                                                                    onBackwardMove={(group, targetStepId) => {
+                                                                        setPendingMove({ group, targetStepId });
+                                                                        setBackwardDialogOpen(true);
+                                                                    }}
+                                                                    onUpsell={(group) => setUpsellGroup(group)}
                                                                 />
                                                             ))}
                                                             {provided.placeholder}
@@ -476,14 +576,65 @@ export function SalesTab({
                                 </CardTitle>
                             </CardHeader>
                             <CardContent>
-                                {salesLogs.length === 0 ? (
+                                {displayedLogs.length === 0 ? (
                                     <p className="text-[11px] text-muted-foreground italic py-2">Chưa có lịch sử chuyển bước.</p>
                                 ) : (
                                     <ul className="space-y-2 max-h-48 overflow-y-auto">
-                                        {salesLogs.map((log: any) => (
-                                            <li key={log.id} className="text-[11px] flex items-center gap-2 py-1.5 border-b border-dashed last:border-0">
-                                                <span className="text-muted-foreground shrink-0">{formatDateTime(log.created_at)}</span>
-                                                <span className="font-medium">{log.created_by_user?.name ?? 'Hệ thống'}</span>
+                                        {displayedLogs.map((log: any) => (
+                                            <li key={log.id} className="text-[11px] flex flex-col gap-1 py-1.5 border-b border-dashed last:border-0">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-bold text-gray-900">{log.created_by_user?.name || 'Hệ thống'}</span>
+                                                            <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                                                                {formatDateTime(log.created_at)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex gap-1 items-center">
+                                                            {(log.reason || (log.photos && log.photos.length > 0)) && (
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    className="h-7 text-[10px] text-primary hover:text-primary hover:bg-primary/10 gap-1"
+                                                                    onClick={() => {
+                                                                        const groupName = workflowKanbanGroups?.find(g =>
+                                                                            g.product?.id === log.entity_id || g.services.some(s => s.id === log.entity_id)
+                                                                        )?.product?.item_name || 'Sản phẩm';
+    
+                                                                        setViewLogData({
+                                                                            reason: log.reason,
+                                                                            photos: log.photos || [],
+                                                                            itemName: groupName
+                                                                        });
+                                                                    }}
+                                                                >
+                                                                    <ImageIcon className="h-3 w-3" />
+                                                                    Xem lý do
+                                                                </Button>
+                                                            )}
+                                                            {['step1', 'step2', 'step3', 'step4', 'step5'].includes(log.from_status) && (
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="sm"
+                                                                    className="h-7 text-[10px] text-blue-600 hover:text-blue-700 hover:bg-blue-50 gap-1"
+                                                                    onClick={() => {
+                                                                        const targetGroup = workflowKanbanGroups?.find(g =>
+                                                                            g.product?.id === log.entity_id || g.services.some(s => s.id === log.entity_id)
+                                                                        );
+                                                                        if (targetGroup) {
+                                                                            onProductCardClick?.(targetGroup, log.from_status);
+                                                                        } else {
+                                                                            toast.error('Không tìm thấy thông tin sản phẩm tương ứng.');
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    <FileText className="h-3 w-3" />
+                                                                    Xem nội dung
+                                                                </Button>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
                                                 <span className="text-muted-foreground">
                                                     {log.from_status ? `${getSalesStatusLabel(log.from_status)} → ` : ''}{getSalesStatusLabel(log.to_status)}
                                                 </span>
@@ -577,6 +728,45 @@ export function SalesTab({
                     </div>
                 </div>
             </div>
-        </TabsContent >
+        </TabsContent>
+
+        <BackwardMoveDialog
+            open={backwardDialogOpen}
+            onClose={() => {
+                setBackwardDialogOpen(false);
+                setPendingMove(null);
+            }}
+            onConfirm={handleBackwardMoveConfirm}
+            itemName={pendingMove?.group?.product?.item_name || pendingMove?.group?.services?.[0]?.item_name}
+            mode="create"
+        />
+
+        <BackwardMoveDialog
+            open={!!viewLogData}
+            onClose={() => setViewLogData(null)}
+            itemName={viewLogData?.itemName}
+            mode="view"
+            initialData={viewLogData ? {
+                reason: viewLogData.reason || '',
+                photos: viewLogData.photos || []
+            } : undefined}
+        />
+
+        <UpsellDialog
+            open={!!upsellGroup}
+            onOpenChange={(open) => !open && setUpsellGroup(null)}
+            orderId={order?.id || ''}
+            order={order}
+            preselectedProduct={upsellGroup?.product ? { 
+                id: upsellGroup.product.id, 
+                name: upsellGroup.product.item_name, 
+                type: upsellGroup.product.product_type || upsellGroup.product.item_type_label || '' 
+            } : null}
+            onSuccess={() => {
+                reloadOrder();
+                setUpsellGroup(null);
+            }}
+        />
+        </>
     );
 }

@@ -89,8 +89,8 @@ export function UpsellDialog({ open, onOpenChange, orderId, order, preselectedPr
             // Initialize from existing order items if available
             if (order && order.items) {
                 const items: any[] = order.items;
-                const customerItemGroups: any[] = [];
-                const existingSaleItems: any[] = [];
+                let customerItemGroups: any[] = [];
+                let existingSaleItems: any[] = [];
 
                 let i = 0;
                 while (i < items.length) {
@@ -102,6 +102,9 @@ export function UpsellDialog({ open, onOpenChange, orderId, order, preselectedPr
                                 order_product_id: item.id,
                                 name: item.item_name,
                                 type: normalizeProductType(item.product?.type || item.item_type_label || (item as any).product_type),
+                                brand: item.product?.brand || (item as any).product_brand || '',
+                                color: item.product?.color || (item as any).product_color || '',
+                                material: item.product?.material || (item as any).product_material || '',
                                 is_existing: true,
                                 services: [] as any[]
                             };
@@ -157,6 +160,13 @@ export function UpsellDialog({ open, onOpenChange, orderId, order, preselectedPr
                         });
                         i++;
                     }
+                }
+
+                if (preselectedProduct) {
+                    customerItemGroups = customerItemGroups.filter(
+                        g => g.order_product_id === preselectedProduct.id
+                    );
+                    existingSaleItems = [];
                 }
 
                 setCustomerItems(customerItemGroups);
@@ -535,6 +545,23 @@ export function UpsellDialog({ open, onOpenChange, orderId, order, preselectedPr
                                                                 </Select>
                                                             </div>
                                                         </div>
+
+                                                        {item.is_existing && (
+                                                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                                                <div className="space-y-1.5">
+                                                                    <Label className="text-[10px] font-bold text-slate-500 uppercase">Hãng</Label>
+                                                                    <div className="h-8 flex items-center px-3 border border-slate-200 bg-slate-50 text-xs rounded-md text-slate-600 truncate">{item.brand || '---'}</div>
+                                                                </div>
+                                                                <div className="space-y-1.5">
+                                                                    <Label className="text-[10px] font-bold text-slate-500 uppercase">Màu sắc</Label>
+                                                                    <div className="h-8 flex items-center px-3 border border-slate-200 bg-slate-50 text-xs rounded-md text-slate-600 truncate">{item.color || '---'}</div>
+                                                                </div>
+                                                                <div className="space-y-1.5">
+                                                                    <Label className="text-[10px] font-bold text-slate-500 uppercase">Chất liệu</Label>
+                                                                    <div className="h-8 flex items-center px-3 border border-slate-200 bg-slate-50 text-xs rounded-md text-slate-600 truncate">{item.material || '---'}</div>
+                                                                </div>
+                                                            </div>
+                                                        )}
 
                                                         <div className="space-y-2.5 bg-slate-50/50 p-3 rounded-xl border border-dashed border-slate-200">
                                                             <div className="flex items-center justify-between gap-4">

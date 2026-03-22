@@ -30,6 +30,7 @@ import { orderItemsApi } from '@/lib/api';
 import { toast } from 'sonner';
 import { ImageUpload } from '@/components/products/ImageUpload';
 import { useUsers } from '@/hooks/useUsers';
+import { uploadFile } from '@/lib/supabase';
 
 
 interface ProductDetailDialogProps {
@@ -48,6 +49,100 @@ interface ProductDetailDialogProps {
     workflowLogs?: any[];
     aftersaleLogs?: any[];
     careLogs?: any[];
+}
+
+export function MultiMediaUpload({ value, onChange, disabled, bucket = 'orders', folder = 'step1' }: { value: string[]; onChange: (urls: string[]) => void; disabled?: boolean; bucket?: string; folder?: string }) {
+    const [uploading, setUploading] = useState(false);
+    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files || files.length === 0) return;
+
+        setUploading(true);
+        try {
+            const uploadedUrls: string[] = [];
+            for (let i = 0; i < files.length; i++) {
+                const file = files[i];
+                const { url, error } = await uploadFile(bucket, folder, file);
+                if (error) throw error;
+                if (url) uploadedUrls.push(url);
+            }
+            onChange([...value, ...uploadedUrls]);
+            toast.success('Đã tải lên thành công');
+        } catch (error) {
+            console.error('Upload error:', error);
+            toast.error('Lỗi upload file');
+        } finally {
+            setUploading(false);
+        }
+    };
+
+    const removeFile = (index: number) => {
+        const newValue = [...value];
+        newValue.splice(index, 1);
+        onChange(newValue);
+    };
+
+    return (
+        <div className="grid grid-cols-4 sm:grid-cols-5 gap-2 mt-2">
+            {value?.map((url, i) => {
+                const isVideo = url.match(/\.(mp4|webm|ogg|mov|m4v)$|^data:video/i) || url.includes('/video/');
+                return (
+                    <div 
+                        key={i} 
+                        className="group relative aspect-square rounded-xl overflow-hidden border bg-white shadow-sm ring-1 ring-gray-100 cursor-zoom-in group"
+                        onClick={() => setPreviewUrl(url)}
+                    >
+                        {isVideo ? (
+                            <video src={url} className="w-full h-full object-cover" />
+                        ) : (
+                            <img src={url} alt="" className="w-full h-full object-cover" />
+                        )}
+                        
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                            <Maximize2 className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-md" />
+                        </div>
+
+                        {!disabled && (
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); removeFile(i); }} 
+                                className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                            >
+                                <XCircle className="w-3.5 h-3.5" />
+                            </button>
+                        )}
+                        {isVideo && (
+                            <div className="absolute bottom-1 left-1 bg-black/40 px-1 rounded text-[8px] text-white font-bold uppercase">Video</div>
+                        )}
+                    </div>
+                );
+            })}
+            {!disabled && (
+                <label className={cn(
+                    "aspect-square rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-all shadow-sm",
+                    uploading ? "opacity-50 pointer-events-none" : ""
+                )}>
+                    {uploading ? <Loader2 className="w-5 h-5 animate-spin text-primary" /> : <Camera className="w-6 h-6 text-slate-300" />}
+                    <span className="text-[9px] font-bold text-slate-400 mt-1 uppercase">Tải lên</span>
+                    <input type="file" multiple accept="image/*,video/*" className="hidden" onChange={handleFileChange} />
+                </label>
+            )}
+
+            <Dialog open={!!previewUrl} onOpenChange={(open) => !open && setPreviewUrl(null)}>
+                <DialogContent className="max-w-4xl p-0 overflow-hidden bg-transparent border-none shadow-none flex items-center justify-center">
+                    <DialogTitle className="sr-only">Xem phương tiện</DialogTitle>
+                    {previewUrl && (
+                        previewUrl.match(/\.(mp4|webm|ogg|mov|m4v)$|^data:video/i) || previewUrl.includes('/video/') ? (
+                            <video src={previewUrl} controls autoPlay className="max-w-full max-h-[90vh] rounded-lg shadow-2xl bg-black" />
+                        ) : (
+                            <img src={previewUrl} alt="" className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl bg-white" />
+                        )
+                    )}
+                </DialogContent>
+            </Dialog>
+        </div>
+    );
 }
 
 export function ProductDetailDialog({
@@ -75,14 +170,18 @@ export function ProductDetailDialog({
     useEffect(() => {
         if (open) {
             fetchUsers();
+            // Reset scroll position to top when dialog opens or room changes
+            const viewport = document.querySelector('.product-detail-scroll-area [data-radix-scroll-area-viewport]');
+            if (viewport) viewport.scrollTop = 0;
         }
-    }, [open, fetchUsers]);
+    }, [open, fetchUsers, roomId]);
 
     // Local form state
     const [formData, setFormData] = useState<Partial<Order>>({});
     const [dueAt, setDueAt] = useState<string>('');
     const [selectedLogDetail, setSelectedLogDetail] = useState<any>(null);
     const [showLogDetailDialog, setShowLogDetailDialog] = useState(false);
+    const [mainPreviewUrl, setMainPreviewUrl] = useState<string | null>(null);
 
     // Initialize form data when the dialog is opened or order ID changes
     useEffect(() => {
@@ -197,6 +296,31 @@ export function ProductDetailDialog({
     const handleSaveStepData = async () => {
         const itemId = product?.id || services[0]?.id;
         if (!itemId) return;
+
+        // Validation for step1
+        if (roomId === 'step1') {
+            if (!stepData.step1_receiver_name) {
+                toast.error('Vui lòng chọn nhân viên Sale nhận');
+                return;
+            }
+            if (!stepData.step1_evidence_photos || stepData.step1_evidence_photos.length === 0) {
+                toast.error('Vui lòng tải ảnh/video làm bằng chứng trước khi kỹ thuật làm');
+                return;
+            }
+        }
+
+        // Validation for step2
+        if (roomId === 'step2') {
+            if (!stepData.step2_tags_photos || stepData.step2_tags_photos.length === 0) {
+                toast.error('Vui lòng tải ảnh chứng minh đã gắn tags');
+                return;
+            }
+            if (!stepData.step2_form_photos || stepData.step2_form_photos.length === 0) {
+                toast.error('Vui lòng tải ảnh đã gắn Form túi hoặc shoestree');
+                return;
+            }
+        }
+
         setSavingStepData(true);
         try {
             await orderItemsApi.updateSalesStepData(itemId, stepData);
@@ -224,13 +348,6 @@ export function ProductDetailDialog({
                     toast.error("Vui lòng upload ảnh hoàn thiện/kiểm nợ làm bằng chứng");
                     return;
                 }
-            }
-        }
-
-        if (isAftersale && roomId.startsWith('after2')) {
-            if (!formData.delivery_creator_name || !formData.delivery_shipper_phone || !formData.delivery_staff_name || !formData.delivery_received_at) {
-                toast.error("Vui lòng nhập đầy đủ: NV Tạo đơn, SĐT Liên hệ, NV Giao đồ và Thời gian nhận đồ");
-                return;
             }
         }
 
@@ -417,12 +534,18 @@ export function ProductDetailDialog({
                             {allImages?.length > 0 && (
                                 <div className="flex flex-col xl:flex-row gap-4">
                                     {/* Main Large Image */}
-                                    <div className="flex-[3] rounded-2xl overflow-hidden border-4 border-white shadow-xl bg-gray-50 max-h-[400px] xl:max-h-[500px] aspect-video relative group shrink-0">
+                                    <div 
+                                        className="flex-[3] rounded-2xl overflow-hidden border-4 border-white shadow-xl bg-gray-50 max-h-[400px] xl:max-h-[500px] aspect-video relative group shrink-0 cursor-zoom-in"
+                                        onClick={() => setMainPreviewUrl(allImages[activeImageIdx])}
+                                    >
                                         <img
                                             src={allImages[activeImageIdx]}
                                             alt={`${productName}-${activeImageIdx}`}
                                             className="w-full h-full object-contain transition-transform group-hover:scale-105 duration-700"
                                         />
+                                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                                            <Maximize2 className="w-10 h-10 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow-2xl" />
+                                        </div>
                                     </div>
 
                                     {/* Scrollable Thumbnails Right Side */}
@@ -624,7 +747,7 @@ export function ProductDetailDialog({
                     </ScrollArea>
 
                     {/* Contextual Right Sidebar */}
-                    <ScrollArea className="flex-1 bg-gray-50/40">
+                    <ScrollArea className="flex-1 bg-gray-50/40 product-detail-scroll-area">
                         <div className="p-4 flex flex-col gap-4 min-h-full">
                             {/* Consolidated Due Date / Pickup Block */}
                             <div className={cn(
@@ -1295,9 +1418,27 @@ export function ProductDetailDialog({
                                             <Button
                                                 variant="outline"
                                                 className="w-full h-10 rounded-xl font-bold border-red-300 text-red-700 hover:bg-red-50 gap-2"
-                                                onClick={() => {
-                                                    const code = `HDBH${order?.order_code || ''}.1`;
-                                                    toast.success(`Đã tạo HD Bảo hành: ${code}`);
+                                                disabled={saving}
+                                                onClick={async () => {
+                                                    if (!entityId || !onReloadOrder) return;
+                                                    setSaving(true);
+                                                    try {
+                                                        const isCustomerItem = !!product;
+                                                        const api = isCustomerItem ? (await import('@/lib/api')).orderProductsApi : (await import('@/lib/api')).orderItemsApi;
+                                                        
+                                                        // Update item status to 'step1'
+                                                        await api.updateStatus(entityId, 'step1', 'Bảo hành lại');
+                                                        
+                                                        const code = `HDBH${order?.order_code || ''}.${entityId.slice(-4)}`;
+                                                        toast.success(`Đã tạo HD Bảo hành: ${code} và chuyển về Nhận đồ & Chụp ảnh`);
+                                                        onOpenChange(false);
+                                                        if (setActiveTab) setActiveTab('sales');
+                                                        onReloadOrder();
+                                                    } catch (error: any) {
+                                                        toast.error(error?.response?.data?.message || 'Lỗi khi tạo HD Bảo hành');
+                                                    } finally {
+                                                        setSaving(false);
+                                                    }
                                                 }}
                                             >
                                                 <ClipboardList className="h-4 w-4" />
@@ -1358,12 +1499,20 @@ export function ProductDetailDialog({
                                                 <div className="space-y-3">
                                                     <div className="grid grid-cols-2 gap-4">
                                                         <div className="space-y-1.5">
-                                                            <Label className="text-xs font-bold text-gray-500">TÊN NGƯỜI NHẬN</Label>
-                                                            <Input
-                                                                placeholder="VD: Nguyễn Văn A"
+                                                            <Label className="text-xs font-bold text-gray-500">TÊN NHÂN VIÊN SALE NHẬN <span className="text-red-500">*</span></Label>
+                                                            <Select
                                                                 value={stepData.step1_receiver_name || ''}
-                                                                onChange={(e) => setStepData(prev => ({ ...prev, step1_receiver_name: e.target.value }))}
-                                                            />
+                                                                onValueChange={(val) => setStepData(prev => ({ ...prev, step1_receiver_name: val }))}
+                                                             >
+                                                                 <SelectTrigger className="bg-white h-9">
+                                                                     <SelectValue placeholder="Chọn nhân viên..." />
+                                                                 </SelectTrigger>
+                                                                 <SelectContent>
+                                                                     {users.filter(u => ['sale', 'manager', 'admin'].includes(u.role)).map(u => (
+                                                                         <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
+                                                                     ))}
+                                                                 </SelectContent>
+                                                             </Select>
                                                         </div>
                                                         <div className="space-y-1.5">
                                                             <Label className="text-xs font-bold text-gray-500">SỐ ĐIỆN THOẠI</Label>
@@ -1404,6 +1553,17 @@ export function ProductDetailDialog({
                                                     </div>
 
                                                     <div className="space-y-1.5">
+                                                        <Label className="text-xs font-bold text-gray-500 uppercase font-bold tracking-tight mb-2 flex items-center gap-1.5">
+                                                            <Camera className="h-3.5 w-3.5 text-blue-500" />
+                                                            ẢNH & VIDEO LÀM BẰNG CHỨNG <span className="text-red-500">*</span>
+                                                         </Label>
+                                                         <MultiMediaUpload 
+                                                            value={stepData.step1_evidence_photos || []}
+                                                            onChange={(urls) => setStepData(prev => ({ ...prev, step1_evidence_photos: urls }))}
+                                                         />
+                                                     </div>
+
+                                                    <div className="space-y-1.5">
                                                         <Label className="text-xs font-bold text-gray-500">GHI CHÚ NHẬN ĐỒ</Label>
                                                         <Textarea
                                                             placeholder="Tình trạng đồ khi nhận, ghi chú thêm..."
@@ -1421,6 +1581,48 @@ export function ProductDetailDialog({
                                             >
                                                 {savingStepData ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
                                                 Lưu thông tin nhận đồ
+                                            </Button>
+                                        </div>
+                                    )}
+
+                                    {/* Step 2: TAGS + FORM TÚI + SHOESTREE */}
+                                    {roomId === 'step2' && (
+                                        <div className="space-y-4">
+                                            <div className="bg-white p-5 rounded-2xl border border-green-100 shadow-sm space-y-4">
+                                                <div className="flex items-center gap-2 text-green-700 mb-1">
+                                                    <Tag className="h-4 w-4" />
+                                                    <span className="text-xs font-black uppercase tracking-tight">Gắn Tags & Phụ kiện bảo quản</span>
+                                                </div>
+                                                <div className="space-y-3">
+                                                    <div className="space-y-1.5">
+                                                        <Label className="text-xs font-bold text-gray-500 uppercase font-bold tracking-tight mb-2 flex items-center gap-1.5">
+                                                            <Camera className="h-3.5 w-3.5 text-green-500" />
+                                                            ẢNH CHỨNG MINH ĐÃ GẮN TAGS <span className="text-red-500">*</span>
+                                                        </Label>
+                                                        <MultiMediaUpload 
+                                                           value={stepData.step2_tags_photos || []}
+                                                           onChange={(urls) => setStepData(prev => ({ ...prev, step2_tags_photos: urls }))}
+                                                        />
+                                                    </div>
+                                                    <div className="space-y-1.5">
+                                                        <Label className="text-xs font-bold text-gray-500 uppercase font-bold tracking-tight mb-2 flex items-center gap-1.5">
+                                                            <Camera className="h-3.5 w-3.5 text-green-500" />
+                                                            ẢNH ĐÃ GẮN FORM TÚI/SHOESTREE <span className="text-red-500">*</span>
+                                                        </Label>
+                                                        <MultiMediaUpload 
+                                                           value={stepData.step2_form_photos || []}
+                                                           onChange={(urls) => setStepData(prev => ({ ...prev, step2_form_photos: urls }))}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <Button
+                                                className="w-full h-11 rounded-xl font-bold shadow-lg shadow-green-200 bg-green-600 hover:bg-green-700"
+                                                onClick={handleSaveStepData}
+                                                disabled={savingStepData}
+                                            >
+                                                {savingStepData ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                                                Lưu thông tin Step 2
                                             </Button>
                                         </div>
                                     )}
@@ -1469,21 +1671,34 @@ export function ProductDetailDialog({
                                                         />
                                                     </div>
                                                 </div>
+                                                <Button
+                                                    className="w-full h-11 rounded-xl font-bold shadow-lg shadow-orange-200 bg-orange-600 hover:bg-orange-700"
+                                                    onClick={handleSaveStepData}
+                                                    disabled={savingStepData}
+                                                >
+                                                    {savingStepData ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                                                    Lưu thông tin trao đổi KT
+                                                </Button>
                                             </div>
-                                            <Button
-                                                className="w-full h-11 rounded-xl font-bold shadow-lg shadow-orange-200 bg-orange-600 hover:bg-orange-700"
-                                                onClick={handleSaveStepData}
-                                                disabled={savingStepData}
-                                            >
-                                                {savingStepData ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
-                                                Lưu thông tin trao đổi KT
-                                            </Button>
                                         </div>
                                     )}
 
-                                    {/* Chat section for all sales steps */}
-                                    {entityId && (
-                                        <div className="flex-1 flex flex-col min-h-[400px] gap-4">
+                                        <div className="flex-1 flex flex-col min-h-[250px] gap-4">
+                                            <div className="flex-1 flex flex-col min-h-[250px]">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <MessageSquare className="h-3.5 w-3.5 text-gray-400" />
+                                                    <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Trao đổi nội bộ</h4>
+                                                </div>
+                                                <ProductChat
+                                                    orderId={order?.id || ''}
+                                                    entityId={entityId}
+                                                    entityType={entityType}
+                                                    roomId={roomId}
+                                                    currentUserId={currentUserId}
+                                                    highlightMessageId={highlightMessageId}
+                                                />
+                                            </div>
+
                                             <div className="flex-1 flex flex-col min-h-[150px]">
                                                 <div className="flex items-center gap-2 mb-2">
                                                     <History className="h-3.5 w-3.5 text-gray-400" />
@@ -1548,6 +1763,7 @@ export function ProductDetailDialog({
                                                                         )}
                                                                     </div>
                                                                 )}
+
                                                                 {log.action === 'failed' && log.notes && (
                                                                     <div className="mt-1.5 bg-red-50 p-2 rounded-lg border border-red-100 text-red-700 italic">
                                                                         {log.notes}
@@ -1584,26 +1800,30 @@ export function ProductDetailDialog({
                                                     </div>
                                                 </ScrollArea>
                                             </div>
-
-                                            <div className="flex-1 flex flex-col min-h-[250px]">
-                                                <div className="flex items-center gap-2 mb-2">
-                                                    <MessageSquare className="h-3.5 w-3.5 text-gray-400" />
-                                                    <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Trao đổi nội bộ</h4>
-                                                </div>
-                                                <ProductChat
-                                                    orderId={order?.id || ''}
-                                                    entityId={entityId}
-                                                    entityType={entityType}
-                                                    roomId={roomId}
-                                                    currentUserId={currentUserId}
-                                                    highlightMessageId={highlightMessageId}
-                                                />
-                                            </div>
                                         </div>
-                                    )}
-                                </div>
-                            ) : (
+                                    </div>
+                                ) : (
                                 <div className="flex-1 flex flex-col gap-4 min-h-0">
+                                    <div className="flex-1 flex flex-col min-h-[250px]">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Trao đổi nội bộ</h3>
+                                            <Badge variant="secondary" className="text-[10px] px-2 py-0 font-bold">
+                                                {SALES_STATUS_LABELS[roomId]?.toUpperCase() || `PHÒNG ${roomId.toUpperCase()}`}
+                                            </Badge>
+                                        </div>
+
+                                        {entityId && (
+                                            <ProductChat
+                                                orderId={order?.id || ''}
+                                                entityId={entityId}
+                                                entityType={entityType}
+                                                roomId={roomId}
+                                                currentUserId={currentUserId}
+                                                highlightMessageId={highlightMessageId}
+                                            />
+                                        )}
+                                    </div>
+
                                     <div className="flex-1 flex flex-col min-h-[150px]">
                                         <div className="flex items-center gap-2 mb-2">
                                             <History className="h-3.5 w-3.5 text-gray-400" />
@@ -1655,26 +1875,6 @@ export function ProductDetailDialog({
                                         </ScrollArea>
                                     </div>
 
-                                    <div className="flex-1 flex flex-col min-h-[250px]">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Trao đổi nội bộ</h3>
-                                            <Badge variant="secondary" className="text-[10px] px-2 py-0 font-bold">
-                                                {SALES_STATUS_LABELS[roomId]?.toUpperCase() || `PHÒNG ${roomId.toUpperCase()}`}
-                                            </Badge>
-                                        </div>
-
-                                        {entityId && (
-                                            <ProductChat
-                                                orderId={order?.id || ''}
-                                                entityId={entityId}
-                                                entityType={entityType}
-                                                roomId={roomId}
-                                                currentUserId={currentUserId}
-                                                highlightMessageId={highlightMessageId}
-                                            />
-                                        )}
-                                    </div>
-
                                     {/* Mark Failed Button - Only for Workflow stages */}
                                     {!isSalesStep && !isAftersale && !isCareFlow && (
                                         <div className="pt-4 mt-auto">
@@ -1715,6 +1915,19 @@ export function ProductDetailDialog({
                     if (onReloadOrder) await onReloadOrder();
                 }}
             />
+
+            <Dialog open={!!mainPreviewUrl} onOpenChange={(open) => !open && setMainPreviewUrl(null)}>
+                <DialogContent className="max-w-5xl p-0 overflow-hidden bg-transparent border-none shadow-none flex items-center justify-center">
+                    <DialogTitle className="sr-only">Xem phương tiện</DialogTitle>
+                    {mainPreviewUrl && (
+                        mainPreviewUrl.match(/\.(mp4|webm|ogg|mov|m4v)$|^data:video/i) || mainPreviewUrl.includes('/video/') ? (
+                            <video src={mainPreviewUrl} controls autoPlay className="max-w-full max-h-[90vh] rounded-lg shadow-2xl bg-black" />
+                        ) : (
+                            <img src={mainPreviewUrl} alt="" className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl bg-white" />
+                        )
+                    )}
+                </DialogContent>
+            </Dialog>
         </DialogContent>
     </Dialog>
 );

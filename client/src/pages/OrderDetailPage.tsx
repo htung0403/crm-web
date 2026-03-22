@@ -637,18 +637,14 @@ export function OrderDetailPage() {
                         <FileText className="h-4 w-4" />
                         Chi tiết
                     </TabsTrigger>
-                    {order.status === 'before_sale' && (
-                        <TabsTrigger value="sales" className="gap-2 shrink-0">
-                            <ShoppingBag className="h-4 w-4" />
-                            Lên đơn (Sales)
-                        </TabsTrigger>
-                    )}
-                    {order.status !== 'done' && (
-                        <TabsTrigger value="workflow" className="gap-2 shrink-0">
-                            <Layers className="h-4 w-4" />
-                            Tiến trình / Quy trình
-                        </TabsTrigger>
-                    )}
+                    <TabsTrigger value="sales" className="gap-2 shrink-0">
+                        <ShoppingBag className="h-4 w-4" />
+                        Lên đơn (Sales)
+                    </TabsTrigger>
+                    <TabsTrigger value="workflow" className="gap-2 shrink-0">
+                        <Layers className="h-4 w-4" />
+                        Tiến trình / Quy trình
+                    </TabsTrigger>
                     <TabsTrigger value="aftersale" className="gap-2 shrink-0">
                         <RefreshCcw className="h-4 w-4" />
                         After sale
@@ -666,19 +662,17 @@ export function OrderDetailPage() {
                     onShowPaymentDialog={() => setShowPaymentDialog(true)}
                 />
 
-                {order.status === 'before_sale' && (
-                    <SalesTab
-                        order={order}
-                        salesLogs={salesLogs}
-                        updateOrderItemStatus={updateOrderItemStatus}
-                        updateOrderStatus={updateOrderStatus}
-                        reloadOrder={reloadOrder}
-                        fetchKanbanLogs={fetchKanbanLogs}
-                        onProductCardClick={handleOpenProductDialog}
-                        workflowKanbanGroups={workflowKanbanGroups}
-                        onTabChange={setActiveTab}
-                    />
-                )}
+                <SalesTab
+                    order={order}
+                    salesLogs={salesLogs}
+                    updateOrderItemStatus={updateOrderItemStatus}
+                    updateOrderStatus={updateOrderStatus}
+                    reloadOrder={reloadOrder}
+                    fetchKanbanLogs={fetchKanbanLogs}
+                    onProductCardClick={handleOpenProductDialog}
+                    workflowKanbanGroups={workflowKanbanGroups}
+                    onTabChange={setActiveTab}
+                />
 
                 <WorkflowTab
                     order={order}
@@ -686,6 +680,7 @@ export function OrderDetailPage() {
                     allWorkflowSteps={allWorkflowSteps}
                     workflowKanbanGroups={workflowKanbanGroups}
                     workflowLogs={workflowLogs}
+                    salesLogs={salesLogs}
                     onWorkflowDragEnd={onWorkflowDragEnd}
                     getGroupCurrentTechRoom={getGroupCurrentTechRoom}
                     getItemCurrentStep={getItemCurrentStep}
@@ -696,6 +691,8 @@ export function OrderDetailPage() {
                     handleOpenAssignDialog={handleOpenAssignDialog}
                     handleOpenSaleAssignDialog={handleOpenSaleAssignDialog}
                     onProductCardClick={handleOpenProductDialog}
+                    updateOrderItemStatus={updateOrderItemStatus}
+                    fetchKanbanLogs={fetchKanbanLogs}
                 />
 
                 <AftersaleTab

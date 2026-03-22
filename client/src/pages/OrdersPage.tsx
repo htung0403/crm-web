@@ -31,6 +31,7 @@ import {
     columns
 } from '@/components/orders';
 import { orderItemsApi } from '@/lib/api';
+import { normalizeSearchText } from '@/lib/utils';
 
 export function OrdersPage() {
     const location = useLocation();
@@ -168,12 +169,12 @@ export function OrdersPage() {
 
         // Apply global search
         if (globalSearch) {
-            const gTerm = globalSearch.toLowerCase().trim();
+            const gTerm = normalizeSearchText(globalSearch);
             return result.filter(v => 
-                v.order.order_code?.toLowerCase().includes(gTerm) ||
-                v.order.customer?.name?.toLowerCase().includes(gTerm) ||
-                v.order.customer?.phone?.includes(gTerm) ||
-                v.order.sales_user?.name?.toLowerCase().includes(gTerm)
+                normalizeSearchText(v.order.order_code || '').includes(gTerm) ||
+                normalizeSearchText(v.order.customer?.name || '').includes(gTerm) ||
+                (v.order.customer?.phone || '').includes(gTerm) ||
+                normalizeSearchText(v.order.sales_user?.name || '').includes(gTerm)
             );
         }
 
@@ -411,14 +412,14 @@ export function OrdersPage() {
                                                 <span>{column.title}</span>
                                                 <Badge variant="secondary" className="bg-white/80">
                                                     {(() => {
-                                                        const searchText = (columnSearch[column.id] || '').toLowerCase().trim();
+                                                        const searchText = normalizeSearchText(columnSearch[column.id] || '');
                                                         const statusCards = getCardsByStatus(column.id);
                                                         if (!searchText) return statusCards.length;
                                                         return statusCards.filter(c =>
-                                                            c.order.customer?.name.toLowerCase().includes(searchText) ||
-                                                            c.order.customer?.phone?.includes(searchText) ||
-                                                            c.order.order_code?.toLowerCase().includes(searchText) ||
-                                                            c.order.sales_user?.name?.toLowerCase().includes(searchText)
+                                                            normalizeSearchText(c.order.customer?.name || '').includes(searchText) ||
+                                                            (c.order.customer?.phone || '').includes(searchText) ||
+                                                            normalizeSearchText(c.order.order_code || '').includes(searchText) ||
+                                                            normalizeSearchText(c.order.sales_user?.name || '').includes(searchText)
                                                         ).length;
                                                     })()}
                                                 </Badge>
@@ -437,13 +438,13 @@ export function OrdersPage() {
                                             <Droppable droppableId={column.id}>
                                                 {(provided, snapshot) => {
                                                     const cardsByStatus = getCardsByStatus(column.id);
-                                                    const searchText = (columnSearch[column.id] || '').toLowerCase().trim();
+                                                    const searchText = normalizeSearchText(columnSearch[column.id] || '');
                                                     const filteredCards = searchText
                                                         ? cardsByStatus.filter(c =>
-                                                            c.order.customer?.name.toLowerCase().includes(searchText) ||
-                                                            c.order.customer?.phone?.includes(searchText) ||
-                                                            c.order.order_code?.toLowerCase().includes(searchText) ||
-                                                            c.order.sales_user?.name?.toLowerCase().includes(searchText)
+                                                            normalizeSearchText(c.order.customer?.name || '').includes(searchText) ||
+                                                            (c.order.customer?.phone || '').includes(searchText) ||
+                                                            normalizeSearchText(c.order.order_code || '').includes(searchText) ||
+                                                            normalizeSearchText(c.order.sales_user?.name || '').includes(searchText)
                                                         )
                                                         : cardsByStatus;
                                                     return (

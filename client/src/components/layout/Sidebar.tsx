@@ -126,11 +126,12 @@ const menuItems: MenuItem[] = [
         id: 'hr',
         label: 'Nhân sự',
         icon: <UserCog className="h-5 w-5" />,
-        roles: ['admin', 'manager', 'accountant'], // Only Manager and Accountant
+        roles: ['admin', 'manager', 'accountant', 'sale', 'technician'],
         children: [
             { id: 'employees', label: 'Danh sách', roles: ['admin', 'manager'] },
             { id: 'kpi', label: 'KPI', roles: ['admin', 'manager'] },
-            { id: 'salary', label: 'Lương', roles: ['admin', 'manager', 'accountant'] } // Accountant can access salary
+            { id: 'salary', label: 'Lương', roles: ['admin', 'manager', 'accountant'] },
+            { id: 'leave-requests', label: 'Xin nghỉ / muộn', roles: ['admin', 'manager', 'accountant', 'sale', 'technician'] }
         ]
     },
     {

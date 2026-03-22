@@ -51,6 +51,12 @@ export function formatTimeAgo(date: Date | string): string {
     return formatDate(d)
 }
 
-export function generateId(): string {
-    return Math.random().toString(36).substring(2, 9)
+export function normalizeSearchText(text: string): string {
+    if (!text) return '';
+    return text
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/đ/g, 'd')
+        .trim();
 }

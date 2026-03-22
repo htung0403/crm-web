@@ -113,8 +113,10 @@ export function useWorkflowKanban(
         if (steps.length === 0) return 'waiting';
 
         const inProgress = steps.find((s: any) => s.status === 'in_progress');
-        const firstPending = steps.find((s: any) => s.status === 'pending' || s.status === 'assigned');
-        const step = inProgress || firstPending;
+        const assigned = steps.find((s: any) => s.status === 'assigned');
+        const firstPending = steps.find((s: any) => s.status === 'pending');
+        
+        const step = inProgress || assigned || firstPending;
 
         if (!step) {
             // Check if all steps are completed or skipped
@@ -122,6 +124,9 @@ export function useWorkflowKanban(
             if (allFinished) return 'done';
             return 'waiting';
         }
+
+        // Nếu mới ở trạng thái pending (chưa phân công), giữ ở cột waiting
+        if (step.status === 'pending') return 'waiting';
 
         const roomByDept = getTechRoomByDepartmentName(step?.department?.name);
         if (roomByDept) return roomByDept;

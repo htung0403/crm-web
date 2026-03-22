@@ -34,6 +34,7 @@ import productTypesRouter from './routes/product-types.js';
 import productChatsRouter from './routes/product-chats.js';
 import { upsellTicketsRouter } from './routes/upsell-tickets.js';
 import webhooksRouter from './routes/webhooks.js';
+import leaveRequestsRouter from './routes/leave-requests.js';
 
 dotenv.config();
 
@@ -91,6 +92,7 @@ app.use('/api/product-chats', productChatsRouter);
 app.use('/api/product-types', productTypesRouter);
 app.use('/api/upsell-tickets', upsellTicketsRouter);
 app.use('/api/webhooks', webhooksRouter);
+app.use('/api/leave-requests', leaveRequestsRouter);
 
 // Error handling
 app.use(errorHandler);
