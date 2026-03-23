@@ -108,14 +108,12 @@ export function LeaveRequestsPage() {
             return;
         }
 
-        const start = new Date(startDate);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        
-        const diffTime = start.getTime() - today.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        const start = new Date(`${startDate}T${startTime || '00:00'}:00`);
+        const now = new Date();
+        const diffHours = (start.getTime() - now.getTime()) / (1000 * 60 * 60);
 
         if (formType === 'leave') {
+            const diffDays = Math.ceil(diffHours / 24);
             if (formSubType === 'annual' && diffDays < 30) {
                 toast.error('Xin nghỉ phép phải báo trước ít nhất 30 ngày');
                 return;
@@ -124,10 +122,19 @@ export function LeaveRequestsPage() {
                 toast.error('Xin nghỉ đột xuất phải báo trước ít nhất 3 ngày');
                 return;
             }
+        } else if (formType === 'late') {
+            if (formSubType === 'planned_late' && diffHours < 64) {
+                toast.error('Xin đi muộn (trước 64 tiếng) phải báo trước ít nhất 64 tiếng');
+                return;
+            }
+            if (formSubType === 'unexpected_late' && diffHours < 24) {
+                toast.error('Xin đi muộn đột xuất phải báo trước ít nhất 24 tiếng');
+                return;
+            }
         }
 
-        const start_time = `${startDate}T${startTime || '00:00'}:00Z`;
-        const end_time = formType === 'leave' ? `${endDate}T${endTime || '23:59'}:00Z` : null;
+        const start_time = new Date(`${startDate}T${startTime || '00:00'}:00`).toISOString();
+        const end_time = formType === 'leave' && endDate ? new Date(`${endDate}T${endTime || '23:59'}:00`).toISOString() : null;
 
         setSubmitting(true);
         try {
@@ -172,6 +179,7 @@ export function LeaveRequestsPage() {
         setEndTime('');
         setReason('');
         setLeaveDays(1);
+        setFormSubType(formType === 'leave' ? 'annual' : 'planned_late');
     };
 
     const filteredRequests = requests.filter(req => {
@@ -191,7 +199,10 @@ export function LeaveRequestsPage() {
                     <h1 className="text-2xl font-bold text-foreground">Xin nghỉ / đi muộn</h1>
                     <p className="text-muted-foreground">Quản lý và tạo yêu cầu xin nghỉ hoặc đi muộn</p>
                 </div>
-                <Button onClick={() => setShowForm(true)}>
+                <Button onClick={() => {
+                    setFormType(activeTab);
+                    setShowForm(true);
+                }}>
                     <Plus className="h-4 w-4 mr-2" />
                     Tạo yêu cầu
                 </Button>
@@ -355,7 +366,28 @@ export function LeaveRequestsPage() {
                             </div>
                             <div className="space-y-2">
                                 <Label>Giờ bắt đầu</Label>
-                                <Input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} />
+                                <div className="flex gap-2">
+                                    <Select value={startTime.split(':')[0] || '08'} onValueChange={(h) => setStartTime(`${h}:${startTime.split(':')[1] || '00'}`)}>
+                                        <SelectTrigger className="w-full">
+                                            <SelectValue placeholder="Giờ" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0')).map(h => (
+                                                <SelectItem key={h} value={h}>{h}h</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <Select value={startTime.split(':')[1] || '00'} onValueChange={(m) => setStartTime(`${startTime.split(':')[0] || '08'}:${m}`)}>
+                                        <SelectTrigger className="w-full">
+                                            <SelectValue placeholder="Phút" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0')).map(m => (
+                                                <SelectItem key={m} value={m}>{m}p</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
                             </div>
                         </div>
 
@@ -367,7 +399,28 @@ export function LeaveRequestsPage() {
                                 </div>
                                 <div className="space-y-2">
                                     <Label>Giờ kết thúc</Label>
-                                    <Input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} />
+                                    <div className="flex gap-2">
+                                        <Select value={endTime.split(':')[0] || '17'} onValueChange={(h) => setEndTime(`${h}:${endTime.split(':')[1] || '00'}`)}>
+                                            <SelectTrigger className="w-full">
+                                                <SelectValue placeholder="Giờ" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0')).map(h => (
+                                                    <SelectItem key={h} value={h}>{h}h</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <Select value={endTime.split(':')[1] || '00'} onValueChange={(m) => setEndTime(`${endTime.split(':')[0] || '17'}:${m}`)}>
+                                            <SelectTrigger className="w-full">
+                                                <SelectValue placeholder="Phút" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0')).map(m => (
+                                                    <SelectItem key={m} value={m}>{m}p</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
                                 </div>
                             </div>
                         )}
