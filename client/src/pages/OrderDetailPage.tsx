@@ -181,7 +181,7 @@ export function OrderDetailPage() {
         getGroupCurrentTechRoom,
         workflowKanbanGroups,
         getStepDeadlineDisplay,
-    } = useWorkflowKanban(order, allWorkflowSteps);
+    } = useWorkflowKanban(order, allWorkflowSteps, salesLogs);
 
     // Dialog & UI States
     const [activeTab, setActiveTab] = useState('detail');

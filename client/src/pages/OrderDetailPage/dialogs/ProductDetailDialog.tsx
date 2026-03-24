@@ -340,7 +340,7 @@ export function ProductDetailDialog({
         if (isAftersale && roomId.startsWith('after1')) {
             if (formData.debt_checked) {
                 if (!formData.debt_checked_by_name || !formData.aftersale_receiver_name) {
-                    toast.error("Vui lòng chọn Tên người kiểm nợ và Tên người nhận hàng");
+                    toast.error("Vui lòng chọn Người thu tiền và Người chụp After");
                     return;
                 }
                 const hasPhotos = formData.completion_photos && formData.completion_photos.length > 0;
@@ -928,7 +928,7 @@ export function ProductDetailDialog({
                                                 <div className="grid grid-cols-2 gap-4">
                                                     <div className="space-y-2">
                                                         <Label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1.5">
-                                                            TÊN NGƯỜI KIỂM NỢ
+                                                            Người thu tiền
                                                             {formData.debt_checked && <span className="text-rose-500">*</span>}
                                                         </Label>
                                                         <Select
@@ -947,7 +947,7 @@ export function ProductDetailDialog({
                                                     </div>
                                                     <div className="space-y-2">
                                                         <Label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1.5">
-                                                            TÊN NGƯỜI NHẬN HÀNG
+                                                            Người chụp After
                                                             {formData.debt_checked && <span className="text-rose-500">*</span>}
                                                         </Label>
                                                         <Select

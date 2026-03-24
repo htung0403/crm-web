@@ -129,17 +129,30 @@ export function OrdersPage() {
     const getGroupStatus = (group: { product: OrderItem | null; services: OrderItem[] }, fallbackOrder: Order): string => {
         const itemStatus = group.product?.status || group.services?.[0]?.status;
         
-        // If item has no specific status or is in early steps, use the order's status as default
-        if (!itemStatus || ['step1', 'step2', 'step3', 'step4', 'pending'].includes(itemStatus)) {
+        // 1. Check for technical workflow progress first (Highest priority for "In Progress")
+        // If any item in the group is currently assigned to or being worked on by a technician
+        const allItems = [group.product, ...group.services].filter(Boolean) as OrderItem[];
+        const hasActiveTechSteps = allItems.some(item => 
+            item.order_item_steps?.some(step => ['in_progress', 'assigned'].includes(step.status))
+        );
+        if (hasActiveTechSteps) return 'in_progress';
+
+        if (!itemStatus) {
             return fallbackOrder.status;
         }
 
-        // Map item statuses to Kanban columns
+        // 2. Sales / Warranty steps (Before Sale)
+        if (['step1', 'step2', 'step3', 'step4', 'pending'].includes(itemStatus)) return 'before_sale';
+
+        // 3. Explicit In Progress / Processing statuses
         if (['assigned', 'in_progress', 'processing'].includes(itemStatus)) return 'in_progress';
+        
+        // 4. Completion / After sale statuses
         if (['completed', 'done'].includes(itemStatus)) return 'done';
         if (['delivered', 'after_sale'].includes(itemStatus)) return 'after_sale';
         
-        return itemStatus;
+        // 5. Fallback to order status (e.g. for step5 which is technically "chốt đơn" but waiting for tech)
+        return fallbackOrder.status;
     };
 
     const getCardsByStatus = (status: string) => {
@@ -195,13 +208,24 @@ export function OrdersPage() {
         let i = 0;
         while (i < items.length) {
             const item = items[i] as OrderItem & { is_customer_item?: boolean };
-            if (item.is_customer_item && item.item_type === 'product') {
+            
+            // Treat ANY customer item that isn't a service/package as a "product" card head
+            const isProductHead = item.is_customer_item && !['service', 'package'].includes(item.item_type) || 
+                                 (!hasCustomerItems && item.item_type === 'product');
+
+            if (isProductHead) {
                 const services: OrderItem[] = [];
                 let j = i + 1;
                 while (j < items.length) {
                     const next = items[j] as OrderItem & { is_customer_item?: boolean };
-                    if (next.is_customer_item && next.item_type === 'product') break;
-                    if (next.item_type === 'service' || next.item_type === 'package') services.push(items[j] as OrderItem);
+                    // Stop if we hit another "product head"
+                    const nextIsProductHead = next.is_customer_item && !['service', 'package'].includes(next.item_type) || 
+                                           (!hasCustomerItems && next.item_type === 'product');
+                    if (nextIsProductHead) break;
+                    
+                    if (next.item_type === 'service' || next.item_type === 'package') {
+                        services.push(items[j] as OrderItem);
+                    }
                     j++;
                 }
                 groups.push({ product: item, services });

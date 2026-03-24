@@ -247,6 +247,17 @@ const SalesCard = memo(({
                                     }
                                 }
 
+                                // Step 2 validation: TAGS + FORM TÚI + SHOESTREE
+                                if (column.id === 'step2') {
+                                    const firstItem = itemsToUpdate[0];
+                                    const stepData = firstItem?.sales_step_data || {};
+                                    if (!stepData.step2_tags_photos?.length || !stepData.step2_form_photos?.length) {
+                                        toast.error('Vui lòng tải ảnh bằng chứng TAGS và FORM TÚI/SHOESTREE trước khi chuyển bước 2');
+                                        onProductCardClick?.(group, 'step2');
+                                        return;
+                                    }
+                                }
+
                                 try {
                                     for (const item of itemsToUpdate) {
                                         await updateOrderItemStatus(item.id, nextStep);
@@ -413,6 +424,17 @@ export function SalesTab({
                                             if (!stepData.step1_receiver_name || !stepData.step1_evidence_photos?.length) {
                                                 toast.error('Vui lòng hoàn thành thông tin nhân viên Sale và ảnh/video bằng chứng bước 1 trước khi chuyển');
                                                 onProductCardClick?.(group, 'step1');
+                                                return;
+                                            }
+                                        }
+
+                                        // Step 2 validation: TAGS + FORM TÚI + SHOESTREE
+                                        if (result.source.droppableId === 'step2' && destIdx > sourceIdx) {
+                                            const firstItem = itemsToUpdate[0];
+                                            const stepData = firstItem?.sales_step_data || {};
+                                            if (!stepData.step2_tags_photos?.length || !stepData.step2_form_photos?.length) {
+                                                toast.error('Vui lòng tải ảnh bằng chứng TAGS và FORM TÚI/SHOESTREE trước khi chuyển bước 2');
+                                                onProductCardClick?.(group, 'step2');
                                                 return;
                                             }
                                         }

@@ -377,15 +377,16 @@ export function WorkflowTab({
         { id: 'fail', title: 'Thất bại' }
     ], []);
 
-    // Khi order ở trạng thái before_sale, hiển thị nhóm đã chốt đơn (step5) hoặc đã chuyển sang thực hiện
+    // Hiển thị sản phẩm ở tab Quy trình khi đã chốt đơn (step5) hoặc đang thực hiện kỹ thuật
+    // Ẩn các sản phẩm đang ở quy trình Sales/Bảo hành (step1-4)
     const filteredGroups = useMemo(() => {
-        if (order?.status !== 'before_sale') return workflowKanbanGroups;
         return workflowKanbanGroups.filter(g => {
-            const leadItem = g.product || g.services[0];
+            const leadItem = g.product || g.services?.[0];
             const status = leadItem?.status;
+            // Chỉ hiện nếu đã chốt đơn (step5) hoặc đang trong tiến trình kỹ thuật (in_progress, processing, completed)
             return status === 'step5' || status === 'processing' || status === 'in_progress' || status === 'completed';
         });
-    }, [workflowKanbanGroups, order?.status]);
+    }, [workflowKanbanGroups]);
 
     const groupsByRoom = useMemo(() => {
         const map: Record<string, typeof workflowKanbanGroups> = {};

@@ -5,7 +5,8 @@ import { getTechRoomByStepOrder, getTechRoomByDepartmentName } from '@/component
 
 export function useWorkflowKanban(
     order: Order | null,
-    allWorkflowSteps: any[]
+    allWorkflowSteps: any[],
+    salesLogs: any[] = []
 ) {
     // Nhóm theo sản phẩm (product + các dịch vụ) cho Kanban Tiến trình/Quy trình
     const workflowKanbanGroups = useMemo((): WorkflowKanbanGroup[] => {
@@ -75,33 +76,79 @@ export function useWorkflowKanban(
     const getStepDeadlineDisplay = useCallback((itemId: string): StepDeadlineInfo => {
         const steps = allWorkflowSteps.filter((s: any) => s.item_id === itemId || s.order_item_id === itemId || s.order_product_service_id === itemId);
 
-        if (steps.length === 0) {
-            return { label: 'Chờ quy trình', dueAt: null };
-        }
-
         const inProgress = steps.find((s: any) => s.status === 'in_progress');
         const firstPending = steps.find((s: any) => s.status === 'pending' || s.status === 'assigned');
         const step = inProgress || firstPending;
 
-        if (!step) {
-            // All steps completed or cancelled
+        let days = step ? (Number(step.estimated_duration) || 0) : 0;
+        let baseAt = step?.started_at || step?.created_at || (step as any)?.order_item?.confirmed_at || order?.confirmed_at || order?.created_at;
+
+        // Nếu đang ở cột Chờ phân công: Ưu tiên SLA 2 giờ từ lúc chốt đơn (step5)
+        const isWaiting = (steps.length === 0) || (step && step.status === 'pending');
+        
+        if (isWaiting) {
+            days = 2 / 24; // Luôn áp dụng 2 giờ cho cột Chờ phân công
+
+            // Tìm thông tin nhóm để lấy ID sản phẩm cha (nếu có)
+            const parentGroup = workflowKanbanGroups.find(g => 
+                g.product?.id === itemId || g.services.some(s => s.id === itemId)
+            );
+            const parentProductId = parentGroup?.product?.id;
+
+            // Tìm log chuyển sang step5 (Chốt đơn) gần nhất cho item này hoặc sản phẩm cha
+            const step5Log = [...(salesLogs || [])]
+                .filter(l => (l.entity_id === itemId || (parentProductId && l.entity_id === parentProductId)) && l.to_status === 'step5')
+                .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+            
+            if (step5Log) {
+                baseAt = step5Log.created_at;
+            } else {
+                // Nếu không thấy log step5, ưu tiên dùng created_at của step (vì step được tạo khi vào quy trình)
+                // Hoặc nếu mới nhất là một log sales bất kỳ thì lấy mốc đó
+                const lastSalesLog = [...(salesLogs || [])]
+                    .filter(l => l.entity_id === itemId || (parentProductId && l.entity_id === parentProductId))
+                    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+                
+                if (lastSalesLog && new Date(lastSalesLog.created_at) > new Date(baseAt || 0)) {
+                    baseAt = lastSalesLog.created_at;
+                }
+            }
+        }
+
+        if (!baseAt) {
+            return { label: 'Chờ hạn', dueAt: null };
+        }
+
+        if (!step && steps.length > 0) {
+            // Trường hợp có steps nhưng đều đã hoàn thành/hủy
             const allCompleted = steps.every(s => s.status === 'completed' || s.status === 'skipped');
             if (allCompleted) return { label: 'Đã hoàn thành', dueAt: null };
             return { label: 'N/A', dueAt: null };
         }
 
-        const days = Number(step.estimated_duration) || 0;
-        const baseAt = step.started_at || order?.confirmed_at || order?.created_at;
-
-        if (!baseAt || days <= 0) return { label: 'Chưa có hạn', dueAt: null };
+        if (days <= 0) return { label: 'Chưa có hạn', dueAt: null };
 
         const base = new Date(baseAt);
-        const dueAt = new Date(base);
-        dueAt.setDate(dueAt.getDate() + days);
-        const diff = Math.ceil((dueAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-        const label = diff < 0 ? `Trễ ${Math.abs(diff)} ngày` : `Còn ${diff} ngày`;
+        const dueAt = new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
+        const now = Date.now();
+        const diffMs = dueAt.getTime() - now;
+        const isLate = diffMs < 0;
+        const absDiffMs = Math.abs(diffMs);
+
+        let label = '';
+        if (absDiffMs < 3600000) { // < 1 hour
+            const mins = Math.round(absDiffMs / 60000);
+            label = isLate ? `Trễ ${mins} phút` : `Còn ${mins} phút`;
+        } else if (absDiffMs < 86400000) { // < 1 day
+            const hours = Math.round(absDiffMs / 3600000);
+            label = isLate ? `Trễ ${hours} giờ` : `Còn ${hours} giờ`;
+        } else {
+            const daysDiff = Math.ceil(absDiffMs / 86400000);
+            label = isLate ? `Trễ ${daysDiff} ngày` : `Còn ${daysDiff} ngày`;
+        }
+
         return { label, dueAt };
-    }, [allWorkflowSteps, order?.confirmed_at, order?.created_at]);
+    }, [allWorkflowSteps, order?.confirmed_at, order?.created_at, salesLogs, workflowKanbanGroups]);
 
     // Compute current tech room: ưu tiên department của bước (Bộ phận: Dán đế → Phòng Dán đế), fallback step_order
     const getItemCurrentTechRoom = useCallback((itemId: string): TechRoom => {
