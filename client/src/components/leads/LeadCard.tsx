@@ -5,6 +5,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { formatTimeAgo, formatDateTime } from '@/lib/utils';
 import type { Lead } from '@/hooks/useLeads';
 import { sourceLabels } from './constants';
+import { SLACountdown } from './SLACountdown';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface LeadCardProps {
@@ -52,9 +53,12 @@ export function LeadCard({ lead, index, onClick, onDelete }: LeadCardProps) {
                                 </AvatarFallback>
                             </Avatar>
                             <div className="min-w-0 flex-1">
-                                <p className="font-bold text-sm text-foreground mb-0.5 leading-tight">
-                                    {lead.name}
-                                </p>
+                                <div className="flex items-center gap-2 mb-0.5">
+                                    <p className="font-bold text-sm text-foreground truncate leading-tight">
+                                        {lead.name}
+                                    </p>
+                                    <SLACountdown lead={lead} size="sm" />
+                                </div>
                                 <div className="flex flex-col gap-1">
                                     <p className="text-[11px] text-muted-foreground truncate font-medium">
                                         {lead.phone}
@@ -128,6 +132,19 @@ export function LeadCard({ lead, index, onClick, onDelete }: LeadCardProps) {
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-600 truncate max-w-[120px]">
                                 {lead.company}
                             </span>
+                        )}
+                        {lead.pipeline_stage === 'hen_qua_ship' && (
+                            <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                lead.delivery_method === 'direct' 
+                                ? 'bg-orange-50 text-orange-600 border-orange-100' 
+                                : 'bg-blue-50 text-blue-600 border-blue-100'
+                            }`}>
+                                {lead.delivery_method === 'direct' ? (
+                                    <>Hẹn: {lead.appointment_time ? formatDateTime(lead.appointment_time) : '-'}</>
+                                ) : (
+                                    <>Ship: {lead.tracking_code || '-'}</>
+                                )}
+                            </div>
                         )}
                     </div>
 

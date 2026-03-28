@@ -23,8 +23,11 @@ import {
     Search,
     Image as ImageIcon,
     DollarSign,
-    CheckCircle2
+    CheckCircle2,
+    Info,
+    Send
 } from 'lucide-react';
+import { format } from 'date-fns';
 import { toast } from 'sonner';
 import type { DropResult } from '@hello-pangea/dnd';
 
@@ -256,9 +259,8 @@ export function OrderDetailPage() {
 
     // Tab switching logic for completed orders
     useEffect(() => {
-        if (order?.status === 'done' && activeTab === 'workflow') {
-            setActiveTab('detail');
-        }
+        // Only auto-switch to aftersale if we just COMPLETED the items (handled in ConfirmDoneDialog onSuccess)
+        // No longer forcing users out of workflow tab if status is done, so they can view history.
     }, [order?.status, activeTab]);
 
     // Fetch product status summary for V2 products
@@ -352,6 +354,7 @@ export function OrderDetailPage() {
             }
 
             const payload = {
+                status: 'requested',
                 notes: newItemNotes,
                 metadata: {
                     item_name: newItemName,
@@ -408,7 +411,7 @@ export function OrderDetailPage() {
         if (!partnerItem) return;
         setPartnerLoading(true);
         try {
-            await orderItemsApi.updatePartner(partnerItem.id, { status: 'ship_to_partner', notes: partnerNotes || undefined });
+            await orderItemsApi.updatePartner(partnerItem.id, { status: 'requested', notes: partnerNotes || undefined });
             toast.success('Đã cập nhật trạng thái gửi đối tác');
             await reloadOrder();
             setShowPartnerDialog(false);
@@ -419,27 +422,18 @@ export function OrderDetailPage() {
         }
     };
 
-    const handleOpenExtension = (item?: OrderItem | any) => {
-        if (item && item.id) {
-            setExtensionItem(item);
-            setExtensionReason((item as any).extension_request?.reason || '');
-            setExtensionNewDueAt((item as any).extension_request?.new_due_at ? (item as any).extension_request.new_due_at.slice(0, 16) : '');
-        } else {
-            setExtensionItem(null);
-            setExtensionReason(order?.extension_request?.reason || '');
-            setExtensionCustomerResult(order?.extension_request?.customer_result || '');
-            setExtensionNewDueAt(order?.extension_request?.new_due_at ? order.extension_request.new_due_at.slice(0, 16) : '');
-            setExtensionValidReason(!!order?.extension_request?.valid_reason);
-        }
+    const handleOpenExtension = (item: OrderItem | any) => {
+        setExtensionItem(item);
+        setExtensionReason((item as any).extension_request?.reason || '');
+        setExtensionNewDueAt((item as any).extension_request?.new_due_at ? (item as any).extension_request.new_due_at.slice(0, 16) : '');
         setShowExtensionDialog(true);
     };
 
     const handleSubmitExtension = async () => {
-        if (!order?.id) return;
+        if (!order?.id || !extensionItem) return;
         setExtensionLoading(true);
         try {
-            const isItemExtension = !!extensionItem;
-            const currentRequest = isItemExtension ? (extensionItem as any).extension_request : order.extension_request;
+            const currentRequest = (extensionItem as any).extension_request;
 
             if (currentRequest?.id) {
                 const payload: any = {};
@@ -452,7 +446,7 @@ export function OrderDetailPage() {
                     payload.valid_reason = extensionValidReason;
                     if (extensionNewDueAt) payload.status = 'manager_approved';
                 }
-                await ordersApi.updateExtensionRequest(order.id, payload);
+                await requestsApi.updateExtension(currentRequest.id, payload);
                 toast.success('Đã cập nhật yêu cầu gia hạn');
             } else {
                 if (!extensionReason.trim()) {
@@ -471,11 +465,7 @@ export function OrderDetailPage() {
                     new_due_at: new Date(extensionNewDueAt).toISOString()
                 };
 
-                if (isItemExtension && extensionItem) {
-                    await orderItemsApi.createExtensionRequest(extensionItem.id, extensionData);
-                } else {
-                    await ordersApi.createExtensionRequest(order.id, extensionData);
-                }
+                await orderItemsApi.createExtensionRequest(extensionItem.id, extensionData);
 
                 toast.success('Đã gửi yêu cầu gia hạn.');
                 // Chuyển sang bên yêu cầu
@@ -503,8 +493,9 @@ export function OrderDetailPage() {
         if (!leadItem) return;
 
         if (targetRoomId === 'done') {
-            const serviceIds = group.services.map(s => s.id);
-            setConfirmDoneItemIds(serviceIds);
+            const itemIds = [...group.services.map(s => s.id)];
+            if (group.product?.id) itemIds.push(group.product.id);
+            setConfirmDoneItemIds(itemIds);
             setIsV2ServiceForDone(group.services.some(s => s.item_type === 'service' || s.item_type === 'package'));
             setShowConfirmDoneDialog(true);
         } else if (targetRoomId === 'fail') {
@@ -569,27 +560,6 @@ export function OrderDetailPage() {
                         </h1>
                         <div className="text-muted-foreground text-sm flex items-center gap-2">
                             <span>Chi tiết đơn hàng</span>
-                            <span className="text-muted-foreground/30 px-1">•</span>
-                            <div
-                                className="flex items-center gap-1.5 cursor-pointer hover:bg-orange-50 px-1.5 py-0.5 rounded transition-colors group"
-                                onClick={handleOpenExtension}
-                            >
-                                {order.due_at ? (
-                                    <>
-                                        <Calendar className="h-3.5 w-3.5 text-orange-500" />
-                                        <span className="font-medium">Hạn trả: {formatDate(order.due_at)}</span>
-                                        <span className={`font-semibold ${getSLADisplay(order.due_at).includes('Trễ') ? 'text-red-600' : 'text-green-600'}`}>
-                                            ({getSLADisplay(order.due_at)})
-                                        </span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-                                        <span className="italic">Chưa có hạn</span>
-                                    </>
-                                )}
-                                <Pencil className="h-3 w-3 text-muted-foreground opacity-20 group-hover:opacity-100 transition-opacity ml-1" />
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -608,15 +578,25 @@ export function OrderDetailPage() {
                             Sửa đơn
                         </Button>
                     )}
-                    {order.status !== 'after_sale' && order.status !== 'cancelled' && (
-                        <Button
-                            className="bg-green-600 hover:bg-green-700 flex-1 sm:flex-none"
-                            onClick={() => setShowPaymentRecordDialog(true)}
-                        >
-                            <CreditCard className="h-4 w-4 mr-2" />
-                            Thanh toán
-                        </Button>
-                    )}
+                    <Button
+                        className={order.payment_status === 'paid' 
+                            ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100 flex-1 sm:flex-none" 
+                            : "bg-green-600 hover:bg-green-700 flex-1 sm:flex-none"
+                        }
+                        onClick={() => setShowPaymentRecordDialog(true)}
+                    >
+                        {order.payment_status === 'paid' ? (
+                            <>
+                                <CheckCircle2 className="h-4 w-4 mr-2 text-green-600" />
+                                Đã thanh toán
+                            </>
+                        ) : (
+                            <>
+                                <CreditCard className="h-4 w-4 mr-2" />
+                                Thanh toán
+                            </>
+                        )}
+                    </Button>
                     {(user?.role === 'manager' || user?.role === 'admin') &&
                         order.items?.some(item => (item as any).status === 'step4') && (
                             <Button
@@ -889,37 +869,40 @@ export function OrderDetailPage() {
 
             {/* Extension Dialog */}
             <Dialog open={showExtensionDialog} onOpenChange={setShowExtensionDialog}>
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>
-                            {order.extension_request ? 'Cập nhật yêu cầu gia hạn' : 'Cập nhật hạn trả / Gia hạn'}
+                <DialogContent className="max-w-md rounded-2xl p-0 overflow-hidden border-none shadow-2xl">
+                    <DialogHeader className="p-6 bg-slate-50 border-b">
+                        <DialogTitle className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                            <Clock className="w-5 h-5 text-primary" />
+                            {(!order.extension_request && !(extensionItem as any)?.extension_request)
+                                ? 'Yêu cầu gia hạn sản phẩm'
+                                : 'Thông tin yêu cầu gia hạn'}
                         </DialogTitle>
                     </DialogHeader>
-                    <div className="space-y-4">
-                        {!order.extension_request && !(extensionItem as any)?.extension_request ? (
+                    <div className="p-6 space-y-5">
+                        {(!order.extension_request && !(extensionItem as any)?.extension_request) ? (
                             <>
                                 {extensionItem && (
-                                    <div className="p-3 bg-muted rounded-lg mb-4">
+                                    <div className="p-4 bg-primary/5 rounded-xl border border-primary/10">
                                         <p className="text-sm font-bold text-primary flex items-center gap-2">
                                             <Layers className="h-4 w-4" />
                                             {extensionItem.item_name}
                                         </p>
                                     </div>
                                 )}
-                                <div className="space-y-2">
-                                    <Label>Lý do xin gia hạn</Label>
+                                <div className="space-y-1.5">
+                                    <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Lý do xin gia hạn</Label>
                                     <Select value={['MẤT ĐIỆN', 'HẾT NVL', 'QUÊN CHƯA LÀM'].includes(extensionReason) ? extensionReason : extensionReason ? 'other' : ''} onValueChange={(val) => {
                                         if (val === 'other') setExtensionReason('');
                                         else setExtensionReason(val);
                                     }}>
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Chọn lý do..." />
+                                        <SelectTrigger className="h-11 rounded-xl">
+                                            <SelectValue placeholder="Chọn lý do phổ biến..." />
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="MẤT ĐIỆN">1. Mất điện</SelectItem>
                                             <SelectItem value="HẾT NVL">2. Hết nguyên vật liệu</SelectItem>
                                             <SelectItem value="QUÊN CHƯA LÀM">3. Quên chưa làm</SelectItem>
-                                            <SelectItem value="other">Ghi chú khác...</SelectItem>
+                                            <SelectItem value="other">Lý do khác...</SelectItem>
                                         </SelectContent>
                                     </Select>
                                     {(extensionReason === '' || !['MẤT ĐIỆN', 'HẾT NVL', 'QUÊN CHƯA LÀM'].includes(extensionReason)) && (
@@ -927,54 +910,114 @@ export function OrderDetailPage() {
                                             placeholder="Nhập lý do chi tiết..."
                                             value={extensionReason}
                                             onChange={e => setExtensionReason(e.target.value)}
-                                            className="mt-2"
+                                            className="min-h-[100px] rounded-xl mt-3 resize-none border-slate-200"
                                         />
                                     )}
                                 </div>
-                                <div className="space-y-2">
-                                    <Label className="flex items-center gap-2">
-                                        <Clock className="h-4 w-4 text-red-500" />
-                                        THỜI GIAN ĐỀ XUẤT XIN GIA HẠN <span className="text-red-500">*</span>
+                                <div className="space-y-1.5">
+                                    <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                                        THỜI GIAN ĐỀ XUẤT XIN GIA HẠN <span className="text-red-500 text-base">*</span>
                                     </Label>
-                                    <Input
-                                        type="datetime-local"
-                                        required
-                                        value={extensionNewDueAt}
-                                        onChange={e => setExtensionNewDueAt(e.target.value)}
-                                    />
-                                    <p className="text-[10px] text-muted-foreground italic">Phải có ngày giờ rõ ràng để tiếp tục quy trình.</p>
+                                    <div className="relative">
+                                        <Input
+                                            type="datetime-local"
+                                            required
+                                            value={extensionNewDueAt}
+                                            onChange={e => setExtensionNewDueAt(e.target.value)}
+                                            className="h-11 rounded-xl"
+                                        />
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 italic">Hệ thống sẽ chuyển yêu cầu tới Sale và Manager để xử lý.</p>
                                 </div>
                             </>
                         ) : (
-                            <>
-                                <div className="p-3 bg-muted rounded-lg text-sm">
-                                    <p>Lý do: {order.extension_request?.reason || (extensionItem as any)?.extension_request?.reason}</p>
-                                    <p>Trạng thái: {order.extension_request?.status || (extensionItem as any)?.extension_request?.status}</p>
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Kết quả liên hệ khách</Label>
-                                    <Textarea value={extensionCustomerResult} onChange={e => setExtensionCustomerResult(e.target.value)} />
-                                </div>
-                                {(user?.role === 'manager' || user?.role === 'admin') && (
-                                    <div className="space-y-4">
-                                        <div className="flex items-center gap-2">
-                                            <Checkbox checked={extensionValidReason} onCheckedChange={(val) => setExtensionValidReason(!!val)} />
-                                            <Label>Lý do hợp lệ</Label>
+                            <div className="space-y-6">
+                                <div className="p-5 bg-slate-50 rounded-2xl border border-slate-100 space-y-4 shadow-inner">
+                                    <div className="space-y-1">
+                                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Lý do kỹ thuật viên đưa ra</span>
+                                        <p className="text-sm font-medium text-slate-700 leading-relaxed border-l-2 border-primary/30 pl-3 py-1">
+                                            {order.extension_request?.reason || (extensionItem as any)?.extension_request?.reason}
+                                        </p>
+                                    </div>
+                                    
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="space-y-1">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Hạn đề xuất</span>
+                                            <div className="flex items-center gap-2 text-slate-600">
+                                                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                                                <span className="text-sm font-semibold italic">
+                                                    {(() => {
+                                                        const due = order.extension_request?.new_due_at || (extensionItem as any)?.extension_request?.new_due_at;
+                                                        return due ? format(new Date(due), 'dd/MM/yyyy HH:mm') : 'N/A';
+                                                    })()}
+                                                </span>
+                                            </div>
                                         </div>
-                                        <div className="space-y-2">
-                                            <Label>Hạn mới</Label>
-                                            <Input type="datetime-local" value={extensionNewDueAt} onChange={e => setExtensionNewDueAt(e.target.value)} />
+                                        <div className="space-y-1 text-right">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Trạng thái</span>
+                                            <div>
+                                                <Badge className={`rounded-lg px-2.5 py-0.5 text-[10px] font-bold uppercase ${
+                                                    (() => {
+                                                        const status = order.extension_request?.status || (extensionItem as any)?.extension_request?.status;
+                                                        if (status === 'manager_approved') return 'bg-emerald-100 text-emerald-700 border-emerald-200';
+                                                        if (status === 'requested' || status === 'pending') return 'bg-amber-100 text-amber-700 border-amber-200 animate-pulse';
+                                                        return 'bg-slate-100 text-slate-600';
+                                                    })()
+                                                }`}>
+                                                    {(() => {
+                                                        const status = order.extension_request?.status || (extensionItem as any)?.extension_request?.status;
+                                                        if (status === 'manager_approved') return 'Đã phê duyệt';
+                                                        if (status === 'sale_contacted') return 'Đã liên hệ khách';
+                                                        if (status === 'requested' || status === 'pending') return 'Đang xin gia hạn';
+                                                        return status;
+                                                    })()}
+                                                </Badge>
+                                            </div>
                                         </div>
                                     </div>
+                                </div>
+
+                                {(order.extension_request?.customer_result || (extensionItem as any)?.extension_request?.customer_result) && (
+                                    <div className="space-y-1.5 px-1">
+                                        <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Ghi chú từ Sale</Label>
+                                        <p className="text-sm text-slate-600 bg-white p-3 rounded-xl border border-slate-100 italic">
+                                            "{order.extension_request?.customer_result || (extensionItem as any)?.extension_request?.customer_result}"
+                                        </p>
+                                    </div>
                                 )}
-                            </>
+                                
+                                <div className="p-4 bg-amber-50 rounded-xl border border-amber-100 flex items-start gap-3">
+                                    <div className="bg-amber-100 p-1.5 rounded-lg mt-0.5">
+                                        <Info className="w-4 h-4 text-amber-600" />
+                                    </div>
+                                    <p className="text-[11px] text-amber-800 leading-relaxed font-medium">
+                                        Yêu cầu này đang được Sale và Quản lý thẩm định. Vui lòng theo dõi trạng thái hoặc liên hệ trực tiếp nếu cần gấp.
+                                    </p>
+                                </div>
+                            </div>
                         )}
                     </div>
-                    <DialogFooter>
-                        <Button onClick={handleSubmitExtension} disabled={extensionLoading}>
-                            {extensionLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            {order.extension_request ? 'Cập nhật' : 'Gửi yêu cầu'}
-                        </Button>
+                    <DialogFooter className="p-6 bg-slate-50/50 border-t flex items-center justify-between gap-3">
+                        {(!order.extension_request && !(extensionItem as any)?.extension_request) ? (
+                            <>
+                                <Button variant="ghost" onClick={() => setShowExtensionDialog(false)} className="rounded-xl px-6">Hủy</Button>
+                                <Button 
+                                    onClick={handleSubmitExtension} 
+                                    disabled={extensionLoading}
+                                    className="rounded-xl px-10 font-bold shadow-lg shadow-primary/20"
+                                >
+                                    {extensionLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
+                                    Gửi yêu cầu
+                                </Button>
+                            </>
+                        ) : (
+                            <Button 
+                                onClick={() => setShowExtensionDialog(false)} 
+                                className="w-full rounded-xl h-11 font-bold bg-slate-800 hover:bg-slate-900 shadow-xl"
+                            >
+                                Đóng thông tin
+                            </Button>
+                        )}
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
@@ -1009,9 +1052,18 @@ export function OrderDetailPage() {
                 onOpenChange={setShowConfirmDoneDialog}
                 itemIds={confirmDoneItemIds}
                 isV2Service={isV2ServiceForDone}
-                onSuccess={() => {
-                    reloadOrder();
-                    if (order?.id) fetchKanbanLogs(order.id);
+                onSuccess={async () => {
+                    const updated = await reloadOrder();
+                    if (updated?.id) {
+                        fetchKanbanLogs(updated.id);
+                        // Synchronize overall order status – if all items are now finished, move order to 'done'
+                        const allDone = updated.items?.every((i: any) => 
+                            i.status === 'completed' || i.status === 'cancelled' || i.status === 'aftersale_stored'
+                        );
+                        if (allDone && updated.status !== 'done' && updated.status !== 'after_sale') {
+                            await updateOrderStatus(updated.id, 'done');
+                        }
+                    }
                     setActiveTab('aftersale');
                 }}
             />

@@ -32,7 +32,8 @@ interface AftersaleTabProps {
 }
 
 const AFTER_COLS = [
-    { id: 'after1', title: 'Kiểm nợ & Ảnh hoàn thiện', color: 'text-purple-700' },
+    { id: 'after1', title: 'Ảnh hoàn thiện', color: 'text-purple-700' },
+    { id: 'after1_debt', title: 'Kiểm nợ', color: 'text-purple-700' },
     { id: 'after2', title: 'Đóng gói & Giao hàng', color: 'text-purple-700' },
     { id: 'after3', title: 'Nhắn HD Bảo Quản & Feedback', color: 'text-purple-700' },
     { id: 'after4', title: 'Lưu Trữ', color: 'text-green-700' },
@@ -58,7 +59,7 @@ const AftersaleCard = memo(({
     const productName = product?.item_name || 'Khách';
     const productItem = product as any;
     const productImage = product?.image || productItem?.product?.image || productItem?.service?.image;
-    const isLate = order.due_at && new Date(order.due_at) < new Date();
+    const isLate = product?.due_at && new Date(product.due_at) < new Date();
 
     return (
         <Draggable key={draggableId} draggableId={draggableId} index={index}>
@@ -117,7 +118,7 @@ const AftersaleCard = memo(({
                         <Badge variant="secondary" className="text-[10px] font-bold text-purple-500 bg-purple-50 uppercase h-5">
                             {order.sales_user?.name || 'Sale'}
                         </Badge>
-                        <span className="font-semibold text-gray-400">{getSLADisplay(order.due_at)}</span>
+                        <span className="font-semibold text-gray-400">{getSLADisplay(product?.due_at)}</span>
                     </div>
 
                     {col.id === 'after1' && (
@@ -127,7 +128,17 @@ const AftersaleCard = memo(({
                             className="mt-2 w-full h-8 text-[11px] font-bold border-purple-200 hover:bg-purple-50 text-purple-700"
                             onClick={(e) => { e.stopPropagation(); onProductCardClick(group, 'after1'); }}
                         >
-                            <Camera className="h-3.5 w-3.5 mr-1.5" /> Kiểm nợ & Ảnh hoàn thiện
+                            <Camera className="h-3.5 w-3.5 mr-1.5" /> Ảnh hoàn thiện
+                        </Button>
+                    )}
+                    {col.id === 'after1_debt' && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="mt-2 w-full h-8 text-[11px] font-bold border-purple-200 hover:bg-purple-50 text-purple-700"
+                            onClick={(e) => { e.stopPropagation(); onProductCardClick(group, 'after1_debt'); }}
+                        >
+                            <FileText className="h-3.5 w-3.5 mr-1.5" /> Kiểm nợ
                         </Button>
                     )}
                     {col.id === 'after2' && (
@@ -176,19 +187,32 @@ export function AftersaleTab({
 
         toast.success(`Đã chuyển sản phẩm "${draggedGroup.product.item_name}" sang bước mới`);
 
-        if (result.source.droppableId === 'after1' && newStage === 'after2') {
+        if (result.source.droppableId === 'after1' && newStage === 'after1_debt') {
             const hasPhotos = draggedGroup.product.completion_photos && draggedGroup.product.completion_photos.length > 0;
-            const hasNames = order.debt_checked_by_name && order.aftersale_receiver_name;
-            const isDebtChecked = order.debt_checked;
+            const hasReceiver = order.aftersale_receiver_name;
 
-            if (!isDebtChecked || !hasNames || !hasPhotos) {
-                let errorMsg = "Vui lòng hoàn thành các yêu cầu sau để chuyển bước:";
-                if (!isDebtChecked) errorMsg += "\n- Cần \"Xác nhận đã kiểm nợ\"";
-                if (!hasNames) errorMsg += "\n- Phải điền tên người Kiểm nợ và người Nhận hàng";
-                if (!hasPhotos) errorMsg += "\n- Cần upload ít nhất một \"Ảnh hoàn thiện/kiểm nợ\"";
+            if (!hasReceiver || !hasPhotos) {
+                let errorMsg = "Vui lòng hoàn thành để chuyển bước:";
+                if (!hasReceiver) errorMsg += "\n- Cần điền tên \"Người chụp After\"";
+                if (!hasPhotos) errorMsg += "\n- Cần upload ít nhất một \"Ảnh hoàn thiện\"";
                 
                 toast.error(errorMsg, { duration: 5000 });
                 onProductCardClick(draggedGroup, 'after1');
+                return;
+            }
+        }
+
+        if (result.source.droppableId === 'after1_debt' && newStage === 'after2') {
+            const hasNames = order.debt_checked_by_name;
+            const isDebtChecked = order.debt_checked;
+
+            if (!isDebtChecked || !hasNames) {
+                let errorMsg = "Vui lòng hoàn thành để chuyển bước:";
+                if (!isDebtChecked) errorMsg += "\n- Cần \"Xác nhận đã kiểm nợ\"";
+                if (!hasNames) errorMsg += "\n- Phải điền tên \"Người thu tiền\"";
+                
+                toast.error(errorMsg, { duration: 5000 });
+                onProductCardClick(draggedGroup, 'after1_debt');
                 return;
             }
         }
@@ -237,19 +261,19 @@ export function AftersaleTab({
                             After sale – Quy trình sau kỹ thuật
                         </CardTitle>
                         <p className="text-sm text-muted-foreground">
-                            Kiểm nợ & Ảnh → Đóng gói & Giao hàng → Nhắn HD & Feedback → Lưu trữ. Kéo thả thẻ đơn vào cột để chuyển bước.
+                            Ảnh → Kiểm nợ → Đóng gói & Giao hàng → Nhắn HD & Feedback → Lưu trữ. Kéo thả thẻ đơn vào cột để chuyển bước.
                         </p>
                     </CardHeader>
                     <CardContent>
                         <DragDropContext onDragEnd={handleAfterSaleDragEnd}>
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 overflow-x-auto pb-4">
+                            <div className="grid grid-cols-1 md:grid-cols-5 gap-4 overflow-x-auto pb-4">
                                 {AFTER_COLS.map((col) => {
                                     const colGroups = groups.filter(g => {
                                         const itemStage = g.product?.after_sale_stage || (order as any).after_sale_stage || 'after1';
                                         return itemStage === col.id && getGroupCurrentTechRoom(g) === 'done';
                                     });
                                     return (
-                                        <div key={col.id} className="flex flex-col min-w-[260px]">
+                                        <div key={col.id} className="flex flex-col min-w-[220px]">
                                             <div className="flex justify-between items-center mb-4 px-2">
                                                 <h2 className={cn("font-bold uppercase text-xs tracking-widest", col.color)}>
                                                     {col.title}

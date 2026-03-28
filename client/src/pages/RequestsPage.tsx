@@ -33,17 +33,21 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
-import { requestsApi, orderItemsApi, ordersApi } from '@/lib/api';
+import { requestsApi, orderItemsApi, ordersApi, usersApi, transactionsApi } from '@/lib/api';
 import { uploadFile } from '@/lib/supabase';
-import { formatDateTime } from '@/lib/utils';
+import { formatDateTime, formatCurrency } from '@/lib/utils';
 import { ACCESSORY_LABELS, PARTNER_LABELS, EXTENSION_LABELS, REQUEST_SLA } from '@/components/orders/constants';
 
-const ACCESSORY_COLUMNS = Object.entries(ACCESSORY_LABELS).map(([id, label]) => ({ id, label }));
-const PARTNER_COLUMNS = Object.entries(PARTNER_LABELS).map(([id, label]) => ({ id, label }));
+const ACCESSORY_COLUMNS = Object.entries(ACCESSORY_LABELS)
+    .filter(([id]) => id !== 'requested' && id !== 'rejected')
+    .map(([id, label]) => ({ id, label }));
+const PARTNER_COLUMNS = Object.entries(PARTNER_LABELS)
+    .filter(([id]) => id !== 'requested' && id !== 'rejected')
+    .map(([id, label]) => ({ id, label }));
 
 // Extension: Show only requested, manager_approved, sale_contacted, notified_tech in Kanban board
 const EXTENSION_COLUMNS = Object.entries(EXTENSION_LABELS)
-    .filter(([id]) => ['requested', 'manager_approved', 'sale_contacted', 'notified_tech'].includes(id))
+    .filter(([id]) => ['manager_approved', 'sale_contacted', 'notified_tech'].includes(id))
     .map(([id, label]) => ({ id, label }));
 
 // Reorder extension columns: QL duyệt (manager_approved) before "Đã báo KT" (notified_tech)
@@ -150,24 +154,24 @@ function PhotoUpload({ label, value, onChange, disabled }: { label: string; valu
     return (
         <div className="space-y-2">
             <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">{label}</Label>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 gap-3">
                 {value?.map((url, i) => (
-                    <div key={i} className="group relative aspect-square rounded-lg overflow-hidden border bg-white shadow-sm">
+                    <div key={i} className="group relative aspect-square rounded-xl overflow-hidden border bg-white shadow-md transition-transform hover:scale-[1.02]">
                         <img src={url} alt="" className="w-full h-full object-cover" />
                         {!disabled && (
                             <button
                                 onClick={() => removePhoto(i)}
-                                className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="absolute top-1.5 right-1.5 bg-black/60 text-white rounded-full p-1.5 opacity-0 group-hover:opacity-100 transition-opacity"
                             >
-                                <Plus className="w-3 h-3 rotate-45" />
+                                <Plus className="w-4 h-4 rotate-45" />
                             </button>
                         )}
                     </div>
                 ))}
                 {!disabled && (
-                    <label className={`aspect-square rounded-lg border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-all ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
-                        {uploading ? <Loader2 className="w-5 h-5 animate-spin text-primary" /> : <ImageIcon className="w-6 h-6 text-slate-300" />}
-                        <span className="text-[10px] font-medium text-slate-400 mt-1">Tải ảnh</span>
+                    <label className={`aspect-square rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-all ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                        {uploading ? <Loader2 className="w-8 h-8 animate-spin text-primary" /> : <ImageIcon className="w-10 h-10 text-slate-300" />}
+                        <span className="text-xs font-bold text-slate-400 mt-2">Tải ảnh</span>
                         <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileChange} />
                     </label>
                 )}
@@ -176,38 +180,54 @@ function PhotoUpload({ label, value, onChange, disabled }: { label: string; valu
     );
 }
 
-const ACCESSORY_TRANSITIONS: Record<string, { next: string; label: string; fields: { name: string; label: string; type: 'photo' | 'text' | 'number'; required: boolean; placeholder?: string }[] }> = {
-    need_buy: { 
-        next: 'bought', 
-        label: 'Đã mua (Cập nhật ảnh)', 
+const ACCESSORY_TRANSITIONS: Record<string, { next: string; label: string; fields: { name: string; label: string; type: 'photo' | 'text' | 'number' | 'select' | 'datetime-local'; required: boolean; placeholder?: string; options?: { label: string; value: string }[] }[] }> = {
+    need_buy: {
+        next: 'bought',
+        label: 'Đã mua (Cập nhật ảnh)',
         fields: [
-            { name: 'photos_purchase', label: '1. Ảnh mua', type: 'photo', required: true },
-            { name: 'photos_transfer', label: '2. Ảnh ck', type: 'photo', required: true }
-        ] 
+            { name: 'payment_by', label: '1. Nhân viên chi', type: 'select', required: true },
+            {
+                name: 'payment_type', label: '2. Chi loại', type: 'select', required: true, options: [
+                    { label: 'Tiền mặt', value: 'cash' },
+                    { label: 'Chuyển khoản', value: 'transfer' },
+                    { label: 'Zalo Pay', value: 'zalopay' }
+                ]
+            },
+            { name: 'photos_purchase', label: '3. Ảnh mua', type: 'photo', required: true },
+            { name: 'photos_transfer', label: '4. Ảnh ck', type: 'photo', required: true }
+        ]
     },
-    bought: { 
-        next: 'waiting_ship', 
-        label: 'Chờ ship (Cập nhật vận đơn)', 
+    bought: {
+        next: 'waiting_ship',
+        label: 'Chờ ship (Cập nhật vận đơn)',
         fields: [
             { name: 'tracking_number', label: '1. Mã vận đơn', type: 'text', required: true, placeholder: 'VN12345678...' },
             { name: 'notes_shipping', label: '2. Note', type: 'text', required: false, placeholder: 'Ghi chú vận chuyển...' }
-        ] 
+        ]
     },
-    waiting_ship: { 
-        next: 'shipped', 
-        label: 'Ship tới (Cập nhật nhận hàng)', 
+    waiting_ship: {
+        next: 'shipped',
+        label: 'Ship tới (Cập nhật nhận hàng)',
         fields: [
-            { name: 'shipping_cost', label: '1. Phí ship (0đ hoặc 100k...)', type: 'text', required: true, placeholder: '0đ hoặc 100k...' },
-            { name: 'photos_arrival', label: '2. Ảnh chụp lúc nhận hàng', type: 'photo', required: true }
-        ] 
+            { name: 'payment_by', label: '1. Nhân viên chi', type: 'select', required: true },
+            {
+                name: 'payment_type', label: '2. Chi loại', type: 'select', required: true, options: [
+                    { label: 'Tiền mặt', value: 'cash' },
+                    { label: 'Chuyển khoản', value: 'transfer' },
+                    { label: 'Zalo Pay', value: 'zalopay' }
+                ]
+            },
+            { name: 'shipping_cost', label: '3. Phí ship (0đ hoặc 100k...)', type: 'text', required: true, placeholder: '0đ hoặc 100k...' },
+            { name: 'photos_arrival', label: '4. Ảnh chụp lúc nhận hàng', type: 'photo', required: true }
+        ]
     },
-    shipped: { 
-        next: 'delivered_to_tech', 
-        label: 'Giao KT (Hoàn tất bàn giao)', 
+    shipped: {
+        next: 'delivered_to_tech',
+        label: 'Giao KT (Hoàn tất bàn giao)',
         fields: [
             { name: 'photos_item', label: '1. Chụp ảnh hàng', type: 'photo', required: true },
             { name: 'photos_storage', label: '2. Chụp chỗ để', type: 'photo', required: true }
-        ] 
+        ]
     },
     delivered_to_tech: {
         next: 'done',
@@ -216,31 +236,62 @@ const ACCESSORY_TRANSITIONS: Record<string, { next: string; label: string; field
     }
 };
 
-const PARTNER_TRANSITIONS: Record<string, { next: string; label: string; fields: { name: string; label: string; type: 'photo' | 'text' | 'number' | 'datetime-local'; required: boolean; placeholder?: string }[] }> = {
-    ship_to_partner: { 
-        next: 'partner_doing', 
-        label: 'Đối tác đã nhận', 
+const PARTNER_TRANSITIONS: Record<string, { next: string; label: string; fields: { name: string; label: string; type: 'photo' | 'text' | 'number' | 'select' | 'datetime-local'; required: boolean; placeholder?: string; options?: { label: string; value: string }[] }[] }> = {
+    ship_to_partner: {
+        next: 'partner_doing',
+        label: 'Đối tác đã nhận',
         fields: [
-            { name: 'photos_package', label: 'Ảnh gói đồ', type: 'photo', required: true }
-        ] 
+            { name: 'sender_staff', label: '1. Tên NV gửi', type: 'select', required: true },
+            { name: 'shipping_sender_staff', label: '2. Tên NV gửi tiền ship', type: 'select', required: true },
+            { name: 'shipping_cost_out', label: '3. Phí ship đi', type: 'text', required: true, placeholder: '0đ hoặc 20k...' },
+            {
+                name: 'shipping_payment_type', label: '4. Loại chi ship', type: 'select', required: true, options: [
+                    { label: 'Tiền mặt', value: 'cash' },
+                    { label: 'Chuyển khoản', value: 'transfer' },
+                    { label: 'Zalo Pay', value: 'zalopay' }
+                ]
+            },
+            { name: 'appointment_time', label: '5. Thời gian đối tác hẹn làm', type: 'datetime-local', required: true },
+            { name: 'photos_package', label: '6. Ảnh gói đồ', type: 'photo', required: true }
+        ]
     },
-    partner_doing: { 
-        next: 'ship_back', 
-        label: 'Gửi về Shop', 
+    partner_doing: {
+        next: 'ship_back',
+        label: 'Gửi về Shop',
         fields: [
             { name: 'partner_name', label: 'Tên đối tác', type: 'text', required: true, placeholder: 'Xưởng ABC...' },
             { name: 'partner_address', label: 'Địa chỉ', type: 'text', required: true, placeholder: 'Số 1 Trần Phú...' },
             { name: 'appointment_time', label: 'Hẹn ngày xong', type: 'datetime-local', required: true }
-        ] 
+        ]
     },
-    ship_back: { 
+    ship_back: {
         next: 'done', 
         label: 'Hoàn thành bàn giao', 
         fields: [
-            { name: 'shipping_cost', label: 'Phí ship (Free hoặc 20k...)', type: 'text', required: true, placeholder: 'Free hoặc 20k...' },
-            { name: 'photos_package_back', label: 'Ảnh gói hàng (về)', type: 'photo', required: true },
-            { name: 'photos_storage', label: 'Ảnh chỗ để gói hàng', type: 'photo', required: true }
-        ] 
+            // Row 1: Costs
+            { name: 'shipping_cost_back', label: '1. Phí ship mang về', type: 'text', required: true, placeholder: '0đ hoặc 20k...' },
+            { name: 'partner_fee_amount', label: '4. Phí sửa đối tác', type: 'text', required: true, placeholder: '0đ hoặc 500k...' },
+            
+            // Row 2: Personnel
+            { name: 'shipping_sender_staff_back', label: '2. NV gửi tiền ship về', type: 'select', required: true },
+            { name: 'partner_fee_sender_staff', label: '5. NV gửi phí đối tác', type: 'select', required: true },
+            
+            // Row 3: Payment Type
+            { name: 'shipping_payment_type_back', label: '3. Loại chi ship về', type: 'select', required: true, options: [
+                { label: 'Tiền mặt', value: 'cash' },
+                { label: 'Chuyển khoản', value: 'transfer' },
+                { label: 'Zalo Pay', value: 'zalopay' }
+            ]},
+            { name: 'partner_payment_type', label: '6. Loại chi phí đối tác', type: 'select', required: true, options: [
+                { label: 'Tiền mặt', value: 'cash' },
+                { label: 'Chuyển khoản', value: 'transfer' },
+                { label: 'Zalo Pay', value: 'zalopay' }
+            ]},
+            
+            // Row 4: Evidence
+            { name: 'photos_package_back', label: '7. Ảnh gói hàng (về)', type: 'photo', required: true },
+            { name: 'photos_storage', label: '8. Ảnh chỗ để gói hàng', type: 'photo', required: true }
+        ]
     },
 };
 
@@ -335,10 +386,10 @@ function PartnerKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, getPr
     const { label: slaLabel, isOverdue, color: slaColor } = calculateSLADisplay(row.updated_at, slaConfig);
 
     const metadata = row.metadata || {};
-    const isAppointmentOverdue = row.status === 'partner_doing' && 
-                                metadata.appointment_time && 
-                                new Date(metadata.appointment_time).getTime() < Date.now();
-    
+    const isAppointmentOverdue = row.status === 'partner_doing' &&
+        metadata.appointment_time &&
+        new Date(metadata.appointment_time).getTime() < Date.now();
+
     const finalOverdue = isOverdue || isAppointmentOverdue;
 
     return (
@@ -419,8 +470,9 @@ function PartnerKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, getPr
     );
 }
 
-function ExtensionKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, getProductImage, extra }: Omit<KanbanCardProps, 'getItemName' | 'getProductCode'> & { getItemName?: (row: any) => string }) {
+function ExtensionKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, getProductCode, getItemName, getProductImage, extra }: KanbanCardProps) {
     const order = getOrder(row);
+    const productCode = getProductCode?.(row) ?? '—';
     const productImage = getProductImage?.(row) ?? null;
 
     // SLA for Extension: Warning if requested more than 3h ago (handled by requested: -3 SLA)
@@ -431,11 +483,11 @@ function ExtensionKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, get
         <div
             className={`group relative rounded-xl border bg-card text-sm shadow-sm transition-all hover:shadow-md overflow-hidden ${isOverdue ? 'border-red-500 ring-1 ring-red-500' : ''}`}
         >
-            <div className="relative w-full aspect-[16/9] bg-muted flex items-center justify-center overflow-hidden">
+            <div className="relative w-full aspect-[4/3] bg-muted flex items-center justify-center overflow-hidden">
                 {productImage ? (
                     <img src={productImage} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
                 ) : (
-                    <Clock className="h-8 w-8 text-muted-foreground/30" />
+                    <Clock className="h-10 w-10 text-muted-foreground/30" />
                 )}
                 {slaLabel && (
                     <div className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-bold shadow-sm flex items-center gap-1 border ${slaColor}`}>
@@ -448,9 +500,13 @@ function ExtensionKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, get
             <div className="p-3">
                 <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                        <span className="font-mono font-bold text-primary truncate" title={order.order_code}>
-                            #{order.order_code || '—'}
-                        </span>
+                        <div className="flex items-center gap-1.5 overflow-hidden">
+                            <span className="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider">{productCode.includes('.') ? 'Mã SP' : 'Mã ĐH'}:</span>
+                            <span className="font-mono font-bold text-primary truncate" title={productCode}>{productCode}</span>
+                        </div>
+                        <p className="mt-1 font-medium text-slate-900 truncate" title={getItemName(row)}>
+                            {getItemName(row)}
+                        </p>
                     </div>
                     {order.id && (
                         <Button
@@ -546,23 +602,32 @@ function AccessoryKanban({
                                                             onOpenDialog={onOpenDialog}
                                                             onNavigateOrder={onNavigateOrder}
                                                             getOrder={() => order || {}}
-                                                            getProductCode={(r) => r.order_item?.item_code ?? 
-                                                                 r.order_product_service?.order_product?.product_code ?? 
-                                                                 r.order_product?.product_code ?? 
-                                                                 (r.metadata?.order_code ?? '—').toUpperCase().replace('HD', 'HĐ')}
-                                                            getItemName={(r) => r.order_item?.item_name ?? 
-                                                                 r.order_product_service?.order_product?.name ?? 
-                                                                 r.order_product?.name ?? '—'}
+                                                            getProductCode={(r) => r.order_item?.item_code ??
+                                                                r.order_product_service?.order_product?.product_code ??
+                                                                r.order_product?.product_code ??
+                                                                (r.metadata?.order_code ?? '—').toUpperCase().replace('HD', 'HĐ')}
+                                                            getItemName={(r) => r.order_item?.item_name ??
+                                                                r.order_product_service?.order_product?.name ??
+                                                                r.order_product?.name ?? '—'}
                                                             getProductImage={(r) => {
-                                                                const v1 = r.order_item?.product?.image || r.metadata?.photos?.[0];
-                                                                if (v1) return v1;
-                                                                const op = r.order_product_service?.order_product ?? r.order_product;
-                                                                const imgs = op?.images;
-                                                                if (Array.isArray(imgs) && imgs[0]) return imgs[0];
-                                                                if (typeof imgs === 'string') {
-                                                                    try { const arr = JSON.parse(imgs); return Array.isArray(arr) && arr[0] ? arr[0] : null; } catch { return null; }
-                                                                }
-                                                                return null;
+                                                                const parseImages = (imgs: any) => {
+                                                                    if (!imgs) return null;
+                                                                    if (Array.isArray(imgs)) return imgs[0] || null;
+                                                                    if (typeof imgs === 'string') {
+                                                                        if (imgs.startsWith('[') || imgs.startsWith('{')) {
+                                                                            try {
+                                                                                const parsed = JSON.parse(imgs);
+                                                                                return Array.isArray(parsed) ? (parsed[0] || null) : (parsed || null);
+                                                                            } catch { return imgs; }
+                                                                        }
+                                                                        return imgs;
+                                                                    }
+                                                                    return null;
+                                                                };
+                                                                return r.order_item?.product?.image ||
+                                                                    r.metadata?.photos?.[0] ||
+                                                                    parseImages(r.order_product_service?.order_product?.images) ||
+                                                                    parseImages(r.order_product?.images);
                                                             }}
                                                         />
                                                     </div>
@@ -636,23 +701,32 @@ function PartnerKanban({
                                                             onOpenDialog={onOpenDialog}
                                                             onNavigateOrder={onNavigateOrder}
                                                             getOrder={() => order || {}}
-                                                            getProductCode={(r) => r.order_item?.item_code ?? 
-                                                                 r.order_product_service?.order_product?.product_code ?? 
-                                                                 r.order_product?.product_code ?? 
-                                                                 (r.metadata?.order_code ?? '—').toUpperCase().replace('HD', 'HĐ')}
-                                                            getItemName={(r) => r.order_item?.item_name ?? 
-                                                                 r.order_product_service?.order_product?.name ?? 
-                                                                 r.order_product?.name ?? '—'}
+                                                            getProductCode={(r) => r.order_item?.item_code ??
+                                                                r.order_product_service?.order_product?.product_code ??
+                                                                r.order_product?.product_code ??
+                                                                (r.metadata?.order_code ?? '—').toUpperCase().replace('HD', 'HĐ')}
+                                                            getItemName={(r) => r.order_item?.item_name ??
+                                                                r.order_product_service?.order_product?.name ??
+                                                                r.order_product?.name ?? '—'}
                                                             getProductImage={(r) => {
-                                                                const v1 = r.order_item?.product?.image || r.metadata?.photos?.[0];
-                                                                if (v1) return v1;
-                                                                const op = r.order_product_service?.order_product ?? r.order_product;
-                                                                const imgs = op?.images;
-                                                                if (Array.isArray(imgs) && imgs[0]) return imgs[0];
-                                                                if (typeof imgs === 'string') {
-                                                                    try { const arr = JSON.parse(imgs); return Array.isArray(arr) && arr[0] ? arr[0] : null; } catch { return null; }
-                                                                }
-                                                                return null;
+                                                                const parseImages = (imgs: any) => {
+                                                                    if (!imgs) return null;
+                                                                    if (Array.isArray(imgs)) return imgs[0] || null;
+                                                                    if (typeof imgs === 'string') {
+                                                                        if (imgs.startsWith('[') || imgs.startsWith('{')) {
+                                                                            try {
+                                                                                const parsed = JSON.parse(imgs);
+                                                                                return Array.isArray(parsed) ? (parsed[0] || null) : (parsed || null);
+                                                                            } catch { return imgs; }
+                                                                        }
+                                                                        return imgs;
+                                                                    }
+                                                                    return null;
+                                                                };
+                                                                return r.order_item?.product?.image ||
+                                                                    r.metadata?.photos?.[0] ||
+                                                                    parseImages(r.order_product_service?.order_product?.images) ||
+                                                                    parseImages(r.order_product?.images);
                                                             }}
                                                         />
                                                     </div>
@@ -719,13 +793,36 @@ function ExtensionKanban({
                                                             onOpenDialog={onOpenDialog}
                                                             onNavigateOrder={onNavigateOrder}
                                                             getOrder={() => ({ id: order?.id ?? row.order_id, order_code: order?.order_code || '—' })}
+                                                            getProductCode={(r) => r.order_item?.item_code ??
+                                                                r.order_product_service?.order_product?.product_code ??
+                                                                r.order_product?.product_code ??
+                                                                (order?.order_code ?? '—').toUpperCase().replace('HD', 'HĐ')}
+                                                            getItemName={(r) => r.order_item?.item_name ??
+                                                                r.order_product_service?.item_name ??
+                                                                r.order_product?.name ?? '—'}
                                                             getProductImage={(r) => {
-                                                                const op = r.order?.order_products?.[0]; // Estimate first product
-                                                                if (!op) return null;
-                                                                const imgs = op.images;
-                                                                if (Array.isArray(imgs) && imgs[0]) return imgs[0];
-                                                                return null;
-                                                            }}
+                                                                const parseImages = (imgs: any) => {
+                                                                    if (!imgs) return null;
+                                                                    if (Array.isArray(imgs)) return imgs[0] || null;
+                                                                    if (typeof imgs === 'string') {
+                                                                        if (imgs.startsWith('[') || imgs.startsWith('{')) {
+                                                                            try {
+                                                                                const parsed = JSON.parse(imgs);
+                                                                                return Array.isArray(parsed) ? (parsed[0] || null) : (parsed || null);
+                                                                            } catch { return imgs; } // Fallback to raw string if it's not valid JSON
+                                                                        }
+                                                                        return imgs; // Probable direct URL
+                                                                    }
+                                                                    return null;
+                                                                };
+
+                                                                const img = r.order_item?.product?.image ||
+                                                                    parseImages(r.order_product_service?.order_product?.images) ||
+                                                                    parseImages(r.order_product?.images) ||
+                                                                    parseImages(r.order?.order_products?.[0]?.images);
+
+                                                                return img;
+                                                              }}
                                                         />
                                                     </div>
                                                 )}
@@ -752,6 +849,7 @@ export function RequestsPage() {
     const [extensions, setExtensions] = useState<any[]>([]);
     const [activeTab, setActiveTab] = useState((location.state as any)?.defaultTab || 'accessories');
     const [updatingId, setUpdatingId] = useState<string | null>(null);
+    const [users, setUsers] = useState<any[]>([]);
 
     // Dialog Mua phụ kiện / Gửi Đối Tác
     const [showAccessoryDialog, setShowAccessoryDialog] = useState(false);
@@ -788,19 +886,42 @@ export function RequestsPage() {
     const [foundOrder, setFoundOrder] = useState<any>(null);
     const [foundItem, setFoundItem] = useState<any>(null);
 
+    const getOrderCode = (req: any) => {
+        if (!req) return '—';
+        return req.order?.order_code ||
+            req.order_code ||
+            req.metadata?.order_code ||
+            req.order_item?.order?.order_code ||
+            req.order_product?.order?.order_code ||
+            req.order_product_service?.order_product?.order?.order_code ||
+            '—';
+    };
+
+    const getOrderId = (req: any) => {
+        if (!req) return '';
+        return req.order_id ||
+            req.order?.id ||
+            req.order_item?.order?.id ||
+            req.order_product?.order?.id ||
+            req.order_product_service?.order_product?.order?.id ||
+            req.metadata?.order_id;
+    };
+
     const loadAll = async () => {
         setLoading(true);
         try {
-            const [accRes, partRes, extRes] = await Promise.all([
+            const [accRes, partRes, extRes, usersRes] = await Promise.all([
                 requestsApi.getAccessories(),
                 requestsApi.getPartners(),
                 requestsApi.getExtensions(),
+                usersApi.getAll({ status: 'active' }),
             ]);
             setAccessories((accRes.data?.data as any[]) || []);
             setPartners((partRes.data?.data as any[]) || []);
             setExtensions((extRes.data?.data as any[]) || []);
+            setUsers((usersRes.data as any).data.users || []);
         } catch (e: any) {
-            toast.error(e?.response?.data?.message || 'Không tải được danh sách yêu cầu');
+            toast.error(e?.response?.data?.message || 'Không tải được danh sách');
         } finally {
             setLoading(false);
         }
@@ -836,10 +957,10 @@ export function RequestsPage() {
         }
     };
 
-    const handleUpdateExtension = async (orderId: string, status: string, newDueAt?: string, validReason?: boolean, customerResult?: string) => {
-        setUpdatingId(orderId);
+    const handleUpdateExtension = async (requestId: string, status: string, newDueAt?: string, validReason?: boolean, customerResult?: string) => {
+        setUpdatingId(requestId);
         try {
-            await ordersApi.updateExtensionRequest(orderId, {
+            await requestsApi.updateExtension(requestId, {
                 status,
                 ...(newDueAt && { new_due_at: newDueAt }),
                 ...(typeof validReason === 'boolean' && { valid_reason: validReason }),
@@ -860,10 +981,10 @@ export function RequestsPage() {
         if (!result.destination || result.source.droppableId === result.destination.droppableId) return;
         const row = accessories.find((r: any) => r.id === result.draggableId);
         if (!row) return;
-        
+
         const newStatus = result.destination.droppableId;
         const trans = ACCESSORY_TRANSITIONS[row.status];
-        
+
         // Prevent drag-to-next if required fields are missing
         if (trans && trans.next === newStatus) {
             for (const field of trans.fields) {
@@ -892,10 +1013,10 @@ export function RequestsPage() {
         if (!result.destination || result.source.droppableId === result.destination.droppableId) return;
         const row = partners.find((r: any) => r.id === result.draggableId);
         if (!row) return;
-        
+
         const newStatus = result.destination.droppableId;
         const trans = PARTNER_TRANSITIONS[row.status];
-        
+
         // Validation for drag & drop
         if (trans && trans.next === newStatus) {
             for (const field of trans.fields) {
@@ -923,12 +1044,12 @@ export function RequestsPage() {
     const handleExtensionDragEnd = (result: DropResult) => {
         if (!result.destination || result.source.droppableId === result.destination.droppableId) return;
         const row = extensions.find((r: any) => r.id === result.draggableId);
-        if (!row?.order_id) return;
+        if (!row?.id) return;
         const newStatus = result.destination.droppableId;
         const prevStatus = row.status;
         setExtensions((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: newStatus } : r)));
-        ordersApi.updateExtensionRequest(row.order_id, { status: newStatus }).then(() => {
-            toast.success('Đã cập nhật yêu cầu gia hạn');
+        requestsApi.updateExtension(row.id, { status: newStatus }).then(() => {
+            toast.success('Đã cập nhật trạng thái gia hạn');
         }).catch((e: any) => {
             setExtensions((prev) => prev.map((r) => (r.id === row.id ? { ...r, status: prevStatus } : r)));
             toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
@@ -946,7 +1067,7 @@ export function RequestsPage() {
 
     const handleSubmitAccessory = async () => {
         if (!accessoryRow?.id) return;
-        
+
         // Validation for mandatory fields
         const trans = ACCESSORY_TRANSITIONS[accessoryRow.status];
         if (trans) {
@@ -968,6 +1089,62 @@ export function RequestsPage() {
                 notes: accessoryNotes || undefined,
                 metadata: accessoryMeta
             });
+
+            // 💰 Tự động tạo phiếu chi khi chuyển sang Đã mua
+            if (accessoryRow.status === 'need_buy' && accessoryStatus === 'bought') {
+                try {
+                    const amount = Number(String(accessoryRow.metadata?.price_estimate || 0).replace(/\D/g, ''));
+                    if (amount > 0) {
+                        await transactionsApi.create({
+                            type: 'expense',
+                            category: 'Mua phụ kiện',
+                            amount,
+                            payment_method: accessoryMeta.payment_type || 'transfer',
+                            notes: `Chi mua: ${accessoryRow.metadata?.item_name || 'phụ kiện'} (Yêu cầu #${accessoryRow.id.slice(0, 8)}). Người chi: ${accessoryMeta.payment_by || 'N/A'}`,
+                            order_id: getOrderId(accessoryRow),
+                            order_code: getOrderCode(accessoryRow),
+                            date: new Date().toISOString(),
+                            status: 'approved',
+                            metadata: {
+                                type: 'accessory_purchase',
+                                purchase_photos: accessoryMeta.photos_purchase || [],
+                                transfer_photos: accessoryMeta.photos_transfer || []
+                            }
+                        });
+                        toast.success('Đã tự động tạo phiếu chi mua phụ kiện');
+                    }
+                } catch (txErr) {
+                    console.error('Lỗi tạo phiếu chi mua:', txErr);
+                }
+            }
+
+            // 💰 Tự động tạo phiếu chi phí ship khi hàng về
+            if (accessoryRow.status === 'waiting_ship' && accessoryStatus === 'shipped') {
+                try {
+                    const amount = Number(String(accessoryMeta.shipping_cost || 0).replace(/\D/g, ''));
+                    if (amount > 0) {
+                        await transactionsApi.create({
+                            type: 'expense',
+                            category: 'Phí ship nhận hàng',
+                            amount,
+                            payment_method: accessoryMeta.payment_type || 'transfer',
+                            notes: `Phí ship: ${accessoryRow.metadata?.item_name || 'phụ kiện'} (Yêu cầu #${accessoryRow.id.slice(0, 8)}). Người chi: ${accessoryMeta.payment_by || 'N/A'}`,
+                            order_id: getOrderId(accessoryRow),
+                            order_code: getOrderCode(accessoryRow),
+                            date: new Date().toISOString(),
+                            status: 'approved',
+                            metadata: {
+                                type: 'accessory_shipping',
+                                arrival_photos: accessoryMeta.photos_arrival || []
+                            }
+                        });
+                        toast.success('Đã tự động tạo phiếu chi phí ship');
+                    }
+                } catch (txErr) {
+                    console.error('Lỗi tạo phiếu chi ship:', txErr);
+                }
+            }
+
             toast.success('Đã cập nhật trạng thái mua phụ kiện');
             loadAll();
             setShowAccessoryDialog(false);
@@ -991,7 +1168,7 @@ export function RequestsPage() {
 
     const handleSubmitPartner = async () => {
         if (!partnerRow?.id) return;
-        
+
         const trans = PARTNER_TRANSITIONS[partnerRow.status];
         if (trans) {
             for (const field of trans.fields) {
@@ -1012,6 +1189,88 @@ export function RequestsPage() {
                 notes: partnerNotes || undefined,
                 metadata: partnerMeta
             });
+
+            // 💰 Tự động tạo phiếu chi phí ship khi gửi đi
+            if (partnerRow.status === 'ship_to_partner' && partnerStatus === 'partner_doing') {
+                try {
+                    const amount = Number(String(partnerMeta.shipping_cost_out || 0).replace(/\D/g, ''));
+                    if (amount > 0) {
+                        await transactionsApi.create({
+                            type: 'expense',
+                            category: 'Phí ship gửi đối tác',
+                            amount,
+                            payment_method: partnerMeta.shipping_payment_type || 'transfer',
+                            notes: `Phí ship gửi: ${partnerRow.order_item?.item_name ?? partnerRow.order_product_service?.order_product?.name ?? partnerRow.order_product?.name ?? 'sản phẩm'} (Yêu cầu #${partnerRow.id.slice(0, 8)}). Người gửi: ${partnerMeta.sender_staff || 'N/A'}. Người chi: ${partnerMeta.shipping_sender_staff || 'N/A'}`,
+                            order_id: getOrderId(partnerRow),
+                            order_code: getOrderCode(partnerRow),
+                            date: new Date().toISOString(),
+                            status: 'approved',
+                            metadata: {
+                                type: 'partner_shipping_out',
+                                package_photos: partnerMeta.photos_package || []
+                            }
+                        });
+                        toast.success('Đã tự động tạo phiếu chi phí ship gửi đi');
+                    }
+                } catch (txErr) {
+                    console.error('Lỗi tạo phiếu chi ship gửi:', txErr);
+                }
+            }
+
+            // 💰 Tự động tạo phiếu chi khi hoàn tất gửi đối tác (Phí ship về + Phí đối tác)
+            if (partnerRow.status === 'ship_back' && partnerStatus === 'done') {
+                try {
+                    const itemName = partnerRow.order_item?.item_name ?? partnerRow.order_product_service?.order_product?.name ?? partnerRow.order_product?.name ?? 'sản phẩm';
+                    const reqId = partnerRow.id.slice(0, 8);
+                    
+                    // 1. Phí ship trả hàng
+                    const shipAmount = Number(String(partnerMeta.shipping_cost_back || 0).replace(/\D/g, ''));
+                    if (shipAmount > 0) {
+                        await transactionsApi.create({
+                            type: 'expense',
+                            category: 'Phí ship gửi đối tác',
+                            amount: shipAmount,
+                            payment_method: partnerMeta.shipping_payment_type_back || 'transfer',
+                            notes: `Phí ship trả: ${itemName} (Yêu cầu #${reqId}). Người chi: ${partnerMeta.shipping_sender_staff_back || 'N/A'}`,
+                            order_id: getOrderId(partnerRow),
+                            order_code: getOrderCode(partnerRow),
+                            date: new Date().toISOString(),
+                            status: 'approved',
+                            metadata: {
+                                type: 'partner_shipping_back',
+                                package_photos: partnerMeta.photos_package_back || []
+                            }
+                        });
+                    }
+
+                    // 2. Phí thanh toán đối tác
+                    const partnerFee = Number(String(partnerMeta.partner_fee_amount || 0).replace(/\D/g, ''));
+                    if (partnerFee > 0) {
+                        await transactionsApi.create({
+                            type: 'expense',
+                            category: 'Thanh toán phí đối tác',
+                            amount: partnerFee,
+                            payment_method: partnerMeta.partner_payment_type || 'transfer',
+                            notes: `Thanh toán phí: ${itemName} (Yêu cầu #${reqId}). Người chi: ${partnerMeta.partner_fee_sender_staff || 'N/A'}`,
+                            order_id: getOrderId(partnerRow),
+                            order_code: getOrderCode(partnerRow),
+                            date: new Date().toISOString(),
+                            status: 'approved',
+                            metadata: {
+                                type: 'partner_repair_fee',
+                                photos_storage: partnerMeta.photos_storage || []
+                            }
+                        });
+                    }
+
+                    if (shipAmount > 0 || partnerFee > 0) {
+                        toast.success('Đã tự động tạo phiếu chi hoàn tất đối tác');
+                    }
+                } catch (txErr) {
+                    console.error('Lỗi tạo phiếu chi hoàn tất đối tác:', txErr);
+                }
+            }
+
             toast.success('Đã cập nhật trạng thái gửi đối tác');
             loadAll();
             setShowPartnerDialog(false);
@@ -1035,14 +1294,14 @@ export function RequestsPage() {
     };
 
     const handleSubmitExtension = async () => {
-        if (!extensionRow?.order_id) return;
+        if (!extensionRow?.id) return;
 
         // If rejected, valid_reason depends on the selected reason (1 and 2 are valid, 3 is not)
         const isRejected = extensionStatus === 'rejected';
         const finalValidReason = isRejected ? extensionValidReason : true;
 
         await handleUpdateExtension(
-            extensionRow.order_id,
+            extensionRow.id,
             extensionStatus,
             extensionNewDueAt || undefined,
             finalValidReason,
@@ -1057,22 +1316,22 @@ export function RequestsPage() {
         try {
             // Normalize: HD -> HĐ, uppercase
             const query = newItemOrderCode.trim().toUpperCase().replace('HD', 'HĐ');
-            
+
             // If query is HĐ1.1, base code is HĐ1
             const baseOrderCode = query.includes('.') ? query.split('.')[0] : query;
 
             const res = await ordersApi.getAll({ search: baseOrderCode });
             const orders = (res.data as any).data.orders || [];
-            
+
             // 1. Try to find direct match by order_code
             let order = orders.find((o: any) => o.order_code === baseOrderCode);
-            
+
             // 2. If not found or searching for specific item, try to find by product code in sub-items
             let targetItem = null;
             // Search in flattened items (works for both V1 order_items and V2 order_product_services)
             if (order && query.includes('.')) {
-                targetItem = (order.items || []).find((it: any) => 
-                    it.item_code === query || 
+                targetItem = (order.items || []).find((it: any) =>
+                    it.item_code === query ||
                     (it.product?.code === query) ||
                     (it.id === query) // Fallback for direct ID match
                 );
@@ -1108,7 +1367,7 @@ export function RequestsPage() {
         setUpdatingId('creating');
         try {
             const normalizedCustomCode = newItemOrderCode.trim().toUpperCase().replace('HD', 'HĐ');
-            
+
             // Resolve correct ID based on the item found or the first item in the order
             let order_item_id = undefined;
             let order_product_id = undefined;
@@ -1117,13 +1376,13 @@ export function RequestsPage() {
             const itemToLink = foundItem || foundOrder?.items?.[0];
             if (itemToLink) {
                 if (itemToLink.is_customer_item) {
-                     if (itemToLink.item_type === 'product') {
-                         order_product_id = itemToLink.id;
-                     } else {
-                         order_product_service_id = itemToLink.id;
-                     }
+                    if (itemToLink.item_type === 'product') {
+                        order_product_id = itemToLink.id;
+                    } else {
+                        order_product_service_id = itemToLink.id;
+                    }
                 } else {
-                     order_item_id = itemToLink.id;
+                    order_item_id = itemToLink.id;
                 }
             }
 
@@ -1333,8 +1592,8 @@ export function RequestsPage() {
                                             <p className="text-sm font-bold text-slate-700">{accessoryRow.metadata?.quantity || '1'}</p>
                                         </div>
                                         <div>
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase">Giá dự kiến</p>
-                                            <p className="text-sm font-bold text-emerald-600">{(Number(accessoryRow.metadata?.price_estimate || 0)).toLocaleString()}đ</p>
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase">Giá</p>
+                                            <p className="text-sm font-bold text-emerald-600">{formatCurrency(Number(String(accessoryRow.metadata?.price_estimate || 0).replace(/\D/g, '')))}</p>
                                         </div>
                                     </div>
                                     {accessoryRow.notes && (
@@ -1345,40 +1604,69 @@ export function RequestsPage() {
                                     )}
                                 </div>
 
-                                {ACCESSORY_TRANSITIONS[accessoryRow.status]?.fields.map((field) => (
-                                    <div key={field.name} className="space-y-1.5 text-left">
-                                        <div className="flex items-center justify-between">
-                                            <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">
-                                                {field.label} {field.required && <span className="text-red-500">*</span>}
-                                            </Label>
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                                    {ACCESSORY_TRANSITIONS[accessoryRow.status]?.fields.map((field) => (
+                                        <div key={field.name} className={`space-y-1.5 text-left ${field.type === 'photo' || field.name === 'payment_by' || field.name === 'payment_type' ? 'col-span-1' : 'col-span-2'}`}>
+                                            <div className="flex items-center justify-between">
+                                                <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">
+                                                    {field.label} {field.required && <span className="text-red-500">*</span>}
+                                                </Label>
+                                            </div>
+
+                                            {field.type === 'photo' ? (
+                                                <PhotoUpload
+                                                    label=""
+                                                    value={accessoryMeta[field.name] || []}
+                                                    onChange={(urls) => setAccessoryMeta(m => ({ ...m, [field.name]: urls }))}
+                                                />
+                                            ) : field.type === 'select' ? (
+                                                <Select
+                                                    value={accessoryMeta[field.name] || ''}
+                                                    onValueChange={(val) => setAccessoryMeta(m => ({ ...m, [field.name]: val }))}
+                                                >
+                                                    <SelectTrigger className="h-10 rounded-lg">
+                                                        <SelectValue placeholder={field.placeholder || "Chọn..."} />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {field.name.includes('staff') || field.name.includes('_by') ? (
+                                                            users.map(u => (
+                                                                <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
+                                                            ))
+                                                        ) : (
+                                                            field.options?.map(opt => (
+                                                                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                                            ))
+                                                        )}
+                                                    </SelectContent>
+                                                </Select>
+                                            ) : (
+                                                <Input
+                                                    type={field.type === 'number' ? 'number' : 'text'}
+                                                    value={accessoryMeta[field.name] || ''}
+                                                    onChange={(e) => {
+                                                        let value = e.target.value;
+                                                        if (field.name.toLowerCase().includes('cost') || field.name.toLowerCase().includes('price') || field.name.toLowerCase().includes('amount')) {
+                                                            const digits = value.replace(/\D/g, '');
+                                                            value = digits ? new Intl.NumberFormat('en-US').format(Number(digits)) : '';
+                                                        }
+                                                        setAccessoryMeta(m => ({ ...m, [field.name]: value }));
+                                                    }}
+                                                    placeholder={field.placeholder || '...'}
+                                                    className="h-10 rounded-lg text-left"
+                                                />
+                                            )}
                                         </div>
-                                        
-                                        {field.type === 'photo' ? (
-                                            <PhotoUpload
-                                                label=""
-                                                value={accessoryMeta[field.name] || []}
-                                                onChange={(urls) => setAccessoryMeta(m => ({ ...m, [field.name]: urls }))}
-                                            />
-                                        ) : (
-                                            <Input
-                                                type={field.type === 'number' ? 'number' : 'text'}
-                                                value={accessoryMeta[field.name] || ''}
-                                                onChange={(e) => setAccessoryMeta(m => ({ ...m, [field.name]: e.target.value }))}
-                                                placeholder={field.placeholder || '...'}
-                                                className="h-10 rounded-lg text-left"
-                                            />
-                                        )}
+                                    ))}
+
+                                    <div className="space-y-1.5 pt-2 border-t border-dashed text-left col-span-2">
+                                        <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Ghi chú xử lý</Label>
+                                        <Textarea
+                                            value={accessoryNotes}
+                                            onChange={(e) => setAccessoryNotes(e.target.value)}
+                                            placeholder="Nhập ghi chú (nếu có)..."
+                                            className="min-h-[100px] rounded-xl resize-none"
+                                        />
                                     </div>
-                                ))}
-                                
-                                <div className="space-y-1.5 pt-2 border-t border-dashed text-left">
-                                    <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Ghi chú xử lý</Label>
-                                    <Textarea
-                                        value={accessoryNotes}
-                                        onChange={(e) => setAccessoryNotes(e.target.value)}
-                                        placeholder="Nhập ghi chú (nếu có)..."
-                                        className="min-h-[100px] rounded-xl resize-none"
-                                    />
                                 </div>
                             </div>
                         </div>
@@ -1400,99 +1688,128 @@ export function RequestsPage() {
             {/* Dialog Cập nhật Gửi Đối Tác */}
             <Dialog open={showPartnerDialog} onOpenChange={setShowPartnerDialog}>
                 <DialogContent className="max-w-md p-0 overflow-hidden rounded-2xl border-none shadow-2xl">
-                    <DialogHeader className="p-6 pb-4 bg-slate-50/50 border-b">
-                        <DialogTitle className="text-xl font-bold flex items-center gap-2">
-                            <Truck className="w-6 h-6 text-primary" />
+                    <DialogHeader className="p-4 pb-2 bg-slate-50/50 border-b">
+                        <DialogTitle className="text-lg font-bold flex items-center gap-2">
+                            <Truck className="w-5 h-5 text-primary" />
                             Xử lý gửi đối tác
                         </DialogTitle>
                     </DialogHeader>
                     {partnerRow && (
-                        <div className="p-6 space-y-5">
-                            <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 flex gap-3">
-                                <div className="h-10 w-10 shrink-0 bg-white rounded-lg border shadow-sm flex items-center justify-center">
-                                    <RefreshCw className="w-5 h-5 text-amber-600" />
+                        <div className="p-4 space-y-3">
+                            <div className="bg-amber-50 border border-amber-100 rounded-lg p-2.5 flex items-center gap-3">
+                                <div className="h-8 w-8 shrink-0 bg-white rounded flex items-center justify-center shadow-sm">
+                                    <RefreshCw className="w-4 h-4 text-amber-600" />
                                 </div>
                                 <div>
-                                    <p className="text-xs font-semibold text-amber-800 uppercase tracking-wider">Trạng thái tiếp theo</p>
-                                    <p className="text-sm font-bold text-amber-900 mt-0.5">
+                                    <p className="text-[10px] font-bold text-amber-800 uppercase leading-none">Trạng thái tiếp theo</p>
+                                    <p className="text-sm font-bold text-amber-900 mt-1">
                                         {PARTNER_LABELS[partnerStatus] || partnerStatus}
                                     </p>
                                 </div>
                             </div>
 
                             <div className="space-y-4">
-                                <div className="bg-slate-50 border rounded-xl p-4 space-y-3">
-                                    <div className="grid grid-cols-2 gap-4">
+                                <div className="bg-slate-50 border rounded-lg p-2.5 space-y-2">
+                                    <div className="grid grid-cols-2 gap-2">
                                         <div>
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase">Hạng mục</p>
-                                            <p className="text-sm font-bold text-slate-700">
-                                                {partnerRow.order_item?.item_name ?? 
-                                                 partnerRow.order_product_service?.order_product?.name ?? 
-                                                 partnerRow.order_product?.name ?? '—'}
+                                            <p className="text-[9px] font-bold text-slate-400 uppercase">Hạng mục</p>
+                                            <p className="text-xs font-bold text-slate-700 truncate">
+                                                {partnerRow.order_item?.item_name ??
+                                                    partnerRow.order_product_service?.order_product?.name ??
+                                                    partnerRow.order_product?.name ?? '—'}
                                             </p>
                                         </div>
                                         <div>
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase">Mã SP/ĐH</p>
-                                            <p className="text-sm font-bold text-slate-700">
-                                                {partnerRow.order_item?.item_code ?? 
-                                                 partnerRow.order_product_service?.order_product?.product_code ?? 
-                                                 partnerRow.order_product?.product_code ?? 
-                                                 (partnerRow.metadata?.order_code ?? '—').toUpperCase()}
+                                            <p className="text-[9px] font-bold text-slate-400 uppercase">Mã SP/ĐH</p>
+                                            <p className="text-xs font-bold text-slate-700 truncate">
+                                                {partnerRow.order_item?.item_code ??
+                                                    partnerRow.order_product_service?.order_product?.product_code ??
+                                                    partnerRow.order_product?.product_code ??
+                                                    (partnerRow.metadata?.order_code ?? '—').toUpperCase()}
                                             </p>
                                         </div>
                                     </div>
                                     {partnerRow.notes && (
-                                        <div className="pt-2 border-t text-left">
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase">Ghi chú KT</p>
-                                            <p className="text-xs text-slate-600 italic">"{partnerRow.notes}"</p>
+                                        <div className="pt-1.5 border-t text-left">
+                                            <p className="text-[9px] font-bold text-slate-400 uppercase">Ghi chú KT</p>
+                                            <p className="text-[11px] text-slate-600 italic line-clamp-1">"{partnerRow.notes}"</p>
                                         </div>
                                     )}
                                 </div>
 
-                                {PARTNER_TRANSITIONS[partnerRow.status]?.fields.map((field) => (
-                                    <div key={field.name} className="space-y-1.5 text-left">
-                                        <div className="flex items-center justify-between">
-                                            <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">
-                                                {field.label} {field.required && <span className="text-red-500">*</span>}
-                                            </Label>
-                                        </div>
-                                        
-                                        {field.type === 'photo' ? (
-                                            <PhotoUpload
-                                                label=""
-                                                value={partnerMeta[field.name] || []}
-                                                onChange={(urls) => setPartnerMeta(m => ({ ...m, [field.name]: urls }))}
-                                            />
-                                        ) : (
-                                            <Input
-                                                type={field.type === 'datetime-local' ? 'datetime-local' : (field.type === 'number' ? 'number' : 'text')}
-                                                value={partnerMeta[field.name] || ''}
-                                                onChange={(e) => setPartnerMeta(m => ({ ...m, [field.name]: e.target.value }))}
-                                                placeholder={field.placeholder || '...'}
-                                                className="h-10 rounded-lg text-left"
-                                            />
-                                        )}
-                                    </div>
-                                ))}
+                                <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                                    {PARTNER_TRANSITIONS[partnerRow.status]?.fields.map((field) => (
+                                        <div key={field.name} className={`space-y-1.5 text-left ${['sender_staff', 'shipping_sender_staff', 'shipping_cost_out', 'shipping_payment_type', 'shipping_cost_back', 'shipping_sender_staff_back', 'shipping_payment_type_back', 'partner_fee_amount', 'partner_fee_sender_staff', 'partner_payment_type', 'photos_package_back', 'photos_storage'].includes(field.name) ? 'col-span-1' : 'col-span-2'}`}>
+                                            <div className="flex items-center justify-between">
+                                                <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">
+                                                    {field.label} {field.required && <span className="text-red-500">*</span>}
+                                                </Label>
+                                            </div>
 
-                                <div className="space-y-1.5 pt-2 border-t border-dashed text-left">
-                                    <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">Ghi chú xử lý</Label>
+                                            {field.type === 'photo' ? (
+                                                <PhotoUpload
+                                                    label=""
+                                                    value={partnerMeta[field.name] || []}
+                                                    onChange={(urls) => setPartnerMeta(m => ({ ...m, [field.name]: urls }))}
+                                                />
+                                            ) : field.type === 'select' ? (
+                                                <Select
+                                                    value={partnerMeta[field.name] || ''}
+                                                    onValueChange={(val) => setPartnerMeta(m => ({ ...m, [field.name]: val }))}
+                                                >
+                                                    <SelectTrigger className="h-10 rounded-lg">
+                                                        <SelectValue placeholder={field.placeholder || "Chọn..."} />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {field.name.includes('staff') || field.name.includes('_by') ? (
+                                                            users.map(u => (
+                                                                <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
+                                                            ))
+                                                        ) : (
+                                                            field.options?.map(opt => (
+                                                                <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                                                            ))
+                                                        )}
+                                                    </SelectContent>
+                                                </Select>
+                                            ) : (
+                                                <Input
+                                                    type={field.type === 'datetime-local' ? 'datetime-local' : (field.type === 'number' ? 'number' : 'text')}
+                                                    value={partnerMeta[field.name] || ''}
+                                                    onChange={(e) => {
+                                                        let value = e.target.value;
+                                                        if (field.name.toLowerCase().includes('cost') || field.name.toLowerCase().includes('price') || field.name.toLowerCase().includes('amount')) {
+                                                            const digits = value.replace(/\D/g, '');
+                                                            value = digits ? new Intl.NumberFormat('en-US').format(Number(digits)) : '';
+                                                        }
+                                                        setPartnerMeta(m => ({ ...m, [field.name]: value }));
+                                                    }}
+                                                    placeholder={field.placeholder || '...'}
+                                                    className="h-10 rounded-lg text-left"
+                                                />
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="space-y-1.5 pt-1.5 border-t border-dashed text-left">
+                                    <Label className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Ghi chú xử lý</Label>
                                     <Textarea
                                         value={partnerNotes}
                                         onChange={(e) => setPartnerNotes(e.target.value)}
-                                        placeholder="Nhập ghi chú (nếu có)..."
-                                        className="min-h-[100px] rounded-xl resize-none"
+                                        placeholder="Nhập ghi chú..."
+                                        className="min-h-[54px] rounded-lg resize-none text-sm"
                                     />
                                 </div>
                             </div>
                         </div>
                     )}
-                    <DialogFooter className="p-6 bg-slate-50/50 border-t flex items-center justify-between gap-3">
-                        <Button variant="ghost" onClick={() => setShowPartnerDialog(false)} className="rounded-xl px-6">Hủy</Button>
+                    <DialogFooter className="p-4 bg-slate-50/50 border-t flex items-center justify-between gap-3">
+                        <Button variant="ghost" onClick={() => setShowPartnerDialog(false)} className="rounded-lg px-6 h-9 text-sm">Hủy</Button>
                         <Button
                             onClick={handleSubmitPartner}
                             disabled={!!updatingId}
-                            className="rounded-xl px-10 font-bold shadow-lg shadow-primary/20"
+                            className="rounded-lg px-8 h-9 font-bold shadow-lg shadow-primary/20 text-sm"
                         >
                             {updatingId ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
                             Xác nhận
@@ -1508,11 +1825,43 @@ export function RequestsPage() {
                     <DialogHeader className="p-6 pb-4 bg-slate-50/50 border-b">
                         <DialogTitle className="text-xl font-bold flex items-center gap-2">
                             <Clock className="w-6 h-6 text-primary" />
-                            Xử lý gia hạn đơn hàng
+                            Xử lý gia hạn sản phẩm
                         </DialogTitle>
                     </DialogHeader>
                     {extensionRow && (
                         <div className="p-6 space-y-6">
+                            <div className="bg-slate-50 border rounded-xl p-4 space-y-3">
+                                <div className="flex gap-3">
+                                    <div className="h-12 w-12 shrink-0 bg-white rounded-lg border shadow-sm flex items-center justify-center overflow-hidden">
+                                        {((extensionRow.order_item?.product?.image) || (extensionRow.order_product?.images?.[0]) || (extensionRow.order_product_service?.order_product?.images?.[0])) ? (
+                                            <img
+                                                src={extensionRow.order_item?.product?.image || extensionRow.order_product?.images?.[0] || extensionRow.order_product_service?.order_product?.images?.[0]}
+                                                className="w-full h-full object-cover"
+                                            />
+                                        ) : (
+                                            <Clock className="w-6 h-6 text-slate-300" />
+                                        )}
+                                    </div>
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-1.5 overflow-hidden">
+                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Mã:</span>
+                                            <span className="text-xs font-mono font-bold text-primary truncate">
+                                                {extensionRow.order_item?.item_code || extensionRow.order_product?.product_code || extensionRow.order_product_service?.order_product?.product_code || (extensionRow.order?.order_code ?? extensionRow.order_id)}
+                                            </span>
+                                        </div>
+                                        <p className="text-sm font-bold text-slate-700 truncate mt-0.5">
+                                            {extensionRow.order_item?.item_name || extensionRow.order_product?.name || extensionRow.order_product_service?.item_name || '—'}
+                                        </p>
+                                    </div>
+                                </div>
+                                {extensionRow.reason && (
+                                    <div className="pt-2 border-t text-left">
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Lý do kỹ thuật</p>
+                                        <p className="text-sm text-slate-600 mt-0.5 leading-relaxed italic">"{extensionRow.reason}"</p>
+                                    </div>
+                                )}
+                            </div>
+
                             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3">
                                 <div className="h-10 w-10 shrink-0 bg-white rounded-lg border shadow-sm flex items-center justify-center">
                                     <AlertCircle className="w-5 h-5 text-blue-600" />

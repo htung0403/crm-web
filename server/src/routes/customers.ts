@@ -34,7 +34,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
         if (customerIds.length > 0) {
             const { data: allOrders } = await supabaseAdmin
                 .from('orders')
-                .select('customer_id, total_amount')
+                .select('customer_id, total_amount, remaining_debt')
                 .in('customer_id', customerIds);
 
             // Tính toán stats cho từng customer
@@ -42,11 +42,13 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                 const customerOrders = allOrders?.filter(o => o.customer_id === customer.id) || [];
                 const totalOrders = customerOrders.length;
                 const totalSpent = customerOrders.reduce((sum, o) => sum + (o.total_amount || 0), 0);
+                const totalDebt = customerOrders.reduce((sum, o) => sum + (o.remaining_debt || 0), 0);
 
                 return {
                     ...customer,
                     total_orders: totalOrders,
                     total_spent: totalSpent,
+                    total_debt: totalDebt,
                 };
             });
         }
@@ -86,7 +88,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         // Lấy thống kê
         const { data: stats } = await supabaseAdmin
             .from('orders')
-            .select('id, total_amount')
+            .select('id, total_amount, remaining_debt')
             .eq('customer_id', id);
 
         const totalOrders = stats?.length || 0;
@@ -99,6 +101,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                     ...customer,
                     total_orders: totalOrders,
                     total_spent: totalSpent,
+                    total_debt: stats?.reduce((sum, o) => sum + (o.remaining_debt || 0), 0) || 0,
                 }
             },
         });

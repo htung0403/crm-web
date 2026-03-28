@@ -275,16 +275,8 @@ export function LeaveRequestsPage() {
                                                 {req.approver && <div className="text-[10px] text-muted-foreground mt-1">bởi {req.approver.name}</div>}
                                             </td>
                                             <td className="p-3 text-right">
-                                                {canApprove && req.status === 'pending' && (
-                                                    <div className="flex justify-end gap-2">
-                                                        <Button size="sm" variant="outline" className="text-green-600 bg-green-50 hover:bg-green-100" onClick={() => handleUpdateStatus(req.id, 'approved')}>Duyệt</Button>
-                                                        <Button size="sm" variant="outline" className="text-red-600 bg-red-50 hover:bg-red-100" onClick={() => handleUpdateStatus(req.id, 'rejected')}>Từ chối</Button>
-                                                    </div>
-                                                )}
-                                                {(!canApprove || req.status !== 'pending') && (
-                                                    <span className="text-xs text-muted-foreground">-</span>
-                                                )}
-                                            </td>
+                                                 <span className="text-xs text-muted-foreground">-</span>
+                                             </td>
                                         </tr>
                                     ))
                                 )}
@@ -360,35 +352,37 @@ export function LeaveRequestsPage() {
                         )}
 
                         <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
+                            <div className={`space-y-2 ${formType === 'late' ? 'col-span-2' : ''}`}>
                                 <Label>Ngày bắt đầu *</Label>
                                 <Input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
                             </div>
-                            <div className="space-y-2">
-                                <Label>Giờ bắt đầu</Label>
-                                <div className="flex gap-2">
-                                    <Select value={startTime.split(':')[0] || '08'} onValueChange={(h) => setStartTime(`${h}:${startTime.split(':')[1] || '00'}`)}>
-                                        <SelectTrigger className="w-full">
-                                            <SelectValue placeholder="Giờ" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0')).map(h => (
-                                                <SelectItem key={h} value={h}>{h}h</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                    <Select value={startTime.split(':')[1] || '00'} onValueChange={(m) => setStartTime(`${startTime.split(':')[0] || '08'}:${m}`)}>
-                                        <SelectTrigger className="w-full">
-                                            <SelectValue placeholder="Phút" />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0')).map(m => (
-                                                <SelectItem key={m} value={m}>{m}p</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
+                            {formType !== 'late' && (
+                                <div className="space-y-2">
+                                    <Label>Giờ bắt đầu</Label>
+                                    <div className="flex gap-2">
+                                        <Select value={startTime.split(':')[0] || '08'} onValueChange={(h) => setStartTime(`${h}:${startTime.split(':')[1] || '00'}`)}>
+                                            <SelectTrigger className="w-full">
+                                                <SelectValue placeholder="Giờ" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {Array.from({ length: 24 }, (_, i) => i.toString().padStart(2, '0')).map(h => (
+                                                    <SelectItem key={h} value={h}>{h}h</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        <Select value={startTime.split(':')[1] || '00'} onValueChange={(m) => setStartTime(`${startTime.split(':')[0] || '08'}:${m}`)}>
+                                            <SelectTrigger className="w-full">
+                                                <SelectValue placeholder="Phút" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0')).map(m => (
+                                                    <SelectItem key={m} value={m}>{m}p</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
                                 </div>
-                            </div>
+                            )}
                         </div>
 
                         {formType === 'leave' && (

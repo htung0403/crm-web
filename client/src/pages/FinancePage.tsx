@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Edit, Trash2, Check, X, Upload, FileText, Loader2, RefreshCw, Eye, ExternalLink } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Check, X, Upload, FileText, Loader2, RefreshCw, Eye, ExternalLink, Image as ImageIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,8 +10,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { transactionsApi } from '@/lib/api';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { transactionsApi, ordersApi, requestsApi } from '@/lib/api';
+import { formatCurrency, formatDate, cn, normalizeSearchText } from '@/lib/utils';
 import type { User } from '@/types';
 
 interface FinancePageProps {
@@ -27,7 +27,7 @@ interface Transaction {
     type: TransactionType;
     category: string;
     amount: number;
-    payment_method: 'cash' | 'transfer' | 'card';
+    payment_method: 'cash' | 'transfer' | 'zalopay';
     notes?: string;
     image_url?: string;
     date: string;
@@ -39,6 +39,7 @@ interface Transaction {
     approved_by?: string;
     approved_by_user?: { id: string; name: string };
     created_at: string;
+    metadata?: any;
 }
 
 const statusLabels: Record<TransactionStatus, { label: string; variant: 'warning' | 'success' | 'danger' }> = {
@@ -50,12 +51,13 @@ const statusLabels: Record<TransactionStatus, { label: string; variant: 'warning
 const paymentMethodLabels = {
     cash: 'Tiền mặt',
     transfer: 'Chuyển khoản',
-    card: 'Thẻ'
+    zalopay: 'Zalo Pay'
 };
 
 const incomeCategories = [
     'Thanh toán đơn hàng',
     'Đặt cọc',
+    'Phí giao hàng',
     'Thu khác',
 ];
 
@@ -66,6 +68,7 @@ const expenseCategories = [
     'Tiền thuê mặt bằng',
     'Mua vật tư',
     'Chi phí vận hành',
+    'Phí ship nhận hàng',
     'Chi khác',
 ];
 
@@ -79,10 +82,48 @@ interface TransactionFormProps {
 function TransactionForm({ type, onClose, onSubmit, loading }: TransactionFormProps) {
     const [category, setCategory] = useState('');
     const [amount, setAmount] = useState<number>(0);
-    const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'card'>('cash');
+    const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'zalopay'>('cash');
     const [notes, setNotes] = useState('');
     const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
     const [imageUrl, setImageUrl] = useState('');
+    const [orderCode, setOrderCode] = useState('');
+    const [orderId, setOrderId] = useState<string | undefined>(undefined);
+    const [orderSuggestions, setOrderSuggestions] = useState<any[]>([]);
+    const [searchingOrders, setSearchingOrders] = useState(false);
+    const [showSuggestions, setShowSuggestions] = useState(false);
+
+    useEffect(() => {
+        const searchOrders = async () => {
+            if (orderCode.length < 1 || orderId) {
+                if (!orderId) setOrderSuggestions([]);
+                return;
+            }
+
+            setSearchingOrders(true);
+            try {
+                // Backend is accent-sensitive, so we map 'HD' to 'HĐ' for the request
+                const searchParam = orderCode.replace(/HD/gi, 'HĐ');
+                const response = await ordersApi.getAll({ search: searchParam, limit: 15 });
+
+                // Local filtering to avoid "full-text search" results that don't match the code
+                // and ensure 'HD' matches 'HĐ' interchangeably.
+                const query = normalizeSearchText(orderCode);
+                const filtered = (response.data.data?.orders || []).filter((order: any) => {
+                    const code = normalizeSearchText(order.order_code || '');
+                    return code.includes(query);
+                });
+
+                setOrderSuggestions(filtered.slice(0, 5));
+            } catch (error) {
+                console.error('Error searching orders:', error);
+            } finally {
+                setSearchingOrders(false);
+            }
+        };
+
+        const timer = setTimeout(searchOrders, 300);
+        return () => clearTimeout(timer);
+    }, [orderCode, orderId]);
 
     const categories = type === 'income' ? incomeCategories : expenseCategories;
 
@@ -100,6 +141,8 @@ function TransactionForm({ type, onClose, onSubmit, loading }: TransactionFormPr
             notes,
             date,
             image_url: imageUrl || undefined,
+            order_code: orderCode || undefined,
+            order_id: orderId,
         });
     };
 
@@ -160,6 +203,83 @@ function TransactionForm({ type, onClose, onSubmit, loading }: TransactionFormPr
                     </Select>
                 </div>
 
+                {/* Order Code - Only for specific income categories */}
+                {type === 'income' && ['Thanh toán đơn hàng', 'Đặt cọc', 'Phí giao hàng'].includes(category) && (
+                    <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300 relative">
+                        <Label>Mã đơn hàng</Label>
+                        <div className="relative group/input">
+                            <Input
+                                placeholder="Nhập mã đơn hàng (VD: HĐ123)"
+                                value={orderCode}
+                                onChange={(e) => {
+                                    setOrderCode(e.target.value.toUpperCase());
+                                    setShowSuggestions(true);
+                                    setOrderId(undefined);
+                                }}
+                                onFocus={() => setShowSuggestions(true)}
+                                onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                                className={cn(
+                                    "transition-all",
+                                    orderId && "border-green-500 bg-green-50/30 focus-visible:ring-green-500"
+                                )}
+                            />
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                                {searchingOrders && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                                {orderId && <Check className="h-4 w-4 text-green-500" />}
+                            </div>
+                        </div>
+
+                        {showSuggestions && orderCode.length >= 1 && !orderId && (
+                            <div className="absolute z-[100] w-full mt-1 bg-card border rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                                {searchingOrders ? (
+                                    <div className="px-3 py-6 text-center text-sm text-muted-foreground flex flex-col items-center justify-center gap-2">
+                                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                                        <span>Đang tìm kiếm đơn hàng...</span>
+                                    </div>
+                                ) : orderSuggestions.length > 0 ? (
+                                    <>
+                                        <div className="px-2 py-1.5 border-b bg-muted/30">
+                                            <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Đơn hàng gợi ý</p>
+                                        </div>
+                                        <ul className="py-1 max-h-[240px] overflow-y-auto custom-scrollbar">
+                                            {orderSuggestions.map((order) => (
+                                                <li
+                                                    key={order.id}
+                                                    className="px-3 py-2.5 text-sm hover:bg-accent cursor-pointer flex justify-between items-center group transition-colors"
+                                                    onClick={() => {
+                                                        setOrderCode(order.order_code);
+                                                        setOrderId(order.id);
+                                                        setShowSuggestions(false);
+                                                    }}
+                                                >
+                                                    <div className="flex flex-col gap-0.5">
+                                                        <p className="font-bold text-foreground group-hover:text-primary transition-colors">{order.order_code}</p>
+                                                        <p className="text-xs text-muted-foreground flex items-center gap-1">
+                                                            <span className="max-w-[120px] truncate">{order.customer?.name || 'Ẩn danh'}</span>
+                                                            <span>•</span>
+                                                            <span>{order.customer?.phone}</span>
+                                                        </p>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <p className="font-bold text-primary">{formatCurrency(order.total_amount)}</p>
+                                                        <Badge variant="secondary" className="text-[9px] h-4 px-1.5 uppercase font-bold">
+                                                            {order.status}
+                                                        </Badge>
+                                                    </div>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    </>
+                                ) : (
+                                    <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                                        Không tìm thấy đơn hàng: <span className="font-bold">{orderCode}</span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 {/* Amount */}
                 <div className="space-y-2">
                     <Label>Số tiền *</Label>
@@ -190,7 +310,7 @@ function TransactionForm({ type, onClose, onSubmit, loading }: TransactionFormPr
                         <SelectContent>
                             <SelectItem value="cash">Tiền mặt</SelectItem>
                             <SelectItem value="transfer">Chuyển khoản</SelectItem>
-                            <SelectItem value="card">Thẻ</SelectItem>
+                            <SelectItem value="zalopay">Zalo Pay</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
@@ -453,6 +573,47 @@ export function FinancePage({ currentUser }: FinancePageProps) {
     const [loading, setLoading] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
     const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+    const [associatedAccessory, setAssociatedAccessory] = useState<any | null>(null);
+    const [fetchingAccessory, setFetchingAccessory] = useState(false);
+
+    // Fetch related accessory or partner data when relevant transaction is selected
+    useEffect(() => {
+        const fetchRelatedData = async () => {
+            const isAcc = selectedTransaction?.category === 'Mua phụ kiện' || selectedTransaction?.category === 'Phí ship nhận hàng';
+            const isPartnerShip = selectedTransaction?.category === 'Phí ship gửi đối tác';
+
+            if (!selectedTransaction || (!isAcc && !isPartnerShip)) {
+                setAssociatedAccessory(null);
+                return;
+            }
+
+            // Extract ID from notes like "(Yêu cầu #052fc03c)"
+            const match = selectedTransaction.notes?.match(/\(Yêu cầu #([a-f0-9]+)\)/);
+            if (!match) return;
+
+            const shortId = match[1];
+            setFetchingAccessory(true);
+            try {
+                if (isAcc) {
+                    const res = await requestsApi.getAccessories();
+                    const accessories = (res.data.data as any[]) || [];
+                    const found = accessories.find((a: any) => a.id.startsWith(shortId));
+                    if (found) setAssociatedAccessory(found);
+                } else {
+                    const res = await requestsApi.getPartners();
+                    const partners = (res.data.data as any[]) || [];
+                    const found = partners.find((p: any) => p.id.startsWith(shortId));
+                    if (found) setAssociatedAccessory(found); // Reusing state name for simplicity as it stores 'request' data
+                }
+            } catch (err) {
+                console.error('Error fetching associated data:', err);
+            } finally {
+                setFetchingAccessory(false);
+            }
+        };
+
+        fetchRelatedData();
+    }, [selectedTransaction]);
 
     // Fetch transactions
     const fetchTransactions = useCallback(async () => {
@@ -497,7 +658,24 @@ export function FinancePage({ currentUser }: FinancePageProps) {
     const handleCreateTransaction = async (data: any) => {
         setActionLoading(true);
         try {
-            await transactionsApi.create(data);
+            // If it's an income related to an order, use ordersApi.createPayment 
+            // to ensure the order's remaining debt and payment status are updated.
+            const isOrderIncome = data.type === 'income' &&
+                data.order_id &&
+                ['Thanh toán đơn hàng', 'Đặt cọc', 'Phí giao hàng'].includes(data.category);
+
+            if (isOrderIncome) {
+                await ordersApi.createPayment(data.order_id, {
+                    content: data.category,
+                    amount: data.amount,
+                    payment_method: data.payment_method,
+                    image_url: data.image_url,
+                    notes: data.notes,
+                });
+            } else {
+                await transactionsApi.create(data);
+            }
+
             toast.success(`Đã tạo phiếu ${data.type === 'income' ? 'thu' : 'chi'}`);
             setShowForm(null);
             fetchTransactions();
@@ -806,14 +984,171 @@ export function FinancePage({ currentUser }: FinancePageProps) {
                                 </div>
                             )}
 
-                            {/* Image */}
-                            {selectedTransaction.image_url && (
+                            {/* Attachments - Specific Category Display (Accessories & Partners) */}
+                            {(() => {
+                                const isAccessoryPurchase = selectedTransaction.category === 'Mua phụ kiện';
+                                const isAccessoryShipping = selectedTransaction.category === 'Phí ship nhận hàng';
+                                const isPartnerShipping = selectedTransaction.category === 'Phí ship gửi đối tác';
+
+                                if (!isAccessoryPurchase && !isAccessoryShipping && !isPartnerShipping) return null;
+
+                                // Helper to parse metadata safely
+                                const parseMeta = (meta: any) => {
+                                    if (!meta) return {};
+                                    if (typeof meta === 'object') return meta;
+                                    try {
+                                        const parsed = JSON.parse(meta);
+                                        return typeof parsed === 'object' ? parsed : {};
+                                    } catch (e) {
+                                        console.error('Meta parse error:', e);
+                                        return {};
+                                    }
+                                };
+
+                                const rawMeta = parseMeta(selectedTransaction.metadata);
+                                const associatedMeta = parseMeta(associatedAccessory?.metadata);
+
+                                // Normalize photos from meta or associated request
+                                const purchasePhotos = rawMeta.photos_purchase || rawMeta.purchase_photos || associatedMeta?.photos_purchase || associatedMeta?.purchase_photos || [];
+                                const transferPhotos = rawMeta.photos_transfer || rawMeta.transfer_photos || associatedMeta?.photos_transfer || associatedMeta?.transfer_photos || [];
+                                const arrivalPhotos = rawMeta.arrival_photos || rawMeta.photos_arrival || associatedMeta?.arrival_photos || associatedMeta?.photos_arrival || [];
+                                const packagePhotos = rawMeta.package_photos || rawMeta.photos_package || associatedMeta?.package_photos || associatedMeta?.photos_package || [];
+
+                                const hasAnyPhotos = purchasePhotos.length > 0 || transferPhotos.length > 0 || arrivalPhotos.length > 0 || packagePhotos.length > 0;
+
+                                return (
+                                    <div className="border rounded-2xl p-4 bg-slate-50/50 space-y-5 animate-in slide-in-from-bottom-2 border-slate-200">
+                                        <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2 mb-2">
+                                            <ImageIcon className="w-3.5 h-3.5" />
+                                            {isAccessoryPurchase ? 'Chứng từ mua phụ kiện' :
+                                                isAccessoryShipping ? 'Chứng từ phí ship nhận hàng' :
+                                                    'Chứng từ gửi đối tác (Ảnh gói đồ)'}
+                                            {fetchingAccessory && <Loader2 className="w-3 h-3 animate-spin ml-auto" />}
+                                            {(!fetchingAccessory && hasAnyPhotos) && (
+                                                <Badge variant="success" className="ml-auto text-[8px] h-4 uppercase tracking-tighter bg-emerald-100 text-emerald-600 border-emerald-200">Đã liên kết</Badge>
+                                            )}
+                                        </div>
+
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                                            {/* Accessory Purchase & Partner Package share similar grid display */}
+                                            {((isAccessoryPurchase || purchasePhotos.length > 0)) && (
+                                                <div className="space-y-4">
+                                                    <p className="text-[11px] font-black text-blue-600 uppercase tracking-tighter flex items-center gap-2 bg-blue-50 w-fit px-2 py-0.5 rounded-md border border-blue-100">
+                                                        Ảnh mua hàng
+                                                    </p>
+                                                    {purchasePhotos.length > 0 ? (
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            {purchasePhotos.map((url: string, i: number) => (
+                                                                <div key={i} className="aspect-square rounded-xl border-2 border-white overflow-hidden bg-white group cursor-pointer relative shadow-sm transition-all hover:shadow-md hover:border-blue-200" onClick={() => window.open(url, '_blank')}>
+                                                                    <img src={url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                                        <Eye className="w-6 h-6 text-white" />
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="h-24 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 gap-2 bg-white/50">
+                                                            <ImageIcon className="w-5 h-5 opacity-20" />
+                                                            <span className="text-[10px] font-medium uppercase tracking-tighter">Trống</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {((isAccessoryPurchase || transferPhotos.length > 0)) && (
+                                                <div className="space-y-4">
+                                                    <p className="text-[11px] font-black text-emerald-600 uppercase tracking-tighter flex items-center gap-2 bg-emerald-50 w-fit px-2 py-0.5 rounded-md border border-emerald-100">
+                                                        Ảnh chuyển khoản
+                                                    </p>
+                                                    {transferPhotos.length > 0 ? (
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            {transferPhotos.map((url: string, i: number) => (
+                                                                <div key={i} className="aspect-square rounded-xl border-2 border-white overflow-hidden bg-white group cursor-pointer relative shadow-sm transition-all hover:shadow-md hover:border-emerald-200" onClick={() => window.open(url, '_blank')}>
+                                                                    <img src={url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                                        <Eye className="w-6 h-6 text-white" />
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="h-24 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 gap-2 bg-white/50">
+                                                            <ImageIcon className="w-5 h-5 opacity-20" />
+                                                            <span className="text-[10px] font-medium uppercase tracking-tighter">Trống</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {isAccessoryShipping && (
+                                                <div className="space-y-4 col-span-1 sm:col-span-2">
+                                                    <p className="text-[11px] font-black text-amber-600 uppercase tracking-tighter flex items-center gap-2 bg-amber-50 w-fit px-2 py-0.5 rounded-md border border-amber-100">
+                                                        Ảnh nhận hàng (Lúc về kho)
+                                                    </p>
+                                                    {arrivalPhotos.length > 0 ? (
+                                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                                            {arrivalPhotos.map((url: string, i: number) => (
+                                                                <div key={i} className="aspect-square rounded-xl border-2 border-white overflow-hidden bg-white group cursor-pointer relative shadow-sm transition-all hover:shadow-md hover:border-amber-200" onClick={() => window.open(url, '_blank')}>
+                                                                    <img src={url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                                        <Eye className="w-6 h-6 text-white" />
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="h-24 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 gap-2 bg-white/50">
+                                                            <ImageIcon className="w-5 h-5 opacity-20" />
+                                                            <span className="text-[10px] font-medium uppercase tracking-tighter">Trống</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+
+                                            {(isPartnerShipping || packagePhotos.length > 0) && (
+                                                <div className="space-y-4 col-span-1 sm:col-span-2">
+                                                    <p className="text-[11px] font-black text-indigo-600 uppercase tracking-tighter flex items-center gap-2 bg-indigo-50 w-fit px-2 py-0.5 rounded-md border border-indigo-100">
+                                                        Ảnh gói hàng gửi đi
+                                                    </p>
+                                                    {packagePhotos.length > 0 ? (
+                                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                                            {packagePhotos.map((url: string, i: number) => (
+                                                                <div key={i} className="aspect-square rounded-xl border-2 border-white overflow-hidden bg-white group cursor-pointer relative shadow-sm transition-all hover:shadow-md hover:border-indigo-200" onClick={() => window.open(url, '_blank')}>
+                                                                    <img src={url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-110" />
+                                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                                        <Eye className="w-6 h-6 text-white" />
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    ) : (
+                                                        <div className="h-24 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 gap-2 bg-white/50">
+                                                            <ImageIcon className="w-5 h-5 opacity-20" />
+                                                            <span className="text-[10px] font-medium uppercase tracking-tighter">Trống</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {(!fetchingAccessory && !hasAnyPhotos) && (
+                                            <div className="text-center py-4 text-slate-400 italic text-[13px] border-t border-dashed mt-2">
+                                                Chưa có ảnh đính kèm
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })()}
+
+                            {/* Fallback for single image_url if not already shown in specific categorical layouts */}
+                            {selectedTransaction.image_url && !['Mua phụ kiện', 'Phí ship nhận hàng', 'Phí ship gửi đối tác'].includes(selectedTransaction.category) && (
                                 <div>
                                     <p className="text-sm text-muted-foreground mb-2">Ảnh đính kèm</p>
                                     <img
                                         src={selectedTransaction.image_url}
                                         alt="Đính kèm"
-                                        className="w-full rounded-lg border"
+                                        className="w-full rounded-lg border shadow-sm"
                                     />
                                 </div>
                             )}

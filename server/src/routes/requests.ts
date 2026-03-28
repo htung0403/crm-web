@@ -54,7 +54,7 @@ router.patch('/accessories/:id', authenticate, async (req: AuthenticatedRequest,
         }
 
         // Validate if changing status
-        if (status && status !== current.status) {
+        if (status && status !== current.status && status !== 'rejected' && status !== 'cancelled') {
             const required = ACCESSORY_REQUIRED_FIELDS[current.status];
             if (required) {
                 const finalMeta = metadata || current.metadata || {};
@@ -186,24 +186,17 @@ router.get('/partners', async (req: AuthenticatedRequest, res: Response, next: N
         const { data, error } = await supabaseAdmin
             .from('order_item_partner')
             .select(`
-                id,
-                order_product_id,
-                order_product_service_id,
-                status,
-                notes,
-                metadata,
-                created_at,
-                updated_at,
+                *,
                 order_item:order_items(
-                    id,
-                    item_name,
-                    item_code,
-                    order:orders(id, order_code),
-                    product:products(id, image)
+                    id, 
+                    item_name, 
+                    item_code, 
+                    order:orders(id, order_code)
                 ),
+                technician:users(id, name),
                 order_product:order_products(id, name, product_code, images, order:orders(id, order_code)),
                 order_product_service:order_product_services(
-                    id,
+                    id, 
                     order_product:order_products(name, product_code, images, order:orders(id, order_code))
                 )
             `)
@@ -225,6 +218,9 @@ router.get('/extensions', async (req: AuthenticatedRequest, res: Response, next:
             .select(`
                 id,
                 order_id,
+                order_item_id,
+                order_product_id,
+                order_product_service_id,
                 requested_by,
                 reason,
                 status,
@@ -233,13 +229,54 @@ router.get('/extensions', async (req: AuthenticatedRequest, res: Response, next:
                 valid_reason,
                 created_at,
                 updated_at,
-                order:orders(id, order_code)
+                order:orders(id, order_code, order_products(id, images)),
+                order_item:order_items(id, item_name, item_code, product:products(id, image)),
+                order_product:order_products(id, name, product_code, images),
+                order_product_service:order_product_services(id, item_name, order_product:order_products(id, name, product_code, images))
             `)
             .order('created_at', { ascending: false });
 
-        if (error) throw new ApiError('Không thể lấy danh sách yêu cầu gia hạn', 500);
-
         res.json({ status: 'success', data: data || [] });
+    } catch (e) {
+        next(e);
+    }
+});
+
+// PATCH /api/requests/extensions/:id - Cập nhật yêu cầu gia hạn cụ thể
+router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { status, customer_result, new_due_at, valid_reason } = req.body;
+        const userId = req.user?.id;
+
+        const { data, error } = await supabaseAdmin
+            .from('order_extension_requests')
+            .update({
+                status: status || undefined,
+                customer_result: customer_result !== undefined ? customer_result : undefined,
+                new_due_at: new_due_at || undefined,
+                valid_reason: typeof valid_reason === 'boolean' ? valid_reason : undefined,
+                updated_by: userId,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', id)
+            .select('*')
+            .single();
+
+        if (error) {
+            throw new ApiError('Không thể cập nhật yêu cầu gia hạn: ' + error.message, 500);
+        }
+
+        // 🔔 WH5: Fire webhook — Gia hạn (status change)
+        if (status) {
+            fireWebhook('extension.status_changed', {
+                extension_id: id,
+                new_status: status,
+                customer_result: customer_result || null,
+            });
+        }
+
+        res.json({ status: 'success', data });
     } catch (e) {
         next(e);
     }

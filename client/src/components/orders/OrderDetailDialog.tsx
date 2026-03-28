@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Package, Gift, Sparkles, ShoppingBag, CreditCard, Printer, Wrench } from 'lucide-react';
+import { Package, Gift, Sparkles, ShoppingBag, CreditCard, Printer, Wrench, CheckCircle } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -215,17 +215,38 @@ export function OrderDetailDialog({
                                 Sửa đơn
                             </Button>
                         )}
-                        {order.status === 'in_progress' && onPayment && (
-                            <Button
-                                className="flex-1 bg-green-600 hover:bg-green-700"
-                                onClick={() => {
-                                    onPayment(order);
-                                    onClose();
-                                }}
-                            >
-                                <CreditCard className="h-4 w-4 mr-2" />
-                                Thanh toán
-                            </Button>
+                        {onPayment && (
+                            (() => {
+                                const isPaid = order.remaining_debt !== undefined ? order.remaining_debt <= 0 : order.status === 'after_sale' || order.status === 'done';
+
+                                if (isPaid) {
+                                    return (
+                                        <Button
+                                            className="flex-1 bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                                            onClick={() => {
+                                                onPayment(order);
+                                                onClose();
+                                            }}
+                                        >
+                                            <CheckCircle className="h-4 w-4 mr-2" />
+                                            Đã thanh toán
+                                        </Button>
+                                    );
+                                }
+
+                                return (
+                                    <Button
+                                        className="flex-1 bg-green-600 hover:bg-green-700"
+                                        onClick={() => {
+                                            onPayment(order);
+                                            onClose();
+                                        }}
+                                    >
+                                        <CreditCard className="h-4 w-4 mr-2" />
+                                        Thanh toán
+                                    </Button>
+                                );
+                            })()
                         )}
                         <Button
                             variant="outline"

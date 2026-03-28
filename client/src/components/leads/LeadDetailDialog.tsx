@@ -11,6 +11,7 @@ import { leadsApi } from '@/lib/api';
 import { formatDateTime } from '@/lib/utils';
 import type { Lead } from '@/hooks/useLeads';
 import { kanbanColumns, sourceLabels, getStatusLabel } from './constants';
+import { LeadHenQuaShipDialog } from './LeadHenQuaShipDialog';
 
 interface LeadDetailDialogProps {
     lead: Lead | null;
@@ -37,6 +38,7 @@ export function LeadDetailDialog({
     const [emailCopied, setEmailCopied] = useState(false);
     const [activities, setActivities] = useState<any[]>([]);
     const [loadingActivities, setLoadingActivities] = useState(false);
+    const [showHenQuaShipDialog, setShowHenQuaShipDialog] = useState(false);
 
     // Fetch activities when dialog opens
     useEffect(() => {
@@ -99,8 +101,18 @@ export function LeadDetailDialog({
             }
         }
     };
-
     const handleStatusChange = async (newStatus: string) => {
+        // Validation: Must have phone number to move to 'chot_don'
+        if (newStatus === 'chot_don' && !lead.phone) {
+            toast.error('Vui lòng cập nhật số điện thoại trước khi chốt đơn');
+            return;
+        }
+
+        if (newStatus === 'hen_qua_ship') {
+            setShowHenQuaShipDialog(true);
+            return;
+        }
+
         setIsSaving(true);
         try {
             await onUpdate(lead.id, { status: newStatus, pipeline_stage: newStatus });
@@ -108,6 +120,21 @@ export function LeadDetailDialog({
             toast.success('Đã cập nhật trạng thái');
         } catch {
             toast.error('Lỗi khi cập nhật trạng thái');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleSubmitHenQuaShip = async (data: Partial<Lead>) => {
+        if (!lead) return;
+        setIsSaving(true);
+        try {
+            await onUpdate(lead.id, data);
+            setSelectedStatus('hen_qua_ship');
+            setShowHenQuaShipDialog(false);
+            toast.success('Đã cập nhật thông tin');
+        } catch {
+            toast.error('Lỗi khi cập nhật thông tin');
         } finally {
             setIsSaving(false);
         }
@@ -210,6 +237,27 @@ export function LeadDetailDialog({
                         <p className="text-sm text-muted-foreground">Ngày tạo</p>
                         <p className="font-medium">{formatDateTime(lead.created_at)}</p>
                     </div>
+                    {lead.pipeline_stage === 'hen_qua_ship' && (
+                        <>
+                            {lead.delivery_method === 'direct' ? (
+                                <div>
+                                    <p className="text-sm text-muted-foreground font-semibold text-orange-600">Ngày hẹn qua</p>
+                                    <p className="font-bold">{lead.appointment_time ? formatDateTime(lead.appointment_time) : '-'}</p>
+                                </div>
+                            ) : (
+                                <>
+                                    <div>
+                                        <p className="text-sm text-muted-foreground font-semibold text-blue-600">Mã vận chuyển</p>
+                                        <p className="font-bold">{lead.tracking_code || '-'}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm text-muted-foreground font-semibold text-blue-600">Phí ship</p>
+                                        <p className="font-bold">{lead.shipping_fee ? lead.shipping_fee.toLocaleString('vi-VN') + ' ₫' : '0 ₫'}</p>
+                                    </div>
+                                </>
+                            )}
+                        </>
+                    )}
                     <div>
                         <p className="text-sm text-muted-foreground">Ngày sinh</p>
                         <Input
@@ -319,6 +367,12 @@ export function LeadDetailDialog({
                     </Button>
                 </div>
             </DialogContent>
+            <LeadHenQuaShipDialog
+                open={showHenQuaShipDialog}
+                onClose={() => setShowHenQuaShipDialog(false)}
+                onSubmit={handleSubmitHenQuaShip}
+                lead={lead}
+            />
         </Dialog>
     );
 }

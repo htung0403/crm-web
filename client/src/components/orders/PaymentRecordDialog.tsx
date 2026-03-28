@@ -1,5 +1,5 @@
-import { useState, useRef } from 'react';
-import { Loader2, Upload, X, CreditCard, Banknote, Smartphone, ImagePlus, CheckCircle2, Camera } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Loader2, Upload, X, Wallet, Banknote, Smartphone, ImagePlus, CheckCircle2, Camera } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,12 +24,14 @@ interface PaymentRecordDialogProps {
     orderCode: string;
     remainingDebt: number;
     onSuccess: () => void;
+    initialContent?: string;
+    initialAmount?: number;
 }
 
 const PAYMENT_METHODS = [
     { value: 'cash', label: 'Tiền mặt', icon: Banknote },
     { value: 'transfer', label: 'Chuyển khoản', icon: Smartphone },
-    { value: 'card', label: 'Thẻ', icon: CreditCard },
+    { value: 'zalopay', label: 'Zalo Pay', icon: Wallet },
 ] as const;
 
 const CONTENT_SUGGESTIONS = [
@@ -47,10 +49,21 @@ export function PaymentRecordDialog({
     orderCode,
     remainingDebt,
     onSuccess,
+    initialContent = '',
+    initialAmount = 0,
 }: PaymentRecordDialogProps) {
-    const [content, setContent] = useState('');
-    const [amount, setAmount] = useState<number>(0);
-    const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'card'>('cash');
+    const [content, setContent] = useState(initialContent);
+    const [amount, setAmount] = useState<number>(initialAmount);
+
+    // Update values when dialog opens with initial props
+    useEffect(() => {
+        if (open) {
+            if (initialContent) setContent(initialContent);
+            if (initialAmount) setAmount(initialAmount);
+        }
+    }, [open, initialContent, initialAmount]);
+
+    const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'zalopay'>('cash');
     const [imageUrl, setImageUrl] = useState('');
     const [notes, setNotes] = useState('');
     const [loading, setLoading] = useState(false);
@@ -158,37 +171,42 @@ export function PaymentRecordDialog({
 
     return (
         <Dialog open={open} onOpenChange={handleClose}>
-            <DialogContent className="max-w-md">
-                <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                        <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center">
-                            <CreditCard className="h-5 w-5 text-green-600" />
+            <DialogContent className="max-w-md p-0 overflow-hidden">
+                <DialogHeader className="p-6 pb-2">
+                    <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
+                            <Wallet className="h-5 w-5 text-green-600" />
                         </div>
-                        Ghi nhận thanh toán
-                    </DialogTitle>
-                    <DialogDescription>
-                        Đơn hàng: <span className="font-semibold text-foreground">{orderCode}</span>
-                        <br />
-                        Còn nợ: <span className="font-semibold text-red-600">{formatCurrency(remainingDebt)}</span>
-                    </DialogDescription>
+                        <div>
+                            <DialogTitle className="text-xl">Ghi nhận thanh toán</DialogTitle>
+                            <DialogDescription className="text-xs mt-0.5">
+                                Đơn hàng: <span className="font-medium text-foreground">{orderCode}</span>
+                                <span className="mx-2 text-muted-foreground">|</span>
+                                Còn nợ: <span className="font-semibold text-red-600">{formatCurrency(remainingDebt)}</span>
+                            </DialogDescription>
+                        </div>
+                    </div>
                 </DialogHeader>
 
-                <div className="space-y-4 py-4">
+                <div className="px-6 py-4 space-y-4">
                     {/* Content */}
                     <div className="space-y-2">
-                        <Label>Nội dung thanh toán *</Label>
+                        <Label className="text-sm font-medium">Nội dung thanh toán *</Label>
                         <Input
                             placeholder="VD: Đặt cọc, Thanh toán đợt 1..."
                             value={content}
                             onChange={(e) => setContent(e.target.value)}
                         />
-                        <div className="flex flex-wrap gap-1">
+                        <div className="flex flex-wrap gap-1.5">
                             {CONTENT_SUGGESTIONS.map((suggestion) => (
                                 <button
                                     key={suggestion}
                                     type="button"
-                                    onClick={() => setContent(suggestion)}
-                                    className="px-2 py-1 text-xs rounded-full bg-muted hover:bg-muted/80 transition-colors"
+                                    onClick={() => {
+                                        setContent(suggestion);
+                                        if (suggestion === 'Thanh toán hết') handlePayFull();
+                                    }}
+                                    className="text-xs px-2.5 py-1 rounded-full bg-muted hover:bg-muted/80 transition-colors"
                                 >
                                     {suggestion}
                                 </button>
@@ -198,52 +216,51 @@ export function PaymentRecordDialog({
 
                     {/* Amount */}
                     <div className="space-y-2">
-                        <Label>Số tiền *</Label>
+                        <div className="flex items-center justify-between">
+                            <Label className="text-sm font-medium">Số tiền *</Label>
+                            {remainingDebt > 0 && (
+                                <button
+                                    type="button"
+                                    onClick={handlePayFull}
+                                    className="text-xs text-green-600 hover:underline font-medium"
+                                >
+                                    Thanh toán hết ({formatCurrency(remainingDebt)})
+                                </button>
+                            )}
+                        </div>
                         <div className="relative">
                             <Input
                                 type="text"
                                 placeholder="0"
                                 value={formatInputCurrency(amount)}
                                 onChange={(e) => setAmount(parseInputCurrency(e.target.value))}
-                                className="pr-16"
+                                className="pr-12 text-lg font-semibold text-green-600"
                             />
-                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
-                                VNĐ
+                            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-bold">
+                                VND
                             </span>
                         </div>
-                        {remainingDebt > 0 && (
-                            <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={handlePayFull}
-                                className="text-green-600 border-green-200 hover:bg-green-50"
-                            >
-                                Thanh toán hết ({formatCurrency(remainingDebt)})
-                            </Button>
-                        )}
                     </div>
 
                     {/* Payment Method */}
                     <div className="space-y-2">
-                        <Label>Phương thức thanh toán</Label>
+                        <Label className="text-sm font-medium">Phương thức thanh toán</Label>
                         <div className="grid grid-cols-3 gap-2">
                             {PAYMENT_METHODS.map((method) => {
                                 const Icon = method.icon;
+                                const isSelected = paymentMethod === method.value;
                                 return (
                                     <button
                                         key={method.value}
                                         type="button"
                                         onClick={() => setPaymentMethod(method.value)}
-                                        className={`flex flex-col items-center gap-1 p-3 rounded-lg border-2 transition-all ${paymentMethod === method.value
-                                            ? 'border-primary bg-primary/5'
-                                            : 'border-muted hover:border-muted-foreground/30'
+                                        className={`flex items-center justify-center gap-2 p-2.5 rounded-lg border-2 transition-all ${isSelected
+                                            ? 'border-primary bg-primary/5 text-primary'
+                                            : 'border-muted hover:border-muted-foreground/30 text-muted-foreground'
                                             }`}
                                     >
-                                        <Icon className={`h-5 w-5 ${paymentMethod === method.value ? 'text-primary' : 'text-muted-foreground'}`} />
-                                        <span className={`text-xs ${paymentMethod === method.value ? 'font-medium' : ''}`}>
-                                            {method.label}
-                                        </span>
+                                        <Icon className="h-4 w-4" />
+                                        <span className="text-xs font-medium">{method.label}</span>
                                     </button>
                                 );
                             })}
@@ -252,8 +269,7 @@ export function PaymentRecordDialog({
 
                     {/* Payment Verification - Image Upload */}
                     <div className="space-y-2">
-                        <Label>Xác minh thanh toán</Label>
-                        {/* Hidden file input for gallery */}
+                        <Label className="text-sm font-medium">Xác minh thanh toán</Label>
                         <input
                             type="file"
                             accept="image/*"
@@ -261,7 +277,6 @@ export function PaymentRecordDialog({
                             ref={fileInputRef}
                             className="hidden"
                         />
-                        {/* Hidden file input for camera */}
                         <input
                             type="file"
                             accept="image/*"
@@ -272,44 +287,23 @@ export function PaymentRecordDialog({
                         />
 
                         {!imageUrl ? (
-                            <div className={`border-2 border-dashed rounded-lg p-6 text-center transition-all ${uploading ? 'opacity-50' : ''}`}>
+                            <div
+                                onClick={() => fileInputRef.current?.click()}
+                                className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-all ${uploading ? 'opacity-50 pointer-events-none' : ''}`}
+                            >
                                 {uploading ? (
-                                    <div className="flex flex-col items-center gap-2">
-                                        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                                        <p className="text-sm text-muted-foreground">Đang tải ảnh lên...</p>
+                                    <div className="flex items-center justify-center gap-2 py-1">
+                                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                        <span className="text-sm text-muted-foreground">Đang tải ảnh...</span>
                                     </div>
                                 ) : (
-                                    <div className="flex flex-col items-center gap-2">
-                                        <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center">
-                                            <ImagePlus className="h-6 w-6 text-muted-foreground" />
+                                    <div className="flex items-center justify-center gap-4">
+                                        <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center shrink-0">
+                                            <ImagePlus className="h-5 w-5 text-muted-foreground" />
                                         </div>
-                                        <div>
+                                        <div className="text-left">
                                             <p className="text-sm font-medium">Tải ảnh chứng từ</p>
                                             <p className="text-xs text-muted-foreground">QR code, biên lai, ảnh chuyển khoản...</p>
-                                        </div>
-                                        <div className="flex gap-2 mt-2">
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => fileInputRef.current?.click()}
-                                                disabled={uploading}
-                                            >
-                                                <Upload className="h-4 w-4 mr-2" />
-                                                Chọn ảnh
-                                            </Button>
-                                            {/* Camera button - only visible on mobile */}
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => document.getElementById('cameraInput')?.click()}
-                                                disabled={uploading}
-                                                className="md:hidden text-blue-600 border-blue-200 hover:bg-blue-50"
-                                            >
-                                                <Camera className="h-4 w-4 mr-2" />
-                                                Chụp ảnh
-                                            </Button>
                                         </div>
                                     </div>
                                 )}
@@ -317,40 +311,43 @@ export function PaymentRecordDialog({
                         ) : (
                             <div className="relative">
                                 <div className="border rounded-lg p-3 bg-green-50/50 border-green-200">
-                                    <div className="flex items-start gap-3">
-                                        <img
-                                            src={imageUrl}
-                                            alt="Payment proof"
-                                            className="h-24 w-24 object-cover rounded-lg border shadow-sm"
-                                        />
+                                    <div className="flex items-center gap-4">
+                                        <div className="relative group">
+                                            <img
+                                                src={imageUrl}
+                                                alt="Payment proof"
+                                                className="h-16 w-16 object-cover rounded-lg border shadow-sm"
+                                            />
+                                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-lg transition-opacity">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => fileInputRef.current?.click()}
+                                                    className="p-1.5 bg-white rounded-full text-primary"
+                                                >
+                                                    <Upload className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2 text-green-600 mb-1">
                                                 <CheckCircle2 className="h-4 w-4" />
                                                 <span className="text-sm font-medium">Đã tải lên</span>
                                             </div>
-                                            <p className="text-xs text-muted-foreground mb-2">
-                                                Ảnh xác minh thanh toán đã được lưu
-                                            </p>
-                                            <div className="flex gap-2">
-                                                <Button
+                                            <div className="flex gap-3">
+                                                <button
                                                     type="button"
-                                                    variant="outline"
-                                                    size="sm"
                                                     onClick={() => fileInputRef.current?.click()}
-                                                    disabled={uploading}
+                                                    className="text-xs font-medium text-blue-600 hover:text-blue-700"
                                                 >
                                                     Đổi ảnh
-                                                </Button>
-                                                <Button
+                                                </button>
+                                                <button
                                                     type="button"
-                                                    variant="ghost"
-                                                    size="sm"
                                                     onClick={handleRemoveImage}
-                                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                    className="text-xs font-medium text-red-600 hover:text-red-700"
                                                 >
-                                                    <X className="h-4 w-4 mr-1" />
                                                     Xóa
-                                                </Button>
+                                                </button>
                                             </div>
                                         </div>
                                     </div>
@@ -361,27 +358,26 @@ export function PaymentRecordDialog({
 
                     {/* Notes */}
                     <div className="space-y-2">
-                        <Label>Ghi chú</Label>
-                        <Textarea
+                        <Label className="text-sm font-medium">Ghi chú (không bắt buộc)</Label>
+                        <Input
                             placeholder="Ghi chú thêm..."
                             value={notes}
                             onChange={(e) => setNotes(e.target.value)}
-                            rows={2}
                             className="resize-none"
                         />
                     </div>
                 </div>
 
-                <DialogFooter>
-                    <Button variant="outline" onClick={handleClose} disabled={loading || uploading}>
+                <DialogFooter className="p-6 pt-2 pb-6 gap-2 sm:gap-0">
+                    <Button variant="ghost" onClick={handleClose} disabled={loading || uploading} className="h-10 text-muted-foreground hover:text-foreground">
                         Hủy
                     </Button>
                     <Button
                         onClick={handleSubmit}
                         disabled={loading || uploading || !content.trim() || amount <= 0}
-                        className="bg-green-600 hover:bg-green-700"
+                        className="h-10 px-8 bg-green-600 hover:bg-green-700 shadow-md transition-all active:scale-95"
                     >
-                        {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                        {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
                         Xác nhận thanh toán
                     </Button>
                 </DialogFooter>

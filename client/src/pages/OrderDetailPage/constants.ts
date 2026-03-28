@@ -46,7 +46,8 @@ export const SALES_STATUS_LABELS: Record<string, string> = {
 };
 
 export const AFTER_SALE_STAGE_LABELS: Record<string, string> = {
-    after1: 'Kiểm nợ & Ảnh hoàn thiện',
+    after1: 'Ảnh hoàn thiện',
+    after1_debt: 'Kiểm nợ',
     after2: 'Đóng gói & Giao hàng',
     after3: 'Nhắn HD & Feedback',
     after4: 'Lưu Trữ',

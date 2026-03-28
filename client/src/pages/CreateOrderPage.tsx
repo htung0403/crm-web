@@ -5,7 +5,7 @@ import {
     ArrowLeft, ArrowRight, Plus, Trash2, Camera, Package, Sparkles,
     Loader2, User, Search, CheckCircle, ShoppingBag, QrCode, Image as ImageIcon,
     Tag, Palette, Layers, FileText, Check, Wrench, UserCheck, X, UserPlus,
-    Percent, DollarSign, ChevronDown, CreditCard, Calendar, Pencil
+    Percent, DollarSign, ChevronDown, CreditCard, Calendar, Pencil, Wallet, Smartphone
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,7 @@ import { useCustomers } from '@/hooks/useCustomers';
 import { useProducts } from '@/hooks/useProducts';
 import { usePackages } from '@/hooks/usePackages';
 import { useUsers } from '@/hooks/useUsers';
-import { ordersApi } from '@/lib/api';
+import { ordersApi, transactionsApi } from '@/lib/api';
 import { CreateCustomerDialog } from '@/components/customers/CreateCustomerDialog';
 import { ImageUpload } from '@/components/products/ImageUpload';
 import { useProductTypes } from '@/hooks/useProductTypes';
@@ -115,6 +115,7 @@ export function CreateOrderPage() {
     const [discountType, setDiscountType] = useState<'amount' | 'percent'>('amount');
     const [surcharges, setSurcharges] = useState<Surcharge[]>([]);
     const [paidAmount, setPaidAmount] = useState(0);
+    const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'zalopay'>('cash');
 
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
@@ -1076,6 +1077,7 @@ export function CreateOrderPage() {
                     amount: s.isPercent ? Math.round(subtotal * s.value / 100) : s.value
                 })),
                 paid_amount: paidAmount,
+                payment_method: paymentMethod,
 
             };
 
@@ -1083,7 +1085,10 @@ export function CreateOrderPage() {
                 ? await ordersApi.updateFull(id, payload)
                 : await ordersApi.create(payload);
 
-            setCreatedOrder(response.data.data);
+            const orderResult = response.data.data;
+            setCreatedOrder(orderResult);
+
+
             setStep(4); // Success step
             toast.success(isEditMode ? 'Đã cập nhật đơn hàng thành công!' : 'Đã tạo đơn hàng thành công!');
         } catch (error: any) {
@@ -2361,9 +2366,45 @@ export function CreateOrderPage() {
                                     </div>
                                 </div>
 
-                                {/* Payment Input */}
-                                <div className="space-y-2 pt-2 border-t border-green-200">
-                                    <Label className="text-xs text-green-700">Nhận thanh toán</Label>
+                                {/* Payment Method Selection */}
+                                 <div className="space-y-2 pt-2 border-t border-green-200">
+                                     <Label className="text-xs text-green-700">Phương thức thanh toán</Label>
+                                     <div className="grid grid-cols-3 gap-2 pb-2">
+                                         <Button
+                                             type="button"
+                                             variant={paymentMethod === 'cash' ? 'default' : 'outline'}
+                                             size="sm"
+                                             onClick={() => setPaymentMethod('cash')}
+                                             className={`flex flex-col items-center gap-1 h-auto py-2 px-1 ${paymentMethod === 'cash' ? 'bg-green-600 hover:bg-green-700' : 'border-green-200 text-green-700'}`}
+                                         >
+                                             <DollarSign className="h-4 w-4" />
+                                             <span className="text-[10px]">Tiền mặt</span>
+                                         </Button>
+                                         <Button
+                                             type="button"
+                                             variant={paymentMethod === 'transfer' ? 'default' : 'outline'}
+                                             size="sm"
+                                             onClick={() => setPaymentMethod('transfer')}
+                                             className={`flex flex-col items-center gap-1 h-auto py-2 px-1 ${paymentMethod === 'transfer' ? 'bg-green-600 hover:bg-green-700' : 'border-green-200 text-green-700'}`}
+                                         >
+                                             <Smartphone className="h-4 w-4" />
+                                             <span className="text-[10px]">Chuyển khoản</span>
+                                         </Button>
+                                         <Button
+                                             type="button"
+                                             variant={paymentMethod === 'zalopay' ? 'default' : 'outline'}
+                                             size="sm"
+                                             onClick={() => setPaymentMethod('zalopay')}
+                                             className={`flex flex-col items-center gap-1 h-auto py-2 px-1 ${paymentMethod === 'zalopay' ? 'bg-blue-600 hover:bg-blue-700' : 'border-blue-200 text-blue-700'}`}
+                                         >
+                                             <Wallet className="h-4 w-4" />
+                                             <span className="text-[10px]">Zalo Pay</span>
+                                         </Button>
+                                     </div>
+                                 </div>
+
+                                 {/* Payment Input */}                                <div className="space-y-2 pt-2 border-t border-green-200">
+                                    <Label className="text-xs text-green-700">Số tiền khách thanh toán</Label>
                                     <div className="flex gap-2">
                                         <Input
                                             type="text"

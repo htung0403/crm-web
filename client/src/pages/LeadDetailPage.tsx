@@ -29,6 +29,15 @@ import { useLeads } from '@/hooks/useLeads';
 import { kanbanColumns, sourceLabels, getStatusLabel } from '@/components/leads/constants';
 import { format } from 'date-fns';
 import { useAuth } from '@/contexts/AuthContext';
+import { usersApi } from '@/lib/api';
+import { SLACountdown } from '@/components/leads/SLACountdown';
+
+interface MentionUser {
+    id: string;
+    name: string;
+    avatar_url?: string;
+    role?: string;
+}
 
 export function LeadDetailPage() {
     const { id } = useParams<{ id: string }>();
@@ -72,6 +81,15 @@ export function LeadDetailPage() {
     const [editDob, setEditDob] = useState('');
     const [isEditingInfo, setIsEditingInfo] = useState(false);
     const [isEditingContact, setIsEditingContact] = useState(false);
+    
+    // Suggestion state
+    const [users, setUsers] = useState<MentionUser[]>([]);
+    const [showMentions, setShowMentions] = useState(false);
+    const [mentionFilter, setMentionFilter] = useState('');
+    const [cursorPosition, setCursorPosition] = useState(0);
+    const [mentionStyle, setMentionStyle] = useState({ top: 0, left: 0 });
+    const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
+    const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
     // Fetch lead data
     useEffect(() => {
@@ -133,7 +151,17 @@ export function LeadDetailPage() {
 
     useEffect(() => {
         fetchActivities();
+        fetchUsers();
     }, [id]);
+
+    const fetchUsers = async () => {
+        try {
+            const res = await usersApi.getAll();
+            setUsers(res.data.data?.users || []);
+        } catch (err) {
+            console.error('Error fetching users:', err);
+        }
+    };
 
     // Timer for elapsed time since lead creation
     useEffect(() => {
@@ -260,6 +288,12 @@ export function LeadDetailPage() {
     };
 
     const handleStatusChange = async (newStatus: string) => {
+        // Validation: Must have phone number to move to 'chot_don'
+        if (newStatus === 'chot_don' && !lead.phone) {
+            toast.error('Vui lòng cập nhật số điện thoại trước khi chốt đơn');
+            return;
+        }
+
         setIsSaving(true);
         try {
             await updateLead(lead.id, { status: newStatus, pipeline_stage: newStatus });
@@ -357,6 +391,106 @@ export function LeadDetailPage() {
         }
     };
 
+    const getCaretCoordinates = () => {
+        if (!textAreaRef.current) return { top: 30, left: 10 };
+        
+        const el = textAreaRef.current;
+        const { offsetLeft, offsetTop } = el;
+        
+        // This is a simplified caret position calculator
+        // For a more precise one, we would need a mirror div
+        // But we can approximate based on line height and character width
+        const fontSize = 14; // text-sm
+        const lineHeight = 20;
+        
+        const textBeforeCaret = el.value.substring(0, el.selectionStart);
+        const lines = textBeforeCaret.split('\n');
+        const currentLineIndex = lines.length - 1;
+        const currentLineText = lines[currentLineIndex];
+        
+        // Approximate character width (not perfect for non-monospace)
+        const charWidth = fontSize * 0.6; 
+        
+        return {
+            top: (currentLineIndex + 1) * lineHeight + 8, // +8 for padding
+            left: Math.min(el.clientWidth - 200, currentLineText.length * charWidth + 12)
+        };
+    };
+
+    const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        const value = e.target.value;
+        const position = e.target.selectionStart;
+        setNewNote(value);
+        setCursorPosition(position);
+
+        // Check for @ trigger
+        const lastAtPos = value.lastIndexOf('@', position - 1);
+        if (lastAtPos !== -1) {
+            const textAfterAt = value.substring(lastAtPos + 1, position);
+            const isAtStartOrAfterSpace = lastAtPos === 0 || value[lastAtPos - 1] === ' ' || value[lastAtPos - 1] === '\n';
+            
+            if (isAtStartOrAfterSpace && !textAfterAt.includes(' ')) {
+                setMentionFilter(textAfterAt);
+                setShowMentions(true);
+                setSelectedMentionIndex(-1);
+                
+                // Set dynamic position
+                setMentionStyle(getCaretCoordinates()); 
+            } else {
+                setShowMentions(false);
+            }
+        } else {
+            setShowMentions(false);
+        }
+    };
+
+    const insertMention = (user: MentionUser) => {
+        const beforeAt = newNote.substring(0, newNote.lastIndexOf('@', cursorPosition - 1));
+        const afterMention = newNote.substring(cursorPosition);
+        const updatedNote = `${beforeAt}@${user.name} ${afterMention}`;
+        
+        setNewNote(updatedNote);
+        setShowMentions(false);
+        
+        // Focus back to textarea
+        setTimeout(() => {
+            if (textAreaRef.current) {
+                textAreaRef.current.focus();
+                const newPos = beforeAt.length + user.name.length + 2; 
+                textAreaRef.current.setSelectionRange(newPos, newPos);
+            }
+        }, 0);
+    };
+
+    const filteredUsers = users.filter(u => 
+        u.name.toLowerCase().includes(mentionFilter.toLowerCase())
+    ).slice(0, 8);
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (showMentions) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setSelectedMentionIndex(prev => {
+                    if (prev === -1) return 0;
+                    return (prev + 1) % filteredUsers.length;
+                });
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setSelectedMentionIndex(prev => {
+                    if (prev <= 0) return filteredUsers.length - 1;
+                    return prev - 1;
+                });
+            } else if (e.key === 'Enter' || e.key === 'Tab') {
+                if (filteredUsers.length > 0 && selectedMentionIndex !== -1) {
+                    e.preventDefault();
+                    insertMention(filteredUsers[selectedMentionIndex]);
+                }
+            } else if (e.key === 'Escape') {
+                setShowMentions(false);
+            }
+        }
+    };
+
     const handleAddNote = async () => {
         if (!id || (!newNote.trim() && !selectedImageUrl)) return;
 
@@ -365,6 +499,17 @@ export function LeadDetailPage() {
             const metadata: any = {};
             if (selectedImageUrl) {
                 metadata.image_url = selectedImageUrl;
+            }
+
+            // Extract mentioned user IDs from content
+            const mentions: string[] = [];
+            users.forEach(u => {
+                if (newNote.includes(`@${u.name}`)) {
+                    mentions.push(u.id);
+                }
+            });
+            if (mentions.length > 0) {
+                metadata.mentions = mentions;
             }
 
             await leadsApi.addActivity(id, {
@@ -475,8 +620,9 @@ export function LeadDetailPage() {
                             />
                         </div>
                         <div className="flex-1 min-w-0">
-                            <div className="flex flex-wrap items-center gap-2 mb-1">
-                                <h1 className="text-xl sm:text-2xl font-bold truncate pr-2">{lead.name}</h1>
+                            <div className="flex flex-wrap items-center gap-3 mb-1">
+                                <h1 className="text-xl sm:text-2xl font-bold truncate">{lead.name}</h1>
+                                <SLACountdown lead={lead} size="lg" />
                             </div>
                             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                                 <p className="text-muted-foreground text-sm sm:text-base">{lead.phone}</p>
@@ -1147,11 +1293,50 @@ export function LeadDetailPage() {
                                 )}
                                 <div className="relative">
                                     <textarea
+                                        ref={textAreaRef}
                                         value={newNote}
-                                        onChange={(e) => setNewNote(e.target.value)}
-                                        placeholder="Nhập ghi chú mới..."
+                                        onChange={handleTextareaChange}
+                                        onKeyDown={handleKeyDown}
+                                        placeholder="Nhập ghi chú mới... Dùng @ để nhắc tên đồng nghiệp"
                                         className="w-full min-h-24 px-3 py-2 pb-10 text-sm rounded-lg border border-input bg-background resize-none focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
                                     />
+                                    
+                                    {/* Mentions dropdown */}
+                                    {showMentions && filteredUsers.length > 0 && (
+                                        <Card 
+                                            className="absolute shadow-2xl z-[100] border-slate-200 overflow-hidden animate-in fade-in slide-in-from-top-2 w-64"
+                                            style={{ 
+                                                top: `${mentionStyle.top}px`, 
+                                                left: `${mentionStyle.left}px` 
+                                            }}
+                                        >
+                                            <div className="bg-slate-50 border-b px-3 py-2">
+                                                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Đồng nghiệp</p>
+                                            </div>
+                                            <div className="max-h-60 overflow-y-auto p-1">
+                                                {filteredUsers.map((user, index) => (
+                                                    <button
+                                                        key={user.id}
+                                                        onClick={() => insertMention(user)}
+                                                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all ${index === selectedMentionIndex ? 'bg-primary/10 text-primary' : 'hover:bg-slate-100'}`}
+                                                    >
+                                                        <Avatar className="h-8 w-8 shrink-0 border border-slate-100">
+                                                            <AvatarImage src={user.avatar_url} />
+                                                            <AvatarFallback className="bg-slate-200 text-xs text-slate-600 font-bold uppercase">
+                                                                {user.name.charAt(0)}
+                                                            </AvatarFallback>
+                                                        </Avatar>
+                                                        <div className="min-w-0">
+                                                            <p className="text-sm font-bold truncate">{user.name}</p>
+                                                            {user.role && (
+                                                                <p className="text-[10px] text-slate-500 font-medium uppercase truncate">{user.role}</p>
+                                                            )}
+                                                        </div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </Card>
+                                    )}
                                     <div className="absolute bottom-2 left-2 flex items-center gap-1">
                                         <input
                                             type="file"
@@ -1373,9 +1558,28 @@ export function LeadDetailPage() {
                                                                     </span>
                                                                 </div>
                                                                 <div className="text-sm bg-muted/30 rounded-lg py-2 px-3 border border-muted/50">
-                                                                    <p className={`text-sm whitespace-pre-wrap ${activity.metadata?.sticker_id ? 'text-4xl py-2' : 'text-muted-foreground'}`}>
-                                                                        {activity.metadata?.sticker_id || activity.content}
-                                                                    </p>
+                                                                    <div className={`text-sm whitespace-pre-wrap ${activity.metadata?.sticker_id ? 'text-4xl py-2' : 'text-muted-foreground'}`}>
+                                                                        {activity.metadata?.sticker_id || (() => {
+                                                                            const content = activity.content || '';
+                                                                            if (users.length === 0) return content;
+                                                                            
+                                                                            // Build a regex that matches exactly the names of our users
+                                                                            const names = users.map(u => u.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+                                                                            const regex = new RegExp(`(@(?:${names}))`, 'g');
+                                                                            
+                                                                            const parts = content.split(regex);
+                                                                            return parts.map((part: string, i: number) => {
+                                                                                if (part.startsWith('@')) {
+                                                                                    const nameOnly = part.substring(1);
+                                                                                    const isValidUser = users.some(u => u.name === nameOnly);
+                                                                                    if (isValidUser) {
+                                                                                        return <span key={i} className="text-primary font-bold bg-primary/5 px-1 rounded">{part}</span>;
+                                                                                    }
+                                                                                }
+                                                                                return part;
+                                                                            });
+                                                                        })()}
+                                                                    </div>
                                                                     {activity.metadata?.image_url && (
                                                                         <div className="mt-2 group relative w-fit max-w-full">
                                                                             <img

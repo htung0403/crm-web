@@ -29,6 +29,8 @@ interface WorkflowCardProps {
     handleOpenAssignDialog: (item: OrderItem) => void;
     handleOpenSaleAssignDialog: (item: OrderItem) => void;
     onCardClick: (group: { product: OrderItem | null; services: OrderItem[] }, roomId: string) => void;
+    handleOpenBackwardMove: (group: any) => void;
+    orderExtensionRequest?: any;
 }
 
 const WorkflowCard = memo(({
@@ -43,7 +45,8 @@ const WorkflowCard = memo(({
     handleOpenExtension,
     handleOpenAssignDialog,
     handleOpenSaleAssignDialog,
-    onCardClick
+    onCardClick,
+    orderExtensionRequest
 }: WorkflowCardProps) => {
     const productName = group.product?.item_name ?? group.services[0]?.item_name ?? '—';
     const productItem = group.product as any;
@@ -52,6 +55,8 @@ const WorkflowCard = memo(({
     const cardKey = group.product?.id ?? group.services.map((s) => s.id).join('-');
 
     const leadItem = group.services.find((s) => getItemCurrentStep(s.id)) ?? group.services[0];
+    // Isolation logic: only use orderExtensionRequest if it's truly global (no item IDs)
+    const extensionRequest = productItem?.extension_request || (leadItem as any)?.extension_request;
     const stepDeadline = leadItem ? getStepDeadlineDisplay(leadItem.id) : { label: 'N/A', dueAt: null };
     const itemLate = stepDeadline.dueAt ? stepDeadline.dueAt < new Date() : false;
     const currentStep = leadItem ? getItemCurrentStep(leadItem.id) : null;
@@ -66,7 +71,9 @@ const WorkflowCard = memo(({
                     className={cn(
                         "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all cursor-grab active:cursor-grabbing",
                         snapshot.isDragging ? "shadow-lg ring-2 ring-primary/20 scale-105" : "",
-                        itemLate && roomId !== 'done' ? "border-red-500 bg-red-50/30" :
+                        itemLate && roomId !== 'done' ? (
+                            (extensionRequest?.status === 'pending' || extensionRequest?.status === 'requested') ? "border-amber-400 bg-amber-50/50 border-dashed" : "border-red-500 bg-red-50/30"
+                        ) :
                             roomId === 'done' ? "border-green-500" :
                                 roomId === 'fail' ? "border-red-400" : "border-blue-400"
                     )}
@@ -85,6 +92,20 @@ const WorkflowCard = memo(({
                         <h3 className="font-bold text-gray-800 text-[13px] flex items-center gap-1.5 flex-wrap">
                             <ShoppingBag className="h-3.5 w-3.5 shrink-0 text-primary" />
                             <span className="truncate flex-1">{productName}</span>
+                            {extensionRequest && (
+                                <Badge
+                                    variant="outline"
+                                    className={cn(
+                                        "text-[9px] py-0 h-3.5 gap-1 shrink-0",
+                                        (extensionRequest.status === 'pending' || extensionRequest.status === 'requested') ? "bg-amber-50 text-amber-600 border-amber-200 animate-pulse" :
+                                            extensionRequest.status === 'manager_approved' ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
+                                                "bg-blue-50 text-blue-600 border-blue-200"
+                                    )}
+                                >
+                                    <Clock className="h-2 w-2" />
+                                    {(extensionRequest.status === 'pending' || extensionRequest.status === 'requested') ? 'Chờ gia hạn' : 'Đã gia hạn'}
+                                </Badge>
+                            )}
                             {group.product?.due_at && (
                                 <Badge variant="outline" className="text-[9px] py-0 h-3.5 bg-orange-50 text-orange-600 border-orange-200 gap-1 shrink-0">
                                     <Clock className="h-2 w-2" />
@@ -153,35 +174,89 @@ const WorkflowCard = memo(({
                         <>
                             <div className="mt-2 flex items-center justify-between text-[11px]">
                                 <span className="text-gray-500">Hết hạn bước:</span>
-                                <span className={cn("font-semibold", itemLate ? "text-red-600" : stepDeadline.dueAt ? "text-emerald-600" : "text-gray-400")}>{stepDeadline.label}</span>
+                                <div className="flex items-center gap-1">
+                                    <span className={cn("font-semibold", itemLate ? "text-red-600" : stepDeadline.dueAt ? "text-emerald-600" : "text-gray-400")}>
+                                        {stepDeadline.label}
+                                    </span>
+                                    {extensionRequest?.status === 'manager_approved' && (
+                                        <History className="h-3 w-3 text-emerald-500" />
+                                    )}
+                                </div>
                             </div>
                             <div className="mt-3 pt-2 border-t border-gray-100 grid grid-cols-3 gap-1">
                                 <button
                                     type="button"
-                                    onClick={(e) => { e.stopPropagation(); leadItem && handleOpenAccessory(leadItem); }}
-                                    className="inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7 bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (leadItem && (leadItem as any).accessory?.status === 'rejected') {
+                                            toast.error(`Yêu cầu phụ kiện bị từ chối: ${(leadItem as any).accessory.notes || 'Không có lý do'}`);
+                                            return;
+                                        }
+                                        leadItem && handleOpenAccessory(leadItem);
+                                    }}
+                                    className={cn(
+                                        "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",
+                                        (leadItem as any)?.accessory?.status === 'requested' ? "bg-amber-50 text-amber-600 border-amber-200 animate-pulse" :
+                                            (leadItem as any)?.accessory?.status === 'rejected' ? "bg-red-50 text-red-600 border-red-200" :
+                                                "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                                    )}
                                 >
-                                    <span className="truncate">Mua PK</span>
+                                    <span className="truncate">
+                                        {(leadItem as any)?.accessory?.status === 'requested' ? 'Đang chờ PK' :
+                                            (leadItem as any)?.accessory?.status === 'rejected' ? 'Bị từ chối PK' : 'Mua PK'}
+                                    </span>
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={(e) => { e.stopPropagation(); leadItem && handleOpenPartner(leadItem); }}
-                                    className="inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7 bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (leadItem && (leadItem as any).partner?.status === 'rejected') {
+                                            toast.error(`Yêu cầu đối tác bị từ chối: ${(leadItem as any).partner.notes || 'Không có lý do'}`);
+                                            return;
+                                        }
+                                        leadItem && handleOpenPartner(leadItem);
+                                    }}
+                                    className={cn(
+                                        "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",
+                                        (leadItem as any)?.partner?.status === 'requested' ? "bg-amber-50 text-amber-600 border-amber-200 animate-pulse" :
+                                            (leadItem as any)?.partner?.status === 'rejected' ? "bg-red-50 text-red-600 border-red-200" :
+                                                "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
+                                    )}
                                 >
-                                    <span className="truncate">Gửi ĐT</span>
+                                    <span className="truncate">
+                                        {(leadItem as any)?.partner?.status === 'requested' ? 'Đang chờ ĐT' :
+                                            (leadItem as any)?.partner?.status === 'rejected' ? 'Bị từ chối ĐT' : 'Gửi ĐT'}
+                                    </span>
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={(e) => { e.stopPropagation(); leadItem && handleOpenExtension(leadItem); }}
-                                    className="inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (extensionRequest?.status === 'rejected') {
+                                            toast.error(`Yêu cầu gia hạn bị từ chối: ${extensionRequest.customer_result || 'Không có lý do'}`);
+                                            return;
+                                        }
+                                        leadItem && handleOpenExtension(leadItem);
+                                    }}
+                                    className={cn(
+                                        "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",
+                                        (extensionRequest?.status === 'pending' || extensionRequest?.status === 'requested') ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 animate-pulse" :
+                                            extensionRequest?.status === 'manager_approved' ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" :
+                                                extensionRequest?.status === 'rejected' ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100" :
+                                                    "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                                    )}
                                 >
-                                    <span className="truncate">Gia hạn</span>
+                                    <span className="truncate">
+                                        {(extensionRequest?.status === 'pending' || extensionRequest?.status === 'requested') ? 'Đang xin GH' :
+                                            extensionRequest?.status === 'manager_approved' ? 'Xem hạn mới' :
+                                                extensionRequest?.status === 'rejected' ? 'Bị từ chối GH' : 'Gia hạn'}
+                                    </span>
                                 </button>
                                 {roomId === 'waiting' && (
                                     <button
                                         type="button"
-                                        onClick={(e) => { 
-                                            e.stopPropagation(); 
+                                        onClick={(e) => {
+                                            e.stopPropagation();
                                             (group as any).handleOpenBackwardMove?.(group);
                                         }}
                                         className="col-span-3 mt-1 inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7 bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100"
@@ -214,6 +289,7 @@ interface WorkflowColumnProps {
     handleOpenSaleAssignDialog: (item: OrderItem) => void;
     onCardClick: (group: { product: OrderItem | null; services: OrderItem[] }, roomId: string) => void;
     handleOpenBackwardMove: (group: any) => void;
+    orderExtensionRequest?: any;
 }
 
 const WorkflowColumn = ({
@@ -228,7 +304,8 @@ const WorkflowColumn = ({
     handleOpenAssignDialog,
     handleOpenSaleAssignDialog,
     onCardClick,
-    handleOpenBackwardMove
+    handleOpenBackwardMove,
+    orderExtensionRequest
 }: WorkflowColumnProps) => {
     return (
         <div className="flex flex-col min-w-[240px]">
@@ -270,6 +347,7 @@ const WorkflowColumn = ({
                                 handleOpenAssignDialog={handleOpenAssignDialog}
                                 handleOpenSaleAssignDialog={handleOpenSaleAssignDialog}
                                 onCardClick={onCardClick}
+                                orderExtensionRequest={orderExtensionRequest}
                                 {...({ group: { ...group, handleOpenBackwardMove } } as any)}
                             />
                         ))}
@@ -368,7 +446,8 @@ export function WorkflowTab({
         return logs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }, [workflowLogs, salesLogs]);
 
-    if (order?.status === 'done') return null;
+    // if (order?.status === 'done') return null;
+    // We now allow viewing workflow history even for completed orders.
 
     const rooms = useMemo(() => [
         { id: 'waiting', title: 'Chờ phân công' },
@@ -441,6 +520,7 @@ export function WorkflowTab({
                                                 handleOpenSaleAssignDialog={handleOpenSaleAssignDialog}
                                                 onCardClick={onProductCardClick}
                                                 handleOpenBackwardMove={handleOpenBackwardMove}
+                                                orderExtensionRequest={order?.extension_request}
                                             />
                                         ))}
                                     </div>

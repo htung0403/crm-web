@@ -344,7 +344,9 @@ export function SalesTab({
         return ['pending', 'step1', 'step2', 'step3', 'step4', 'step5'].includes(status);
     });
 
-    if (order?.status !== 'before_sale' && !['step1', 'step2', 'step3', 'step4', 'step5', 'in_progress'].includes(order.status) && !hasSalesItem) return null;
+    if (order?.status !== 'before_sale' && 
+        !['step1', 'step2', 'step3', 'step4', 'step5', 'in_progress', 'done'].includes(order.status) && 
+        !hasSalesItem) return null;
 
     return (
         <>

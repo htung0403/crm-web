@@ -23,7 +23,7 @@ router.post('/accessories', authenticate, async (req: AuthenticatedRequest, res,
             order_item_id: order_item_id || null,
             order_product_id: order_product_id || null,
             order_product_service_id: order_product_service_id || null,
-            status: 'need_buy',
+            status: 'requested',
             notes: notes || null,
             metadata: metadata || {},
             updated_by: userId
@@ -631,6 +631,7 @@ router.patch('/:id/complete', authenticate, async (req: AuthenticatedRequest, re
         const { id } = req.params;
         const { notes } = req.body;
         const userId = req.user?.id;
+        console.log(`[Complete Endpoint] Marking item ${id} as complete. Notes: ${notes}`);
 
         // Try V1
         let { data: item, error } = await supabaseAdmin
@@ -645,7 +646,7 @@ router.patch('/:id/complete', authenticate, async (req: AuthenticatedRequest, re
 
         let isV2 = false;
 
-        // Try V2
+        // Try V2 service
         if (!item) {
             isV2 = true;
             const { data: v2Item, error: v2Error } = await supabaseAdmin
@@ -659,14 +660,37 @@ router.patch('/:id/complete', authenticate, async (req: AuthenticatedRequest, re
                 .select('*, order_product:order_products(order:orders(id, order_code, sales_id, customer:customers(name)))')
                 .maybeSingle();
 
-            if (v2Error || !v2Item) {
-                throw new ApiError('Không tìm thấy hạng mục', 404);
+            if (v2Item) {
+                item = {
+                    ...v2Item,
+                    order: v2Item.order_product?.order
+                };
             }
+        }
 
-            item = {
-                ...v2Item,
-                order: v2Item.order_product?.order
-            };
+        // Try V2 product head
+        if (!item) {
+            const { data: v2Product, error: v2ProdError } = await supabaseAdmin
+                .from('order_products')
+                .update({
+                    status: 'completed',
+                    completed_at: new Date().toISOString()
+                })
+                .eq('id', id)
+                .select('*, order:orders(id, order_code, sales_id, customer:customers(name))')
+                .maybeSingle();
+
+            if (v2Product) {
+                item = v2Product;
+                // For product heads, we don't need isV2 true (it refers to order_product_services progress)
+                isV2 = false; 
+            } else if (v2ProdError) {
+                throw new ApiError('Lỗi cập nhật sản phẩm V2: ' + v2ProdError.message, 500);
+            }
+        }
+
+        if (!item) {
+            throw new ApiError('Không tìm thấy hạng mục', 404);
         }
 
         // 3. Mark all workflow steps for this item as 'completed'
@@ -890,6 +914,8 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
         // Tìm order_id liên quan
         let orderId: string | null = null;
         let itemName = '';
+        let order_item_id: string | null = null;
+        let order_product_service_id: string | null = null;
 
         // Thử V1
         const { data: v1 } = await supabaseAdmin
@@ -901,9 +927,10 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
         if (v1) {
             orderId = v1.order_id;
             itemName = v1.item_name;
+            order_item_id = id;
         } else {
             // Thử V2 (Service -> Product -> Order)
-            const { data: v2 } = await supabaseAdmin
+            const { data: v2, error: v2Err } = await supabaseAdmin
                 .from('order_product_services')
                 .select('item_name, order_product:order_products(order_id)')
                 .eq('id', id)
@@ -912,6 +939,7 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
             if (v2) {
                 orderId = (v2.order_product as any)?.order_id;
                 itemName = v2.item_name;
+                order_product_service_id = id;
             }
         }
 
@@ -924,6 +952,8 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
             .from('order_extension_requests')
             .insert({
                 order_id: orderId,
+                order_item_id,
+                order_product_service_id,
                 requested_by: req.user!.id,
                 reason: `${itemName}: ${reason.trim()}`,
                 new_due_at: new_due_at || null,
@@ -1331,7 +1361,7 @@ router.patch('/steps/:stepId/skip', authenticate, async (req: AuthenticatedReque
 // =====================================================
 // ORDER ITEM ACCESSORIES (Mua phụ kiện)
 // =====================================================
-const ACCESSORY_STATUSES = ['need_buy', 'bought', 'waiting_ship', 'shipped', 'delivered_to_tech'];
+const ACCESSORY_STATUSES = ['requested', 'rejected', 'need_buy', 'bought', 'waiting_ship', 'shipped', 'delivered_to_tech'];
 
 router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -1339,7 +1369,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
         const { status, notes, metadata } = req.body;
 
         if (!status || !ACCESSORY_STATUSES.includes(status)) {
-            throw new ApiError('Trạng thái không hợp lệ. Chọn: need_buy, bought, waiting_ship, shipped, delivered_to_tech', 400);
+            throw new ApiError('Trạng thái không hợp lệ. Chọn: requested, rejected, need_buy, bought, waiting_ship, shipped, delivered_to_tech', 400);
         }
 
         // Resolve id: V1 = order_items, V2 = order_product_services
@@ -1407,7 +1437,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
 // =====================================================
 // ORDER ITEM PARTNER (Gửi Đối Tác)
 // =====================================================
-const PARTNER_STATUSES = ['ship_to_partner', 'partner_doing', 'ship_back', 'done'];
+const PARTNER_STATUSES = ['requested', 'rejected', 'ship_to_partner', 'partner_doing', 'ship_back', 'done'];
 
 router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -1415,7 +1445,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
         const { status, notes, metadata } = req.body;
 
         if (!status || !PARTNER_STATUSES.includes(status)) {
-            throw new ApiError('Trạng thái không hợp lệ. Chọn: ship_to_partner, partner_doing, ship_back, done', 400);
+            throw new ApiError('Trạng thái không hợp lệ. Chọn: requested, rejected, ship_to_partner, partner_doing, ship_back, done', 400);
         }
 
         // Resolve id: V1 = order_items, V2 = order_product_services

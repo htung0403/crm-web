@@ -35,10 +35,15 @@ import productChatsRouter from './routes/product-chats.js';
 import { upsellTicketsRouter } from './routes/upsell-tickets.js';
 import webhooksRouter from './routes/webhooks.js';
 import leaveRequestsRouter from './routes/leave-requests.js';
+import { cronRouter } from './routes/cron.js';
+import { checkAllSLA } from './utils/slaManager.js';
 
 dotenv.config();
 
 const app = express();
+
+// Disable ETag globally to ensure fresh data during debugging
+app.set('etag', false);
 
 // Middleware
 app.use(helmet());
@@ -93,6 +98,7 @@ app.use('/api/product-types', productTypesRouter);
 app.use('/api/upsell-tickets', upsellTicketsRouter);
 app.use('/api/webhooks', webhooksRouter);
 app.use('/api/leave-requests', leaveRequestsRouter);
+app.use('/api/cron', cronRouter);
 
 // Error handling
 app.use(errorHandler);
@@ -102,6 +108,11 @@ app.listen(config.port, () => {
     console.log(`🚀 Server running on http://localhost:${config.port}`);
     console.log(`📊 Environment: ${config.nodeEnv}`);
     console.log(`🕒 Last Reload: ${new Date().toLocaleString()}`);
+    
+    // Start SLA Manager
+    console.log(`⏱️ Starting SLA Manager cron job`);
+    setInterval(checkAllSLA, 60000); // Check every minute
 });
 
 export default app;
+// End of File - Force Reload (Re-triggering)

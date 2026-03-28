@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { CreditCard, Loader2, Banknote, Wallet } from 'lucide-react';
+import { Wallet, Loader2, Banknote, Smartphone } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -25,7 +25,7 @@ export function PaymentDialog({
     productGroup
 }: PaymentDialogProps) {
     const [paySpecificProduct, setPaySpecificProduct] = useState(!!productGroup);
-    const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'card'>('cash');
+    const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'zalopay'>('cash');
     const [notes, setNotes] = useState('');
     const [submitting, setSubmitting] = useState(false);
 
@@ -34,7 +34,7 @@ export function PaymentDialog({
     const paymentMethods = [
         { value: 'cash', label: 'Tiền mặt', icon: Banknote, color: 'text-green-600 bg-green-50 border-green-200' },
         { value: 'transfer', label: 'Chuyển khoản', icon: Wallet, color: 'text-blue-600 bg-blue-50 border-blue-200' },
-        { value: 'card', label: 'Thẻ', icon: CreditCard, color: 'text-purple-600 bg-purple-50 border-purple-200' }
+        { value: 'zalopay', label: 'Zalo Pay', icon: Smartphone, color: 'text-blue-500 bg-blue-50 border-blue-200' }
     ];
 
     const groupTotal = productGroup ? (
@@ -47,12 +47,40 @@ export function PaymentDialog({
     const handlePayment = async () => {
         setSubmitting(true);
         try {
+            const order_item_ids: string[] = [];
+            const order_product_service_ids: string[] = [];
+
+            if (paySpecificProduct && productGroup) {
+                if (productGroup.product) {
+                    if (productGroup.product.is_customer_item) {
+                        // V2 format: use order_product_service_ids for services
+                        // But wait, the product itself is in order_products.
+                        // For now, let's assume we want to mark all associated services as paid.
+                        productGroup.services.forEach(s => order_product_service_ids.push(s.id));
+                    } else {
+                        // V1 format: use order_item_ids
+                        order_item_ids.push(productGroup.product.id);
+                        productGroup.services.forEach(s => order_item_ids.push(s.id));
+                    }
+                } else if (productGroup.services.length > 0) {
+                    productGroup.services.forEach(s => {
+                        if (s.is_customer_item) {
+                            order_product_service_ids.push(s.id);
+                        } else {
+                            order_item_ids.push(s.id);
+                        }
+                    });
+                }
+            }
+
             // Create invoice
             const invoiceResponse = await invoicesApi.create({
                 order_id: order.id,
                 payment_method: paymentMethod,
                 amount: amountToPay,
-                notes: notes || undefined
+                notes: notes || undefined,
+                order_item_ids,
+                order_product_service_ids
             });
 
             // Mark invoice as paid
@@ -60,6 +88,7 @@ export function PaymentDialog({
             if (invoice) {
                 await invoicesApi.updateStatus(invoice.id, 'paid');
             }
+
 
             onSuccess();
             onClose();
@@ -77,8 +106,8 @@ export function PaymentDialog({
         <Dialog open={open} onOpenChange={onClose}>
             <DialogContent className="max-w-md">
                 <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                        <CreditCard className="h-5 w-5 text-primary" />
+                    <DialogTitle className="flex items-center gap-2 text-xl">
+                        <Wallet className="h-6 w-6 text-primary" />
                         Thanh toán đơn hàng
                     </DialogTitle>
                     <DialogDescription>
@@ -188,7 +217,7 @@ export function PaymentDialog({
                             </>
                         ) : (
                             <>
-                                <CreditCard className="h-4 w-4" />
+                                <Wallet className="h-4 w-4" />
                                 Xác nhận thanh toán
                             </>
                         )}

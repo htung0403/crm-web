@@ -115,3 +115,6 @@ export interface CreateLeadFormData {
     dob: string;
     appointment_time: string;
 }
+
+export const SLA_CYCLES = [3, 60, 180, 300, 420, 1440, 2880, 3120, 4020, 5160, 6600];
+

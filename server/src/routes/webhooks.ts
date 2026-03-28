@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
+import { fireWebhook } from '../utils/webhookNotifier.js';
 
 const router = Router();
 
@@ -638,7 +639,7 @@ async function handleLeadUpdate(data: any) {
         pancake_customer_id,
         last_message_text,
         last_message_time,
-        last_actor,
+        last_actor: rawLastActor,
         status,
         pipeline_stage: _ignored_stage, // Luôn bỏ qua pipeline_stage vì sale cập nhật thủ công
         assigned_to,
@@ -724,6 +725,8 @@ async function handleLeadUpdate(data: any) {
     addIfValid('loss_risk', loss_risk);
     addIfValid('next_action', next_action);
 
+    let effectiveLastActor = rawLastActor;
+
     // Logic Ownership:
     // 1. Trường hợp đặc biệt: Thu hồi lead (Unassign) từ n8n (Tuần tra SLA)
     if (assign_state === 'unassigned' && assigned_to === null) {
@@ -753,14 +756,40 @@ async function handleLeadUpdate(data: any) {
             });
         }
     }
+    // 3. Chống giành khách (Sale B nhắn vào Lead của Sale A)
+    else if (assigned_to && currentLead.assigned_to) {
+        const resolvedId = await resolveUserByName(assigned_to);
+        if (resolvedId && resolvedId !== currentLead.assigned_to) {
+            // Phát hiện vi phạm
+            fireWebhook('INTRUSION_DETECTED', {
+                lead_id: leadId,
+                lead_name: currentLead.name || currentLead.facebook_name,
+                owner_id: currentLead.assigned_to,
+                intruder_id: resolvedId,
+                intruder_name: assigned_to,
+            });
+
+            // Ghi tin nhắn vào CRM nhưng KHÔNG tính SLA
+            if (last_message_text && rawLastActor === 'sale') {
+                await logLeadActivity(leadId, {
+                    type: 'note',
+                    content: `[Cảnh báo vi phạm] ${assigned_to} đã nhắn tin: ${last_message_text}`,
+                    userName: 'Hệ thống'
+                });
+                
+                // Vô hiệu hóa việc tính SLA phía dưới bằng cách hủy tin nhắn
+                effectiveLastActor = undefined;
+            }
+        }
+    }
 
     // Cập nhật thông tin tin nhắn cuối và SLA
-    if (last_message_text) {
+    if (last_message_text && effectiveLastActor !== undefined) {
         updateData.last_message_text = last_message_text;
         updateData.last_message_time = last_message_time || new Date().toISOString();
-        updateData.last_actor = last_actor;
+        updateData.last_actor = effectiveLastActor;
 
-        if (last_actor === 'lead') {
+        if (effectiveLastActor === 'lead') {
             updateData.t_last_inbound = updateData.last_message_time;
 
             // Log tin nhắn khách
@@ -769,7 +798,7 @@ async function handleLeadUpdate(data: any) {
                 content: last_message_text,
                 userName: currentLead.name || currentLead.facebook_name || 'Khách hàng'
             });
-        } else if (last_actor === 'sale') {
+        } else if (effectiveLastActor === 'sale') {
             updateData.t_last_outbound = updateData.last_message_time;
 
             // Log câu trả lời của Sale
@@ -807,8 +836,8 @@ async function handleLeadUpdate(data: any) {
     if (last_message_text) {
         await logLeadMessage(leadId, {
             content: last_message_text,
-            sender_type: last_actor || 'lead',
-            sender_name: last_actor === 'lead' ? (currentLead?.name || currentLead?.facebook_name) : 'Sale',
+            sender_type: rawLastActor || 'lead',
+            sender_name: rawLastActor === 'lead' ? (currentLead?.name || currentLead?.facebook_name) : 'Sale',
             created_at: last_message_time
         });
     }

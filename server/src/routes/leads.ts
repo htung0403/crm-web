@@ -81,7 +81,7 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
         const {
             name, phone, email, source, company, address, notes, assigned_to,
             dob, fb_thread_id, fb_profile_pic, fb_link, link_message,
-            appointment_time, lead_type
+            appointment_time, lead_type, delivery_method, tracking_code, shipping_fee
         } = req.body;
 
         if (!name || !phone) {
@@ -108,6 +108,9 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                 link_message,
                 appointment_time: appointment_time || null,
                 lead_type: lead_type || 'individual',
+                delivery_method: delivery_method || null,
+                tracking_code: tracking_code || null,
+                shipping_fee: shipping_fee || 0,
             })
             .select()
             .single();
@@ -129,7 +132,7 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
 router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { name, phone, email, source, company, address, notes, status, assigned_to, pipeline_stage, dob } = req.body;
+        const { name, phone, email, source, company, address, notes, status, assigned_to, pipeline_stage, dob, delivery_method, tracking_code, shipping_fee } = req.body;
 
         // Get current lead to check for status change
         const { data: currentLead } = await supabaseAdmin
@@ -167,6 +170,9 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         if (req.body.next_action !== undefined) updateData.next_action = req.body.next_action;
         if (req.body.customer_insight !== undefined) updateData.customer_insight = req.body.customer_insight;
         if (req.body.note !== undefined) updateData.note = req.body.note;
+        if (delivery_method !== undefined) updateData.delivery_method = delivery_method;
+        if (tracking_code !== undefined) updateData.tracking_code = tracking_code;
+        if (shipping_fee !== undefined) updateData.shipping_fee = shipping_fee;
 
         // SLA Shield: Reset round_index if appointment_time is updated
         if (req.body.appointment_time !== undefined) {
@@ -383,6 +389,36 @@ router.post('/:id/activities', authenticate, async (req: AuthenticatedRequest, r
 
         if (error) {
             throw new ApiError('Lỗi khi thêm hoạt động: ' + error.message, 500);
+        }
+
+        // Send notifications if there are mentions
+        if (metadata?.mentions && Array.isArray(metadata.mentions) && metadata.mentions.length > 0) {
+            try {
+                const { data: lead } = await supabaseAdmin
+                    .from('leads')
+                    .select('name')
+                    .eq('id', id)
+                    .single();
+
+                const senderName = req.user!.name;
+                const leadName = lead?.name || 'một Lead';
+
+                const notifications = metadata.mentions.map((userId: string) => ({
+                    user_id: userId,
+                    type: 'mention',
+                    title: 'Bạn được nhắc tên trong ghi chú Lead',
+                    message: `${senderName} đã nhắc tên bạn trong ghi chú của lead "${leadName}"`,
+                    data: {
+                        lead_id: id,
+                        activity_id: activity.id,
+                        action_url: `/leads/${id}`
+                    }
+                }));
+
+                await supabaseAdmin.from('notifications').insert(notifications);
+            } catch (notifError) {
+                console.error('Error creating mention notifications:', notifError);
+            }
         }
 
         res.status(201).json({

@@ -24,6 +24,7 @@ export async function fireWebhook(event: string, data: Record<string, any>): Pro
     };
 
     try {
+        /* Tạm thời comment code gửi sang n8n để tránh lỗi ENOTFOUND khi chưa có URL thật
         const response = await fetch(N8N_WEBHOOK_URL, {
             method: 'POST',
             headers: {
@@ -38,7 +39,9 @@ export async function fireWebhook(event: string, data: Record<string, any>): Pro
         } else {
             console.log(`[WebhookNotifier] ✅ Fired event: ${event}`);
         }
+        */
+        console.log(`[WebhookNotifier] 🔔 Mode: Log-only. Event: ${event}`, data);
     } catch (err) {
-        console.error(`[WebhookNotifier] ❌ Failed to fire event: ${event}`, err);
+        console.error(`[WebhookNotifier] ❌ Failed to log event: ${event}`, err);
     }
 }

@@ -70,7 +70,7 @@ export function useOrderDetail(id: string | undefined) {
 
     // Reload order data
     const reloadOrder = useCallback(async () => {
-        if (!id) return;
+        if (!id) return null;
         try {
             const response = await ordersApi.getById(id);
             const orderData = response.data?.data?.order;
@@ -80,9 +80,12 @@ export function useOrderDetail(id: string | undefined) {
                 if (orderData.items) {
                     fetchWorkflowSteps(orderData.items);
                 }
+                return orderData;
             }
+            return null;
         } catch {
             console.error('Error reloading order');
+            return null;
         }
     }, [id, fetchWorkflowSteps]);
 

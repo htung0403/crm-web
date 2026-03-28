@@ -145,11 +145,9 @@ export const ordersApi = {
         surcharges?: any[];
         paid_amount?: number;
         status?: string;
-        due_at?: string;
     }) => api.post<ApiResponse<{ order: any }>>('/orders', data),
 
-    /** @deprecated Use create() with customer_items and sale_items */
-    createV2: (data: any) => api.post<ApiResponse<{ order: any; products: any[] }>>('/orders', data),
+
 
     update: (id: string, data: any) =>
         api.put<ApiResponse<{ order: any }>>(`/orders/${id}`, data),
@@ -158,7 +156,7 @@ export const ordersApi = {
         api.put<ApiResponse<{ order: any }>>(`/orders/${id}/full`, data),
 
     patch: (id: string, data: {
-        due_at?: string | null;
+
         after_sale_stage?: string | null;
         completion_photos?: string[];
         debt_checked?: boolean;
@@ -187,11 +185,7 @@ export const ordersApi = {
     delete: (id: string) =>
         api.delete<ApiResponse<null>>(`/orders/${id}`),
 
-    createExtensionRequest: (orderId: string, data: { reason: string; new_due_at?: string }) =>
-        api.post<ApiResponse<any>>(`/orders/${orderId}/extension-request`, data),
 
-    updateExtensionRequest: (orderId: string, data: { customer_result?: string; new_due_at?: string; valid_reason?: boolean; status?: string }) =>
-        api.patch<ApiResponse<any>>(`/orders/${orderId}/extension-request`, data),
 
     getKanbanLogs: (orderId: string, tab: 'sales' | 'workflow' | 'aftersale' | 'care') =>
         api.get<ApiResponse<{ logs: any[] }>>(`/orders/${orderId}/kanban-logs`, { params: { tab } }),
@@ -203,7 +197,7 @@ export const ordersApi = {
     createPayment: (orderId: string, data: {
         content: string;
         amount: number;
-        payment_method?: 'cash' | 'transfer' | 'card';
+        payment_method?: 'cash' | 'transfer' | 'zalopay';
         image_url?: string;
         notes?: string;
     }) => api.post<ApiResponse<{ payment: any; order: any }>>(`/orders/${orderId}/payments`, data),
@@ -381,12 +375,14 @@ export const requestsApi = {
         api.get<ApiResponse<any[]>>('/requests/partners'),
     getExtensions: () =>
         api.get<ApiResponse<any[]>>('/requests/extensions'),
-    createAccessory: (data: { order_item_id?: string; order_product_id?: string; order_product_service_id?: string; notes?: string; metadata?: Record<string, any> }) =>
+    createAccessory: (data: { order_item_id?: string; order_product_id?: string; order_product_service_id?: string; notes?: string; status?: string; metadata?: Record<string, any> }) =>
         api.post<ApiResponse<any>>('/order-items/accessories', data),
     updateAccessory: (id: string, data: { status?: string; notes?: string; metadata?: Record<string, any> }) =>
         api.patch<ApiResponse<any>>(`/requests/accessories/${id}`, data),
     updatePartner: (id: string, data: { status?: string; notes?: string; metadata?: Record<string, any> }) =>
         api.patch<ApiResponse<any>>(`/requests/partners/${id}`, data),
+    updateExtension: (id: string, data: { status?: string; customer_result?: string; new_due_at?: string; valid_reason?: boolean }) =>
+        api.patch<ApiResponse<any>>(`/requests/extensions/${id}`, data),
 };
 
 // Upsell Tickets API (admin/manager)
@@ -405,10 +401,17 @@ export const invoicesApi = {
         api.get<PaginatedResponse<{ invoices: any[] }>>('/invoices', { params }),
 
     getById: (id: string) =>
-        api.get<ApiResponse<{ invoice: any }>>(`/invoices/${id}`),
+        api.get<ApiResponse<{ invoice: any }>>(`/invoices/${id}?t=${Date.now()}`),
 
-    create: (data: any) =>
-        api.post<ApiResponse<{ invoice: any }>>('/invoices', data),
+    create: (data: {
+        order_id: string;
+        payment_method?: string;
+        amount?: number;
+        notes?: string;
+        order_item_ids?: string[];
+        order_product_service_ids?: string[];
+    }) => api.post<ApiResponse<{ invoice: any }>>('/invoices', data),
+
 
     updateStatus: (id: string, status: string) =>
         api.patch<ApiResponse<{ invoice: any }>>(`/invoices/${id}/status`, { status }),
@@ -622,12 +625,14 @@ export const transactionsApi = {
         type: 'income' | 'expense';
         category: string;
         amount: number;
-        payment_method?: 'cash' | 'transfer' | 'card';
+        payment_method?: 'cash' | 'transfer' | 'zalopay';
         notes?: string;
         image_url?: string;
         date?: string;
         order_id?: string;
         order_code?: string;
+        status?: string;
+        metadata?: any;
     }) => api.post<ApiResponse<{ transaction: any }>>('/transactions', data),
 
     updateStatus: (id: string, status: 'pending' | 'approved' | 'cancelled') =>
@@ -660,6 +665,16 @@ export const productTypesApi = {
 
     delete: (id: string) =>
         api.delete<ApiResponse<null>>(`/product-types/${id}`),
+};
+
+// Leave Requests API
+export const leaveRequestsApi = {
+    getAll: (params?: { user_id?: string; role?: string }) =>
+        api.get<any[]>('/leave-requests', { params }),
+    create: (data: { user_id: string; type: string; sub_type: string; start_time: string; end_time?: string | null; reason: string }) =>
+        api.post<any>('/leave-requests', data),
+    updateStatus: (id: string, status: 'approved' | 'rejected', approved_by: string) =>
+        api.patch<any>(`/leave-requests/${id}/status`, { status, approved_by }),
 };
 
 export default api;

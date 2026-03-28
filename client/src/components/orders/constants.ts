@@ -194,18 +194,22 @@ export interface CustomerOption {
     status?: string;
 }
 export const ACCESSORY_LABELS: Record<string, string> = {
+    requested: 'Chờ duyệt',
     need_buy: 'Cần mua',
     bought: 'Đã mua',
     waiting_ship: 'Chờ ship',
     shipped: 'Ship tới',
     delivered_to_tech: 'Giao KT',
+    rejected: 'Bị từ chối',
 };
 
 export const PARTNER_LABELS: Record<string, string> = {
+    requested: 'Chờ duyệt',
     ship_to_partner: 'Ship Đối tác',
     partner_doing: 'Đối tác làm',
     ship_back: 'Ship về Shop',
     done: 'Done',
+    rejected: 'Bị từ chối',
 };
 
 export const EXTENSION_LABELS: Record<string, string> = {
@@ -213,6 +217,7 @@ export const EXTENSION_LABELS: Record<string, string> = {
     manager_approved: 'QL đã duyệt',
     sale_contacted: 'Sale đã liên hệ',
     notified_tech: 'Đã báo KT',
+    rejected: 'Bị từ chối',
 };
 
 export const REQUEST_SLA: Record<string, number> = {

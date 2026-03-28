@@ -37,7 +37,9 @@ export function ConfirmDoneDialog({
                 orderItemsApi.complete(id, isV2Service ? 'Hoàn thành dịch vụ' : 'Hoàn thành hạng mục')
             ));
 
-            toast.success(`Đã hoàn thành ${itemIds.length} hạng mục`);
+            const count = isV2Service ? (itemIds.length > 1 ? itemIds.length - 1 : 1) : itemIds.length;
+            const label = isV2Service ? 'dịch vụ' : 'hạng mục';
+            toast.success(`Sản phẩm đã hoàn thành ${count} ${label}`);
             onSuccess();
             onOpenChange(false);
         } catch (error: any) {

@@ -195,8 +195,10 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                 date: date || new Date().toISOString().split('T')[0],
                 order_id,
                 order_code,
-                status: 'pending',
+                status: req.body.status || 'pending',
                 created_by: req.user!.id,
+                approved_by: req.body.status === 'approved' ? req.user!.id : null,
+                approved_at: req.body.status === 'approved' ? new Date().toISOString() : null,
             })
             .select(`
                 *,

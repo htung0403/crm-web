@@ -30,8 +30,9 @@ import {
     PaymentDialog,
     columns
 } from '@/components/orders';
-import { orderItemsApi } from '@/lib/api';
+import { orderItemsApi, ordersApi } from '@/lib/api';
 import { normalizeSearchText } from '@/lib/utils';
+import { ConfirmDoneDialog } from '@/components/orders/workflow/ConfirmDoneDialog';
 
 export function OrdersPage() {
     const location = useLocation();
@@ -50,6 +51,12 @@ export function OrdersPage() {
     const [columnSearch, setColumnSearch] = useState<{ [key: string]: string }>({});
     const [globalSearch, setGlobalSearch] = useState('');
     const [selectedStaffId, setSelectedStaffId] = useState<string>('all');
+
+    // Confirm done dialog states
+    const [showConfirmDoneDialog, setShowConfirmDoneDialog] = useState(false);
+    const [confirmDoneItemIds, setConfirmDoneItemIds] = useState<string[]>([]);
+    const [isV2ServiceForDone, setIsV2ServiceForDone] = useState(false);
+    const [orderToCheckStatus, setOrderToCheckStatus] = useState<string | null>(null);
 
     // Fetch data on mount and when navigating back to this page
     useEffect(() => {
@@ -104,6 +111,19 @@ export function OrdersPage() {
             }
         }
 
+        // Show confirmation dialog if moving to done
+        if (newStatus === 'done') {
+            const itemIds: string[] = [];
+            if (group.product) itemIds.push(group.product.id);
+            group.services.forEach(s => itemIds.push(s.id));
+
+            setConfirmDoneItemIds(itemIds);
+            setIsV2ServiceForDone(group.services.some(s => s.item_type === 'service' || s.item_type === 'package'));
+            setOrderToCheckStatus(orderId);
+            setShowConfirmDoneDialog(true);
+            return;
+        }
+
         try {
             // Identify all items in this group
             const itemIds: string[] = [];
@@ -112,7 +132,6 @@ export function OrdersPage() {
 
             // Map target column status to valid item status for API
             let targetStatus = newStatus;
-            if (newStatus === 'done') targetStatus = 'completed';
             if (newStatus === 'before_sale') targetStatus = 'step1';
 
             // Update status of all items in the group
@@ -129,22 +148,23 @@ export function OrdersPage() {
     const getGroupStatus = (group: { product: OrderItem | null; services: OrderItem[] }, fallbackOrder: Order): string => {
         const itemStatus = group.product?.status || group.services?.[0]?.status;
         
-        // 1. Check for technical workflow progress first (Highest priority for "In Progress")
-        // If any item in the group is currently assigned to or being worked on by a technician
+        if (!itemStatus) {
+            return fallbackOrder.status;
+        }
+
+        // 1. Sales / Warranty steps (Before Sale) - Highest priority
+        // If an item is being handled by Sales/Warranty, it belongs in "Before Sale"
+        if (['step1', 'step2', 'step3', 'step4', 'pending'].includes(itemStatus)) return 'before_sale';
+
+        // 2. Check for technical workflow progress (In Progress)
+        // If sales are done/confirmed and any item in the group is assigned or being worked on
         const allItems = [group.product, ...group.services].filter(Boolean) as OrderItem[];
         const hasActiveTechSteps = allItems.some(item => 
             item.order_item_steps?.some(step => ['in_progress', 'assigned'].includes(step.status))
         );
         if (hasActiveTechSteps) return 'in_progress';
 
-        if (!itemStatus) {
-            return fallbackOrder.status;
-        }
-
-        // 2. Sales / Warranty steps (Before Sale)
-        if (['step1', 'step2', 'step3', 'step4', 'pending'].includes(itemStatus)) return 'before_sale';
-
-        // 3. Explicit In Progress / Processing statuses
+        // 3. Explicit In Progress / Processing statuses (from lead item)
         if (['assigned', 'in_progress', 'processing'].includes(itemStatus)) return 'in_progress';
         
         // 4. Completion / After sale statuses
@@ -526,6 +546,33 @@ export function OrdersPage() {
                 onConfirm={async () => {
                     await fetchOrders();
                     setNewlyCreatedOrder(null);
+                }}
+            />
+
+            <ConfirmDoneDialog 
+                open={showConfirmDoneDialog}
+                onOpenChange={setShowConfirmDoneDialog}
+                itemIds={confirmDoneItemIds}
+                isV2Service={isV2ServiceForDone}
+                onSuccess={async () => {
+                    await fetchOrders();
+                    if (orderToCheckStatus) {
+                        try {
+                            const response = await ordersApi.getById(orderToCheckStatus);
+                            const updatedOrder = response.data?.data?.order;
+                            if (updatedOrder && updatedOrder.status !== 'done' && updatedOrder.status !== 'after_sale') {
+                                const allDone = updatedOrder.items?.every((i: any) => 
+                                    i.status === 'completed' || i.status === 'cancelled' || i.status === 'aftersale_stored'
+                                );
+                                if (allDone) {
+                                    await updateOrderStatus(orderToCheckStatus, 'done');
+                                }
+                            }
+                        } catch (err) {
+                            console.error('Failed to sync order status after confirmation:', err);
+                        }
+                        setOrderToCheckStatus(null);
+                    }
                 }}
             />
         </>

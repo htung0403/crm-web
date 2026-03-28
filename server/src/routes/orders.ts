@@ -3,6 +3,8 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireSale } from '../middleware/auth.js';
 import { checkAndCompleteOrder } from '../utils/orderHelper.js';
+import { autoCreateInvoice, syncInvoiceWithOrder } from '../utils/billingHelper.js';
+
 
 const router = Router();
 
@@ -590,15 +592,15 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         order.sale_items = saleItems;
         order.items = flatItems;
 
-        // Attach latest extension request
-        const { data: extRequest } = await supabaseAdmin
+        // Attach extension requests
+        const { data: extRequests } = await supabaseAdmin
             .from('order_extension_requests')
             .select('*')
             .eq('order_id', order.id)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-        (order as any).extension_request = extRequest || null;
+            .order('created_at', { ascending: false });
+        
+        (order as any).extension_requests = extRequests || [];
+        (order as any).extension_request = extRequests?.find((e: any) => !e.order_item_id && !e.order_product_service_id && !e.order_product_id) || null;
 
         // Attach accessories and partners for each flat item (batched, not N+1)
         if (order.items && order.items.length > 0) {
@@ -624,6 +626,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                 if (!itemId) continue;
                 (item as any).accessory = allAccessories?.find((a: any) => a.order_item_id === itemId || a.order_product_service_id === itemId) || null;
                 (item as any).partner = allPartners?.find((p: any) => p.order_item_id === itemId || p.order_product_service_id === itemId) || null;
+                (item as any).extension_request = extRequests?.find((e: any) => e.order_item_id === itemId || e.order_product_service_id === itemId) || null;
             }
         }
 
@@ -736,6 +739,7 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
             discount_value,
             surcharges,
             paid_amount,
+            payment_method,
             status,
             due_at
         } = req.body;
@@ -808,7 +812,6 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                 payment_status: remainingDebt <= 0 ? 'paid' : (paidAmountValue > 0 ? 'partial' : 'unpaid'),
                 status: status || 'in_progress',
                 notes,
-                due_at: due_at || null,
                 created_by: req.user!.id,
             })
             .select()
@@ -1056,7 +1059,7 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                 type: 'income',
                 category: 'Thanh toán đơn hàng',
                 amount: paidAmountValue,
-                payment_method: 'cash',
+                payment_method: payment_method || 'cash',
                 notes: `Thanh toán tại chỗ khi tạo đơn - ${orderCode}`,
                 date: new Date().toISOString().split('T')[0],
                 order_id: order.id,
@@ -1076,7 +1079,13 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
             },
             message: `Đã tạo đơn hàng thành công với ${createdCustomerItems.length} sản phẩm khách gửi.`
         });
+
+        // Auto-create invoice for the order - Force Reload Comment
+        console.log(`[OrderCreate] Triggering auto-invoice creation for order ${order.id}`);
+        autoCreateInvoice(order.id, payment_method).catch(err => console.error('[OrderCreate] Failed to auto-create invoice:', err));
+
     } catch (error) {
+
         next(error);
     }
 });
@@ -1581,7 +1590,7 @@ router.put('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, 
 router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { customer_id, customer_items, sale_items, notes, discount, discount_type, discount_value, surcharges, paid_amount, due_at } = req.body;
+        const { customer_id, customer_items, sale_items, notes, discount, discount_type, discount_value, surcharges, paid_amount, payment_method, due_at } = req.body;
 
         // 1. Check if order exists
         const { data: existingOrder } = await supabaseAdmin
@@ -1637,7 +1646,6 @@ router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequ
                 notes,
                 paid_amount: Number(paid_amount) || 0,
                 remaining_debt: totalAmount - (Number(paid_amount) || 0),
-                due_at: due_at || null,
                 surcharges: surcharges || [],
                 updated_at: new Date().toISOString(),
             })
@@ -1837,6 +1845,42 @@ router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequ
             }
         }
 
+        // 7. Create Transaction record for payment if paid_amount > 0
+        const paidAmountValue = Number(paid_amount) || 0;
+        if (paidAmountValue > 0) {
+            const { data: lastTrans } = await supabaseAdmin
+                .from('transactions')
+                .select('code')
+                .like('code', 'PT%')
+                .order('created_at', { ascending: false })
+                .limit(1);
+            let tCodeValue = 'PT000001';
+            if (lastTrans && lastTrans.length > 0) {
+                const lNum = parseInt(lastTrans[0].code.replace('PT', ''), 10);
+                tCodeValue = `PT${String(lNum + 1).padStart(6, '0')}`;
+            }
+
+            const { error: tError } = await supabaseAdmin.from('transactions').insert({
+                code: tCodeValue,
+                type: 'income',
+                category: 'Thanh toán đơn hàng',
+                amount: paidAmountValue,
+                payment_method: payment_method || 'cash',
+                notes: `Thanh toán khi cập nhật đơn - ${order.order_code}`,
+                date: new Date().toISOString().split('T')[0],
+                order_id: order.id,
+                order_code: order.order_code,
+                status: 'approved',
+                created_by: req.user!.id,
+                approved_by: req.user!.id,
+                approved_at: new Date().toISOString(),
+            });
+            if (tError) console.error('[OrderUpdateFull] Transaction recording failed:', tError);
+        }
+
+        // 8. Sync associated invoices (updates totals/items and marks as paid if settled)
+        syncInvoiceWithOrder(id, payment_method).catch(err => console.error('[OrderUpdate] Failed to sync invoice:', err));
+
         res.json({
             status: 'success',
             data: { order },
@@ -1858,7 +1902,6 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
         let oldCareStage: string | null | undefined;
         let oldAfterSaleStage: string | null | undefined;
         const {
-            due_at,
             completion_photos,
             debt_checked,
             debt_checked_notes,
@@ -1900,7 +1943,6 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
         }
 
         const updatePayload: Record<string, unknown> = { updated_at: new Date().toISOString() };
-        if (due_at !== undefined) updatePayload.due_at = due_at || null;
         if (completion_photos !== undefined) updatePayload.completion_photos = Array.isArray(completion_photos) ? completion_photos : [];
         if (debt_checked !== undefined) {
             updatePayload.debt_checked = !!debt_checked;
@@ -2093,7 +2135,7 @@ router.post('/:id/payments', authenticate, async (req: AuthenticatedRequest, res
         // Get order details
         const { data: order, error: orderError } = await supabaseAdmin
             .from('orders')
-            .select('id, order_code, total_amount, paid_amount, remaining_debt')
+            .select('id, order_code, customer_id, total_amount, paid_amount, remaining_debt')
             .eq('id', id)
             .single();
 
@@ -2162,6 +2204,17 @@ router.post('/:id/payments', authenticate, async (req: AuthenticatedRequest, res
             transCode = `PT${String(lastNum + 1).padStart(6, '0')}`;
         }
 
+        // Find associated invoice to link and update
+        const { data: invoice } = await supabaseAdmin
+            .from('invoices')
+            .select('id, total_amount, order_item_ids, order_product_service_ids')
+            .eq('order_id', order.id)
+            .neq('status', 'cancelled')
+            .neq('status', 'paid')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
         const { error: transError } = await supabaseAdmin
             .from('transactions')
             .insert({
@@ -2186,6 +2239,30 @@ router.post('/:id/payments', authenticate, async (req: AuthenticatedRequest, res
         } else {
             console.log(`Created transaction ${transCode} for order ${order.order_code} payment`);
         }
+
+        // 3. Create a record in finance_transactions for consistent tracking and Invoices view
+        // We do this for EVERY payment (partial or full) so it shows up in "Phiếu thu" tab
+        if (invoice) {
+            const financeTransCode = `PT${Date.now().toString().slice(-8)}`;
+            await supabaseAdmin
+                .from('finance_transactions')
+                .insert({
+                    code: financeTransCode,
+                    type: 'income',
+                    amount, // The specific payment amount recorded now
+                    category: 'Thanh toán đơn hàng',
+                    description: `${content} - Hóa đơn ${invoice.id.slice(0, 8)} - ${order.order_code}`,
+                    customer_id: (order as any).customer_id || null, 
+                    invoice_id: invoice.id,
+                    payment_method: payment_method || 'cash',
+                    status: 'approved',
+                    created_by: req.user!.id
+                });
+            console.log(`Created finance_transaction ${financeTransCode} linked to invoice ${invoice.id}`);
+        }
+
+        // Sync associated invoices (updates totals/items and marks as paid if settled)
+        syncInvoiceWithOrder(id, payment_method).catch(err => console.error('[OrderPayment] Failed to sync invoice:', err));
 
         res.status(201).json({
             status: 'success',
@@ -2283,12 +2360,7 @@ router.patch('/:id/extension-request', authenticate, async (req: AuthenticatedRe
 
         if (error) throw new ApiError('Lỗi cập nhật: ' + error.message, 500);
 
-        if (new_due_at && updated) {
-            await supabaseAdmin
-                .from('orders')
-                .update({ due_at: new_due_at, updated_at: new Date().toISOString() })
-                .eq('id', id);
-        }
+        // Removed global order due_at update
 
         if (status === 'kpi_recorded' && updated && !(updated as any).valid_reason) {
             await supabaseAdmin

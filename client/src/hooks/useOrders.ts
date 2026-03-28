@@ -46,6 +46,7 @@ export interface OrderItem {
     sales_step_data?: any;
     care_warranty_flow?: string | null;
     care_warranty_stage?: string | null;
+    delivery_payment_method?: string | null;
 }
 
 export interface Order {
@@ -73,7 +74,7 @@ export interface Order {
     payment_status?: 'unpaid' | 'partial' | 'paid';
     status: string;
     confirmed_at?: string;
-    due_at?: string;
+
     after_sale_stage?: string | null;
     completion_photos?: string[];
     debt_checked?: boolean;
@@ -100,6 +101,7 @@ export interface Order {
     feedback_requested_at?: string | null;
     care_warranty_flow?: string | null;
     care_warranty_stage?: string | null;
+    delivery_payment_method?: string | null;
     notes?: string;
     customer_items?: any[];
     sale_items?: OrderItem[];
@@ -189,7 +191,6 @@ export function useOrders() {
         surcharges?: any[];
         paid_amount?: number;
         status?: string;
-        due_at?: string;
     }): Promise<Order> => {
         setLoading(true);
         try {

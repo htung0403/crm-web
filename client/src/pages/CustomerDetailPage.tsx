@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
     ArrowLeft, Phone, Mail, MapPin, Building2, User, ShoppingCart, DollarSign,
-    Star, MessageCircle, Loader2, Package, Calendar, Clock, ArrowRight, FileText, Video, Edit
+    Star, MessageCircle, Loader2, Package, Calendar, Clock, ArrowRight, FileText, Video, Edit, AlertCircle
 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { useCustomers } from '@/hooks/useCustomers';
@@ -19,14 +19,16 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { formatCurrency, formatDate } from '@/lib/utils';
-import { customersApi } from '@/lib/api';
+import { formatCurrency, formatDate, cn } from '@/lib/utils';
+import { customersApi, invoicesApi } from '@/lib/api';
+import { InvoiceDetailDialog, type Invoice } from '@/components/invoices/InvoiceDetailDialog';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Interaction types
 type InteractionType = 'call' | 'email' | 'meeting' | 'message' | 'note' | 'task' | 'purchase';
 type InteractionResult = 'successful' | 'no_answer' | 'callback' | 'interested' | 'not_interested' | 'pending' |
     'voicemail' | 'busy' | 'sent' | 'opened' | 'replied' | 'bounced' |
-    'cancelled' | 'rescheduled' | 'no_show' | 'read' | 'completed' | 'in_progress';
+    'cancelled' | 'rescheduled' | 'no_show' | 'read' | 'completed' | 'in_progress' | 'after_sale';
 
 const interactionTypeLabels: Record<InteractionType, { label: string; icon: React.ReactNode; color: string }> = {
     call: { label: 'Cuộc gọi', icon: <Phone className="h-4 w-4" />, color: 'bg-blue-100 text-blue-600' },
@@ -57,6 +59,7 @@ const resultLabels: Record<InteractionResult, { label: string; variant: 'success
     read: { label: 'Đã đọc', variant: 'success' },
     completed: { label: 'Hoàn thành', variant: 'success' },
     in_progress: { label: 'Đang thực hiện', variant: 'info' },
+    after_sale: { label: 'After Sale', variant: 'success' },
 };
 
 const resultOptionsByType: Record<InteractionType, InteractionResult[]> = {
@@ -241,6 +244,11 @@ export function CustomerDetailPage() {
     const [loading, setLoading] = useState(true);
     const [showContactDialog, setShowContactDialog] = useState(false);
 
+    const { user } = useAuth();
+    const [invoices, setInvoices] = useState<Invoice[]>([]);
+    const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+    const [showInvoiceDetail, setShowInvoiceDetail] = useState(false);
+    const [loadingInvoice, setLoadingInvoice] = useState(false);
     const [leadInteractions, setLeadInteractions] = useState<Interaction[]>([]);
 
     // Fetch customer data
@@ -266,8 +274,35 @@ export function CustomerDetailPage() {
         if (id) {
             fetchOrders({ customer_id: id });
             fetchInteractions({ customer_id: id });
+            fetchInvoices();
         }
     }, [id, fetchOrders, fetchInteractions]);
+
+    const fetchInvoices = async () => {
+        if (!id) return;
+        try {
+            const response = await invoicesApi.getAll({ customer_id: id });
+            setInvoices(response.data.data?.invoices || []);
+        } catch (error) {
+            console.error('Error fetching invoices:', error);
+        }
+    };
+
+    const handleViewInvoice = async (invoiceId: string) => {
+        setLoadingInvoice(true);
+        try {
+            const response = await invoicesApi.getById(invoiceId);
+            const invoice = response.data.data?.invoice;
+            if (invoice) {
+                setSelectedInvoice(invoice);
+                setShowInvoiceDetail(true);
+            }
+        } catch (err: any) {
+            toast.error('Lỗi khi tải chi tiết hóa đơn');
+        } finally {
+            setLoadingInvoice(false);
+        }
+    };
 
     // Fetch lead interactions if customer came from lead
     useEffect(() => {
@@ -303,6 +338,9 @@ export function CustomerDetailPage() {
     // Combine customer interactions + lead interactions + orders into unified timeline
     const customerInteractions = interactions.filter(i => i.customer_id === id);
     const allInteractions = [...customerInteractions, ...leadInteractions];
+    
+    // Calculate total debt for all orders
+    const totalDebt = customerOrders.reduce((sum, o) => sum + (Number((o as any).remaining_debt) || 0), 0);
 
     // Convert orders to timeline items
     interface TimelineItem {
@@ -319,20 +357,27 @@ export function CustomerDetailPage() {
         order_code?: string;
         total_amount?: number;
         isFromLead?: boolean;
+        invoice_id?: string;
+        invoice_code?: string;
     }
 
-    const orderTimelineItems: TimelineItem[] = customerOrders.map(order => ({
-        id: `order-${order.id}`,
-        type: 'purchase' as InteractionType,
-        subject: `Đơn hàng ${order.order_code}`,
-        content: `${order.items?.length || 0} sản phẩm/dịch vụ - Tổng: ${formatCurrency(order.total_amount)}`,
-        result: order.status === 'after_sale' ? 'completed' :
-            order.status === 'cancelled' ? 'cancelled' : 'pending',
-        created_at: order.created_at,
-        created_user: order.sales_user,
-        order_code: order.order_code,
-        total_amount: order.total_amount,
-    }));
+    const orderTimelineItems: TimelineItem[] = customerOrders.map(order => {
+        const orderInvoice = invoices.find(inv => inv.order_id === order.id);
+        return {
+            id: `order-${order.id}`,
+            type: 'purchase' as InteractionType,
+            subject: orderInvoice ? orderInvoice.invoice_code : `Đơn hàng ${order.order_code}`,
+            content: `${order.items?.length || 0} sản phẩm/dịch vụ - Tổng: ${formatCurrency(order.total_amount)}`,
+            result: order.status === 'after_sale' ? 'after_sale' :
+                order.status === 'cancelled' ? 'cancelled' : 'pending',
+            created_at: order.created_at,
+            created_user: order.sales_user,
+            order_code: order.order_code,
+            total_amount: order.total_amount,
+            invoice_id: orderInvoice?.id,
+            invoice_code: orderInvoice?.invoice_code,
+        };
+    });
 
     const interactionTimelineItems: TimelineItem[] = allInteractions.map(i => ({
         ...i,
@@ -464,6 +509,24 @@ export function CustomerDetailPage() {
                                         <span className="text-sm text-muted-foreground">Tổng chi tiêu</span>
                                     </div>
                                     <span className="text-xl font-bold text-emerald-600">{formatCurrency(customer.total_spent || 0)}</span>
+                                </div>
+                                <div className={cn(
+                                    "flex items-center justify-between p-3 rounded-lg",
+                                    totalDebt > 0 ? "bg-red-50" : "bg-emerald-50/50"
+                                )}>
+                                    <div className="flex items-center gap-2">
+                                        <AlertCircle className={cn(
+                                            "h-5 w-5",
+                                            totalDebt > 0 ? "text-red-600" : "text-emerald-600"
+                                        )} />
+                                        <span className="text-sm text-muted-foreground">Tổng nợ hiện tại</span>
+                                    </div>
+                                    <span className={cn(
+                                        "text-xl font-bold",
+                                        totalDebt > 0 ? "text-red-600" : "text-emerald-600"
+                                    )}>
+                                        {formatCurrency(totalDebt)}
+                                    </span>
                                 </div>
                                 <div className="flex items-center justify-between p-3 rounded-lg bg-amber-50">
                                     <div className="flex items-center gap-2">
@@ -613,10 +676,41 @@ export function CustomerDetailPage() {
                                                                 </p>
                                                             )}
 
-                                                            {/* Total */}
+                                                            {/* Total & Payment Status */}
                                                             <div className="flex items-center justify-between pt-2 border-t">
-                                                                <span className="font-medium">Tổng:</span>
-                                                                <span className="text-lg font-bold text-primary">{formatCurrency(order.total_amount)}</span>
+                                                                <div className="flex flex-col">
+                                                                    <span className="text-lg font-bold text-primary">{formatCurrency(order.total_amount)}</span>
+                                                                    {(order as any).remaining_debt > 0 ? (
+                                                                        <span className="text-[10px] font-bold text-red-600 uppercase tracking-tight">
+                                                                            Còn nợ: {formatCurrency((order as any).remaining_debt)}
+                                                                        </span>
+                                                                    ) : (
+                                                                        <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-tight">
+                                                                            Đã thanh toán đủ
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                {(() => {
+                                                                    const orderInvoice = invoices.find(inv => inv.order_id === order.id);
+                                                                    if (orderInvoice) {
+                                                                        return (
+                                                                            <Button
+                                                                                variant="ghost" 
+                                                                                size="sm"
+                                                                                className="h-8 text-primary hover:text-primary hover:bg-primary/5 gap-1"
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    handleViewInvoice(orderInvoice.id);
+                                                                                }}
+                                                                                disabled={loadingInvoice}
+                                                                            >
+                                                                                <FileText className="h-3.5 w-3.5" />
+                                                                                Xem hóa đơn
+                                                                            </Button>
+                                                                        );
+                                                                    }
+                                                                    return null;
+                                                                })()}
                                                             </div>
                                                         </CardContent>
                                                     </Card>
@@ -723,11 +817,28 @@ export function CustomerDetailPage() {
 
                                                             {/* Footer */}
                                                             <div className="flex items-center justify-between pt-2 border-t text-xs text-muted-foreground">
-                                                                <span>Bởi: {item.created_user?.name || 'Hệ thống'}</span>
-                                                                {isPurchase && (
-                                                                    <span className="text-primary flex items-center gap-1">
-                                                                        Xem chi tiết <ArrowRight className="h-3 w-3" />
-                                                                    </span>
+                                                                {isPurchase ? (
+                                                                    <div className="flex items-center justify-between gap-2">
+                                                                        <span className="text-primary flex items-center gap-1">
+                                                                            Xem chi tiết <ArrowRight className="h-3 w-3" />
+                                                                        </span>
+                                                                        {item.invoice_id && (
+                                                                            <Button 
+                                                                                variant="link" 
+                                                                                size="sm" 
+                                                                                className="h-auto p-0 text-xs font-semibold h-4"
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    handleViewInvoice(item.invoice_id!);
+                                                                                }}
+                                                                            >
+                                                                                <FileText className="h-3 w-3 mr-1" />
+                                                                                Xem hóa đơn {item.invoice_code}
+                                                                            </Button>
+                                                                        )}
+                                                                    </div>
+                                                                ) : (
+                                                                    <span>Bởi: {item.created_user?.name || 'Hệ thống'}</span>
                                                                 )}
                                                             </div>
                                                         </CardContent>
@@ -749,6 +860,14 @@ export function CustomerDetailPage() {
                 onClose={() => setShowContactDialog(false)}
                 onSubmit={handleCreateInteraction}
                 preselectedCustomerId={customer.id}
+            />
+
+            {/* Invoice Detail Dialog */}
+            <InvoiceDetailDialog
+                invoice={selectedInvoice}
+                open={showInvoiceDetail}
+                onClose={() => setShowInvoiceDetail(false)}
+                canEdit={['manager', 'admin', 'accountant'].includes(user?.role || '')}
             />
         </>
     );

@@ -38,7 +38,10 @@ export interface Lead {
     last_message_time?: string;
     last_actor?: string;       // 'lead' or 'sale'
 
-    // Timing & SLA
+    // Delivery & Appointment (new)
+    delivery_method?: 'direct' | 'ship';
+    tracking_code?: string;
+    shipping_fee?: number;
     appointment_time?: string;
     t_due?: string;
     t_last_inbound?: string;

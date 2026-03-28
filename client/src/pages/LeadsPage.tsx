@@ -24,6 +24,7 @@ import { useOrders } from '@/hooks/useOrders';
 import {
     KanbanColumn,
     kanbanColumns,
+    LeadHenQuaShipDialog,
 } from '@/components/leads';
 import type { CreateLeadFormData } from '@/components/leads';
 
@@ -51,6 +52,10 @@ export function LeadsPage() {
     const [createdOrder, setCreatedOrder] = useState<any>(null);
     const [showOrderDetail, setShowOrderDetail] = useState(false);
     const [confirmedOrder, setConfirmedOrder] = useState<any>(null);
+
+    // State for HenQuaShipDialog
+    const [showHenQuaShipDialog, setShowHenQuaShipDialog] = useState(false);
+    const [leadForHenQuaShip, setLeadForHenQuaShip] = useState<Lead | null>(null);
 
     // Fetch data on mount
     useEffect(() => {
@@ -117,7 +122,20 @@ export function LeadsPage() {
         const leadToUpdate = leads.find(l => l.id === draggableId);
         if (!leadToUpdate) return;
 
+        // Validation: Must have phone number to move to 'chot_don'
+        if (newPipelineStage === 'chot_don' && !leadToUpdate.phone) {
+            toast.error('Vui lòng cập nhật số điện thoại trước khi chốt đơn');
+            return;
+        }
+
         try {
+            // If pipeline_stage is 'hen_qua_ship', open dialog instead of immediate update
+            if (newPipelineStage === 'hen_qua_ship') {
+                setLeadForHenQuaShip(leadToUpdate);
+                setShowHenQuaShipDialog(true);
+                return;
+            }
+
             await updateLead(draggableId, { pipeline_stage: newPipelineStage, status: newPipelineStage });
             const statusLabel = kanbanColumns.find(c => c.id === newPipelineStage)?.label || newPipelineStage;
             toast.success(`Đã chuyển "${leadToUpdate.name}" sang "${statusLabel}"`);
@@ -138,6 +156,19 @@ export function LeadsPage() {
         } catch {
             toast.error('Lỗi khi cập nhật trạng thái');
             await fetchLeads(); // Revert by refreshing
+        }
+    };
+
+    const handleSubmitHenQuaShip = async (data: Partial<Lead>) => {
+        if (!leadForHenQuaShip) return;
+        try {
+            await updateLead(leadForHenQuaShip.id, data);
+            toast.success(`Đã cập nhật thông tin cho "${leadForHenQuaShip.name}"`);
+            setShowHenQuaShipDialog(false);
+            setLeadForHenQuaShip(null);
+            await fetchLeads();
+        } catch {
+            toast.error('Lỗi khi cập nhật thông tin');
         }
     };
 
@@ -397,6 +428,16 @@ export function LeadsPage() {
                         setConfirmedOrder(null);
                     }}
                     order={confirmedOrder}
+                />
+
+                <LeadHenQuaShipDialog
+                    open={showHenQuaShipDialog}
+                    onClose={() => {
+                        setShowHenQuaShipDialog(false);
+                        setLeadForHenQuaShip(null);
+                    }}
+                    onSubmit={handleSubmitHenQuaShip}
+                    lead={leadForHenQuaShip}
                 />
             </div>
         </>

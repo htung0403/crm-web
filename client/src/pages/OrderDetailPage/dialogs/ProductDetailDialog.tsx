@@ -221,6 +221,7 @@ export function ProductDetailDialog({
                 completion_photos: itemCompPhotos,
                 packaging_photos: itemPackPhotos,
                 sales_step_data: (item as any)?.sales_step_data || {},
+                delivery_payment_method: (item as any)?.delivery_payment_method || order.delivery_payment_method || 'cash',
             });
             
             setActiveImageIdx(0);
@@ -380,6 +381,26 @@ export function ProductDetailDialog({
 
             toast.success('Đã cập nhật thông tin thành công');
             if (onReloadOrder) onReloadOrder();
+            
+            // Nếu có phí ship và đang ở các bước liên quan đến giao hàng thì tạo phiếu thu
+            if (formData.delivery_fee && formData.delivery_fee > 0 && order && (roomId.startsWith('after2') || roomId.startsWith('after4'))) {
+                const { transactionsApi } = await import('@/lib/api');
+                try {
+                    await transactionsApi.create({
+                        type: 'income',
+                        category: 'Phí giao hàng',
+                        amount: formData.delivery_fee,
+                        notes: `Phí ship giao đồ cho đơn ${order.order_code || order.id}`,
+                        order_id: order.id,
+                        order_code: order.order_code,
+                        date: new Date().toISOString().split('T')[0],
+                        payment_method: (formData as any).delivery_payment_method || 'cash'
+                    });
+                    toast.success('Đã tạo phiếu thu cho phí ship');
+                } catch (error) {
+                    console.error('Lỗi tạo phiếu thu ship:', error);
+                }
+            }
         } catch (error: any) {
             toast.error(error?.message || 'Lỗi khi cập nhật thông tin');
         } finally {
@@ -421,7 +442,8 @@ export function ProductDetailDialog({
         if (!roomId) return 'Chi tiết sản phẩm';
         if (roomId.startsWith('after')) {
             switch (roomId) {
-                case 'after1': return 'Kiểm nợ & Ảnh hoàn thiện';
+                case 'after1': return 'Ảnh hoàn thiện';
+                case 'after1_debt': return 'Kiểm nợ';
                 case 'after2': return 'Đóng gói & Giao hàng';
                 case 'after3': return 'Nhắn HD & Feedback';
                 case 'after4': return 'Lưu Trữ';
@@ -475,7 +497,8 @@ export function ProductDetailDialog({
         if (roomId === 'step1') return "Kiểm tra kỹ tình trạng đồ của khách, chụp ảnh các vết trầy xước hoặc hư hỏng trước khi nhận.";
         if (roomId === 'step2') return "Gắn Tag định danh cho từng sản phẩm. Đảm bảo Tag không làm hỏng chất liệu sản phẩm.";
         if (roomId === 'step3') return "Trao đổi kỹ với bộ phận Kỹ thuật về phương án xử lý. Ghi chú lại các yêu cầu đặc biệt của khách.";
-        if (roomId === 'after1') return "Kiểm tra lại nợ cũ của khách. Chụp ảnh sản phẩm sau khi đã hoàn thiện để gửi khách.";
+        if (roomId === 'after1') return "Chụp ảnh sản phẩm sau khi đã hoàn thiện để gửi khách.";
+        if (roomId === 'after1_debt') return "Kiểm tra lại nợ cũ của khách và xác nhận đã kiểm nợ.";
         if (roomId.startsWith('after2')) return "Đóng gói cẩn thận, dán mã vận đơn rõ ràng. Chụp ảnh gói hàng trước khi giao shipper.";
         return "Hoàn thành các nhiệm vụ trong giai đoạn này và cập nhật trạng thái.";
     };
@@ -831,7 +854,77 @@ export function ProductDetailDialog({
                                 <div className="flex-1 flex flex-col gap-4">
                                     {(roomId.startsWith('after1') || roomId.startsWith('after4')) && (
                                         <div className="space-y-3">
-                                            <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-purple-800">Thông tin thanh toán</h3>
+                                            {/* Proof Photos */}
+                                            <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100 shadow-sm space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="h-7 w-7 rounded-lg bg-purple-100 flex items-center justify-center">
+                                                            <Camera className="h-4 w-4 text-purple-600" />
+                                                        </div>
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[11px] font-black text-purple-900 uppercase tracking-tight">ẢNH HOÀN THIỆN</span>
+                                                            <span className="text-[9px] text-purple-500 font-medium italic">Chụp ảnh sản phẩm đã hoàn thiện</span>
+                                                        </div>
+                                                    </div>
+                                                    <Badge variant="outline" className="text-[9px] bg-white text-purple-600 border-purple-200">
+                                                        {(formData.completion_photos?.length || 0)} ảnh
+                                                    </Badge>
+                                                </div>
+
+                                                <div className="flex flex-wrap gap-2 pt-1">
+                                                    {(Array.isArray(formData.completion_photos) ? formData.completion_photos : []).map((photo, idx) => (
+                                                        <ImageUpload
+                                                            key={`comp-${idx}`}
+                                                            value={photo}
+                                                            onChange={(url) => {
+                                                                setFormData(prev => {
+                                                                    const newPhotos = [...(prev.completion_photos || [])];
+                                                                    if (url) { newPhotos[idx] = url; } else { newPhotos.splice(idx, 1); }
+                                                                    return { ...prev, completion_photos: newPhotos };
+                                                                });
+                                                            }}
+                                                            className="w-16 h-16 rounded-xl border-2"
+                                                            bucket="orders" folder="completion" hideInfo
+                                                        />
+                                                    ))}
+                                                    <ImageUpload
+                                                        key="comp-new" value={null}
+                                                        onChange={(url) => {
+                                                            if (url) {
+                                                                setFormData(prev => ({ ...prev, completion_photos: [...(prev.completion_photos || []), url] }));
+                                                            }
+                                                        }}
+                                                        className="w-16 h-16 rounded-xl border-2 border-dashed"
+                                                        bucket="orders" folder="completion" placeholderIcon={<Camera className="h-6 w-6 text-purple-300" />} hideInfo
+                                                    />
+                                                </div>
+                                            </div>
+
+                                            <div className="space-y-2">
+                                                <Label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1.5">
+                                                    Người chụp After
+                                                    {(roomId === 'after1' || roomId === 'after4') && <span className="text-rose-500">*</span>}
+                                                </Label>
+                                                <Select
+                                                    value={formData.aftersale_receiver_name || ''}
+                                                    onValueChange={(val) => setFormData(prev => ({ ...prev, aftersale_receiver_name: val }))}
+                                                >
+                                                    <SelectTrigger className="bg-white h-9">
+                                                        <SelectValue placeholder="Chọn nhân viên..." />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        {users.map(u => (
+                                                            <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {(roomId.startsWith('after1_debt') || roomId.startsWith('after4')) && (
+                                        <div className="space-y-3">
+                                            <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-purple-800">Thông tin thanh toán (Kiểm nợ)</h3>
                                             <div className="bg-white p-4 rounded-2xl border border-purple-100 shadow-sm space-y-4">
                                                 <div className="flex justify-between items-center bg-purple-50/50 p-2.5 rounded-xl border border-purple-50">
                                                     <span className="text-xs font-semibold text-purple-700">NGƯỜI TRẢ ĐỒ:</span>
@@ -879,91 +972,24 @@ export function ProductDetailDialog({
                                                     />
                                                 </div>
 
-                                                {/* Proof Photos */}
-                                                <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100 shadow-sm space-y-3">
-                                                    <div className="flex items-center justify-between">
-                                                        <div className="flex items-center gap-2">
-                                                            <div className="h-7 w-7 rounded-lg bg-purple-100 flex items-center justify-center">
-                                                                <Camera className="h-4 w-4 text-purple-600" />
-                                                            </div>
-                                                            <div className="flex flex-col">
-                                                                <span className="text-[11px] font-black text-purple-900 uppercase tracking-tight">ẢNH HOÀN THIỆN / KIỂM NỢ</span>
-                                                                <span className="text-[9px] text-purple-500 font-medium italic">Chụp bằng chứng CK hoặc tiền mặt</span>
-                                                            </div>
-                                                        </div>
-                                                        <Badge variant="outline" className="text-[9px] bg-white text-purple-600 border-purple-200">
-                                                            {(formData.completion_photos?.length || 0)} ảnh
-                                                        </Badge>
-                                                    </div>
-
-                                                    <div className="flex flex-wrap gap-2 pt-1">
-                                                        {(Array.isArray(formData.completion_photos) ? formData.completion_photos : []).map((photo, idx) => (
-                                                            <ImageUpload
-                                                                key={`comp-${idx}`}
-                                                                value={photo}
-                                                                onChange={(url) => {
-                                                                    setFormData(prev => {
-                                                                        const newPhotos = [...(prev.completion_photos || [])];
-                                                                        if (url) { newPhotos[idx] = url; } else { newPhotos.splice(idx, 1); }
-                                                                        return { ...prev, completion_photos: newPhotos };
-                                                                    });
-                                                                }}
-                                                                className="w-16 h-16 rounded-xl border-2"
-                                                                bucket="orders" folder="completion" hideInfo
-                                                            />
-                                                        ))}
-                                                        <ImageUpload
-                                                            key="comp-new" value={null}
-                                                            onChange={(url) => {
-                                                                if (url) {
-                                                                    setFormData(prev => ({ ...prev, completion_photos: [...(prev.completion_photos || []), url] }));
-                                                                }
-                                                            }}
-                                                            className="w-16 h-16 rounded-xl border-2 border-dashed"
-                                                            bucket="orders" folder="completion" placeholderIcon={<Camera className="h-6 w-6 text-purple-300" />} hideInfo
-                                                        />
-                                                    </div>
-                                                </div>
-
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div className="space-y-2">
-                                                        <Label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1.5">
-                                                            Người thu tiền
-                                                            {formData.debt_checked && <span className="text-rose-500">*</span>}
-                                                        </Label>
-                                                        <Select
-                                                            value={formData.debt_checked_by_name || ''}
-                                                            onValueChange={(val) => setFormData(prev => ({ ...prev, debt_checked_by_name: val }))}
-                                                        >
-                                                            <SelectTrigger className="bg-white h-9">
-                                                                <SelectValue placeholder="Chọn nhân viên..." />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                {users.map(u => (
-                                                                    <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <Label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1.5">
-                                                            Người chụp After
-                                                            {formData.debt_checked && <span className="text-rose-500">*</span>}
-                                                        </Label>
-                                                        <Select
-                                                            value={formData.aftersale_receiver_name || ''}
-                                                            onValueChange={(val) => setFormData(prev => ({ ...prev, aftersale_receiver_name: val }))}
-                                                        >
-                                                            <SelectTrigger className="bg-white h-9">
-                                                                <SelectValue placeholder="Chọn nhân viên..." />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                {users.map(u => (
-                                                                    <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </div>
+                                                <div className="space-y-2">
+                                                    <Label className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1.5">
+                                                        Người thu tiền
+                                                        {(roomId.startsWith('after1_debt') || roomId === 'after4') && <span className="text-rose-500">*</span>}
+                                                    </Label>
+                                                    <Select
+                                                        value={formData.debt_checked_by_name || ''}
+                                                        onValueChange={(val) => setFormData(prev => ({ ...prev, debt_checked_by_name: val }))}
+                                                    >
+                                                        <SelectTrigger className="bg-white h-9">
+                                                            <SelectValue placeholder="Chọn nhân viên..." />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {users.map(u => (
+                                                                <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
                                                 </div>
                                             </div>
                                         </div>
@@ -1134,15 +1160,15 @@ export function ProductDetailDialog({
                                                                 </div>
 
                                                                 <div className="space-y-4 border-t border-blue-50 pt-4">
-                                                                    <div className="space-y-2">
-                                                                        <Label className="text-xs font-bold text-gray-500">ĐƠN VỊ VẬN CHUYỂN</Label>
-                                                                        <Input
-                                                                            placeholder="VD: GHTK, Viettel Post..."
-                                                                            value={formData.delivery_carrier || ''}
-                                                                            onChange={(e) => setFormData(prev => ({ ...prev, delivery_carrier: e.target.value }))}
-                                                                        />
-                                                                    </div>
                                                                     <div className="grid grid-cols-2 gap-4">
+                                                                        <div className="space-y-2">
+                                                                            <Label className="text-xs font-bold text-gray-500 uppercase">ĐƠN VỊ VẬN CHUYỂN</Label>
+                                                                            <Input
+                                                                                placeholder="VD: GHTK, Viettel Post..."
+                                                                                value={formData.delivery_carrier || ''}
+                                                                                onChange={(e) => setFormData(prev => ({ ...prev, delivery_carrier: e.target.value }))}
+                                                                            />
+                                                                        </div>
                                                                         <div className="space-y-2">
                                                                             <Label className="text-xs font-bold text-gray-500 uppercase">Mã vận đơn</Label>
                                                                             <Input
@@ -1151,6 +1177,9 @@ export function ProductDetailDialog({
                                                                                 onChange={(e) => setFormData(prev => ({ ...prev, delivery_code: e.target.value }))}
                                                                             />
                                                                         </div>
+                                                                    </div>
+                                                                    
+                                                                    <div className="grid grid-cols-2 gap-4">
                                                                         <div className="space-y-2">
                                                                             <Label className="text-xs font-bold text-gray-500 uppercase">Phí Ship</Label>
                                                                             <Input
@@ -1165,7 +1194,24 @@ export function ProductDetailDialog({
                                                                                 }}
                                                                             />
                                                                         </div>
+                                                                        <div className="space-y-2">
+                                                                            <Label className="text-xs font-bold text-gray-500 uppercase">PT Thanh toán Ship</Label>
+                                                                            <Select 
+                                                                                value={(formData as any).delivery_payment_method || 'cash'}
+                                                                                onValueChange={(val) => setFormData(prev => ({ ...prev, delivery_payment_method: val }))}
+                                                                            >
+                                                                                <SelectTrigger className="bg-white">
+                                                                                    <SelectValue />
+                                                                                </SelectTrigger>
+                                                                                <SelectContent>
+                                                                                    <SelectItem value="cash">Tiền mặt</SelectItem>
+                                                                                    <SelectItem value="transfer">Chuyển khoản</SelectItem>
+                                                                                    <SelectItem value="zalopay">Zalo Pay</SelectItem>
+                                                                                </SelectContent>
+                                                                            </Select>
+                                                                        </div>
                                                                     </div>
+                                                                    
                                                                     <div className="space-y-2">
                                                                         <Label className="text-xs font-bold text-gray-500 uppercase">ĐỊA CHỈ GIAO HÀNG</Label>
                                                                         <Input
@@ -1515,41 +1561,17 @@ export function ProductDetailDialog({
                                                              </Select>
                                                         </div>
                                                         <div className="space-y-1.5">
-                                                            <Label className="text-xs font-bold text-gray-500">SỐ ĐIỆN THOẠI</Label>
+                                                            <Label className="text-xs font-bold text-gray-500">TIỀN SHIP (NẾU CÓ)</Label>
                                                             <Input
-                                                                placeholder="VD: 0909 xxx xxx"
-                                                                value={stepData.step1_receiver_phone || ''}
-                                                                onChange={(e) => setStepData(prev => ({ ...prev, step1_receiver_phone: e.target.value }))}
+                                                                placeholder="Nhập số tiền..."
+                                                                type="text"
+                                                                value={stepData.step1_shipping_fee ? stepData.step1_shipping_fee.toLocaleString('vi-VN') : ''}
+                                                                onChange={(e) => {
+                                                                    const val = e.target.value.replace(/\D/g, '');
+                                                                    setStepData(prev => ({ ...prev, step1_shipping_fee: val ? parseInt(val, 10) : 0 }));
+                                                                }}
                                                             />
                                                         </div>
-                                                    </div>
-
-                                                    <div className="grid grid-cols-2 gap-4">
-                                                        <div className="space-y-1.5">
-                                                            <Label className="text-xs font-bold text-gray-500">HÌNH THỨC NHẬN</Label>
-                                                            <Select
-                                                                value={stepData.step1_delivery_type || 'direct'}
-                                                                onValueChange={(val) => setStepData(prev => ({ ...prev, step1_delivery_type: val }))}
-                                                            >
-                                                                <SelectTrigger>
-                                                                    <SelectValue placeholder="Chọn hình thức" />
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    <SelectItem value="direct">Trực tiếp</SelectItem>
-                                                                    <SelectItem value="ship">Giao hàng (Ship)</SelectItem>
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </div>
-                                                        {stepData.step1_delivery_type === 'ship' && (
-                                                            <div className="space-y-1.5">
-                                                                <Label className="text-xs font-bold text-gray-500">MÃ VẬN ĐƠN</Label>
-                                                                <Input
-                                                                    placeholder="VD: SPX123..."
-                                                                    value={stepData.step1_tracking_code || ''}
-                                                                    onChange={(e) => setStepData(prev => ({ ...prev, step1_tracking_code: e.target.value }))}
-                                                                />
-                                                            </div>
-                                                        )}
                                                     </div>
 
                                                     <div className="space-y-1.5">
@@ -1576,7 +1598,29 @@ export function ProductDetailDialog({
                                             </div>
                                             <Button
                                                 className="w-full h-11 rounded-xl font-bold shadow-lg shadow-blue-200 bg-blue-600 hover:bg-blue-700"
-                                                onClick={handleSaveStepData}
+                                                onClick={async () => {
+                                                    await handleSaveStepData();
+                                                    // Nếu có tiền ship thì tạo phiếu chi (expense)
+                                                    if (roomId === 'step1' && stepData.step1_shipping_fee > 0 && order) {
+                                                        const { transactionsApi } = await import('@/lib/api');
+                                                        try {
+                                                            await transactionsApi.create({
+                                                                type: 'expense',
+                                                                category: 'Phí ship nhận hàng',
+                                                                amount: stepData.step1_shipping_fee,
+                                                                notes: `Tiền ship nhận đồ cho đơn ${order.order_code || order.id}`,
+                                                                order_id: order.id,
+                                                                order_code: order.order_code,
+                                                                date: new Date().toISOString().split('T')[0],
+                                                                payment_method: 'cash'
+                                                            });
+                                                            toast.success('Đã tạo phiếu chi cho tiền ship');
+                                                        } catch (error) {
+                                                            console.error('Lỗi tạo phiếu chi:', error);
+                                                            toast.error('Lỗi khi tạo phiếu chi tự động');
+                                                        }
+                                                    }
+                                                }}
                                                 disabled={savingStepData}
                                             >
                                                 {savingStepData ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
