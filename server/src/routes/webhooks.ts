@@ -472,7 +472,7 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
         : incomingData;
 
     const {
-        id, name, phone, email, source, company, address, notes, assigned_to, lead_type,
+        id, name, phone, email, source, company, address, notes, assigned_to, owner_sale, lead_type,
         fb_thread_id, pancake_conversation_id, facebook_name, avatar_url,
         last_message_text, last_message_time, last_actor,
         ai_suggested_reply, pancake_customer_id,
@@ -497,8 +497,8 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
         if (data) existing = data;
     }
 
-    // Ưu tiên 1: Theo fb_thread_id
-    if (fb_thread_id) {
+    // Ưu tiên 1: Theo fb_thread_id (nếu chưa tìm thấy)
+    if (!existing && fb_thread_id) {
         const { data } = await supabaseAdmin
             .from('leads')
             .select('id, assigned_to')
@@ -543,8 +543,17 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
         return await handleLeadUpdate({ id: existing.id, ...data });
     }
 
+    // [KIẾM TRA] Theo yêu cầu: Không tạo lead mới khi có tin nhắn, chỉ upsert theo thread (nếu đã tồn tại)
+    // Nếu không tìm thấy existing lead mà có thông tin tin nhắn, thì bỏ qua việc tạo mới
+    if (!existing && last_message_text && event !== 'lead.create') {
+        console.log(`[Webhook] Không tìm thấy lead cho thread ${fb_thread_id || pancake_conversation_id}, bỏ qua tạo mới theo yêu cầu.`);
+        return { message: 'Bỏ qua tạo lead mới cho tin nhắn không xác định', skipped: true };
+    }
+
     // 2. Resolve assigned_to (Name -> UUID)
-    const resolvedAssignedTo = await resolveUserByName(assigned_to);
+    // Ưu tiên owner_sale (tên sale) từ n8n theo yêu cầu mới
+    const saleName = owner_sale || assigned_to;
+    const resolvedAssignedTo = await resolveUserByName(saleName);
 
     // 3. Tạo Lead mới
     const { data: lead, error } = await supabaseAdmin
@@ -593,9 +602,9 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
     if (resolvedAssignedTo) {
         await logLeadActivity(lead.id, {
             type: 'owner_assigned',
-            content: `Lead được gán cho ${assigned_to}`,
+            content: `Lead được gán cho ${saleName}`,
             userId: resolvedAssignedTo,
-            userName: assigned_to
+            userName: saleName
         });
     }
 
@@ -605,7 +614,7 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
             type: 'note',
             content: notes,
             userId: resolvedAssignedTo || undefined,
-            userName: assigned_to && !isUUID(assigned_to) ? assigned_to : 'n8n'
+            userName: saleName && !isUUID(saleName) ? saleName : 'n8n'
         });
     }
 
@@ -644,6 +653,7 @@ async function handleLeadUpdate(data: any) {
         status,
         pipeline_stage: _ignored_stage, // Luôn bỏ qua pipeline_stage vì sale cập nhật thủ công
         assigned_to,
+        owner_sale, // Tên sale từ n8n
         assign_state, // Bôi đậm trạng thái gán
         ai_suggested_reply,
         lead_score,
@@ -661,16 +671,52 @@ async function handleLeadUpdate(data: any) {
     let currentLead: any = null;
 
     if (!leadId) {
-        let query = supabaseAdmin.from('leads').select('id, assigned_to, name, facebook_name');
-        if (data.phone) query = query.eq('phone', data.phone);
-        else if (data.pancake_customer_id) query = query.eq('pancake_customer_id', data.pancake_customer_id);
-        else if (fb_thread_id) query = query.eq('fb_thread_id', fb_thread_id);
-        else if (pancake_conversation_id) query = query.eq('pancake_conversation_id', pancake_conversation_id);
+        // Search by fb_thread_id first
+        if (fb_thread_id) {
+            const { data: found } = await supabaseAdmin.from('leads')
+                .select('id, assigned_to, name, facebook_name')
+                .eq('fb_thread_id', fb_thread_id)
+                .maybeSingle();
+            if (found) {
+                leadId = found.id;
+                currentLead = found;
+            }
+        }
 
-        const { data: found } = await query.maybeSingle();
-        if (found) {
-            leadId = found.id;
-            currentLead = found;
+        // Fallback to pancake_conversation_id
+        if (!leadId && pancake_conversation_id) {
+            const { data: found } = await supabaseAdmin.from('leads')
+                .select('id, assigned_to, name, facebook_name')
+                .eq('pancake_conversation_id', pancake_conversation_id)
+                .maybeSingle();
+            if (found) {
+                leadId = found.id;
+                currentLead = found;
+            }
+        }
+
+        // Fallback to pancake_customer_id
+        if (!leadId && data.pancake_customer_id) {
+            const { data: found } = await supabaseAdmin.from('leads')
+                .select('id, assigned_to, name, facebook_name')
+                .eq('pancake_customer_id', data.pancake_customer_id)
+                .maybeSingle();
+            if (found) {
+                leadId = found.id;
+                currentLead = found;
+            }
+        }
+
+        // Fallback to phone
+        if (!leadId && data.phone) {
+            const { data: found } = await supabaseAdmin.from('leads')
+                .select('id, assigned_to, name, facebook_name')
+                .eq('phone', data.phone)
+                .maybeSingle();
+            if (found) {
+                leadId = found.id;
+                currentLead = found;
+            }
         }
     }
 
@@ -741,9 +787,10 @@ async function handleLeadUpdate(data: any) {
             userName: 'Hệ thống'
         });
     }
-    // 2. Gán Sale mới: Chỉ gán khi lead chưa có chủ và có tên Sale mới gửi vào
-    else if (assigned_to && !currentLead.assigned_to) {
-        const resolvedId = await resolveUserByName(assigned_to);
+    // 2. Gán Sale mới: Ưu tiên owner_sale hoặc assigned_to
+    else if ((owner_sale || assigned_to) && !currentLead.assigned_to) {
+        const saleName = owner_sale || assigned_to;
+        const resolvedId = await resolveUserByName(saleName);
         if (resolvedId) {
             updateData.assigned_to = resolvedId;
             updateData.assign_state = 'assigned';
@@ -751,15 +798,16 @@ async function handleLeadUpdate(data: any) {
             // Log sự kiện gán Sale
             await logLeadActivity(leadId, {
                 type: 'owner_assigned',
-                content: `Lead được gán cho ${assigned_to}`,
+                content: `Lead được gán cho ${saleName}`,
                 userId: resolvedId,
-                userName: assigned_to
+                userName: saleName
             });
         }
     }
     // 3. Chống giành khách (Sale B nhắn vào Lead của Sale A)
-    else if (assigned_to && currentLead.assigned_to) {
-        const resolvedId = await resolveUserByName(assigned_to);
+    else if ((owner_sale || assigned_to) && currentLead.assigned_to) {
+        const saleName = owner_sale || assigned_to;
+        const resolvedId = await resolveUserByName(saleName);
         if (resolvedId && resolvedId !== currentLead.assigned_to) {
             // Lấy telegram_chat_id của cả 2 sale
             const { data: usersData } = await supabaseAdmin
@@ -777,7 +825,7 @@ async function handleLeadUpdate(data: any) {
                 owner_id: currentLead.assigned_to,
                 tele_id_sale: ownerTele,
                 intruder_id: resolvedId,
-                intruder_name: assigned_to,
+                intruder_name: saleName,
                 tele_id_vi_pham: intruderTele,
                 link_lead: `${FRONTEND_URL}/leads/${leadId}`,
             });
@@ -786,7 +834,7 @@ async function handleLeadUpdate(data: any) {
             if (last_message_text && rawLastActor === 'sale') {
                 await logLeadActivity(leadId, {
                     type: 'note',
-                    content: `[Cảnh báo vi phạm] ${assigned_to} đã nhắn tin: ${last_message_text}`,
+                    content: `[Cảnh báo vi phạm] ${saleName} đã nhắn tin: ${last_message_text}`,
                     userName: 'Hệ thống'
                 });
                 
