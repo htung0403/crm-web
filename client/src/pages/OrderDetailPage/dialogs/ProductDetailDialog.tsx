@@ -1368,6 +1368,61 @@ export function ProductDetailDialog({
                                         </div>
                                     )}
 
+                                    {isAftersale && (
+                                        <div className="flex-1 flex flex-col min-h-[400px] gap-6 pt-6 border-t mt-4">
+                                            <div className="flex-1 flex flex-col min-h-[250px]">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <MessageSquare className="h-3.5 w-3.5 text-gray-400" />
+                                                    <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Thảo luận nội bộ</h4>
+                                                </div>
+                                                <ProductChat
+                                                    orderId={order?.id || ''}
+                                                    entityId={entityId}
+                                                    entityType={entityType}
+                                                    roomId={roomId}
+                                                    currentUserId={currentUserId}
+                                                    highlightMessageId={highlightMessageId}
+                                                />
+                                            </div>
+
+                                            <div className="flex-1 flex flex-col min-h-[150px]">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <History className="h-3.5 w-3.5 text-gray-400" />
+                                                    <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Lịch sử thay đổi</h4>
+                                                </div>
+                                                <ScrollArea className="flex-1 bg-white rounded-xl border border-gray-100 p-3">
+                                                    <div className="space-y-3">
+                                                        {roomLogs.length > 0 ? roomLogs.map((log: any) => (
+                                                            <div key={log.id} className="text-[11px] border-b border-gray-50 pb-2 last:border-0 relative">
+                                                                <div className="flex justify-between items-start mb-1">
+                                                                    <span className="font-bold text-gray-700 uppercase">
+                                                                        {log.order_item_step_id ? (
+                                                                            <span className={log.action === 'failed' ? "text-red-500" : "text-blue-700"}>
+                                                                                {log.action === 'failed' && <span className="mr-1">THẤT BẠI:</span>}
+                                                                                {log.step_name}
+                                                                            </span>
+                                                                        ) : (
+                                                                            `${log.from_status || log.from_stage || 'START'} → ${log.to_status || log.to_stage}`
+                                                                        )}
+                                                                    </span>
+                                                                    <span className="text-[9px] text-gray-400 tabular-nums">{formatDateTime(log.created_at)}</span>
+                                                                </div>
+                                                                <div className="flex items-center gap-1.5 text-gray-500 mb-1">
+                                                                    <div className="h-3 w-3 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-[8px] font-bold">
+                                                                        {log.created_by_user?.name?.charAt(0) || '?'}
+                                                                    </div>
+                                                                    {log.created_by_user?.name || 'Hệ thống'}
+                                                                </div>
+                                                            </div>
+                                                        )) : (
+                                                            <div className="text-center py-8 text-gray-400 italic text-[11px]">Chưa có lịch sử thay đổi</div>
+                                                        )}
+                                                    </div>
+                                                </ScrollArea>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {isAftersale && !roomId.startsWith('after4') && (
                                         <Button
                                             className="w-full h-12 rounded-xl font-bold shadow-lg shadow-primary/20"
@@ -1513,12 +1568,131 @@ export function ProductDetailDialog({
                                         <div className="grid grid-cols-2 gap-4 pt-1">
                                             <div className="flex flex-col">
                                                 <span className="text-[9px] text-gray-400 font-bold tracking-tight">NGÀY HOÀN THÀNH</span>
-                                                <span className="text-xs font-bold text-gray-600 tabular-nums">{order.completed_at ? formatDateTime(order.completed_at) : '—'}</span>
+                                                <span className="text-xs font-bold text-gray-600 tabular-nums">{order?.completed_at ? formatDateTime(order.completed_at) : '—'}</span>
                                             </div>
                                             <div className="flex flex-col">
                                                 <span className="text-[9px] text-gray-400 font-bold tracking-tight">TỔNG THANH TOÁN</span>
-                                                <span className="text-xs font-bold text-gray-600 tabular-nums">{formatCurrency(order.total_amount)}</span>
+                                                <span className="text-xs font-bold text-gray-600 tabular-nums">{order ? formatCurrency(order.total_amount) : '—'}</span>
                                             </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex-1 flex flex-col min-h-[400px] gap-6 pt-6 border-t mt-4">
+                                        <div className="flex-1 flex flex-col min-h-[250px]">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <MessageSquare className="h-3.5 w-3.5 text-gray-400" />
+                                                <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Thảo luận nội bộ</h4>
+                                            </div>
+                                            <ProductChat
+                                                orderId={order?.id || ''}
+                                                entityId={entityId}
+                                                entityType={entityType}
+                                                roomId={roomId}
+                                                currentUserId={currentUserId}
+                                                highlightMessageId={highlightMessageId}
+                                            />
+                                        </div>
+
+                                        <div className="flex-1 flex flex-col min-h-[150px]">
+                                            <div className="flex items-center gap-2 mb-2">
+                                                <History className="h-3.5 w-3.5 text-gray-400" />
+                                                <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Lịch sử thay đổi</h4>
+                                            </div>
+                                            <ScrollArea className="flex-1 bg-white rounded-xl border border-gray-100 p-3">
+                                                <div className="space-y-3">
+                                                    {roomLogs.length > 0 ? roomLogs.map((log: any) => (
+                                                        <div key={log.id} className="text-[11px] border-b border-gray-50 pb-2 last:border-0 relative">
+                                                            <div className="flex justify-between items-start mb-1">
+                                                                <span className="font-bold text-gray-700 uppercase">
+                                                                    {log.order_item_step_id ? (
+                                                                        <span className={log.action === 'failed' ? "text-red-500" : "text-blue-700"}>
+                                                                            {log.action === 'failed' && <span className="mr-1">THẤT BẠI:</span>}
+                                                                            {log.step_name}
+                                                                        </span>
+                                                                    ) : (
+                                                                        `${log.from_status || log.from_stage || 'START'} → ${log.to_status || log.to_stage}`
+                                                                    )}
+                                                                </span>
+                                                                <span className="text-[9px] text-gray-400 tabular-nums">{formatDateTime(log.created_at)}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-1.5 text-gray-500 mb-1">
+                                                                <div className="h-3 w-3 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-[8px] font-bold">
+                                                                    {log.created_by_user?.name?.charAt(0) || '?'}
+                                                                </div>
+                                                                {log.created_by_user?.name || 'Hệ thống'}
+                                                            </div>
+
+                                                            {log.action === 'assigned' && (
+                                                                <div className="mt-1.5 space-y-1 bg-blue-50/50 p-2 rounded-lg border border-blue-50">
+                                                                    {log.reason && (
+                                                                        <div className="flex gap-2">
+                                                                            <span className="font-semibold text-gray-500 min-w-[65px]">Lý do:</span>
+                                                                            <span className="text-gray-700">{log.reason}</span>
+                                                                        </div>
+                                                                    )}
+                                                                    <div className="flex gap-2">
+                                                                        <span className="font-semibold text-gray-500 min-w-[65px]">KTV:</span>
+                                                                        <span className="font-medium text-blue-700">{log.assigned_tech?.name || 'Chưa phân công'}</span>
+                                                                    </div>
+                                                                    {log.deadline_days > 0 && (
+                                                                        <div className="flex gap-2">
+                                                                            <span className="font-semibold text-gray-500 min-w-[65px]">Hạn:</span>
+                                                                            <span className="text-gray-700">{log.deadline_days} ngày</span>
+                                                                        </div>
+                                                                    )}
+                                                                    {log.notes && (
+                                                                        <div className="flex gap-2 mt-1 pt-1 border-t border-blue-100/50">
+                                                                            <span className="font-semibold text-gray-500 min-w-[65px]">Ghi chú:</span>
+                                                                            <span className="text-gray-700 italic">{log.notes}</span>
+                                                                        </div>
+                                                                    )}
+                                                                    {log.photos && log.photos.length > 0 && (
+                                                                        <div className="flex flex-wrap gap-1 mt-1 pt-1 border-t border-blue-100/50">
+                                                                            {log.photos.map((url: string, idx: number) => (
+                                                                                <a key={idx} href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>
+                                                                                    <img src={url} alt={`Evidence ${idx}`} className="h-8 w-8 object-cover rounded shadow-sm border border-gray-200" />
+                                                                                </a>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+
+                                                            {log.action === 'failed' && log.notes && (
+                                                                <div className="mt-1.5 bg-red-50 p-2 rounded-lg border border-red-100 text-red-700 italic">
+                                                                    {log.notes}
+                                                                    {log.photos && log.photos.length > 0 && (
+                                                                        <div className="flex flex-wrap gap-1 mt-1.5 pt-1.5 border-t border-red-100">
+                                                                            {log.photos.map((url: string, idx: number) => (
+                                                                                <a key={idx} href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>
+                                                                                    <img src={url} alt={`Evidence ${idx}`} className="h-8 w-8 object-cover rounded shadow-sm border border-red-200" />
+                                                                                </a>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+
+                                                            {log.order_item_step_id && (
+                                                                <Button 
+                                                                    variant="ghost" 
+                                                                    size="sm" 
+                                                                    className="h-6 px-2 absolute top-1 right-1 text-[10px] text-primary hover:bg-primary/10 font-bold border border-primary/20 rounded-md"
+                                                                    onClick={() => {
+                                                                        setSelectedLogDetail(log);
+                                                                        setShowLogDetailDialog(true);
+                                                                    }}
+                                                                >
+                                                                    <Maximize2 className="h-3 w-3 mr-1" />
+                                                                    Xem chi tiết
+                                                                </Button>
+                                                            )}
+                                                        </div>
+                                                    )) : (
+                                                        <div className="text-center py-8 text-gray-400 italic text-[11px]">Chưa có lịch sử thay đổi</div>
+                                                    )}
+                                                </div>
+                                            </ScrollArea>
                                         </div>
                                     </div>
                                 </div>
