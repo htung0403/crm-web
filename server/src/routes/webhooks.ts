@@ -4,6 +4,7 @@ import { ApiError } from '../middleware/errorHandler.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
 
 const router = Router();
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 // ============================================================
 // Middleware: Xác thực webhook bằng API Key
@@ -760,13 +761,25 @@ async function handleLeadUpdate(data: any) {
     else if (assigned_to && currentLead.assigned_to) {
         const resolvedId = await resolveUserByName(assigned_to);
         if (resolvedId && resolvedId !== currentLead.assigned_to) {
+            // Lấy telegram_chat_id của cả 2 sale
+            const { data: usersData } = await supabaseAdmin
+                .from('users')
+                .select('id, telegram_chat_id')
+                .in('id', [currentLead.assigned_to, resolvedId]);
+            
+            const ownerTele = usersData?.find(u => u.id === currentLead.assigned_to)?.telegram_chat_id;
+            const intruderTele = usersData?.find(u => u.id === resolvedId)?.telegram_chat_id;
+
             // Phát hiện vi phạm
             fireWebhook('INTRUSION_DETECTED', {
                 lead_id: leadId,
                 lead_name: currentLead.name || currentLead.facebook_name,
                 owner_id: currentLead.assigned_to,
+                tele_id_sale: ownerTele,
                 intruder_id: resolvedId,
                 intruder_name: assigned_to,
+                tele_id_vi_pham: intruderTele,
+                link_lead: `${FRONTEND_URL}/leads/${leadId}`,
             });
 
             // Ghi tin nhắn vào CRM nhưng KHÔNG tính SLA

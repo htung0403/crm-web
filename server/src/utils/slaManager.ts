@@ -3,6 +3,7 @@ import { fireWebhook } from './webhookNotifier.js';
 
 // Rule 2 configuration
 const SLA_CYCLES = [3, 60, 180, 300, 420, 1440, 2880, 3120, 4020, 5160, 6600];
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 // Storage for tracking which alerts have been sent to avoid spamming
 const firedAlerts = new Set<string>();
@@ -79,7 +80,7 @@ export async function checkAllSLA() {
                 pipeline_stage, 
                 appointment_time, 
                 assign_state,
-                assigned_to_user: users!leads_assigned_to_fkey(name, email)
+                assigned_to_user: users!leads_assigned_to_fkey(name, email, telegram_chat_id)
             `)
             .eq('assign_state', 'assigned')
             .not('assigned_to', 'is', null)
@@ -109,6 +110,8 @@ export async function checkAllSLA() {
                         lead_id: lead.id,
                         lead_name: lead.name,
                         sale_id: lead.assigned_to,
+                        tele_id_sale: Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0]?.telegram_chat_id : (lead.assigned_to_user as any)?.telegram_chat_id,
+                        link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
                         appointment_time: lead.appointment_time,
                         minutes_left: Math.round(minUntilAppoint)
                     });
@@ -161,6 +164,8 @@ export async function checkAllSLA() {
                         lead_name: lead.name,
                         sale_id: lead.assigned_to,
                         sale_name: Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0]?.name : (lead.assigned_to_user as any)?.name,
+                        tele_id_sale: Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0]?.telegram_chat_id : (lead.assigned_to_user as any)?.telegram_chat_id,
+                        link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
                         rule: 'Speed 3M',
                         time_left_sec: Math.round(timeLeft * 60)
                     });
@@ -177,6 +182,8 @@ export async function checkAllSLA() {
                         lead_name: lead.name,
                         sale_id: lead.assigned_to,
                         sale_name: Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0]?.name : (lead.assigned_to_user as any)?.name,
+                        tele_id_sale: Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0]?.telegram_chat_id : (lead.assigned_to_user as any)?.telegram_chat_id,
+                        link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
                         wait_minutes: Math.round(passedMin)
                     });
 
@@ -223,6 +230,8 @@ export async function checkAllSLA() {
                             lead_name: lead.name,
                             sale_id: lead.assigned_to,
                             sale_name: Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0]?.name : (lead.assigned_to_user as any)?.name,
+                            tele_id_sale: Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0]?.telegram_chat_id : (lead.assigned_to_user as any)?.telegram_chat_id,
+                            link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
                             rule: `Cycle ${nextMilestone}M`,
                             minutes_passed: Math.round(passedMin),
                             time_left_min: Math.round(timeLeft)

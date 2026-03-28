@@ -9,9 +9,9 @@ const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
 
 /**
  * Gửi webhook event sang n8n.
- * Fire-and-forget — không throw error, chỉ log.
+ * Trả về và log status của n8n (dùng cho debug/test).
  */
-export async function fireWebhook(event: string, data: Record<string, any>): Promise<void> {
+export async function fireWebhook(event: string, data: Record<string, any>): Promise<{ ok: boolean, status: number } | void> {
     if (!N8N_WEBHOOK_URL) {
         console.log(`[WebhookNotifier] N8N_WEBHOOK_URL chưa cấu hình, bỏ qua event: ${event}`);
         return;
@@ -24,7 +24,6 @@ export async function fireWebhook(event: string, data: Record<string, any>): Pro
     };
 
     try {
-        //Tạm thời comment code gửi sang n8n để tránh lỗi ENOTFOUND khi chưa có URL thật
         const response = await fetch(N8N_WEBHOOK_URL, {
             method: 'POST',
             headers: {
@@ -35,12 +34,13 @@ export async function fireWebhook(event: string, data: Record<string, any>): Pro
         });
 
         if (!response.ok) {
-            console.error(`[WebhookNotifier] n8n responded ${response.status} for event: ${event}`);
+            console.error(`[WebhookNotifier] ❌ n8n responded ${response.status} for event: ${event}`);
         } else {
-            console.log(`[WebhookNotifier] ✅ Fired event: ${event}`);
+            console.log(`[WebhookNotifier] ✅ SUCCESS: Fired event "${event}" to n8n`);
         }
-        console.log(`[WebhookNotifier] 🔔 Mode: Log-only. Event: ${event}`, data);
+        return { ok: response.ok, status: response.status };
     } catch (err) {
-        console.error(`[WebhookNotifier] ❌ Failed to log event: ${event}`, err);
+        console.error(`[WebhookNotifier] ❌ ERROR: Failed to fire event "${event}":`, err);
+        return { ok: false, status: 500 };
     }
 }
