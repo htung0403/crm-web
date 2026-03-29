@@ -59,7 +59,7 @@ export function LeadsPage() {
 
     // Fetch data on mount
     useEffect(() => {
-        fetchLeads();
+        fetchLeads({ limit: 200 });
         fetchEmployees({ role: 'sale' });
         // Fetch data for CreateOrderDialog
         fetchCustomers();
@@ -152,10 +152,10 @@ export function LeadsPage() {
                 navigate(`/orders/new?${params.toString()}`);
             }
 
-            await fetchLeads(); // Refresh data
+            await fetchLeads({ limit: 200 }); // Refresh data
         } catch {
             toast.error('Lỗi khi cập nhật trạng thái');
-            await fetchLeads(); // Revert by refreshing
+            await fetchLeads({ limit: 200 }); // Revert by refreshing
         }
     };
 
@@ -166,7 +166,7 @@ export function LeadsPage() {
             toast.success(`Đã cập nhật thông tin cho "${leadForHenQuaShip.name}"`);
             setShowHenQuaShipDialog(false);
             setLeadForHenQuaShip(null);
-            await fetchLeads();
+            await fetchLeads({ limit: 200 });
         } catch {
             toast.error('Lỗi khi cập nhật thông tin');
         }
@@ -176,7 +176,7 @@ export function LeadsPage() {
         try {
             await convertLead(lead.id);
             toast.success(`Đã chuyển đổi ${lead.name} thành khách hàng!`);
-            await fetchLeads();
+            await fetchLeads({ limit: 200 });
         } catch {
             toast.error('Lỗi khi chuyển đổi lead');
         }
@@ -186,7 +186,7 @@ export function LeadsPage() {
         try {
             await createLead(data);
             toast.success('Đã tạo lead thành công!');
-            await fetchLeads();
+            await fetchLeads({ limit: 200 });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Lỗi khi tạo lead';
             toast.error(message);
@@ -347,9 +347,9 @@ export function LeadsPage() {
                 {/* Kanban Board - Flexible layout with auto-fit */}
                 <div className="pb-6">
                     <DragDropContext onDragEnd={handleDragEnd}>
-                        <div className="flex gap-4 overflow-x-auto lg:overflow-x-visible pb-4 px-4 sm:px-0 scrollbar-hide">
+                        <div className="flex gap-3 pb-4 px-4 sm:px-0">
                             {kanbanColumns.map(column => (
-                                <div key={column.id} className="flex-1 min-w-[280px] lg:min-w-0">
+                                <div key={column.id} className="flex-1 min-w-0">
                                     <KanbanColumn
                                         column={column}
                                         leads={leadsByStatus[column.id] || []}
@@ -416,7 +416,7 @@ export function LeadsPage() {
                         }
                         setShowOrderConfirmation(false);
                         setCreatedOrder(null);
-                        fetchLeads(); // Refresh leads data
+                        fetchLeads({ limit: 200 }); // Refresh leads data
                     }}
                 />
 

@@ -42,29 +42,29 @@ export function LeadCard({ lead, index, onClick, onDelete }: LeadCardProps) {
                     onClick={onClick}
                 >
                     {/* Header */}
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                        <div className="flex items-start gap-2 min-w-0">
-                            <Avatar className="h-8 w-8 shrink-0">
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                        <div className="flex items-start gap-3 min-w-0 flex-1">
+                            <Avatar className="h-10 w-10 shrink-0 border border-secondary/50">
                                 {(lead.avatar_url || lead.fb_profile_pic) && (
                                     <AvatarImage src={(lead.avatar_url || lead.fb_profile_pic)!} alt={lead.name} />
                                 )}
-                                <AvatarFallback className="text-xs bg-primary/10 text-primary font-medium">
-                                    {lead.name.charAt(0)}
+                                <AvatarFallback className="text-sm bg-primary/5 text-primary font-bold">
+                                    {lead.name.charAt(0).toUpperCase()}
                                 </AvatarFallback>
                             </Avatar>
-                            <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2 mb-0.5">
-                                    <p className="font-bold text-sm text-foreground truncate leading-tight">
+                            <div className="min-w-0 flex-1 flex flex-col gap-1.5">
+                                <div className="flex flex-col">
+                                    <h3 className="font-bold text-[14px] sm:text-[15px] text-foreground truncate leading-tight tracking-tight" title={lead.name}>
                                         {lead.name}
-                                    </p>
-                                    <SLACountdown lead={lead} size="sm" />
-                                </div>
-                                <div className="flex flex-col gap-1">
-                                    <p className="text-[11px] text-muted-foreground truncate font-medium">
+                                    </h3>
+                                    <p className="text-[11px] text-muted-foreground font-medium mt-0.5">
                                         {lead.phone}
                                     </p>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                    <SLACountdown lead={lead} size="sm" className="shadow-none" />
                                     {lead.loss_risk?.toLowerCase() === 'high' && (
-                                        <div className="inline-flex items-center gap-1 bg-red-600 text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-sm shadow-sm animate-bounce w-fit mt-0.5">
+                                        <div className="inline-flex items-center gap-1 bg-red-600 text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-sm shadow-sm animate-bounce">
                                             <AlertTriangle className="h-2.5 w-2.5" />
                                             NGUY CƠ RỚT KHÁCH
                                         </div>
@@ -72,7 +72,7 @@ export function LeadCard({ lead, index, onClick, onDelete }: LeadCardProps) {
                                 </div>
                             </div>
                         </div>
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 -mt-1 -mr-1">
                             <Button
                                 variant="ghost"
                                 size="icon"
