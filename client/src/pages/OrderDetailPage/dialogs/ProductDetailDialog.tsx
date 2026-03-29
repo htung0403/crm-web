@@ -25,7 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ProductChat } from '@/components/orders/workflow/ProductChat';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import { cn, formatCurrency, formatDateTime, formatDate } from '@/lib/utils';
-import { SALES_STATUS_LABELS, getCareWarrantyStageLabel } from '../constants';
+import { SALES_STATUS_LABELS, getCareWarrantyStageLabel, getAfterSaleStageLabel } from '../constants';
 import { orderItemsApi } from '@/lib/api';
 import { toast } from 'sonner';
 import { ImageUpload } from '@/components/products/ImageUpload';
@@ -222,7 +222,9 @@ export function ProductDetailDialog({
                 packaging_photos: itemPackPhotos,
                 sales_step_data: (item as any)?.sales_step_data || {},
                 delivery_payment_method: (item as any)?.delivery_payment_method || order.delivery_payment_method || 'cash',
-            });
+                debt_collect_amount: order.remaining_debt ?? (order.total_amount - (order.paid_amount || 0)),
+                debt_payment_method: 'cash',
+            } as any);
             
             setActiveImageIdx(0);
         }
@@ -302,6 +304,10 @@ export function ProductDetailDialog({
         if (roomId === 'step1') {
             if (!stepData.step1_receiver_name) {
                 toast.error('Vui lòng chọn nhân viên Sale nhận');
+                return;
+            }
+            if (stepData.step1_shipping_fee > 0 && !stepData.step1_payment_method) {
+                toast.error('Vui lòng chọn phương thức thanh toán cho tiền ship');
                 return;
             }
             if (!stepData.step1_evidence_photos || stepData.step1_evidence_photos.length === 0) {
@@ -384,21 +390,33 @@ export function ProductDetailDialog({
             
             // Nếu có phí ship và đang ở các bước liên quan đến giao hàng thì tạo phiếu thu
             if (formData.delivery_fee && formData.delivery_fee > 0 && order && (roomId.startsWith('after2') || roomId.startsWith('after4'))) {
-                const { transactionsApi } = await import('@/lib/api');
+                const { ordersApi } = await import('@/lib/api');
                 try {
-                    await transactionsApi.create({
-                        type: 'income',
-                        category: 'Phí giao hàng',
+                    await ordersApi.createPayment(order.id, {
+                        content: 'Phí giao hàng',
                         amount: formData.delivery_fee,
                         notes: `Phí ship giao đồ cho đơn ${order.order_code || order.id}`,
-                        order_id: order.id,
-                        order_code: order.order_code,
-                        date: new Date().toISOString().split('T')[0],
-                        payment_method: (formData as any).delivery_payment_method || 'cash'
+                        payment_method: (formData as any).delivery_payment_method || 'cash',
                     });
                     toast.success('Đã tạo phiếu thu cho phí ship');
                 } catch (error) {
                     console.error('Lỗi tạo phiếu thu ship:', error);
+                }
+            }
+
+            // Tạo phiếu thu khi kiểm nợ
+            if ((formData as any).debt_collect_amount && (formData as any).debt_collect_amount > 0 && order && (roomId.startsWith('after1_debt') || roomId === 'after4')) {
+                const { ordersApi } = await import('@/lib/api');
+                try {
+                    await ordersApi.createPayment(order.id, {
+                        content: 'Thanh toán đơn hàng',
+                        amount: (formData as any).debt_collect_amount,
+                        notes: `Thu nợ cho đơn ${order.order_code || order.id} (Bước: ${getAfterSaleStageLabel(roomId)})`,
+                        payment_method: (formData as any).debt_payment_method || 'cash',
+                    });
+                    toast.success('Đã tạo phiếu thu nợ và cập nhật công nợ');
+                } catch (error) {
+                    console.error('Lỗi tạo phiếu thu nợ:', error);
                 }
             }
         } catch (error: any) {
@@ -502,6 +520,30 @@ export function ProductDetailDialog({
         if (roomId.startsWith('after2')) return "Đóng gói cẩn thận, dán mã vận đơn rõ ràng. Chụp ảnh gói hàng trước khi giao shipper.";
         return "Hoàn thành các nhiệm vụ trong giai đoạn này và cập nhật trạng thái.";
     };
+
+    const getAllUniqueItems = () => {
+        if (!order) return [];
+        const allItems = [
+            ...(order.customer_items || []),
+            ...(order.sale_items || []),
+            ...(order.items || [])
+        ];
+        return Array.from(new Map(allItems.map(item => [item.id, item])).values());
+    };
+
+    const uniqueItems = getAllUniqueItems();
+
+    const getRemainingItemsCount = () => {
+        return uniqueItems.filter(item => 
+            (item as any).is_customer_item &&
+            item.item_type !== 'service' &&
+            !['after2', 'after3', 'after4'].includes((item as any).after_sale_stage) && 
+            item.status !== 'cancelled' &&
+            item.status !== 'delivered'
+        ).length;
+    };
+
+    const remainingItemsCount = getRemainingItemsCount();
 
     if (!group) return null;
 
@@ -942,12 +984,100 @@ export function ProductDetailDialog({
                                                         <span className="text-gray-500 font-medium">Đã thanh toán:</span>
                                                         <span className="font-bold text-green-600">{formatCurrency(order.paid_amount || 0)}</span>
                                                     </div>
-                                                    <div className="pt-3 mt-1 border-t-2 border-dashed border-purple-100">
+
+                                                    <div className="flex justify-between items-center text-sm pt-1 pb-1">
+                                                        <span className="text-red-500 font-bold uppercase text-[10px]">CÒN CHƯA TRẢ KHÁCH:</span>
+                                                        <Badge variant="destructive" className="font-bold h-5 px-1.5 text-[10px]">{remainingItemsCount} sản phẩm</Badge>
+                                                    </div>
+
+                                                    <div className="space-y-2 mb-2 pt-2 border-t border-purple-50">
+                                                        <Label className="text-[10px] font-black text-blue-600 uppercase">Danh sách bàn giao đợt này:</Label>
+                                                        <div className="space-y-1.5 max-h-[150px] overflow-y-auto pr-1 custom-scrollbar">
+                                                            {uniqueItems.filter(item => (item as any).is_customer_item && item.item_type !== 'service').map(item => (
+                                                                <div key={item.id} className="flex items-center justify-between p-2 rounded-lg border bg-blue-50/20 hover:bg-white transition-colors group">
+                                                                    <div className="flex items-center gap-2 min-w-0">
+                                                                        <Checkbox 
+                                                                            id={`item-sent-${item.id}`}
+                                                                            checked={['after2', 'after3', 'after4'].includes((item as any).after_sale_stage)}
+                                                                            onCheckedChange={async (checked) => {
+                                                                                if (onUpdateItemAfterSaleData) {
+                                                                                    // Move to after2 (Delivery) if checked, back to after1_debt if unchecked
+                                                                                    await onUpdateItemAfterSaleData(item.id, !!(item as any).is_customer_item, {
+                                                                                        stage: checked ? 'after2' : 'after1_debt'
+                                                                                    });
+                                                                                }
+
+                                                                                // Cập nhật ghi chú kiểm nợ
+                                                                                const noteLine = `Đã trả ${item.item_name} cho khách`.toUpperCase();
+                                                                                let currentNotes = (formData as any).debt_checked_notes || '';
+                                                                                if (checked) {
+                                                                                    if (!currentNotes.toUpperCase().includes(noteLine)) {
+                                                                                        currentNotes = currentNotes ? `${currentNotes}\n${noteLine}` : noteLine;
+                                                                                    }
+                                                                                } else {
+                                                                                    currentNotes = currentNotes.split('\n').filter((line: string) => line.trim().toUpperCase() !== noteLine).join('\n');
+                                                                                }
+                                                                                setFormData(prev => ({ ...prev, debt_checked_notes: currentNotes } as any));
+                                                                                
+                                                                                if (onReloadOrder) onReloadOrder();
+                                                                            }}
+                                                                        />
+                                                                        <Label htmlFor={`item-sent-${item.id}`} className="text-[11px] font-bold truncate cursor-pointer uppercase">
+                                                                            {item.item_name}
+                                                                        </Label>
+                                                                    </div>
+                                                                    <Badge className={cn(
+                                                                        "text-[9px] h-4 px-1 whitespace-nowrap",
+                                                                        ['after2', 'after3', 'after4'].includes((item as any).after_sale_stage) ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+                                                                    )}>
+                                                                        {['after2', 'after3', 'after4'].includes((item as any).after_sale_stage) ? 'Sắp trả' : 'Chờ trả'}
+                                                                    </Badge>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="pt-3 mt-1 border-t-2 border-dashed border-purple-100 space-y-3">
+                                                        <div className="space-y-1.5">
+                                                            <Label className="text-[10px] font-black text-purple-900 uppercase">SỐ TIỀN THU (ĐIỀU CHỈNH):</Label>
+                                                            <div className="relative">
+                                                                <Input
+                                                                    type="text"
+                                                                    className="h-10 text-lg font-black text-red-600 bg-white border-red-200"
+                                                                    value={(formData as any).debt_collect_amount?.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".") || "0"}
+                                                                    onChange={(e) => {
+                                                                        const val = e.target.value.replace(/\./g, "");
+                                                                        if (/^\d*$/.test(val)) {
+                                                                            setFormData(prev => ({ ...prev, debt_collect_amount: val ? parseInt(val, 10) : 0 } as any));
+                                                                        }
+                                                                    }}
+                                                                />
+                                                                <span className="absolute right-3 top-1/2 -translate-y-1/2 font-bold text-gray-400">đ</span>
+                                                            </div>
+                                                        </div>
+
                                                         <div className="flex justify-between items-center">
-                                                            <span className="text-sm font-black text-purple-900 uppercase tracking-tight">Cần thu:</span>
-                                                            <span className="font-black text-xl text-red-600">
-                                                                {formatCurrency(order.remaining_debt ?? (order.total_amount - (order.paid_amount || 0)))}
+                                                            <span className="text-xs font-black text-purple-900 uppercase tracking-tight">Cần thu còn lại:</span>
+                                                            <span className="font-black text-lg text-gray-500">
+                                                                {formatCurrency((order.remaining_debt ?? (order.total_amount - (order.paid_amount || 0))) - ((formData as any).debt_collect_amount || 0))}
                                                             </span>
+                                                        </div>
+
+                                                        <div className="space-y-1.5 pt-1">
+                                                            <Label className="text-[10px] font-bold text-gray-500 uppercase">PT THANH TOÁN:</Label>
+                                                            <Select 
+                                                                value={(formData as any).debt_payment_method || 'cash'}
+                                                                onValueChange={(val) => setFormData(prev => ({ ...prev, debt_payment_method: val } as any))}
+                                                            >
+                                                                <SelectTrigger className="bg-white h-9 border-purple-200">
+                                                                    <SelectValue />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value="cash">Tiền mặt</SelectItem>
+                                                                    <SelectItem value="transfer">Chuyển khoản</SelectItem>
+                                                                    <SelectItem value="zalopay">Zalo Pay</SelectItem>
+                                                                </SelectContent>
+                                                            </Select>
                                                         </div>
                                                     </div>
                                                 </div>
@@ -1717,15 +1847,15 @@ export function ProductDetailDialog({
                                                     <span className="text-xs font-black uppercase tracking-tight">Thông tin người nhận đồ</span>
                                                 </div>
                                                 <div className="space-y-3">
-                                                    <div className="grid grid-cols-2 gap-4">
+                                                    <div className="grid grid-cols-3 gap-4">
                                                         <div className="space-y-1.5">
-                                                            <Label className="text-xs font-bold text-gray-500">TÊN NHÂN VIÊN SALE NHẬN <span className="text-red-500">*</span></Label>
+                                                            <Label className="text-xs font-bold text-gray-500">NHÂN VIÊN SALE <span className="text-red-500">*</span></Label>
                                                             <Select
                                                                 value={stepData.step1_receiver_name || ''}
                                                                 onValueChange={(val) => setStepData(prev => ({ ...prev, step1_receiver_name: val }))}
                                                              >
                                                                  <SelectTrigger className="bg-white h-9">
-                                                                     <SelectValue placeholder="Chọn nhân viên..." />
+                                                                     <SelectValue placeholder="Chọn..." />
                                                                  </SelectTrigger>
                                                                  <SelectContent>
                                                                      {users.filter(u => ['sale', 'manager', 'admin'].includes(u.role)).map(u => (
@@ -1735,16 +1865,33 @@ export function ProductDetailDialog({
                                                              </Select>
                                                         </div>
                                                         <div className="space-y-1.5">
-                                                            <Label className="text-xs font-bold text-gray-500">TIỀN SHIP (NẾU CÓ)</Label>
+                                                            <Label className="text-xs font-bold text-gray-500">TIỀN SHIP</Label>
                                                             <Input
-                                                                placeholder="Nhập số tiền..."
+                                                                placeholder="0..."
                                                                 type="text"
+                                                                className="h-9"
                                                                 value={stepData.step1_shipping_fee ? stepData.step1_shipping_fee.toLocaleString('vi-VN') : ''}
                                                                 onChange={(e) => {
                                                                     const val = e.target.value.replace(/\D/g, '');
                                                                     setStepData(prev => ({ ...prev, step1_shipping_fee: val ? parseInt(val, 10) : 0 }));
                                                                 }}
                                                             />
+                                                        </div>
+                                                        <div className="space-y-1.5">
+                                                            <Label className="text-xs font-bold text-gray-500">PT THANH TOÁN</Label>
+                                                            <Select
+                                                                value={stepData.step1_payment_method || ''}
+                                                                onValueChange={(val) => setStepData(prev => ({ ...prev, step1_payment_method: val }))}
+                                                            >
+                                                                <SelectTrigger className="bg-white h-9">
+                                                                    <SelectValue placeholder="Chọn..." />
+                                                                </SelectTrigger>
+                                                                <SelectContent>
+                                                                    <SelectItem value="cash">Tiền mặt</SelectItem>
+                                                                    <SelectItem value="transfer">Chuyển khoản</SelectItem>
+                                                                    <SelectItem value="zalopay">Zalo Pay</SelectItem>
+                                                                </SelectContent>
+                                                            </Select>
                                                         </div>
                                                     </div>
 
@@ -1786,7 +1933,7 @@ export function ProductDetailDialog({
                                                                 order_id: order.id,
                                                                 order_code: order.order_code,
                                                                 date: new Date().toISOString().split('T')[0],
-                                                                payment_method: 'cash'
+                                                                payment_method: stepData.step1_payment_method || 'cash'
                                                             });
                                                             toast.success('Đã tạo phiếu chi cho tiền ship');
                                                         } catch (error) {

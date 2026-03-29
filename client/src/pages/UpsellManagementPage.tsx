@@ -17,7 +17,8 @@ import {
     Clock,
     AlertCircle,
     ChevronRight,
-    Search
+    Search,
+    Banknote
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -36,8 +37,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { upsellTicketsApi, requestsApi, leaveRequestsApi } from '@/lib/api';
-import { formatCurrency, formatDateTime } from '@/lib/utils';
+import { upsellTicketsApi, requestsApi, leaveRequestsApi, transactionsApi } from '@/lib/api';
+import { formatCurrency, formatDateTime, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 
 export function UpsellManagementPage() {
@@ -53,23 +54,25 @@ export function UpsellManagementPage() {
     const [partnerRequests, setPartnerRequests] = useState<any[]>([]);
     const [extensionRequests, setExtensionRequests] = useState<any[]>([]);
     const [leaveRequests, setLeaveRequests] = useState<any[]>([]);
+    const [pendingVouchers, setPendingVouchers] = useState<any[]>([]);
     const [totalAccessoriesCount, setTotalAccessoriesCount] = useState(0);
 
     // UI States
     const [selectedTicket, setSelectedTicket] = useState<any>(null);
     const [showRejectDialog, setShowRejectDialog] = useState(false);
-    const [rejectItem, setRejectItem] = useState<{ id: string; type: 'upsell' | 'accessory' | 'partner' | 'extension' | 'leave' } | null>(null);
+    const [rejectItem, setRejectItem] = useState<{ id: string; type: 'upsell' | 'accessory' | 'partner' | 'extension' | 'leave' | 'voucher' } | null>(null);
     const [rejectionReason, setRejectionReason] = useState('');
 
     const loadData = async () => {
         setLoading(true);
         try {
-            const [upsellRes, accRes, partRes, extRes, leaveRes] = await Promise.all([
+            const [upsellRes, accRes, partRes, extRes, leaveRes, voucherRes] = await Promise.all([
                 upsellTicketsApi.getAll(),
                 requestsApi.getAccessories(),
                 requestsApi.getPartners(),
                 requestsApi.getExtensions(),
-                leaveRequestsApi.getAll({ role: user?.role })
+                leaveRequestsApi.getAll({ role: user?.role }),
+                transactionsApi.getAll({ status: 'pending' })
             ]);
 
             setUpsellTickets(upsellRes.data?.data?.filter((t: any) => t.status === 'pending') || []);
@@ -77,6 +80,7 @@ export function UpsellManagementPage() {
             setPartnerRequests(partRes.data?.data?.filter((p: any) => p.status === 'requested' || p.status === 'ship_to_partner') || []);
             setExtensionRequests(extRes.data?.data?.filter((e: any) => e.status === 'requested') || []);
             setLeaveRequests(leaveRes.data?.filter((l: any) => l.status === 'pending') || []);
+            setPendingVouchers(voucherRes.data?.data?.transactions || []);
             setTotalAccessoriesCount(accRes.data?.data?.length || 0);
         } catch (error: any) {
             toast.error(error.response?.data?.message || 'Không thể tải danh sách phê duyệt');
@@ -177,7 +181,20 @@ export function UpsellManagementPage() {
         }
     };
 
-    const onRejectClick = (id: string, type: 'upsell' | 'accessory' | 'partner' | 'extension' | 'leave') => {
+    const handleApproveVoucher = async (id: string) => {
+        setProcessing(true);
+        try {
+            await transactionsApi.updateStatus(id, 'approved');
+            toast.success('Đã duyệt phiếu thu/chi');
+            loadData();
+        } catch (error: any) {
+            toast.error(error.response?.data?.message || 'Lỗi khi duyệt');
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    const onRejectClick = (id: string, type: 'upsell' | 'accessory' | 'partner' | 'extension' | 'leave' | 'voucher') => {
         setRejectItem({ id, type });
         setRejectionReason('');
         setShowRejectDialog(true);
@@ -207,6 +224,9 @@ export function UpsellManagementPage() {
                     break;
                 case 'leave':
                     await leaveRequestsApi.updateStatus(rejectItem.id, 'rejected', user!.id);
+                    break;
+                case 'voucher':
+                    await transactionsApi.updateStatus(rejectItem.id, 'cancelled');
                     break;
             }
             toast.success('Đã từ chối yêu cầu');
@@ -245,7 +265,7 @@ export function UpsellManagementPage() {
                 </div>
                 <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
                     <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                    Tải lại ({upsellTickets.length + accessoryRequests.length + partnerRequests.length + extensionRequests.length})
+                    Tải lại ({upsellTickets.length + accessoryRequests.length + partnerRequests.length + extensionRequests.length + pendingVouchers.length})
                 </Button>
             </div>
 
@@ -275,6 +295,11 @@ export function UpsellManagementPage() {
                         <Calendar className="h-4 w-4" />
                         Nghỉ/Muộn
                         {leaveRequests.length > 0 && <Badge variant="secondary" className="ml-1 bg-rose-100 text-rose-700">{leaveRequests.length}</Badge>}
+                    </TabsTrigger>
+                    <TabsTrigger value="voucher" className="gap-2 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                        <Banknote className="h-4 w-4" />
+                        Thu Chi
+                        {pendingVouchers.length > 0 && <Badge variant="secondary" className="ml-1 bg-green-100 text-green-700">{pendingVouchers.length}</Badge>}
                     </TabsTrigger>
                 </TabsList>
 
@@ -506,6 +531,95 @@ export function UpsellManagementPage() {
                                         <div className="bg-slate-50 md:w-32 border-l border-slate-100 p-4 flex flex-col justify-center gap-2">
                                             <Button className="w-full bg-emerald-600 hover:bg-emerald-700 h-9 text-xs font-bold" onClick={() => handleApproveLeave(req.id)} disabled={processing}>Duyệt</Button>
                                             <Button variant="outline" className="w-full text-rose-600 border-rose-200 h-9 text-xs font-bold" onClick={() => onRejectClick(req.id, 'leave')} disabled={processing}>Từ chối</Button>
+                                        </div>
+                                    </div>
+                                </Card>
+                            ))
+                        )}
+                    </div>
+                </TabsContent>
+
+                {/* Vouchers Tab */}
+                <TabsContent value="voucher" className="mt-0">
+                    <div className="grid gap-4">
+                        {loading ? (
+                            <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-green-600" /></div>
+                        ) : pendingVouchers.length === 0 ? (
+                            emptyState("Chưa có phiếu Thu/Chi", "Tất cả các phiếu thu/chi đã được xử lý hoặc chưa được tạo.", <Banknote className="h-8 w-8 text-slate-400" />)
+                        ) : (
+                            pendingVouchers.map((voucher) => (
+                                <Card key={voucher.id} className={cn(
+                                    "overflow-hidden hover:shadow-md transition-shadow",
+                                    voucher.type === 'income' ? "border-emerald-100" : "border-rose-100"
+                                )}>
+                                    <div className="flex flex-col md:flex-row">
+                                        <div className="flex-1 p-5">
+                                            <div className="flex items-start justify-between mb-3">
+                                                <div className="space-y-1">
+                                                    <div className="flex items-center gap-2">
+                                                        <h3 className="font-bold text-base text-slate-800">{voucher.code}</h3>
+                                                        <Badge className={cn(
+                                                            "uppercase text-[10px]",
+                                                            voucher.type === 'income' ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-rose-50 text-rose-700 border-rose-200"
+                                                        )}>
+                                                            {voucher.type === 'income' ? 'Phiếu thu' : 'Phiếu chi'}
+                                                        </Badge>
+                                                    </div>
+                                                    <div className="flex items-center gap-3 text-xs text-slate-500">
+                                                        <div className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {new Date(voucher.date).toLocaleDateString('vi-VN')}</div>
+                                                        <div className="flex items-center gap-1"><User className="h-3 w-3" /> Tạo bởi: {voucher.created_by_user?.name || '—'}</div>
+                                                    </div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Số tiền</span>
+                                                    <span className={cn(
+                                                        "text-xl font-black",
+                                                        voucher.type === 'income' ? "text-emerald-600" : "text-rose-600"
+                                                    )}>
+                                                        {voucher.type === 'income' ? '+' : '-'}{formatCurrency(voucher.amount)}
+                                                    </span>
+                                                </div>
+                                            </div>
+
+                                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 py-3 bg-slate-50 px-3 rounded-lg border border-slate-100 mb-3">
+                                                <div>
+                                                    <p className="text-[10px] font-bold text-slate-400 uppercase">Hạng mục</p>
+                                                    <p className="text-sm font-black text-slate-700">{voucher.category}</p>
+                                                </div>
+                                                <div>
+                                                    <p className="text-[10px] font-bold text-slate-400 uppercase">Phương thức</p>
+                                                    <p className="text-sm font-bold text-slate-700 capitalize">
+                                                        {voucher.payment_method === 'cash' ? 'Tiền mặt' :
+                                                         voucher.payment_method === 'transfer' ? 'Chuyển khoản' : 'Zalo Pay'}
+                                                    </p>
+                                                </div>
+                                                <div className="col-span-2 md:col-span-1">
+                                                    <p className="text-[10px] font-bold text-slate-400 uppercase">Đơn hàng</p>
+                                                    <p className="text-sm font-bold text-indigo-600">{voucher.order_code || '—'}</p>
+                                                </div>
+                                            </div>
+
+                                            {voucher.notes && (
+                                                <div className="flex gap-2 mb-3">
+                                                    <MessageSquare className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
+                                                    <p className="text-xs text-slate-600 italic line-clamp-2">{voucher.notes}</p>
+                                                </div>
+                                            )}
+
+                                            {voucher.image_url && (
+                                                <div className="mt-2">
+                                                    <img
+                                                        src={voucher.image_url}
+                                                        alt="Minh chứng"
+                                                        className="h-12 w-20 object-cover rounded border cursor-pointer hover:opacity-80 transition-opacity"
+                                                        onClick={() => window.open(voucher.image_url, '_blank')}
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+                                        <div className="bg-slate-50 md:w-32 border-l border-slate-100 p-4 flex flex-col justify-center gap-2">
+                                            <Button className="w-full bg-emerald-600 hover:bg-emerald-700 h-9 text-xs font-bold" onClick={() => handleApproveVoucher(voucher.id)} disabled={processing}>Duyệt</Button>
+                                            <Button variant="outline" className="w-full text-rose-600 border-rose-200 h-9 text-xs font-bold" onClick={() => onRejectClick(voucher.id, 'voucher')} disabled={processing}>Từ chối</Button>
                                         </div>
                                     </div>
                                 </Card>

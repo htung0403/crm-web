@@ -25,6 +25,7 @@ import {
     KanbanColumn,
     kanbanColumns,
     LeadHenQuaShipDialog,
+    LeadFailDialog,
 } from '@/components/leads';
 import type { CreateLeadFormData } from '@/components/leads';
 
@@ -56,6 +57,10 @@ export function LeadsPage() {
     // State for HenQuaShipDialog
     const [showHenQuaShipDialog, setShowHenQuaShipDialog] = useState(false);
     const [leadForHenQuaShip, setLeadForHenQuaShip] = useState<Lead | null>(null);
+    
+    // State for FailDialog
+    const [showFailDialog, setShowFailDialog] = useState(false);
+    const [leadForFail, setLeadForFail] = useState<Lead | null>(null);
 
     // Fetch data on mount
     useEffect(() => {
@@ -136,6 +141,13 @@ export function LeadsPage() {
                 return;
             }
 
+            // If pipeline_stage is 'fail', open dialog instead of immediate update
+            if (newPipelineStage === 'fail') {
+                setLeadForFail(leadToUpdate);
+                setShowFailDialog(true);
+                return;
+            }
+
             await updateLead(draggableId, { pipeline_stage: newPipelineStage, status: newPipelineStage });
             const statusLabel = kanbanColumns.find(c => c.id === newPipelineStage)?.label || newPipelineStage;
             toast.success(`Đã chuyển "${leadToUpdate.name}" sang "${statusLabel}"`);
@@ -169,6 +181,19 @@ export function LeadsPage() {
             await fetchLeads({ limit: 200 });
         } catch {
             toast.error('Lỗi khi cập nhật thông tin');
+        }
+    };
+
+    const handleSubmitFail = async (data: Partial<Lead>) => {
+        if (!leadForFail) return;
+        try {
+            await updateLead(leadForFail.id, data);
+            toast.success(`Đã chuyển "${leadForFail.name}" sang trạng thái Fail`);
+            setShowFailDialog(false);
+            setLeadForFail(null);
+            await fetchLeads({ limit: 200 });
+        } catch {
+            toast.error('Lỗi khi cập nhật trạng thái');
         }
     };
 
@@ -438,6 +463,16 @@ export function LeadsPage() {
                     }}
                     onSubmit={handleSubmitHenQuaShip}
                     lead={leadForHenQuaShip}
+                />
+
+                <LeadFailDialog
+                    open={showFailDialog}
+                    onClose={() => {
+                        setShowFailDialog(false);
+                        setLeadForFail(null);
+                    }}
+                    onSubmit={handleSubmitFail}
+                    lead={leadForFail}
                 />
             </div>
         </>

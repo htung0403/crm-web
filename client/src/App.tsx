@@ -137,6 +137,21 @@ function ProductsPageWrapper({ initialTab }: { initialTab: 'products' | 'service
   return <ProductsPage initialTab={initialTab} onTabChange={handleTabChange} />;
 }
 
+// Wrapper for FinancePage with routing
+function FinancePageWrapper({ initialTab }: { initialTab: 'income' | 'expense' }) {
+  const navigate = useNavigate();
+
+  const handleTabChange = (tab: string) => {
+    navigate(`/${tab}`);
+  };
+
+  return (
+    <WithCurrentUser>
+      {(user) => <FinancePage currentUser={user} initialTab={initialTab} onTabChange={handleTabChange} />}
+    </WithCurrentUser>
+  );
+}
+
 // Wrapper to inject currentUser from context
 function WithCurrentUser({ children }: { children: (user: User) => React.ReactNode }) {
   const { user } = useAuth();
@@ -357,17 +372,13 @@ function AppContent() {
 
             <Route path="/income" element={
               <ProtectedRoute allowedRoles={pagePermissions.income}>
-                <WithCurrentUser>
-                  {(user) => <FinancePage currentUser={user} />}
-                </WithCurrentUser>
+                <FinancePageWrapper initialTab="income" />
               </ProtectedRoute>
             } />
 
             <Route path="/expense" element={
               <ProtectedRoute allowedRoles={pagePermissions.expense}>
-                <WithCurrentUser>
-                  {(user) => <FinancePage currentUser={user} />}
-                </WithCurrentUser>
+                <FinancePageWrapper initialTab="expense" />
               </ProtectedRoute>
             } />
 

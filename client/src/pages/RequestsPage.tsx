@@ -1093,14 +1093,14 @@ export function RequestsPage() {
             // 💰 Tự động tạo phiếu chi khi chuyển sang Đã mua
             if (accessoryRow.status === 'need_buy' && accessoryStatus === 'bought') {
                 try {
-                    const amount = Number(String(accessoryRow.metadata?.price_estimate || 0).replace(/\D/g, ''));
+                    const amount = Number(String(accessoryMeta.price_estimate || 0).replace(/\D/g, ''));
                     if (amount > 0) {
                         await transactionsApi.create({
                             type: 'expense',
                             category: 'Mua phụ kiện',
                             amount,
                             payment_method: accessoryMeta.payment_type || 'transfer',
-                            notes: `Chi mua: ${accessoryRow.metadata?.item_name || 'phụ kiện'} (Yêu cầu #${accessoryRow.id.slice(0, 8)}). Người chi: ${accessoryMeta.payment_by || 'N/A'}`,
+                            notes: `Chi mua: ${accessoryMeta.item_name || 'phụ kiện'} (Yêu cầu #${accessoryRow.id.slice(0, 8)}). Người chi: ${accessoryMeta.payment_by || 'N/A'}`,
                             order_id: getOrderId(accessoryRow),
                             order_code: getOrderCode(accessoryRow),
                             date: new Date().toISOString(),
@@ -1593,7 +1593,24 @@ export function RequestsPage() {
                                         </div>
                                         <div>
                                             <p className="text-[10px] font-bold text-slate-400 uppercase">Giá</p>
-                                            <p className="text-sm font-bold text-emerald-600">{formatCurrency(Number(String(accessoryRow.metadata?.price_estimate || 0).replace(/\D/g, '')))}</p>
+                                            {accessoryRow.status === 'need_buy' ? (
+                                                <div className="relative mt-1">
+                                                    <Input
+                                                        type="text"
+                                                        value={String(accessoryMeta.price_estimate || '').replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ".")}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value.replace(/\./g, "");
+                                                            if (/^\d*$/.test(val)) {
+                                                                setAccessoryMeta({ ...accessoryMeta, price_estimate: val });
+                                                            }
+                                                        }}
+                                                        className="h-8 text-sm font-bold text-emerald-600 pr-6 border-emerald-100 bg-emerald-50/30 focus-visible:ring-emerald-500 text-right"
+                                                    />
+                                                    <span className="absolute right-2 top-1.5 text-[10px] font-bold text-emerald-600">₫</span>
+                                                </div>
+                                            ) : (
+                                                <p className="text-sm font-bold text-emerald-600">{formatCurrency(Number(String(accessoryMeta.price_estimate || 0).replace(/\D/g, '')))}</p>
+                                            )}
                                         </div>
                                     </div>
                                     {accessoryRow.notes && (
@@ -1647,7 +1664,7 @@ export function RequestsPage() {
                                                         let value = e.target.value;
                                                         if (field.name.toLowerCase().includes('cost') || field.name.toLowerCase().includes('price') || field.name.toLowerCase().includes('amount')) {
                                                             const digits = value.replace(/\D/g, '');
-                                                            value = digits ? new Intl.NumberFormat('en-US').format(Number(digits)) : '';
+                                                            value = digits ? digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".") : '';
                                                         }
                                                         setAccessoryMeta(m => ({ ...m, [field.name]: value }));
                                                     }}
@@ -1780,7 +1797,7 @@ export function RequestsPage() {
                                                         let value = e.target.value;
                                                         if (field.name.toLowerCase().includes('cost') || field.name.toLowerCase().includes('price') || field.name.toLowerCase().includes('amount')) {
                                                             const digits = value.replace(/\D/g, '');
-                                                            value = digits ? new Intl.NumberFormat('en-US').format(Number(digits)) : '';
+                                                            value = digits ? digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".") : '';
                                                         }
                                                         setPartnerMeta(m => ({ ...m, [field.name]: value }));
                                                     }}
@@ -1997,9 +2014,9 @@ export function RequestsPage() {
                                         onChange={(e) => {
                                             const digits = e.target.value.replace(/\D/g, '');
                                             if (!digits) setNewItemPrice('');
-                                            else setNewItemPrice(new Intl.NumberFormat('en-US').format(Number(digits)));
+                                            else setNewItemPrice(digits.replace(/\B(?=(\d{3})+(?!\d))/g, "."));
                                         }}
-                                        placeholder="1,500,000"
+                                        placeholder="1.500.000"
                                         className="h-11 rounded-xl pl-10"
                                     />
                                     <DollarSign className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-400" />

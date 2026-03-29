@@ -91,7 +91,7 @@ const menuItems: MenuItem[] = [
         children: [
             { id: 'income', label: 'Phiếu thu', roles: ['admin', 'manager', 'accountant', 'sale'] },
             { id: 'expense', label: 'Phiếu chi', roles: ['admin', 'manager', 'accountant', 'sale'] },
-            { id: 'adjustment', label: 'Điều chỉnh', roles: ['admin', 'manager', 'accountant'] } // Only accountant can adjust
+            //{ id: 'adjustment', label: 'Điều chỉnh', roles: ['admin', 'manager', 'accountant'] } // Only accountant can adjust
         ]
     },
     {

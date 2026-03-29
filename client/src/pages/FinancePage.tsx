@@ -16,6 +16,8 @@ import type { User } from '@/types';
 
 interface FinancePageProps {
     currentUser: User;
+    initialTab?: 'income' | 'expense';
+    onTabChange?: (tab: string) => void;
 }
 
 type TransactionType = 'income' | 'expense';
@@ -361,16 +363,12 @@ function TransactionForm({ type, onClose, onSubmit, loading }: TransactionFormPr
 function TransactionTable({
     transactions,
     userRole,
-    onApprove,
-    onCancel,
     onDelete,
     onView,
     loading,
 }: {
     transactions: Transaction[];
     userRole: string;
-    onApprove: (id: string) => void;
-    onCancel: (id: string) => void;
     onDelete: (id: string) => void;
     onView: (trans: Transaction) => void;
     loading: boolean;
@@ -450,26 +448,8 @@ function TransactionTable({
                                         >
                                             <Eye className="h-4 w-4" />
                                         </Button>
-                                        {canEdit && trans.status === 'pending' && (
+                                        {canEdit && (
                                             <>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="text-green-600 hover:bg-green-100"
-                                                    onClick={(e) => { e.stopPropagation(); onApprove(trans.id); }}
-                                                    disabled={loading}
-                                                >
-                                                    <Check className="h-4 w-4" />
-                                                </Button>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="text-red-600 hover:bg-red-100"
-                                                    onClick={(e) => { e.stopPropagation(); onCancel(trans.id); }}
-                                                    disabled={loading}
-                                                >
-                                                    <X className="h-4 w-4" />
-                                                </Button>
                                                 <Button
                                                     variant="ghost"
                                                     size="icon"
@@ -525,17 +505,8 @@ function TransactionTable({
                                 <span className="text-sm text-muted-foreground">{trans.created_by_user?.name || 'N/A'}</span>
                             </div>
 
-                            {canEdit && trans.status === 'pending' && (
+                            {canEdit && (
                                 <div className="flex gap-1">
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-8 w-8 text-green-600"
-                                        onClick={() => onApprove(trans.id)}
-                                        disabled={loading}
-                                    >
-                                        <Check className="h-4 w-4" />
-                                    </Button>
                                     <Button
                                         variant="ghost"
                                         size="icon"
@@ -555,11 +526,25 @@ function TransactionTable({
     );
 }
 
-export function FinancePage({ currentUser }: FinancePageProps) {
-    const [activeTab, setActiveTab] = useState<'income' | 'expense'>('income');
+export function FinancePage({ currentUser, initialTab = 'income', onTabChange }: FinancePageProps) {
+    const [activeTab, setActiveTab] = useState<'income' | 'expense'>(initialTab);
     const [showForm, setShowForm] = useState<TransactionType | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');
+
+    // Sync activeTab with initialTab when navigation changes
+    useEffect(() => {
+        setActiveTab(initialTab);
+    }, [initialTab]);
+
+    // Handle tab change and notify parent (App.tsx) to update URL
+    const handleTabChange = (tab: string) => {
+        const typedTab = tab as 'income' | 'expense';
+        setActiveTab(typedTab);
+        if (onTabChange) {
+            onTabChange(typedTab);
+        }
+    };
 
     // Data states
     const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -620,7 +605,7 @@ export function FinancePage({ currentUser }: FinancePageProps) {
         setLoading(true);
         try {
             const params: any = {};
-            if (activeTab) params.type = activeTab;
+            // Fetch all transactions to show counts in both tabs
             if (statusFilter !== 'all') params.status = statusFilter;
             if (searchTerm) params.search = searchTerm;
 
@@ -687,35 +672,6 @@ export function FinancePage({ currentUser }: FinancePageProps) {
         }
     };
 
-    // Approve transaction
-    const handleApprove = async (id: string) => {
-        setActionLoading(true);
-        try {
-            await transactionsApi.updateStatus(id, 'approved');
-            toast.success('Đã duyệt phiếu');
-            fetchTransactions();
-            fetchSummary();
-        } catch (error: any) {
-            toast.error(error.response?.data?.message || 'Lỗi khi duyệt phiếu');
-        } finally {
-            setActionLoading(false);
-        }
-    };
-
-    // Cancel transaction
-    const handleCancel = async (id: string) => {
-        setActionLoading(true);
-        try {
-            await transactionsApi.updateStatus(id, 'cancelled');
-            toast.success('Đã hủy phiếu');
-            fetchTransactions();
-            fetchSummary();
-        } catch (error: any) {
-            toast.error(error.response?.data?.message || 'Lỗi khi hủy phiếu');
-        } finally {
-            setActionLoading(false);
-        }
-    };
 
     // Delete transaction
     const handleDelete = async (id: string) => {
@@ -817,7 +773,7 @@ export function FinancePage({ currentUser }: FinancePageProps) {
             {/* Tabs */}
             <Card>
                 <CardContent className="p-0">
-                    <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as typeof activeTab)}>
+                    <Tabs value={activeTab} onValueChange={handleTabChange}>
                         <div className="border-b px-4 pt-4">
                             <TabsList className="mb-4">
                                 <TabsTrigger value="income" className="gap-2">
@@ -866,8 +822,6 @@ export function FinancePage({ currentUser }: FinancePageProps) {
                                 <TransactionTable
                                     transactions={currentTransactions}
                                     userRole={currentUser.role}
-                                    onApprove={handleApprove}
-                                    onCancel={handleCancel}
                                     onDelete={handleDelete}
                                     onView={setSelectedTransaction}
                                     loading={actionLoading}
@@ -884,8 +838,6 @@ export function FinancePage({ currentUser }: FinancePageProps) {
                                 <TransactionTable
                                     transactions={currentTransactions}
                                     userRole={currentUser.role}
-                                    onApprove={handleApprove}
-                                    onCancel={handleCancel}
                                     onDelete={handleDelete}
                                     onView={setSelectedTransaction}
                                     loading={actionLoading}
