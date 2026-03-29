@@ -54,7 +54,7 @@ export function LeadCard({ lead, index, onClick, onDelete }: LeadCardProps) {
                             </Avatar>
                             <div className="min-w-0 flex-1 flex flex-col gap-1.5">
                                 <div className="flex flex-col">
-                                    <h3 className="font-bold text-[14px] sm:text-[15px] text-foreground truncate leading-tight tracking-tight" title={lead.name}>
+                                    <h3 className="font-bold text-[14px] sm:text-[15px] text-foreground leading-tight tracking-tight" title={lead.name}>
                                         {lead.name}
                                     </h3>
                                     <p className="text-[11px] text-muted-foreground font-medium mt-0.5">
