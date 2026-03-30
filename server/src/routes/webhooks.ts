@@ -59,6 +59,8 @@ router.post('/n8n', verifyWebhookSecret, async (req: Request, res: Response, nex
                 case 'lead.create':
                 case 'lead.update':
                     return await handleLeadUpsert(item, evt);
+                case 'lead.ai_update':
+                    return await handleLeadAIUpdate(item);
                 case 'customer.create':
                     return await handleCustomerCreate(item);
                 case 'order.create':
@@ -475,13 +477,26 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
         id, name, phone, email, source, company, address, notes, assigned_to, owner_sale, lead_type,
         fb_thread_id, pancake_conversation_id, facebook_name, avatar_url,
         last_message_text, last_message_time, last_actor,
-        ai_suggested_reply, pancake_customer_id,
-        lead_score, loss_risk, next_action, customer_insight
+        pancake_customer_id, message_direction
     } = data;
 
-    // Nếu đã có ID (chủ động update) thì được phép thiếu thông tin Social
-    if (!id && !name && !fb_thread_id && !pancake_conversation_id) {
-        throw new ApiError('Lead cần có ít nhất tên hoặc thông tin định danh (ID/Facebook ID/Pancake ID)', 400);
+    // Thông tin debug để trả về cho n8n đối soát
+    const debugInfo = {
+        fb_thread_id_received: fb_thread_id || null,
+        pancake_conversation_id_received: pancake_conversation_id || null,
+        last_actor_received: last_actor || null,
+        message_direction_received: message_direction || null
+    };
+
+    // 0. Kiểm tra thông tin định danh tối thiểu
+    if (!id && !name && !fb_thread_id && !pancake_conversation_id && !phone && !pancake_customer_id) {
+        return {
+            action: 'skipped',
+            reason: 'missing_identifiers',
+            message: 'Lead cần có ít nhất tên hoặc thông tin định danh (ID/Phone/FB Thread ID/Pancake ID)',
+            skipped: true,
+            debug: debugInfo
+        };
     }
 
     // 1. Kiểm tra lead đã tồn tại chưa (Duplicate Check theo ưu tiên)
@@ -547,7 +562,13 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
     // Nếu không tìm thấy existing lead mà có thông tin tin nhắn, thì bỏ qua việc tạo mới
     if (!existing && last_message_text && event !== 'lead.create') {
         console.log(`[Webhook] Không tìm thấy lead cho thread ${fb_thread_id || pancake_conversation_id}, bỏ qua tạo mới theo yêu cầu.`);
-        return { message: 'Bỏ qua tạo lead mới cho tin nhắn không xác định', skipped: true };
+        return { 
+            action: 'skipped',
+            reason: 'filtered_as_unknown',
+            message: 'Bỏ qua tạo lead mới cho tin nhắn không xác định (Chỉ update nếu thread đã tồn tại)', 
+            skipped: true,
+            debug: debugInfo 
+        };
     }
 
     // 2. Resolve assigned_to (Name -> UUID)
@@ -572,7 +593,6 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
             fb_thread_id: fb_thread_id || null,
             pancake_conversation_id: pancake_conversation_id || null,
             pancake_customer_id: pancake_customer_id || null,
-            ai_suggested_reply: ai_suggested_reply || null,
             fb_profile_name: facebook_name || null,
             facebook_name: facebook_name || null,
             avatar_url: avatar_url || null,
@@ -581,8 +601,7 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
             last_actor: last_actor || null,
             t_last_inbound: last_actor === 'lead' ? (last_message_time || new Date().toISOString()) : null,
             t_last_outbound: last_actor === 'sale' ? (last_message_time || new Date().toISOString()) : null,
-            assign_state: resolvedAssignedTo ? 'assigned' : 'unassigned',
-            customer_insight: customer_insight || null,
+            assign_state: resolvedAssignedTo ? 'assigned' : 'unassigned'
         })
         .select()
         .single();
@@ -618,14 +637,8 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
         });
     }
 
-    // 6. Log gợi ý AI nếu có
-    if (ai_suggested_reply) {
-        await logLeadActivity(lead.id, {
-            type: 'ai_suggestion',
-            content: ai_suggested_reply,
-            userName: 'AI Assistant'
-        });
-    }
+    // AI fields removed from handleLeadUpsert core flow as per request
+    // These will be handled by lead.ai_update event instead
 
     // 6. Log tin nhắn đầu tiên nếu có
     if (last_message_text) {
@@ -637,7 +650,10 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
         });
     }
 
-    return { lead };
+    return { 
+        action: 'created',
+        lead 
+    };
 }
 
 async function handleLeadUpdate(data: any) {
@@ -655,10 +671,6 @@ async function handleLeadUpdate(data: any) {
         assigned_to,
         owner_sale, // Tên sale từ n8n
         assign_state, // Bôi đậm trạng thái gán
-        ai_suggested_reply,
-        lead_score,
-        loss_risk,
-        next_action,
         lead: _ignored_lead, // Bỏ qua key "lead" để không bị nhầm là cột database
         ...otherFields
     } = data;
@@ -759,18 +771,8 @@ async function handleLeadUpdate(data: any) {
         }
     });
 
-    if (ai_suggested_reply && ai_suggested_reply !== "") {
-        addIfValid('ai_suggested_reply', ai_suggested_reply);
-        // Log gợi ý AI
-        await logLeadActivity(leadId, {
-            type: 'ai_suggestion',
-            content: ai_suggested_reply,
-            userName: 'AI Assistant'
-        });
-    }
-    addIfValid('lead_score', lead_score);
-    addIfValid('loss_risk', loss_risk);
-    addIfValid('next_action', next_action);
+    // AI fields removed from core update
+    // Handled by handleLeadAIUpdate instead
 
     let effectiveLastActor = rawLastActor;
 
@@ -903,7 +905,92 @@ async function handleLeadUpdate(data: any) {
         });
     }
 
-    return { lead };
+    return { 
+        action: 'updated',
+        lead 
+    };
+}
+
+/**
+ * Event: lead.ai_update
+ * Chuyên trách cập nhật các field AI để tách biệt khỏi luồng ghi lead lõi
+ */
+async function handleLeadAIUpdate(data: any) {
+    const {
+        id, phone, fb_thread_id, pancake_conversation_id, pancake_customer_id,
+        ai_suggested_reply, lead_score, loss_risk, next_action, customer_insight
+    } = data;
+
+    // 1. Tìm Lead (Helper lookup)
+    let leadId = id;
+    if (!leadId) {
+        // Tìm ID dựa trên thông tin định danh
+        const lookupFields = { id, phone, fb_thread_id, pancake_conversation_id, pancake_customer_id };
+        for (const [key, val] of Object.entries(lookupFields)) {
+            if (val) {
+                const { data: found } = await supabaseAdmin.from('leads').select('id').eq(key, val).maybeSingle();
+                if (found) {
+                    leadId = found.id;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!leadId) {
+        return {
+            action: 'skipped',
+            reason: 'lead_not_found',
+            message: 'Không tìm thấy lead để cập nhật thông tin AI',
+            skipped: true
+        };
+    }
+
+    // 2. Chuẩn bị dữ liệu update AI
+    const updateData: any = { updated_at: new Date().toISOString() };
+    const addIfValid = (key: string, value: any) => {
+        if (value !== undefined && value !== null && value !== "") updateData[key] = value;
+    };
+
+    addIfValid('ai_suggested_reply', ai_suggested_reply);
+    addIfValid('lead_score', lead_score);
+    addIfValid('loss_risk', loss_risk);
+    addIfValid('next_action', next_action);
+    addIfValid('customer_insight', customer_insight);
+
+    if (Object.keys(updateData).length <= 1) {
+        return { 
+            action: 'skipped', 
+            reason: 'no_ai_data', 
+            message: 'Không có thông tin AI nào để cập nhật',
+            skipped: true
+        };
+    }
+
+    // 3. Thực thi update
+    const { data: lead, error } = await supabaseAdmin
+        .from('leads')
+        .update(updateData)
+        .eq('id', leadId)
+        .select()
+        .single();
+
+    if (error) throw new ApiError('Lỗi cập nhật AI: ' + error.message, 500);
+
+    // 4. Log hoạt động AI
+    if (ai_suggested_reply) {
+        await logLeadActivity(leadId, {
+            type: 'ai_suggestion',
+            content: ai_suggested_reply,
+            userName: 'AI Assistant'
+        });
+    }
+
+    return { 
+        status: 'success',
+        action: 'updated_ai',
+        lead_id: leadId
+    };
 }
 
 /**
