@@ -8,9 +8,10 @@ interface KanbanColumnProps {
     leads: Lead[];
     onCardClick: (lead: Lead) => void;
     onDeleteLead?: (id: string) => void;
+    onLongPressLead?: (lead: Lead) => void;
 }
 
-export function KanbanColumn({ column, leads, onCardClick, onDeleteLead }: KanbanColumnProps) {
+export function KanbanColumn({ column, leads, onCardClick, onDeleteLead, onLongPressLead }: KanbanColumnProps) {
     const Icon = column.icon;
 
     return (
@@ -42,6 +43,7 @@ export function KanbanColumn({ column, leads, onCardClick, onDeleteLead }: Kanba
                                 index={index}
                                 onClick={() => onCardClick(lead)}
                                 onDelete={onDeleteLead}
+                                onLongPress={onLongPressLead}
                             />
                         ))}
                         {provided.placeholder}

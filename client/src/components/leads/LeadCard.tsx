@@ -1,3 +1,4 @@
+import { useRef, useCallback } from 'react';
 import { Draggable } from '@hello-pangea/dnd';
 import { Eye, Trash2, Flame, AlertTriangle, CalendarClock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -13,15 +14,53 @@ interface LeadCardProps {
     index: number;
     onClick: () => void;
     onDelete?: (id: string) => void;
+    onLongPress?: (lead: Lead) => void;
 }
 
-export function LeadCard({ lead, index, onClick, onDelete }: LeadCardProps) {
+export function LeadCard({ lead, index, onClick, onDelete, onLongPress }: LeadCardProps) {
     const { user } = useAuth();
     // Use channel first, fallback to source for legacy data
     const channelKey = lead.channel || lead.source || '';
     const source = sourceLabels[channelKey] || { label: channelKey || 'Khác', color: 'bg-gray-100 text-gray-700' };
 
     const isManagerOrAdmin = user?.role === 'admin' || user?.role === 'manager';
+
+    // Long press detection for mobile
+    const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const longPressTriggered = useRef(false);
+
+    const handleTouchStart = useCallback(() => {
+        longPressTriggered.current = false;
+        longPressTimer.current = setTimeout(() => {
+            longPressTriggered.current = true;
+            onLongPress?.(lead);
+            // Vibrate if supported
+            if (navigator.vibrate) navigator.vibrate(30);
+        }, 500);
+    }, [lead, onLongPress]);
+
+    const handleTouchEnd = useCallback(() => {
+        if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+            longPressTimer.current = null;
+        }
+    }, []);
+
+    const handleTouchMove = useCallback(() => {
+        if (longPressTimer.current) {
+            clearTimeout(longPressTimer.current);
+            longPressTimer.current = null;
+        }
+    }, []);
+
+    const handleCardClick = useCallback(() => {
+        // Don't trigger click if long press was just fired
+        if (longPressTriggered.current) {
+            longPressTriggered.current = false;
+            return;
+        }
+        onClick();
+    }, [onClick]);
 
     const handleDelete = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -39,7 +78,10 @@ export function LeadCard({ lead, index, onClick, onDelete }: LeadCardProps) {
                     {...provided.dragHandleProps}
                     className={`kanban-card bg-white rounded-lg border p-3 cursor-pointer group ${snapshot.isDragging ? 'shadow-lg ring-2 ring-primary/20' : 'shadow-sm hover:shadow-md'
                         }`}
-                    onClick={onClick}
+                    onClick={handleCardClick}
+                    onTouchStart={handleTouchStart}
+                    onTouchEnd={handleTouchEnd}
+                    onTouchMove={handleTouchMove}
                 >
                     {/* Header */}
                     <div className="flex items-start justify-between gap-2 mb-3">
@@ -72,7 +114,7 @@ export function LeadCard({ lead, index, onClick, onDelete }: LeadCardProps) {
                                 </div>
                             </div>
                         </div>
-                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 -mt-1 -mr-1">
+                        <div className="flex items-center gap-0.5 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0 -mt-1 -mr-1">
                             <Button
                                 variant="ghost"
                                 size="icon"

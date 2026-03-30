@@ -121,6 +121,16 @@ body {
   animation: pulse-soft 2s ease-in-out infinite;
 }
 
+/* Bottom sheet animation */
+@keyframes slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.mobile-bottom-sheet {
+  animation: slide-up 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
 /* Kanban specific */
 .kanban-column {
   min-height: calc(100vh - 250px);
@@ -138,5 +148,84 @@ body {
 /* Drag styles */
 [data-rbd-draggable-context-id] {
   transition: transform 0.1s ease !important;
+}
+
+/* ===== Mobile Kanban Styles ===== */
+@media (max-width: 767px) {
+  .kanban-column {
+    min-height: calc(100vh - 320px);
+  }
+
+  /* Horizontal snap scroll container */
+  .kanban-scroll-container {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    gap: 12px;
+    padding-bottom: 12px;
+  }
+
+  .kanban-scroll-container::-webkit-scrollbar {
+    height: 4px;
+  }
+
+  .kanban-scroll-container > div {
+    scroll-snap-align: start;
+    flex: 0 0 calc(100vw - 32px);
+    min-width: calc(100vw - 32px);
+    max-width: calc(100vw - 32px);
+  }
+
+  /* Touch-friendly cards: always show action buttons */
+  .kanban-card .group-hover\:opacity-100 {
+    opacity: 1 !important;
+  }
+
+  .kanban-card:hover {
+    transform: none;
+  }
+
+  .kanban-card:active {
+    transform: scale(0.98);
+    box-shadow: var(--shadow-md);
+  }
+}
+
+/* Mobile column tab bar */
+.mobile-kanban-tabs {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 4px 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.mobile-kanban-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.mobile-kanban-tab {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1.5px solid transparent;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mobile-kanban-tab.active {
+  border-color: currentColor;
+  box-shadow: 0 2px 8px -2px currentColor;
 }
 

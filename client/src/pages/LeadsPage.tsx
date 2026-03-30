@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DragDropContext } from '@hello-pangea/dnd';
 import type { DropResult } from '@hello-pangea/dnd';
-import { Search, Plus, Loader2, Phone, Users, TrendingUp, UserPlus } from 'lucide-react';
+import { Search, Plus, Loader2, Phone, Users, TrendingUp, UserPlus, Filter } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,8 @@ import {
     kanbanColumns,
     LeadHenQuaShipDialog,
     LeadFailDialog,
+    MobileStageBottomSheet,
+    MobileFilterSheet,
 } from '@/components/leads';
 import type { CreateLeadFormData } from '@/components/leads';
 
@@ -43,8 +45,50 @@ export function LeadsPage() {
     const { createOrder, getOrder } = useOrders();
 
     const [searchTerm, setSearchTerm] = useState('');
-    const [selectedSource, setSelectedSource] = useState<string>('all');
-    const [selectedEmployee, setSelectedEmployee] = useState<string>('all');
+    const [selectedSources, setSelectedSources] = useState<string[]>([]);
+    const [selectedEmployees, setSelectedEmployees] = useState<string[]>([]);
+    const [onlyUnassigned, setOnlyUnassigned] = useState<boolean>(false);
+
+    // Mobile kanban state
+    const [activeColumnIndex, setActiveColumnIndex] = useState(0);
+    const kanbanScrollRef = useRef<HTMLDivElement>(null);
+
+    // Scroll to column when tapping a mobile tab
+    const scrollToColumn = useCallback((index: number) => {
+        setActiveColumnIndex(index);
+        const container = kanbanScrollRef.current;
+        if (container) {
+            const children = container.children;
+            if (children[index]) {
+                (children[index] as HTMLElement).scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'nearest',
+                    inline: 'start',
+                });
+            }
+        }
+    }, []);
+
+    // Detect which column is visible via IntersectionObserver
+    useEffect(() => {
+        const container = kanbanScrollRef.current;
+        if (!container) return;
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) {
+                    if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+                        const idx = Array.from(container.children).indexOf(entry.target as Element);
+                        if (idx >= 0) setActiveColumnIndex(idx);
+                    }
+                }
+            },
+            { root: container, threshold: 0.5 }
+        );
+
+        Array.from(container.children).forEach((child) => observer.observe(child));
+        return () => observer.disconnect();
+    }, [kanbanColumns]);
 
     // State for CreateOrderDialog
     const [showOrderDialog, setShowOrderDialog] = useState(false);
@@ -61,6 +105,13 @@ export function LeadsPage() {
     // State for FailDialog
     const [showFailDialog, setShowFailDialog] = useState(false);
     const [leadForFail, setLeadForFail] = useState<Lead | null>(null);
+
+    // State for MobileStageBottomSheet
+    const [showMobileSheet, setShowMobileSheet] = useState(false);
+    const [leadForMobileSheet, setLeadForMobileSheet] = useState<Lead | null>(null);
+
+    // State for MobileFilterSheet
+    const [showMobileFilters, setShowMobileFilters] = useState(false);
 
     // Fetch data on mount
     useEffect(() => {
@@ -80,11 +131,16 @@ export function LeadsPage() {
         return leads.filter(lead => {
             const matchesSearch = (lead.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
                 (lead.phone || '').includes(searchTerm);
-            const matchesSource = selectedSource === 'all' || lead.source === selectedSource;
-            const matchesEmployee = selectedEmployee === 'all' || lead.assigned_to === selectedEmployee;
-            return matchesSearch && matchesSource && matchesEmployee;
+            
+            const matchesSource = selectedSources.length === 0 || selectedSources.includes(lead.source || 'other');
+            const matchesEmployee = selectedEmployees.length === 0 || selectedEmployees.includes(lead.assigned_to || '');
+            
+            // Unassigned leads filter (leads that haven't been assigned to anyone)
+            const matchesUnassigned = !onlyUnassigned || !lead.assigned_to;
+            
+            return matchesSearch && matchesSource && matchesEmployee && matchesUnassigned;
         });
-    }, [leads, searchTerm, selectedSource, selectedEmployee]);
+    }, [leads, searchTerm, selectedSources, selectedEmployees, onlyUnassigned]);
 
     // Group leads by pipeline_stage (or status as fallback) for Kanban
     const leadsByStatus = useMemo(() => {
@@ -229,6 +285,51 @@ export function LeadsPage() {
         }
     };
 
+    // Handle stage change from mobile bottom sheet (mirrors handleDragEnd logic)
+    const handleMobileStageChange = async (lead: Lead, newStageId: string) => {
+        const currentStage = (lead as any).pipeline_stage || lead.status || 'xac_dinh_nhu_cau';
+        if (newStageId === currentStage) return;
+
+        // Validation: Must have phone number to move to 'chot_don'
+        if (newStageId === 'chot_don' && !lead.phone) {
+            toast.error('Vui lòng cập nhật số điện thoại trước khi chốt đơn');
+            return;
+        }
+
+        try {
+            if (newStageId === 'hen_qua_ship') {
+                setLeadForHenQuaShip(lead);
+                setShowHenQuaShipDialog(true);
+                return;
+            }
+
+            if (newStageId === 'fail') {
+                setLeadForFail(lead);
+                setShowFailDialog(true);
+                return;
+            }
+
+            await updateLead(lead.id, { pipeline_stage: newStageId, status: newStageId });
+            const statusLabel = kanbanColumns.find(c => c.id === newStageId)?.label || newStageId;
+            toast.success(`Đã chuyển "${lead.name}" sang "${statusLabel}"`);
+
+            if (newStageId === 'chot_don') {
+                const params = new URLSearchParams({
+                    lead_id: lead.id,
+                    lead_name: lead.name,
+                    lead_phone: lead.phone,
+                    lead_email: lead.email || '',
+                });
+                navigate(`/orders/new?${params.toString()}`);
+            }
+
+            await fetchLeads({ limit: 200 });
+        } catch {
+            toast.error('Lỗi khi cập nhật trạng thái');
+            await fetchLeads({ limit: 200 });
+        }
+    };
+
     if (loading && leads.length === 0) {
         return (
             <div className="flex items-center justify-center min-h-[60vh]">
@@ -322,9 +423,38 @@ export function LeadsPage() {
                     )}
 
                     {/* Filters */}
-                    <Card>
+                    {/* Mobile Filter Button & Search */}
+                    <div className="flex flex-col md:hidden gap-3 px-1">
+                        <div className="flex items-center gap-3">
+                            <div className="relative flex-1">
+                                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                <Input
+                                    placeholder="Tìm theo tên, sđt..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="pl-9 h-11 bg-white border-slate-200 shadow-sm"
+                                />
+                            </div>
+                            <Button 
+                                variant="outline" 
+                                onClick={() => setShowMobileFilters(true)}
+                                className="h-11 shrink-0 bg-white border-slate-200 shadow-sm relative group"
+                            >
+                                <Filter className="h-4 w-4 mr-2 text-primary" />
+                                <span>Lọc</span>
+                                {(selectedSources.length > 0 || selectedEmployees.length > 0 || onlyUnassigned) && (
+                                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-primary text-white text-[10px] font-bold rounded-full flex items-center justify-center animate-in zoom-in">
+                                        {selectedSources.length + selectedEmployees.length + (onlyUnassigned ? 1 : 0)}
+                                    </span>
+                                )}
+                            </Button>
+                        </div>
+                    </div>
+
+                    {/* Desktop Filters */}
+                    <Card className="hidden md:block">
                         <CardContent className="p-4">
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                 {/* Search */}
                                 <div className="relative lg:col-span-2">
                                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -337,7 +467,10 @@ export function LeadsPage() {
                                 </div>
 
                                 {/* Source Filter */}
-                                <Select value={selectedSource} onValueChange={setSelectedSource}>
+                                <Select 
+                                    value={selectedSources.length === 1 ? selectedSources[0] : 'all'} 
+                                    onValueChange={(val) => setSelectedSources(val === 'all' ? [] : [val])}
+                                >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Nguồn" />
                                     </SelectTrigger>
@@ -353,7 +486,10 @@ export function LeadsPage() {
                                 </Select>
 
                                 {/* Employee Filter */}
-                                <Select value={selectedEmployee} onValueChange={setSelectedEmployee}>
+                                <Select 
+                                    value={selectedEmployees.length === 1 ? selectedEmployees[0] : 'all'} 
+                                    onValueChange={(val) => setSelectedEmployees(val === 'all' ? [] : [val])}
+                                >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Nhân viên" />
                                     </SelectTrigger>
@@ -369,17 +505,47 @@ export function LeadsPage() {
                     </Card>
                 </div>
 
+                {/* Mobile Column Tab Bar */}
+                <div className="md:hidden">
+                    <div className="mobile-kanban-tabs px-1">
+                        {kanbanColumns.map((column, idx) => {
+                            const Icon = column.icon;
+                            const count = (leadsByStatus[column.id] || []).length;
+                            return (
+                                <button
+                                    key={column.id}
+                                    className={`mobile-kanban-tab ${column.textColor} ${activeColumnIndex === idx ? `active ${column.bgColor}` : 'bg-white'}`}
+                                    onClick={() => scrollToColumn(idx)}
+                                >
+                                    <Icon className="h-3.5 w-3.5" />
+                                    <span>{column.label}</span>
+                                    <span className={`inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full text-[10px] font-bold text-white ${column.color}`}>
+                                        {count}
+                                    </span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+
                 {/* Kanban Board - Flexible layout with auto-fit */}
                 <div className="pb-6">
                     <DragDropContext onDragEnd={handleDragEnd}>
-                        <div className="flex gap-3 pb-4 px-4 sm:px-0">
+                        <div
+                            ref={kanbanScrollRef}
+                            className="flex gap-3 pb-4 px-4 sm:px-0 kanban-scroll-container md:!overflow-visible md:!scroll-snap-type-none"
+                        >
                             {kanbanColumns.map(column => (
-                                <div key={column.id} className="flex-1 min-w-0">
+                                <div key={column.id} className="md:flex-1 md:min-w-0">
                                     <KanbanColumn
                                         column={column}
                                         leads={leadsByStatus[column.id] || []}
                                         onCardClick={(lead) => navigate(`/leads/${lead.id}`)}
                                         onDeleteLead={handleDeleteLead}
+                                        onLongPressLead={(lead) => {
+                                            setLeadForMobileSheet(lead);
+                                            setShowMobileSheet(true);
+                                        }}
                                     />
                                 </div>
                             ))}
@@ -473,6 +639,33 @@ export function LeadsPage() {
                     }}
                     onSubmit={handleSubmitFail}
                     lead={leadForFail}
+                />
+
+                <MobileStageBottomSheet
+                    open={showMobileSheet}
+                    lead={leadForMobileSheet}
+                    onClose={() => {
+                        setShowMobileSheet(false);
+                        setLeadForMobileSheet(null);
+                    }}
+                    onSelectStage={handleMobileStageChange}
+                />
+                <MobileFilterSheet
+                    open={showMobileFilters}
+                    onClose={() => setShowMobileFilters(false)}
+                    selectedSources={selectedSources}
+                    setSelectedSources={setSelectedSources}
+                    selectedEmployees={selectedEmployees}
+                    setSelectedEmployees={setSelectedEmployees}
+                    onlyUnassigned={onlyUnassigned}
+                    setOnlyUnassigned={setOnlyUnassigned}
+                    leads={leads}
+                    employees={employees}
+                    onClear={() => {
+                        setSelectedSources([]);
+                        setSelectedEmployees([]);
+                        setOnlyUnassigned(false);
+                    }}
                 />
             </div>
         </>
