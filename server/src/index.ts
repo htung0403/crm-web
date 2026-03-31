@@ -64,6 +64,15 @@ app.get('/api/health', (req, res) => {
     });
 });
 
+// Root route for Render health check
+app.get('/', (req, res) => {
+    res.json({
+        status: 'online',
+        message: 'CRM API is running',
+        timestamp: new Date().toISOString()
+    });
+});
+
 
 // API Routes
 app.use('/api/auth', authRouter);
@@ -104,8 +113,11 @@ app.use('/api/cron', cronRouter);
 app.use(errorHandler);
 
 // Start server
-app.listen(config.port, () => {
-    console.log(`🚀 Server running on http://localhost:${config.port}`);
+const port = config.port;
+const host = '0.0.0.0';
+
+app.listen(port, host, () => {
+    console.log(`🚀 Server running on http://${host}:${port}`);
     console.log(`📊 Environment: ${config.nodeEnv}`);
     console.log(`🕒 Last Reload: ${new Date().toLocaleString()}`);
     
