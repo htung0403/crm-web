@@ -61,6 +61,8 @@ router.post('/n8n', verifyWebhookSecret, async (req: Request, res: Response, nex
                     return await handleLeadUpsert(item, evt);
                 case 'lead.ai_update':
                     return await handleLeadAIUpdate(item);
+                case 'lead.sale_memory_update':
+                    return await handleLeadSaleMemoryUpdate(item);
                 case 'customer.create':
                     return await handleCustomerCreate(item);
                 case 'order.create':
@@ -1131,6 +1133,88 @@ async function logLeadActivity(leadId: string, activityData: {
     } catch (err) {
         console.error('[Webhook] Lỗi khi lưu lead_activities:', err);
     }
+}
+
+/**
+ * Event: lead.sale_memory_update
+ * Cập nhật 'sale_memory' khi Sale tương tác với Lead
+ * Dùng để đồng bộ hóa response cho n8n branch/debug
+ */
+async function handleLeadSaleMemoryUpdate(data: any) {
+    const {
+        id, phone, fb_thread_id, pancake_conversation_id, pancake_customer_id,
+        sale_memory, has_important_ops_info
+    } = data;
+
+    // 1. Tìm Lead (Dùng helper lookup giống handleLeadAIUpdate)
+    let leadId = id;
+    if (!leadId) {
+        const lookupFields = { id, phone, fb_thread_id, pancake_conversation_id, pancake_customer_id };
+        for (const [key, val] of Object.entries(lookupFields)) {
+            if (val) {
+                const { data: found } = await supabaseAdmin.from('leads').select('id').eq(key, val).maybeSingle();
+                if (found) {
+                    leadId = found.id;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (!leadId) {
+        return {
+            action: 'skipped',
+            reason: 'lead_not_found',
+            message: 'Không tìm thấy lead để cập nhật sale memory',
+            skipped: true
+        };
+    }
+
+    // 2. Kiểm tra nếu không có thông tin vận hành quan trọng thì bỏ qua theo yêu cầu
+    if (has_important_ops_info === false) {
+        return {
+            action: 'skipped',
+            reason: 'no_important_ops_info',
+            message: 'Không có thông tin vận hành quan trọng để lưu',
+            skipped: true
+        };
+    }
+
+    // 3. Chuẩn bị dữ liệu update
+    const updateData: any = { 
+        updated_at: new Date().toISOString()
+    };
+    
+    // Chỉ cập nhật nếu có sale_memory (hoặc nếu has_important_ops_info là true thì có thể update dù rỗng?)
+    // Tạm thời chỉ add if valid để tránh overwrite bằng null/undefined không mong muốn.
+    if (sale_memory !== undefined && sale_memory !== null) {
+        updateData.sale_memory = sale_memory;
+    }
+
+    // 4. Thực thi update
+    const { error } = await supabaseAdmin
+        .from('leads')
+        .update(updateData)
+        .eq('id', leadId);
+
+    if (error) {
+        throw new ApiError('Lỗi cập nhật sale memory: ' + error.message, 500);
+    }
+
+    // 5. Log activity nếu có sale_memory mới
+    if (sale_memory) {
+        await logLeadActivity(leadId, {
+            type: 'note',
+            content: `[Sale Memory Update] ${sale_memory}`,
+            userName: 'Hệ thống'
+        });
+    }
+
+    return { 
+        status: 'success',
+        action: 'updated_sale_memory',
+        lead_id: leadId
+    };
 }
 
 // ============================================================

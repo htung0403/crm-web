@@ -170,6 +170,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         if (req.body.next_action !== undefined) updateData.next_action = req.body.next_action;
         if (req.body.customer_insight !== undefined) updateData.customer_insight = req.body.customer_insight;
         if (req.body.note !== undefined) updateData.note = req.body.note;
+        if (req.body.sale_memory !== undefined) updateData.sale_memory = req.body.sale_memory;
         if (delivery_method !== undefined) updateData.delivery_method = delivery_method;
         if (tracking_code !== undefined) updateData.tracking_code = tracking_code;
         if (shipping_fee !== undefined) updateData.shipping_fee = shipping_fee;
