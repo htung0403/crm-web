@@ -560,15 +560,20 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
 
     // [KIẾM TRA] Theo yêu cầu: Không tạo lead mới khi có tin nhắn, chỉ upsert theo thread (nếu đã tồn tại)
     // Nếu không tìm thấy existing lead mà có thông tin tin nhắn, thì bỏ qua việc tạo mới
+    // NHƯNG nếu là tin nhắn inbound từ khách (lead), có thread/conv id rõ ràng thì VẪN phải tạo.
     if (!existing && last_message_text && event !== 'lead.create') {
-        console.log(`[Webhook] Không tìm thấy lead cho thread ${fb_thread_id || pancake_conversation_id}, bỏ qua tạo mới theo yêu cầu.`);
-        return { 
-            action: 'skipped',
-            reason: 'filtered_as_unknown',
-            message: 'Bỏ qua tạo lead mới cho tin nhắn không xác định (Chỉ update nếu thread đã tồn tại)', 
-            skipped: true,
-            debug: debugInfo 
-        };
+        const isLeadInbound = last_actor === 'lead' && message_direction === 'inbound';
+        
+        if (!isLeadInbound) {
+            console.log(`[Webhook] Không tìm thấy lead cho thread ${fb_thread_id || pancake_conversation_id}, bỏ qua tạo mới theo yêu cầu.`);
+            return { 
+                action: 'skipped',
+                reason: 'filtered_as_unknown',
+                message: 'Bỏ qua tạo lead mới cho tin nhắn không xác định (Chỉ update nếu thread đã tồn tại)', 
+                skipped: true,
+                debug: debugInfo 
+            };
+        }
     }
 
     // 2. Resolve assigned_to (Name -> UUID)
@@ -671,6 +676,7 @@ async function handleLeadUpdate(data: any) {
         assigned_to,
         owner_sale, // Tên sale từ n8n
         assign_state, // Bôi đậm trạng thái gán
+        message_direction: _ignored_direction, // Không phải cột DB
         lead: _ignored_lead, // Bỏ qua key "lead" để không bị nhầm là cột database
         ...otherFields
     } = data;
