@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Edit, Trash2, Check, X, Upload, FileText, Loader2, RefreshCw, Eye, ExternalLink, Image as ImageIcon } from 'lucide-react';
+import { useState, useEffect, useCallback, Fragment } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Search, Edit, Trash2, Check, X, Upload, FileText, Loader2, RefreshCw, Eye, ExternalLink, Image as ImageIcon, Filter, ChevronDown, ChevronRight, Printer, MoreHorizontal, Download, Calendar as CalendarIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,9 +11,11 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { transactionsApi, ordersApi, requestsApi } from '@/lib/api';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { transactionsApi, ordersApi, requestsApi, invoicesApi } from '@/lib/api';
 import { formatCurrency, formatDate, cn, normalizeSearchText } from '@/lib/utils';
 import type { User } from '@/types';
+import { InvoiceDetailDialog } from '@/components/invoices/InvoiceDetailDialog';
 
 interface FinancePageProps {
     currentUser: User;
@@ -36,6 +39,16 @@ interface Transaction {
     status: TransactionStatus;
     order_id?: string;
     order_code?: string;
+    order?: {
+        id: string;
+        order_code: string;
+        customer: {
+            id: string;
+            name: string;
+            phone: string;
+        };
+    };
+    orders?: any;
     created_by: string;
     created_by_user?: { id: string; name: string; avatar?: string };
     approved_by?: string;
@@ -365,172 +378,254 @@ function TransactionTable({
     userRole,
     onDelete,
     onView,
+    onCustomerClick,
+    onInvoiceClick,
     loading,
 }: {
     transactions: Transaction[];
     userRole: string;
     onDelete: (id: string) => void;
     onView: (trans: Transaction) => void;
+    onCustomerClick: (id: string) => void;
+    onInvoiceClick: (code: string) => void;
     loading: boolean;
 }) {
-    const canEdit = userRole === 'accountant' || userRole === 'manager' || userRole === 'admin';
+    const [expandedRow, setExpandedRow] = useState<string | null>(null);
+
+    const isManagement = ['manager', 'admin', 'accountant'].includes(userRole);
 
     if (transactions.length === 0) {
         return (
-            <div className="py-12 text-center text-muted-foreground">
-                <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p>Chưa có giao dịch nào</p>
+            <div className="py-24 text-center text-muted-foreground flex flex-col items-center justify-center bg-white rounded-lg border-2 border-dashed">
+                <FileText className="h-16 w-16 mb-4 opacity-20" />
+                <p className="text-lg font-medium">Chưa có giao dịch nào phù hợp</p>
+                <p className="text-sm opacity-60">Hãy thử đổi bộ lọc hoặc thêm phiếu mới</p>
             </div>
         );
     }
 
+    const toggleRow = (id: string) => {
+        setExpandedRow(expandedRow === id ? null : id);
+    };
+
     return (
-        <>
-            {/* Desktop Table */}
-            <div className="hidden md:block overflow-x-auto">
-                <table className="w-full">
-                    <thead className="bg-muted/50 border-y">
-                        <tr>
-                            <th className="p-3 text-left text-sm font-medium text-muted-foreground">Mã phiếu</th>
-                            <th className="p-3 text-left text-sm font-medium text-muted-foreground">Ngày</th>
-                            <th className="p-3 text-left text-sm font-medium text-muted-foreground">Loại</th>
-                            <th className="p-3 text-right text-sm font-medium text-muted-foreground">Số tiền</th>
-                            <th className="p-3 text-left text-sm font-medium text-muted-foreground">Người tạo</th>
-                            <th className="p-3 text-left text-sm font-medium text-muted-foreground">Trạng thái</th>
-                            <th className="p-3 text-right text-sm font-medium text-muted-foreground">Thao tác</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {transactions.map((trans) => (
-                            <tr
-                                key={trans.id}
-                                className="border-b hover:bg-muted/30 transition-colors cursor-pointer"
-                                onClick={() => onView(trans)}
-                            >
-                                <td className="p-3">
-                                    <div>
-                                        <p className="font-medium">{trans.code}</p>
-                                        {trans.order_code && (
-                                            <p className="text-xs text-muted-foreground">ĐH: {trans.order_code}</p>
-                                        )}
-                                    </div>
-                                </td>
-                                <td className="p-3 text-sm">{formatDate(trans.date)}</td>
-                                <td className="p-3">
-                                    <Badge variant="outline">{trans.category}</Badge>
-                                </td>
-                                <td className={`p-3 text-right font-semibold ${trans.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                                    {trans.type === 'income' ? '+' : '-'}{formatCurrency(trans.amount)}
-                                </td>
-                                <td className="p-3">
-                                    <div className="flex items-center gap-2">
-                                        <Avatar className="h-7 w-7">
-                                            <AvatarImage src={trans.created_by_user?.avatar} />
-                                            <AvatarFallback className="text-xs">
-                                                {trans.created_by_user?.name?.charAt(0) || '?'}
-                                            </AvatarFallback>
-                                        </Avatar>
-                                        <span className="text-sm">{trans.created_by_user?.name || 'N/A'}</span>
-                                    </div>
-                                </td>
-                                <td className="p-3">
-                                    <Badge variant={statusLabels[trans.status].variant}>
-                                        {statusLabels[trans.status].label}
-                                    </Badge>
-                                </td>
-                                <td className="p-3 text-right">
-                                    <div className="flex items-center justify-end gap-1">
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="text-blue-600 hover:bg-blue-100"
-                                            onClick={(e) => { e.stopPropagation(); onView(trans); }}
+        <div className="overflow-x-auto rounded-lg border bg-card">
+            <table className="w-full border-collapse">
+                <thead className="bg-[#f9fafb] border-b">
+                    <tr>
+                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider w-[120px]">Mã phiếu</th>
+                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider w-[140px]">Thời gian</th>
+                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Người tạo</th>
+                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Loại thu chi</th>
+                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Người nộp/nhận</th>
+                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Mã người NN</th>
+                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">SĐT người NN</th>
+                        <th className="p-3 text-right text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Số tiền</th>
+                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Ghi chú</th>
+                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Trạng thái</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {transactions.map((trans) => {
+                        const isExpanded = expandedRow === trans.id;
+                        
+                        // Extract payer info from linked order → customer data
+                        const orderData: any = Array.isArray(trans.orders) ? trans.orders[0] : (trans.orders || trans.order || (trans as any).order);
+                        const customer = Array.isArray(orderData?.customer) ? orderData.customer[0] : (orderData?.customer || orderData?.customers?.[0] || orderData?.customers);
+                        
+                        const payerName = customer?.name || trans.metadata?.customer_name || trans.metadata?.payer_name || (trans.order_id ? `Đơn hàng #${trans.order_code || trans.order_id.slice(0,8)}` : 'N/A');
+                        const payerCode = customer?.id ? `KH${customer.id.slice(0, 6).toUpperCase()}` : trans.metadata?.customer_code || 'N/A';
+                        const payerPhone = customer?.phone || trans.metadata?.customer_phone || 'N/A';
+
+                        return (
+                            <Fragment key={trans.id}>
+                                <tr
+                                    className={cn(
+                                        "border-b hover:bg-[#f0f7ff] transition-colors cursor-pointer text-sm group",
+                                        isExpanded && "bg-[#f0f7ff]"
+                                    )}
+                                    onClick={() => toggleRow(trans.id)}
+                                >
+                                    <td className="p-3 font-bold text-primary flex items-center gap-2">
+                                        {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                                        {trans.code}
+                                    </td>
+                                    <td className="p-3 whitespace-nowrap">{formatDate(trans.date)}</td>
+                                    <td className="p-3 text-muted-foreground">{trans.created_by_user?.name || 'N/A'}</td>
+                                    <td className="p-3">
+                                        <Badge variant="secondary" className="font-normal">{trans.category}</Badge>
+                                    </td>
+                                    <td className="p-3">
+                                        <span 
+                                            className={cn(
+                                                "font-medium", 
+                                                customer?.id ? "text-blue-600 hover:text-blue-700 underline cursor-pointer" : ""
+                                            )}
+                                            onClick={(e) => {
+                                                if (customer?.id) {
+                                                    e.stopPropagation();
+                                                    onCustomerClick(customer.id);
+                                                }
+                                            }}
                                         >
-                                            <Eye className="h-4 w-4" />
-                                        </Button>
-                                        {canEdit && (
-                                            <>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="text-red-600 hover:bg-red-100"
-                                                    onClick={(e) => { e.stopPropagation(); onDelete(trans.id); }}
-                                                    disabled={loading}
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                            </>
-                                        )}
-                                    </div>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
+                                            {payerName}
+                                        </span>
+                                    </td>
+                                    <td className="p-3 text-muted-foreground">{payerCode}</td>
+                                    <td className="p-3 text-muted-foreground">{payerPhone}</td>
+                                    <td className={cn(
+                                        "p-3 text-right font-bold",
+                                        trans.type === 'income' ? 'text-emerald-600' : 'text-rose-600'
+                                    )}>
+                                        {formatCurrency(trans.amount)}
+                                    </td>
+                                    <td className="p-3 max-w-[200px] truncate text-muted-foreground italic">
+                                        {trans.notes || '---'}
+                                    </td>
+                                    <td className="p-3">
+                                        <Badge variant={statusLabels[trans.status].variant} className="rounded-full px-3">
+                                            {statusLabels[trans.status].label}
+                                        </Badge>
+                                    </td>
+                                </tr>
+                                {isExpanded && (
+                                    <tr className="bg-[#f8faff] border-b animate-in fade-in slide-in-from-top-1 duration-200">
+                                        <td colSpan={10} className="p-6">
+                                            <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+                                                <div className="space-y-4">
+                                                    <div>
+                                                        <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Số tiền</p>
+                                                        <p className={cn("text-2xl font-black", trans.type === 'income' ? 'text-emerald-600' : 'text-rose-600')}>
+                                                            {formatCurrency(trans.amount)}
+                                                        </p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Người nộp</p>
+                                                        <div className="flex flex-col gap-1">
+                                                            <p 
+                                                                className={cn(
+                                                                    "font-bold text-primary underline cursor-pointer",
+                                                                    !customer?.id && "no-underline pointer-events-none"
+                                                                )}
+                                                                onClick={(e) => {
+                                                                    if (customer?.id) {
+                                                                        e.stopPropagation();
+                                                                        onCustomerClick(customer.id);
+                                                                    }
+                                                                }}
+                                                            >
+                                                                {payerName}
+                                                            </p>
+                                                            <p className="text-xs text-muted-foreground">{payerCode} - {payerPhone}</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
 
-            {/* Mobile Card View */}
-            <div className="md:hidden space-y-3 p-4">
-                {transactions.map((trans) => (
-                    <div
-                        key={trans.id}
-                        className="p-4 rounded-lg border bg-card cursor-pointer"
-                        onClick={() => onView(trans)}
-                    >
-                        <div className="flex items-start justify-between mb-3">
-                            <div>
-                                <p className="font-semibold">{trans.code}</p>
-                                <p className="text-sm text-muted-foreground">{formatDate(trans.date)}</p>
-                            </div>
-                            <Badge variant={statusLabels[trans.status].variant}>
-                                {statusLabels[trans.status].label}
-                            </Badge>
-                        </div>
+                                                <div className="space-y-4">
+                                                    <div>
+                                                        <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Loại thu</p>
+                                                        <p className="font-medium">{trans.category}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Thời gian</p>
+                                                        <p className="font-medium">{formatDate(trans.date)}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Đối tượng nộp</p>
+                                                        <p className="font-medium">Khách hàng</p>
+                                                    </div>
+                                                </div>
 
-                        <div className="flex items-center justify-between mb-3">
-                            <Badge variant="outline">{trans.category}</Badge>
-                            <span className={`text-lg font-bold ${trans.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                                {trans.type === 'income' ? '+' : '-'}{formatCurrency(trans.amount)}
-                            </span>
-                        </div>
+                                                <div className="space-y-4">
+                                                    <div>
+                                                        <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Nhân viên</p>
+                                                        <p className="font-medium">{trans.created_by_user?.name || 'N/A'}</p>
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Phương thức</p>
+                                                        <p className="font-medium">{paymentMethodLabels[trans.payment_method]}</p>
+                                                    </div>
+                                                    {trans.order_code && (
+                                                        <div>
+                                                            <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Ghi chú liên kết</p>
+                                                            <p className="text-xs text-[#64748b]">
+                                                                Tự động được tạo gắn với hóa đơn{' '}
+                                                                <span 
+                                                                    className="font-bold text-blue-600 underline cursor-pointer hover:text-blue-700"
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        onInvoiceClick(trans.order_code!);
+                                                                    }}
+                                                                >
+                                                                    {trans.order_code}
+                                                                </span>
+                                                            </p>
+                                                        </div>
+                                                    )}
+                                                </div>
 
-                        <div className="flex items-center justify-between pt-3 border-t">
-                            <div className="flex items-center gap-2">
-                                <Avatar className="h-6 w-6">
-                                    <AvatarImage src={trans.created_by_user?.avatar} />
-                                    <AvatarFallback className="text-xs">
-                                        {trans.created_by_user?.name?.charAt(0) || '?'}
-                                    </AvatarFallback>
-                                </Avatar>
-                                <span className="text-sm text-muted-foreground">{trans.created_by_user?.name || 'N/A'}</span>
-                            </div>
-
-                            {canEdit && (
-                                <div className="flex gap-1">
-                                    <Button
-                                        variant="ghost"
-                                        size="icon"
-                                        className="h-8 w-8 text-red-600"
-                                        onClick={() => onDelete(trans.id)}
-                                        disabled={loading}
-                                    >
-                                        <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                ))}
-            </div>
-        </>
+                                                <div className="flex flex-col justify-end items-end gap-3 pb-2">
+                                                    <div className="flex gap-2">
+                                                        <Button variant="outline" size="sm" className="h-9 px-4 gap-2 font-bold shadow-sm">
+                                                            <Printer className="h-4 w-4" />
+                                                            In
+                                                        </Button>
+                                                        {isManagement && (
+                                                            <>
+                                                                <Button variant="outline" size="sm" className="h-9 px-4 gap-2 font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-100 shadow-sm">
+                                                                    <Edit className="h-4 w-4" />
+                                                                    Chỉnh sửa
+                                                                </Button>
+                                                                <Button 
+                                                                    variant="outline" 
+                                                                    size="sm" 
+                                                                    className="h-9 px-4 gap-2 font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-100 shadow-sm"
+                                                                    onClick={(e) => { e.stopPropagation(); onDelete(trans.id); }}
+                                                                >
+                                                                    <Trash2 className="h-4 w-4" />
+                                                                    Hủy bỏ
+                                                                </Button>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                )}
+                            </Fragment>
+                        );
+                    })}
+                </tbody>
+            </table>
+        </div>
     );
 }
 
+
+
 export function FinancePage({ currentUser, initialTab = 'income', onTabChange }: FinancePageProps) {
+    const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState<'income' | 'expense'>(initialTab);
     const [showForm, setShowForm] = useState<TransactionType | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');
+    
+    // Invoice Detail Modal States
+    const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
+    const [showInvoiceDetail, setShowInvoiceDetail] = useState(false);
+    const [loadingInvoice, setLoadingInvoice] = useState(false);
+    
+    // New Sidebar Filters
+    const [fundFilter, setFundFilter] = useState<string>('all');
+    const [creatorFilter, setCreatorFilter] = useState('');
+    const [employeeFilter, setEmployeeFilter] = useState('');
+    const [payerType, setPayerType] = useState('customer');
+    const [payerName, setPayerName] = useState('');
+    const [payerCode, setPayerCode] = useState('');
+    const [payerPhone, setPayerPhone] = useState('');
+    const [timeFilter, setTimeFilter] = useState('all');
+    const [categoryFilter, setCategoryFilter] = useState('all');
 
     // Sync activeTab with initialTab when navigation changes
     useEffect(() => {
@@ -541,6 +636,7 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
     const handleTabChange = (tab: string) => {
         const typedTab = tab as 'income' | 'expense';
         setActiveTab(typedTab);
+        setCategoryFilter('all'); // Reset category when switching tabs to avoid showing 0 counts for mismatched categories
         if (onTabChange) {
             onTabChange(typedTab);
         }
@@ -552,12 +648,52 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
         totalIncome: 0,
         totalExpense: 0,
         balance: 0,
+        incomeCount: 0,
+        expenseCount: 0,
         pendingIncomeCount: 0,
         pendingExpenseCount: 0,
     });
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState(false);
     const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+
+    const handleOpenInvoiceDetail = async (orderCode: string) => {
+        setLoadingInvoice(true);
+        try {
+            // Find invoice by order code
+            const response = await invoicesApi.getAll();
+            const invoices = response.data.data?.invoices || [];
+            
+            // Search for invoice that matches this order code
+            const invoice = invoices.find((inv: any) => 
+                inv.order?.order_code === orderCode || 
+                inv.invoice_code === orderCode
+            );
+
+            if (invoice) {
+                // Fetch full details
+                const detailResponse = await invoicesApi.getById(invoice.id);
+                setSelectedInvoice(detailResponse.data.data?.invoice);
+                setShowInvoiceDetail(true);
+            } else {
+                // If not found in invoices list, it might be an HĐ code directly
+                if (orderCode.startsWith('HĐ') || orderCode.startsWith('HD')) {
+                    toast.error('Không tìm thấy thông tin hóa đơn này');
+                } else {
+                    toast.info(`Dữ liệu liên kết là mã đơn hàng: ${orderCode}`);
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching invoice for detail:', error);
+            toast.error('Không thể mở chi tiết hóa đơn');
+        } finally {
+            setLoadingInvoice(false);
+        }
+    };
+
+    const handleCustomerClick = (customerId: string) => {
+        navigate(`/customers/${customerId}`);
+    };
     const [associatedAccessory, setAssociatedAccessory] = useState<any | null>(null);
     const [fetchingAccessory, setFetchingAccessory] = useState(false);
 
@@ -605,39 +741,48 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
         setLoading(true);
         try {
             const params: any = {};
-            // Fetch all transactions to show counts in both tabs
+            
             if (statusFilter !== 'all') params.status = statusFilter;
             if (searchTerm) params.search = searchTerm;
+            if (fundFilter !== 'all') params.payment_method = fundFilter;
+            if (categoryFilter !== 'all') params.category = categoryFilter;
 
-            const response = await transactionsApi.getAll(params);
-            setTransactions(response.data.data?.transactions || []);
+            // Handle Time Filter
+            if (timeFilter === 'this_month') {
+                const now = new Date();
+                const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+                params.start_date = startOfMonth;
+            }
+
+            // Parallelize fetching transactions and summary
+            // For transactions, we need the type filter
+            // For summary, we DON'T want the type filter because we want counts for BOTH tabs
+            const [transactionsRes, summaryRes] = await Promise.all([
+                transactionsApi.getAll({ ...params, type: activeTab }),
+                transactionsApi.getSummary(params)
+            ]);
+
+            setTransactions(transactionsRes.data.data?.transactions || []);
+            setSummary(summaryRes.data.data || {
+                totalIncome: 0,
+                totalExpense: 0,
+                balance: 0,
+                incomeCount: 0,
+                expenseCount: 0,
+                pendingIncomeCount: 0,
+                pendingExpenseCount: 0,
+            });
         } catch (error: any) {
+            console.error('Error fetching finance data:', error);
             toast.error(error.response?.data?.message || 'Lỗi khi tải dữ liệu');
         } finally {
             setLoading(false);
         }
-    }, [activeTab, statusFilter, searchTerm]);
-
-    // Fetch summary
-    const fetchSummary = useCallback(async () => {
-        try {
-            const response = await transactionsApi.getSummary();
-            setSummary(response.data.data || {
-                totalIncome: 0,
-                totalExpense: 0,
-                balance: 0,
-                pendingIncomeCount: 0,
-                pendingExpenseCount: 0,
-            });
-        } catch (error) {
-            console.error('Error fetching summary:', error);
-        }
-    }, []);
+    }, [activeTab, statusFilter, searchTerm, fundFilter, categoryFilter, timeFilter]);
 
     useEffect(() => {
         fetchTransactions();
-        fetchSummary();
-    }, [fetchTransactions, fetchSummary]);
+    }, [fetchTransactions]);
 
     // Create transaction
     const handleCreateTransaction = async (data: any) => {
@@ -664,7 +809,6 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
             toast.success(`Đã tạo phiếu ${data.type === 'income' ? 'thu' : 'chi'}`);
             setShowForm(null);
             fetchTransactions();
-            fetchSummary();
         } catch (error: any) {
             toast.error(error.response?.data?.message || 'Lỗi khi tạo phiếu');
         } finally {
@@ -673,18 +817,17 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
     };
 
 
-    // Delete transaction
+    // Cancel transaction (Update status instead of deleting)
     const handleDelete = async (id: string) => {
-        if (!confirm('Bạn có chắc muốn xóa phiếu này?')) return;
+        if (!confirm('Bạn có chắc muốn hủy phiếu này?')) return;
 
         setActionLoading(true);
         try {
-            await transactionsApi.delete(id);
-            toast.success('Đã xóa phiếu');
+            await transactionsApi.updateStatus(id, 'cancelled');
+            toast.success('Đã hủy phiếu thành công');
             fetchTransactions();
-            fetchSummary();
         } catch (error: any) {
-            toast.error(error.response?.data?.message || 'Lỗi khi xóa phiếu');
+            toast.error(error.response?.data?.message || 'Lỗi khi hủy phiếu');
         } finally {
             setActionLoading(false);
         }
@@ -695,158 +838,302 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
     const currentTransactions = activeTab === 'income' ? incomeTransactions : expenseTransactions;
 
     return (
-        <div className="space-y-6 animate-fade-in">
-            {/* Page Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-foreground">Thu Chi</h1>
-                    <p className="text-muted-foreground">Quản lý phiếu thu và phiếu chi</p>
+        <div className="flex flex-col lg:flex-row gap-6 animate-fade-in p-4 lg:p-0">
+            {/* Sidebar Filter Panel */}
+            <div className="w-full lg:w-[280px] space-y-6 shrink-0">
+                <div className="flex items-center gap-2 mb-4">
+                    <Filter className="h-5 w-5 text-blue-600" />
+                    <h2 className="text-xl font-bold">Bộ lọc</h2>
                 </div>
-                <div className="flex flex-col sm:flex-row gap-2">
-                    <div className="flex gap-2">
-                        <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => { fetchTransactions(); fetchSummary(); }}
-                            disabled={loading}
-                            className="hidden sm:flex"
-                        >
-                            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                        </Button>
-                        <Button
-                            variant="outline"
-                            className="flex-1 sm:hidden justify-center"
-                            onClick={() => { fetchTransactions(); fetchSummary(); }}
-                            disabled={loading}
-                        >
-                            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                            Làm mới
-                        </Button>
-                    </div>
-                    <div className="flex gap-2 w-full sm:w-auto">
-                        <Button onClick={() => setShowForm('income')} className="flex-1 bg-green-600 hover:bg-green-700">
-                            <Plus className="h-4 w-4 mr-2" />
-                            Phiếu thu
-                        </Button>
-                        <Button onClick={() => setShowForm('expense')} className="flex-1 bg-red-600 hover:bg-red-700">
-                            <Plus className="h-4 w-4 mr-2" />
-                            Phiếu chi
-                        </Button>
-                    </div>
-                </div>
-            </div>
 
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-                <Card className="bg-green-50 border-green-200 shadow-sm">
-                    <CardContent className="p-4 sm:p-5">
-                        <p className="text-sm font-medium text-muted-foreground mb-1">Tổng thu (đã duyệt)</p>
-                        <p className="text-2xl font-bold text-green-600">{formatCurrency(summary.totalIncome)}</p>
-                        {summary.pendingIncomeCount > 0 && (
-                            <p className="text-xs text-muted-foreground mt-1 bg-white/50 w-fit px-2 py-0.5 rounded-full">
-                                {summary.pendingIncomeCount} phiếu chờ duyệt
-                            </p>
-                        )}
-                    </CardContent>
-                </Card>
-                <Card className="bg-red-50 border-red-200 shadow-sm">
-                    <CardContent className="p-4 sm:p-5">
-                        <p className="text-sm font-medium text-muted-foreground mb-1">Tổng chi (đã duyệt)</p>
-                        <p className="text-2xl font-bold text-red-600">{formatCurrency(summary.totalExpense)}</p>
-                        {summary.pendingExpenseCount > 0 && (
-                            <p className="text-xs text-muted-foreground mt-1 bg-white/50 w-fit px-2 py-0.5 rounded-full">
-                                {summary.pendingExpenseCount} phiếu chờ duyệt
-                            </p>
-                        )}
-                    </CardContent>
-                </Card>
-                <Card className="bg-purple-50 border-purple-200 shadow-sm">
-                    <CardContent className="p-4 sm:p-5">
-                        <p className="text-sm font-medium text-muted-foreground mb-1">Chênh lệch</p>
-                        <p className={`text-2xl font-bold ${summary.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {formatCurrency(summary.balance)}
-                        </p>
-                    </CardContent>
-                </Card>
-            </div>
-
-            {/* Tabs */}
-            <Card>
-                <CardContent className="p-0">
-                    <Tabs value={activeTab} onValueChange={handleTabChange}>
-                        <div className="border-b px-4 pt-4">
-                            <TabsList className="mb-4">
-                                <TabsTrigger value="income" className="gap-2">
-                                    <div className="h-2 w-2 rounded-full bg-green-500" />
-                                    Phiếu thu
-                                    <Badge variant="secondary" className="ml-1">{incomeTransactions.length}</Badge>
-                                </TabsTrigger>
-                                <TabsTrigger value="expense" className="gap-2">
-                                    <div className="h-2 w-2 rounded-full bg-red-500" />
-                                    Phiếu chi
-                                    <Badge variant="secondary" className="ml-1">{expenseTransactions.length}</Badge>
-                                </TabsTrigger>
-                            </TabsList>
-
-                            {/* Filters */}
-                            <div className="flex flex-col sm:flex-row gap-3 pb-4">
-                                <div className="relative flex-1">
-                                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                                    <Input
-                                        placeholder="Tìm theo mã, loại..."
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="pl-9"
-                                    />
+                <div className="space-y-8 bg-white p-6 rounded-xl border shadow-sm">
+                    {/* Time Filter */}
+                    <div className="space-y-3">
+                        <Label className="text-[12px] font-black uppercase text-slate-400 tracking-wider">Thời gian</Label>
+                        <div className="space-y-2">
+                            <label className="flex items-center gap-3 cursor-pointer group">
+                                <input 
+                                    type="radio" 
+                                    name="time" 
+                                    className="w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" 
+                                    checked={timeFilter === 'all'}
+                                    onChange={() => setTimeFilter('all')}
+                                />
+                                <span className="text-sm font-medium group-hover:text-blue-600 transition-colors">Toàn thời gian</span>
+                            </label>
+                            <label className="flex items-center gap-3 cursor-pointer group">
+                                <input 
+                                    type="radio" 
+                                    name="time" 
+                                    className="w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" 
+                                    checked={timeFilter === 'this_month'}
+                                    onChange={() => setTimeFilter('this_month')}
+                                />
+                                <span className="text-sm font-medium group-hover:text-blue-600 transition-colors">Tháng này</span>
+                            </label>
+                            <label className="flex items-center gap-3 cursor-pointer group">
+                                <input 
+                                    type="radio" 
+                                    name="time" 
+                                    className="w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" 
+                                    checked={timeFilter === 'custom'}
+                                    onChange={() => setTimeFilter('custom')}
+                                />
+                                <span className="text-sm font-medium group-hover:text-blue-600 transition-colors flex items-center gap-2">
+                                    Lựa chọn khác <CalendarIcon className="h-3 w-3 opacity-50" />
+                                </span>
+                            </label>
+                            {timeFilter === 'custom' && (
+                                <div className="pt-2">
+                                    <Input type="date" className="h-9 mb-2" />
+                                    <Input type="date" className="h-9" />
                                 </div>
-                                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                                    <SelectTrigger className="w-full sm:w-40">
-                                        <SelectValue placeholder="Trạng thái" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="all">Tất cả</SelectItem>
-                                        <SelectItem value="pending">Chờ duyệt</SelectItem>
-                                        <SelectItem value="approved">Đã duyệt</SelectItem>
-                                        <SelectItem value="cancelled">Đã huỷ</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </div>
+                            )}
                         </div>
+                    </div>
 
-                        <TabsContent value="income" className="m-0">
-                            {loading ? (
-                                <div className="py-12 flex items-center justify-center">
-                                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                                </div>
-                            ) : (
-                                <TransactionTable
-                                    transactions={currentTransactions}
-                                    userRole={currentUser.role}
-                                    onDelete={handleDelete}
-                                    onView={setSelectedTransaction}
-                                    loading={actionLoading}
-                                />
-                            )}
-                        </TabsContent>
+                    <div className="h-[1px] bg-slate-100" />
 
-                        <TabsContent value="expense" className="m-0">
-                            {loading ? (
-                                <div className="py-12 flex items-center justify-center">
-                                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                                </div>
-                            ) : (
-                                <TransactionTable
-                                    transactions={currentTransactions}
-                                    userRole={currentUser.role}
-                                    onDelete={handleDelete}
-                                    onView={setSelectedTransaction}
-                                    loading={actionLoading}
-                                />
-                            )}
-                        </TabsContent>
+                    {/* Funds Filter */}
+                    <div className="space-y-3">
+                        <Label className="text-[12px] font-black uppercase text-slate-400 tracking-wider">Quỹ tiền</Label>
+                        <div className="space-y-2">
+                            {['all', 'cash', 'transfer', 'zalopay'].map((f) => (
+                                <label key={f} className="flex items-center gap-3 cursor-pointer group">
+                                    <input 
+                                        type="radio" 
+                                        name="fund" 
+                                        className="w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" 
+                                        checked={fundFilter === f}
+                                        onChange={() => setFundFilter(f)}
+                                    />
+                                    <span className="text-sm font-medium group-hover:text-blue-600 transition-colors capitalize">
+                                        {f === 'all' ? 'Tất cả' : f === 'cash' ? 'Tiền mặt' : f === 'transfer' ? 'Chuyển khoản' : 'Zalo Pay'}
+                                    </span>
+                                </label>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="h-[1px] bg-slate-100" />
+
+                    {/* Status Filter */}
+                    <div className="space-y-3">
+                        <Label className="text-[12px] font-black uppercase text-slate-400 tracking-wider">Trạng thái</Label>
+                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="h-10">
+                                <SelectValue placeholder="Tất cả" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tất cả</SelectItem>
+                                <SelectItem value="approved">Đã duyệt</SelectItem>
+                                <SelectItem value="pending">Chờ duyệt</SelectItem>
+                                <SelectItem value="cancelled">Đã hủy</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <div className="h-[1px] bg-slate-100" />
+
+                    {/* Creator / Employee */}
+                    <div className="space-y-4">
+                        <div className="space-y-2 text-sm">
+                            <Label className="text-[12px] font-black uppercase text-slate-400 tracking-wider">Người tạo</Label>
+                            <Input placeholder="Tài khoản tạo" className="h-9 font-medium" />
+                        </div>
+                        <div className="space-y-2 text-sm">
+                            <Label className="text-[12px] font-black uppercase text-slate-400 tracking-wider">Nhân viên</Label>
+                            <Input placeholder="Chọn nhân viên" className="h-9 font-medium" />
+                        </div>
+                    </div>
+
+                    <div className="h-[1px] bg-slate-100" />
+
+                    {/* Payer / Receiver Info */}
+                    <div className="space-y-3">
+                        <Label className="text-[12px] font-black uppercase text-slate-400 tracking-wider">Người nộp/nhận</Label>
+                        <Select value={payerType} onValueChange={setPayerType}>
+                            <SelectTrigger className="h-9 font-medium">
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="customer">Khách hàng</SelectItem>
+                                <SelectItem value="supplier">Nhà cung cấp</SelectItem>
+                                <SelectItem value="employee">Nhân viên</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <div className="space-y-2 pt-1">
+                            <Input placeholder="Tên người nộp/nhận" className="h-9 text-xs" />
+                            <Input placeholder="Mã người nộp/nhận" className="h-9 text-xs" />
+                            <Input placeholder="Điện thoại" className="h-9 text-xs" />
+                        </div>
+                    </div>
+
+                    <div className="h-[1px] bg-slate-100" />
+
+                    {/* Category Filter */}
+                    <div className="space-y-3">
+                        <Label className="text-[12px] font-black uppercase text-slate-400 tracking-wider">Loại thu chi</Label>
+                        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                            <SelectTrigger className="h-9">
+                                <SelectValue placeholder="Chọn loại thu chi" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tất cả</SelectItem>
+                                {activeTab === 'income' ? incomeCategories.map(c => (
+                                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                                )) : expenseCategories.map(c => (
+                                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </div>
+            </div>
+
+            {/* Main Content Area */}
+            <div className="flex-1 space-y-6">
+                {/* Header Actions & Search */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-4 flex-1">
+                        <h1 className="text-2xl font-black text-slate-900 shrink-0">Sổ quỹ</h1>
+                        <div className="relative max-w-lg w-full">
+                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                            <Input 
+                                placeholder="Tìm theo mã phiếu" 
+                                className="pl-9 h-11 rounded-full border-2 border-slate-100 hover:border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50/50 transition-all bg-white"
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button className="bg-[#0070f3] hover:bg-blue-700 text-white font-bold gap-2 px-5 rounded-lg shadow-md transition-all active:scale-95">
+                                    <Plus className="h-4 w-4" />
+                                    Phiếu thu
+                                    <ChevronDown className="h-4 w-4 opacity-50" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-56 rounded-xl p-1">
+                                {incomeCategories.map(cat => (
+                                    <DropdownMenuItem key={cat} className="rounded-lg cursor-pointer font-medium py-2" onClick={() => setShowForm('income')}>
+                                        {cat}
+                                    </DropdownMenuItem>
+                                ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button className="bg-rose-600 hover:bg-rose-700 text-white font-bold gap-2 px-5 rounded-lg shadow-md transition-all active:scale-95">
+                                    <Plus className="h-4 w-4" />
+                                    Phiếu chi
+                                    <ChevronDown className="h-4 w-4 opacity-50" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-56 rounded-xl p-1">
+                                {expenseCategories.map(cat => (
+                                    <DropdownMenuItem key={cat} className="rounded-lg cursor-pointer font-medium py-2" onClick={() => setShowForm('expense')}>
+                                        {cat}
+                                    </DropdownMenuItem>
+                                ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+
+                        <Button variant="outline" className="gap-2 font-bold px-5 rounded-lg border-2 border-slate-100 hover:bg-slate-50 shadow-sm transition-all active:scale-95">
+                            <Download className="h-4 w-4" />
+                            Xuất file
+                        </Button>
+                    </div>
+                </div>
+
+                {/* Stats Summary Bar */}
+                <div className="flex flex-wrap items-center justify-end gap-x-12 gap-y-4 bg-white p-5 rounded-xl border shadow-sm border-blue-50">
+                    <div className="text-right">
+                        <p className="text-[12px] font-bold text-slate-400 uppercase tracking-wider mb-1">Quỹ đầu kỳ</p>
+                        <p className="text-lg font-black text-slate-700">{formatCurrency(summary.balance - summary.totalIncome + summary.totalExpense)}</p>
+                    </div>
+                    <div className="text-right">
+                        <p className="text-[12px] font-bold text-slate-400 uppercase tracking-wider mb-1">Tổng thu</p>
+                        <p className="text-xl font-black text-emerald-600">+{formatCurrency(summary.totalIncome)}</p>
+                    </div>
+                    <div className="text-right">
+                        <p className="text-[12px] font-bold text-slate-400 uppercase tracking-wider mb-1">Tổng chi</p>
+                        <p className="text-xl font-black text-rose-600">-{formatCurrency(summary.totalExpense)}</p>
+                    </div>
+                    <div className="text-right border-l pl-12">
+                        <p className="text-[12px] font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1 justify-end">
+                            Tồn quỹ <Eye className="h-3 w-3 opacity-30 cursor-pointer" />
+                        </p>
+                        <p className="text-2xl font-black text-emerald-600">{formatCurrency(summary.balance)}</p>
+                    </div>
+                </div>
+
+                {/* Main Content Card */}
+                <Card className="rounded-xl border-none shadow-xl overflow-hidden ring-1 ring-slate-100">
+                    <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+                        <TabsList className="w-full justify-start rounded-none h-14 bg-white border-b gap-8 px-6">
+                            <TabsTrigger 
+                                value="income" 
+                                className="data-[state=active]:bg-transparent data-[state=active]:border-b-4 data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 rounded-none h-14 px-0 font-black uppercase text-[13px] tracking-widest gap-2"
+                            >
+                                Phiếu thu
+                                <Badge variant="secondary" className="px-1.5 h-5 bg-blue-100 text-blue-600 font-black border-none rounded-sm">{summary.incomeCount || 0}</Badge>
+                            </TabsTrigger>
+                            <TabsTrigger 
+                                value="expense" 
+                                className="data-[state=active]:bg-transparent data-[state=active]:border-b-4 data-[state=active]:border-rose-600 data-[state=active]:text-rose-600 rounded-none h-14 px-0 font-black uppercase text-[13px] tracking-widest gap-2"
+                            >
+                                Phiếu chi
+                                <Badge variant="secondary" className="px-1.5 h-5 bg-rose-100 text-rose-600 font-black border-none rounded-sm">{summary.expenseCount || 0}</Badge>
+                            </TabsTrigger>
+                        </TabsList>
+
+                        <div className="p-0">
+                            <TabsContent value="income" className="m-0 focus-visible:ring-0">
+                                {loading ? (
+                                    <div className="py-24 flex flex-col items-center justify-center gap-4">
+                                        <Loader2 className="h-10 w-10 animate-spin text-blue-600" />
+                                        <p className="text-slate-400 font-medium">Đang tải dữ liệu...</p>
+                                    </div>
+                                ) : (
+                                    <TransactionTable
+                                        transactions={currentTransactions}
+                                        userRole={currentUser.role}
+                                        onDelete={handleDelete}
+                                        onView={setSelectedTransaction}
+                                        onCustomerClick={handleCustomerClick}
+                                        onInvoiceClick={handleOpenInvoiceDetail}
+                                        loading={actionLoading}
+                                    />
+                                )}
+                            </TabsContent>
+
+                            <TabsContent value="expense" className="m-0 focus-visible:ring-0">
+                                {loading ? (
+                                    <div className="py-24 flex flex-col items-center justify-center gap-4">
+                                        <Loader2 className="h-10 w-10 animate-spin text-rose-600" />
+                                        <p className="text-slate-400 font-medium">Đang tải dữ liệu...</p>
+                                    </div>
+                                ) : (
+                                    <TransactionTable
+                                        transactions={currentTransactions}
+                                        userRole={currentUser.role}
+                                        onDelete={handleDelete}
+                                        onView={setSelectedTransaction}
+                                        onCustomerClick={handleCustomerClick}
+                                        onInvoiceClick={handleOpenInvoiceDetail}
+                                        loading={actionLoading}
+                                    />
+                                )}
+                            </TabsContent>
+                        </div>
                     </Tabs>
-                </CardContent>
-            </Card>
+                </Card>
+            </div>
 
             {/* Create Transaction Dialog */}
             <Dialog open={!!showForm} onOpenChange={() => setShowForm(null)}>
@@ -860,278 +1147,25 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
                 )}
             </Dialog>
 
-            {/* Transaction Detail Dialog */}
-            <Dialog open={!!selectedTransaction} onOpenChange={() => setSelectedTransaction(null)}>
-                {selectedTransaction && (
-                    <DialogContent className="max-w-lg w-full h-full sm:h-auto sm:max-h-[90vh] p-0 sm:p-6 flex flex-col gap-0">
-                        <DialogHeader className="p-4 sm:p-0 border-b sm:border-none shrink-0">
-                            <DialogTitle className="flex items-center gap-3">
-                                <div className={`h-10 w-10 rounded-full flex items-center justify-center ${selectedTransaction.type === 'income' ? 'bg-green-100' : 'bg-red-100'
-                                    }`}>
-                                    <FileText className={`h-5 w-5 ${selectedTransaction.type === 'income' ? 'text-green-600' : 'text-red-600'
-                                        }`} />
-                                </div>
-                                <div>
-                                    <p className="text-lg font-semibold">{selectedTransaction.code}</p>
-                                    <p className="text-sm text-muted-foreground font-normal">
-                                        Phiếu {selectedTransaction.type === 'income' ? 'thu' : 'chi'}
-                                    </p>
-                                </div>
-                            </DialogTitle>
-                        </DialogHeader>
+            {/* Invoice Detail Dialog */}
+            <InvoiceDetailDialog
+                invoice={selectedInvoice}
+                open={showInvoiceDetail}
+                onClose={() => setShowInvoiceDetail(false)}
+                onStatusChange={() => {}} // Read-only from here usually or implement if needed
+                onPayButtonClick={() => {}}
+                canEdit={['admin', 'manager', 'accountant'].includes(currentUser.role)}
+            />
 
-                        <div className="flex-1 overflow-y-auto p-4 sm:p-0 sm:pt-4 space-y-4">
-                            {/* Amount */}
-                            <div className={`text-center py-4 rounded-lg ${selectedTransaction.type === 'income' ? 'bg-green-50' : 'bg-red-50'
-                                }`}>
-                                <p className="text-sm text-muted-foreground mb-1">Số tiền</p>
-                                <p className={`text-3xl font-bold ${selectedTransaction.type === 'income' ? 'text-green-600' : 'text-red-600'
-                                    }`}>
-                                    {selectedTransaction.type === 'income' ? '+' : '-'}
-                                    {formatCurrency(selectedTransaction.amount)}
-                                </p>
-                            </div>
-
-                            {/* Details Grid */}
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div>
-                                    <p className="text-sm text-muted-foreground mb-1">Ngày</p>
-                                    <p className="font-medium">{formatDate(selectedTransaction.date)}</p>
-                                </div>
-                                <div>
-                                    <p className="text-sm text-muted-foreground mb-1">Trạng thái</p>
-                                    <Badge variant={statusLabels[selectedTransaction.status].variant}>
-                                        {statusLabels[selectedTransaction.status].label}
-                                    </Badge>
-                                </div>
-                                <div>
-                                    <p className="text-sm text-muted-foreground mb-1">Loại</p>
-                                    <p className="font-medium">{selectedTransaction.category}</p>
-                                </div>
-                                <div>
-                                    <p className="text-sm text-muted-foreground mb-1">Phương thức</p>
-                                    <p className="font-medium">{paymentMethodLabels[selectedTransaction.payment_method]}</p>
-                                </div>
-                            </div>
-
-                            {/* Order Link */}
-                            {selectedTransaction.order_code && (
-                                <div className="p-3 bg-muted/50 rounded-lg">
-                                    <p className="text-sm text-muted-foreground mb-1">Liên kết đơn hàng</p>
-                                    <a
-                                        href={`/orders/${selectedTransaction.order_id}`}
-                                        className="flex items-center gap-2 text-primary hover:underline font-medium"
-                                    >
-                                        {selectedTransaction.order_code}
-                                        <ExternalLink className="h-4 w-4" />
-                                    </a>
-                                </div>
-                            )}
-
-                            {/* Notes */}
-                            {selectedTransaction.notes && (
-                                <div>
-                                    <p className="text-sm text-muted-foreground mb-1">Ghi chú</p>
-                                    <p className="text-sm bg-muted/50 p-3 rounded-lg">{selectedTransaction.notes}</p>
-                                </div>
-                            )}
-
-                            {/* Attachments - Specific Category Display (Accessories & Partners) */}
-                            {(() => {
-                                const isAccessoryPurchase = selectedTransaction.category === 'Mua phụ kiện';
-                                const isAccessoryShipping = selectedTransaction.category === 'Phí ship nhận hàng';
-                                const isPartnerShipping = selectedTransaction.category === 'Phí ship gửi đối tác';
-
-                                if (!isAccessoryPurchase && !isAccessoryShipping && !isPartnerShipping) return null;
-
-                                // Helper to parse metadata safely
-                                const parseMeta = (meta: any) => {
-                                    if (!meta) return {};
-                                    if (typeof meta === 'object') return meta;
-                                    try {
-                                        const parsed = JSON.parse(meta);
-                                        return typeof parsed === 'object' ? parsed : {};
-                                    } catch (e) {
-                                        console.error('Meta parse error:', e);
-                                        return {};
-                                    }
-                                };
-
-                                const rawMeta = parseMeta(selectedTransaction.metadata);
-                                const associatedMeta = parseMeta(associatedAccessory?.metadata);
-
-                                // Normalize photos from meta or associated request
-                                const purchasePhotos = rawMeta.photos_purchase || rawMeta.purchase_photos || associatedMeta?.photos_purchase || associatedMeta?.purchase_photos || [];
-                                const transferPhotos = rawMeta.photos_transfer || rawMeta.transfer_photos || associatedMeta?.photos_transfer || associatedMeta?.transfer_photos || [];
-                                const arrivalPhotos = rawMeta.arrival_photos || rawMeta.photos_arrival || associatedMeta?.arrival_photos || associatedMeta?.photos_arrival || [];
-                                const packagePhotos = rawMeta.package_photos || rawMeta.photos_package || associatedMeta?.package_photos || associatedMeta?.photos_package || [];
-
-                                const hasAnyPhotos = purchasePhotos.length > 0 || transferPhotos.length > 0 || arrivalPhotos.length > 0 || packagePhotos.length > 0;
-
-                                return (
-                                    <div className="border rounded-2xl p-4 bg-slate-50/50 space-y-5 animate-in slide-in-from-bottom-2 border-slate-200">
-                                        <div className="flex items-center gap-2 text-[10px] font-black text-slate-400 uppercase tracking-widest border-b border-slate-200 pb-2 mb-2">
-                                            <ImageIcon className="w-3.5 h-3.5" />
-                                            {isAccessoryPurchase ? 'Chứng từ mua phụ kiện' :
-                                                isAccessoryShipping ? 'Chứng từ phí ship nhận hàng' :
-                                                    'Chứng từ gửi đối tác (Ảnh gói đồ)'}
-                                            {fetchingAccessory && <Loader2 className="w-3 h-3 animate-spin ml-auto" />}
-                                            {(!fetchingAccessory && hasAnyPhotos) && (
-                                                <Badge variant="success" className="ml-auto text-[8px] h-4 uppercase tracking-tighter bg-emerald-100 text-emerald-600 border-emerald-200">Đã liên kết</Badge>
-                                            )}
-                                        </div>
-
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                                            {/* Accessory Purchase & Partner Package share similar grid display */}
-                                            {((isAccessoryPurchase || purchasePhotos.length > 0)) && (
-                                                <div className="space-y-4">
-                                                    <p className="text-[11px] font-black text-blue-600 uppercase tracking-tighter flex items-center gap-2 bg-blue-50 w-fit px-2 py-0.5 rounded-md border border-blue-100">
-                                                        Ảnh mua hàng
-                                                    </p>
-                                                    {purchasePhotos.length > 0 ? (
-                                                        <div className="grid grid-cols-2 gap-3">
-                                                            {purchasePhotos.map((url: string, i: number) => (
-                                                                <div key={i} className="aspect-square rounded-xl border-2 border-white overflow-hidden bg-white group cursor-pointer relative shadow-sm transition-all hover:shadow-md hover:border-blue-200" onClick={() => window.open(url, '_blank')}>
-                                                                    <img src={url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-110" />
-                                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                                                        <Eye className="w-6 h-6 text-white" />
-                                                                    </div>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    ) : (
-                                                        <div className="h-24 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 gap-2 bg-white/50">
-                                                            <ImageIcon className="w-5 h-5 opacity-20" />
-                                                            <span className="text-[10px] font-medium uppercase tracking-tighter">Trống</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-
-                                            {((isAccessoryPurchase || transferPhotos.length > 0)) && (
-                                                <div className="space-y-4">
-                                                    <p className="text-[11px] font-black text-emerald-600 uppercase tracking-tighter flex items-center gap-2 bg-emerald-50 w-fit px-2 py-0.5 rounded-md border border-emerald-100">
-                                                        Ảnh chuyển khoản
-                                                    </p>
-                                                    {transferPhotos.length > 0 ? (
-                                                        <div className="grid grid-cols-2 gap-3">
-                                                            {transferPhotos.map((url: string, i: number) => (
-                                                                <div key={i} className="aspect-square rounded-xl border-2 border-white overflow-hidden bg-white group cursor-pointer relative shadow-sm transition-all hover:shadow-md hover:border-emerald-200" onClick={() => window.open(url, '_blank')}>
-                                                                    <img src={url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-110" />
-                                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                                                        <Eye className="w-6 h-6 text-white" />
-                                                                    </div>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    ) : (
-                                                        <div className="h-24 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 gap-2 bg-white/50">
-                                                            <ImageIcon className="w-5 h-5 opacity-20" />
-                                                            <span className="text-[10px] font-medium uppercase tracking-tighter">Trống</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-
-                                            {isAccessoryShipping && (
-                                                <div className="space-y-4 col-span-1 sm:col-span-2">
-                                                    <p className="text-[11px] font-black text-amber-600 uppercase tracking-tighter flex items-center gap-2 bg-amber-50 w-fit px-2 py-0.5 rounded-md border border-amber-100">
-                                                        Ảnh nhận hàng (Lúc về kho)
-                                                    </p>
-                                                    {arrivalPhotos.length > 0 ? (
-                                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                                            {arrivalPhotos.map((url: string, i: number) => (
-                                                                <div key={i} className="aspect-square rounded-xl border-2 border-white overflow-hidden bg-white group cursor-pointer relative shadow-sm transition-all hover:shadow-md hover:border-amber-200" onClick={() => window.open(url, '_blank')}>
-                                                                    <img src={url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-110" />
-                                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                                                        <Eye className="w-6 h-6 text-white" />
-                                                                    </div>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    ) : (
-                                                        <div className="h-24 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 gap-2 bg-white/50">
-                                                            <ImageIcon className="w-5 h-5 opacity-20" />
-                                                            <span className="text-[10px] font-medium uppercase tracking-tighter">Trống</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-
-                                            {(isPartnerShipping || packagePhotos.length > 0) && (
-                                                <div className="space-y-4 col-span-1 sm:col-span-2">
-                                                    <p className="text-[11px] font-black text-indigo-600 uppercase tracking-tighter flex items-center gap-2 bg-indigo-50 w-fit px-2 py-0.5 rounded-md border border-indigo-100">
-                                                        Ảnh gói hàng gửi đi
-                                                    </p>
-                                                    {packagePhotos.length > 0 ? (
-                                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                                            {packagePhotos.map((url: string, i: number) => (
-                                                                <div key={i} className="aspect-square rounded-xl border-2 border-white overflow-hidden bg-white group cursor-pointer relative shadow-sm transition-all hover:shadow-md hover:border-indigo-200" onClick={() => window.open(url, '_blank')}>
-                                                                    <img src={url} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-110" />
-                                                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                                                        <Eye className="w-6 h-6 text-white" />
-                                                                    </div>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-                                                    ) : (
-                                                        <div className="h-24 rounded-xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 gap-2 bg-white/50">
-                                                            <ImageIcon className="w-5 h-5 opacity-20" />
-                                                            <span className="text-[10px] font-medium uppercase tracking-tighter">Trống</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {(!fetchingAccessory && !hasAnyPhotos) && (
-                                            <div className="text-center py-4 text-slate-400 italic text-[13px] border-t border-dashed mt-2">
-                                                Chưa có ảnh đính kèm
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })()}
-
-                            {/* Fallback for single image_url if not already shown in specific categorical layouts */}
-                            {selectedTransaction.image_url && !['Mua phụ kiện', 'Phí ship nhận hàng', 'Phí ship gửi đối tác'].includes(selectedTransaction.category) && (
-                                <div>
-                                    <p className="text-sm text-muted-foreground mb-2">Ảnh đính kèm</p>
-                                    <img
-                                        src={selectedTransaction.image_url}
-                                        alt="Đính kèm"
-                                        className="w-full rounded-lg border shadow-sm"
-                                    />
-                                </div>
-                            )}
-
-                            {/* Meta */}
-                            <div className="pt-3 border-t grid grid-cols-2 gap-4 text-sm">
-                                <div>
-                                    <p className="text-muted-foreground">Người tạo</p>
-                                    <div className="flex items-center gap-2 mt-1">
-                                        <Avatar className="h-6 w-6">
-                                            <AvatarImage src={selectedTransaction.created_by_user?.avatar} />
-                                            <AvatarFallback className="text-xs">
-                                                {selectedTransaction.created_by_user?.name?.charAt(0) || '?'}
-                                            </AvatarFallback>
-                                        </Avatar>
-                                        <span>{selectedTransaction.created_by_user?.name || 'N/A'}</span>
-                                    </div>
-                                </div>
-                                {selectedTransaction.approved_by_user && (
-                                    <div>
-                                        <p className="text-muted-foreground">Người duyệt</p>
-                                        <p className="mt-1 font-medium">{selectedTransaction.approved_by_user.name}</p>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-
-                    </DialogContent>
-                )}
-            </Dialog>
+            {/* Global Loader for Invoice Fetching */}
+            {loadingInvoice && (
+                <div className="fixed inset-0 bg-black/20 z-50 flex items-center justify-center backdrop-blur-[2px]">
+                    <div className="bg-white p-4 rounded-xl shadow-xl flex items-center gap-3">
+                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                        <p className="text-sm font-medium">Đang mở chi tiết hóa đơn...</p>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

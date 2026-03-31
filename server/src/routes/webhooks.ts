@@ -148,16 +148,16 @@ router.get('/leads/sla', verifyWebhookSecret, async (req: Request, res: Response
         const leads = data.map((lead: any) => {
             const lastIn = lead.t_last_inbound ? new Date(lead.t_last_inbound) : null;
             const lastOut = lead.t_last_outbound ? new Date(lead.t_last_outbound) : null;
-            
+
             let waitMinutes = 0;
             let action_type = 'NONE';
-            
+
             // Chỉ tính nếu khách có nhắn (inbound)
             if (lastIn) {
                 // Khách nhắn sau khi Sale trả lời cuối (hoặc chưa từng trả lời)
                 if (!lastOut || lastIn > lastOut) {
                     waitMinutes = Math.floor((now.getTime() - lastIn.getTime()) / 60000);
-                    
+
                     if (waitMinutes >= SLA_MINUTES) {
                         action_type = 'RECLAIM';
                     } else if (waitMinutes >= WARN_MINUTES) {
@@ -209,13 +209,13 @@ router.get('/leads/daily-summary', verifyWebhookSecret, async (req: Request, res
         const now = new Date();
         const yesterday = new Date(now);
         yesterday.setDate(now.getDate() - 1);
-        
+
         const startOfYesterday = new Date(yesterday);
         startOfYesterday.setHours(0, 0, 0, 0);
-        
+
         const endOfYesterday = new Date(yesterday);
         endOfYesterday.setHours(23, 59, 59, 999);
-        
+
         const last24h = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
         // 1. Top 5 Heat Score chưa chốt
@@ -471,8 +471,8 @@ async function resolveUserByName(nameOrId: string): Promise<string | null> {
 
 async function handleLeadUpsert(incomingData: any, event?: string) {
     // Tự động xử lý nếu dữ liệu bị bọc trong key "lead" (giúp n8n linh hoạt hơn)
-    const data = (incomingData && incomingData.lead) 
-        ? { ...incomingData, ...incomingData.lead } 
+    const data = (incomingData && incomingData.lead)
+        ? { ...incomingData, ...incomingData.lead }
         : incomingData;
 
     const {
@@ -502,6 +502,7 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
     }
 
     // 1. Kiểm tra lead đã tồn tại chưa (Duplicate Check theo ưu tiên)
+    // Dùng .limit(1) thay vì .maybeSingle() để tránh lỗi khi có duplicate records
     let existing: any = null;
 
     // Ưu tiên 0: Theo ID nếu có gửi lên trực tiếp
@@ -510,47 +511,53 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
             .from('leads')
             .select('id, assigned_to')
             .eq('id', id)
-            .maybeSingle();
+            .limit(1)
+            .single();
         if (data) existing = data;
     }
 
-    // Ưu tiên 1: Theo fb_thread_id (nếu chưa tìm thấy)
-    if (!existing && fb_thread_id) {
-        const { data } = await supabaseAdmin
-            .from('leads')
-            .select('id, assigned_to')
-            .eq('fb_thread_id', fb_thread_id)
-            .maybeSingle();
-        if (data) existing = data;
-    }
-
-    // Ưu tiên 2: Theo phone (nếu chưa tìm thấy)
-    if (!existing && phone) {
-        const { data } = await supabaseAdmin
-            .from('leads')
-            .select('id, assigned_to')
-            .eq('phone', phone)
-            .maybeSingle();
-        if (data) existing = data;
-    }
-
-    // Ưu tiên 3: Theo các ID Pancake khác (nếu vẫn chưa thấy)
-    if (!existing && pancake_customer_id) {
-        const { data } = await supabaseAdmin
-            .from('leads')
-            .select('id, assigned_to')
-            .eq('pancake_customer_id', pancake_customer_id)
-            .maybeSingle();
-        if (data) existing = data;
-    }
-
+    // Ưu tiên 1: Theo pancake_conversation_id (ưu tiên nhất vì là ID duy nhất của cuộc hội thoại)
     if (!existing && pancake_conversation_id) {
         const { data } = await supabaseAdmin
             .from('leads')
             .select('id, assigned_to')
             .eq('pancake_conversation_id', pancake_conversation_id)
-            .maybeSingle();
-        if (data) existing = data;
+            .order('created_at', { ascending: true })
+            .limit(1);
+        if (data && data.length > 0) existing = data[0];
+    }
+
+    // Ưu tiên 2: Theo fb_thread_id
+    if (!existing && fb_thread_id) {
+        const { data } = await supabaseAdmin
+            .from('leads')
+            .select('id, assigned_to')
+            .eq('fb_thread_id', fb_thread_id)
+            .order('created_at', { ascending: true })
+            .limit(1);
+        if (data && data.length > 0) existing = data[0];
+    }
+
+    // Ưu tiên 3: Theo phone (fallback)
+    if (!existing && phone) {
+        const { data } = await supabaseAdmin
+            .from('leads')
+            .select('id, assigned_to')
+            .eq('phone', phone)
+            .order('created_at', { ascending: true })
+            .limit(1);
+        if (data && data.length > 0) existing = data[0];
+    }
+
+    // Ưu tiên 4: Theo pancake_customer_id
+    if (!existing && pancake_customer_id) {
+        const { data } = await supabaseAdmin
+            .from('leads')
+            .select('id, assigned_to')
+            .eq('pancake_customer_id', pancake_customer_id)
+            .order('created_at', { ascending: true })
+            .limit(1);
+        if (data && data.length > 0) existing = data[0];
     }
 
     if (existing) {
@@ -565,15 +572,15 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
     // NHƯNG nếu là tin nhắn inbound từ khách (lead), có thread/conv id rõ ràng thì VẪN phải tạo.
     if (!existing && last_message_text && event !== 'lead.create') {
         const isLeadInbound = last_actor === 'lead' && message_direction === 'inbound';
-        
+
         if (!isLeadInbound) {
             console.log(`[Webhook] Không tìm thấy lead cho thread ${fb_thread_id || pancake_conversation_id}, bỏ qua tạo mới theo yêu cầu.`);
-            return { 
+            return {
                 action: 'skipped',
                 reason: 'filtered_as_unknown',
-                message: 'Bỏ qua tạo lead mới cho tin nhắn không xác định (Chỉ update nếu thread đã tồn tại)', 
+                message: 'Bỏ qua tạo lead mới cho tin nhắn không xác định (Chỉ update nếu thread đã tồn tại)',
                 skipped: true,
-                debug: debugInfo 
+                debug: debugInfo
             };
         }
     }
@@ -583,37 +590,65 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
     const saleName = owner_sale || assigned_to;
     const resolvedAssignedTo = await resolveUserByName(saleName);
 
-    // 3. Tạo Lead mới
+    // 3. Tạo Lead mới (với retry logic để xử lý race condition)
+    const insertPayload = {
+        name: name || facebook_name || 'Khách hàng mới',
+        phone: phone || null,
+        email: email || null,
+        source: source || 'n8n',
+        company: company || null,
+        address: address || null,
+        notes: notes || null,
+        status: 'new',
+        assigned_to: resolvedAssignedTo,
+        lead_type: lead_type || 'individual',
+        fb_thread_id: fb_thread_id || null,
+        pancake_conversation_id: pancake_conversation_id || null,
+        pancake_customer_id: pancake_customer_id || null,
+        fb_profile_name: facebook_name || null,
+        facebook_name: facebook_name || null,
+        avatar_url: avatar_url || null,
+        last_message_text: last_message_text || null,
+        last_message_time: last_message_time || new Date().toISOString(),
+        last_actor: last_actor || null,
+        t_last_inbound: last_actor === 'lead' ? (last_message_time || new Date().toISOString()) : null,
+        t_last_outbound: last_actor === 'sale' ? (last_message_time || new Date().toISOString()) : null,
+        assign_state: resolvedAssignedTo ? 'assigned' : 'unassigned'
+    };
+
     const { data: lead, error } = await supabaseAdmin
         .from('leads')
-        .insert({
-            name: name || facebook_name || 'Khách hàng mới',
-            phone: phone || null,
-            email: email || null,
-            source: source || 'n8n',
-            company: company || null,
-            address: address || null,
-            notes: notes || null,
-            status: 'new',
-            assigned_to: resolvedAssignedTo,
-            lead_type: lead_type || 'individual',
-            fb_thread_id: fb_thread_id || null,
-            pancake_conversation_id: pancake_conversation_id || null,
-            pancake_customer_id: pancake_customer_id || null,
-            fb_profile_name: facebook_name || null,
-            facebook_name: facebook_name || null,
-            avatar_url: avatar_url || null,
-            last_message_text: last_message_text || null,
-            last_message_time: last_message_time || new Date().toISOString(),
-            last_actor: last_actor || null,
-            t_last_inbound: last_actor === 'lead' ? (last_message_time || new Date().toISOString()) : null,
-            t_last_outbound: last_actor === 'sale' ? (last_message_time || new Date().toISOString()) : null,
-            assign_state: resolvedAssignedTo ? 'assigned' : 'unassigned'
-        })
+        .insert(insertPayload)
         .select()
         .single();
 
+    // Nếu INSERT lỗi do UNIQUE constraint (race condition), thử tìm lại và update
     if (error) {
+        const isDuplicateError = error.message?.includes('unique') ||
+            error.message?.includes('duplicate') ||
+            error.code === '23505';
+
+        if (isDuplicateError) {
+            console.log(`[Webhook] Race condition detected cho thread ${fb_thread_id || pancake_conversation_id}, chuyển sang update...`);
+
+            // Tìm lại lead vừa bị trùng
+            let retryExisting: any = null;
+            if (pancake_conversation_id) {
+                const { data } = await supabaseAdmin.from('leads').select('id, assigned_to')
+                    .eq('pancake_conversation_id', pancake_conversation_id).limit(1);
+                if (data && data.length > 0) retryExisting = data[0];
+            }
+            if (!retryExisting && fb_thread_id) {
+                const { data } = await supabaseAdmin.from('leads').select('id, assigned_to')
+                    .eq('fb_thread_id', fb_thread_id).limit(1);
+                if (data && data.length > 0) retryExisting = data[0];
+            }
+
+            if (retryExisting) {
+                return await handleLeadUpdate({ id: retryExisting.id, ...data });
+            }
+        }
+
         throw new ApiError('Lỗi khi tạo lead: ' + error.message, 500);
     }
 
@@ -657,9 +692,9 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
         });
     }
 
-    return { 
+    return {
         action: 'created',
-        lead 
+        lead
     };
 }
 
@@ -824,7 +859,7 @@ async function handleLeadUpdate(data: any) {
                 .from('users')
                 .select('id, telegram_chat_id')
                 .in('id', [currentLead.assigned_to, resolvedId]);
-            
+
             const ownerTele = usersData?.find(u => u.id === currentLead.assigned_to)?.telegram_chat_id;
             const intruderTele = usersData?.find(u => u.id === resolvedId)?.telegram_chat_id;
 
@@ -847,7 +882,7 @@ async function handleLeadUpdate(data: any) {
                     content: `[Cảnh báo vi phạm] ${saleName} đã nhắn tin: ${last_message_text}`,
                     userName: 'Hệ thống'
                 });
-                
+
                 // Vô hiệu hóa việc tính SLA phía dưới bằng cách hủy tin nhắn
                 effectiveLastActor = undefined;
             }
@@ -913,9 +948,9 @@ async function handleLeadUpdate(data: any) {
         });
     }
 
-    return { 
+    return {
         action: 'updated',
-        lead 
+        lead
     };
 }
 
@@ -967,9 +1002,9 @@ async function handleLeadAIUpdate(data: any) {
     addIfValid('customer_insight', customer_insight);
 
     if (Object.keys(updateData).length <= 1) {
-        return { 
-            action: 'skipped', 
-            reason: 'no_ai_data', 
+        return {
+            action: 'skipped',
+            reason: 'no_ai_data',
             message: 'Không có thông tin AI nào để cập nhật',
             skipped: true
         };
@@ -994,7 +1029,7 @@ async function handleLeadAIUpdate(data: any) {
         });
     }
 
-    return { 
+    return {
         status: 'success',
         action: 'updated_ai',
         lead_id: leadId
@@ -1181,10 +1216,10 @@ async function handleLeadSaleMemoryUpdate(data: any) {
     }
 
     // 3. Chuẩn bị dữ liệu update
-    const updateData: any = { 
+    const updateData: any = {
         updated_at: new Date().toISOString()
     };
-    
+
     // Chỉ cập nhật nếu có sale_memory (hoặc nếu has_important_ops_info là true thì có thể update dù rỗng?)
     // Tạm thời chỉ add if valid để tránh overwrite bằng null/undefined không mong muốn.
     if (sale_memory !== undefined && sale_memory !== null) {
@@ -1210,7 +1245,7 @@ async function handleLeadSaleMemoryUpdate(data: any) {
         });
     }
 
-    return { 
+    return {
         status: 'success',
         action: 'updated_sale_memory',
         lead_id: leadId

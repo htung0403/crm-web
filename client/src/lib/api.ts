@@ -605,8 +605,6 @@ export const transactionsApi = {
         search?: string;
         start_date?: string;
         end_date?: string;
-        page?: number;
-        limit?: number;
     }) => api.get<PaginatedResponse<{ transactions: any[] }>>('/transactions', { params }),
 
     getSummary: (params?: { start_date?: string; end_date?: string }) =>
@@ -614,6 +612,8 @@ export const transactionsApi = {
             totalIncome: number;
             totalExpense: number;
             balance: number;
+            incomeCount: number;
+            expenseCount: number;
             pendingIncomeCount: number;
             pendingExpenseCount: number;
         }>>('/transactions/summary', { params }),

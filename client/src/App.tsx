@@ -514,11 +514,11 @@ function AppContent() {
               </ProtectedRoute>
             } />
 
-            <Route path="/settings" element={
+            {/* <Route path="/settings" element={
               <ProtectedRoute allowedRoles={pagePermissions.settings}>
                 <PlaceholderPage title="Cài đặt" />
               </ProtectedRoute>
-            } />
+            } /> */}
 
             {/* Default redirect */}
             <Route path="/" element={<Navigate to="/dashboard" replace />} />

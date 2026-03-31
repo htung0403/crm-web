@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Settings, Search, Menu, LogOut, Clock, User, CheckCheck, X, Package } from 'lucide-react';
+import { Bell, Search, Menu, LogOut, Clock, User, CheckCheck, X, Package } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -260,20 +260,20 @@ export function Header({ onMenuToggle, isMobile, currentUser, onLogout }: Header
                         )}
                     </div>
 
-                    {/* Settings */}
+                    {/* Settings
                     <Button variant="ghost" size="icon" className="hidden sm:flex">
                         <Settings className="h-5 w-5" />
-                    </Button>
+                    </Button> */}
 
                     {/* User Info */}
                     <div className="flex items-center gap-3 ml-2 pl-3 border-l">
                         <div className="hidden sm:block text-right">
-                            <p className="text-sm font-medium">{currentUser.name}</p>
+                            <p className="text-sm font-medium">{currentUser?.name || 'User'}</p>
                             <p className="text-xs text-muted-foreground">{roleLabels[currentUser.role]}</p>
                         </div>
                         <Avatar className="h-9 w-9 cursor-pointer ring-2 ring-transparent hover:ring-primary/20 transition-all">
-                            <AvatarImage src={currentUser.avatar} alt={currentUser.name} />
-                            <AvatarFallback>{currentUser.name.charAt(0)}</AvatarFallback>
+                            <AvatarImage src={currentUser?.avatar} alt={currentUser?.name} />
+                            <AvatarFallback>{currentUser?.name?.charAt(0) || 'U'}</AvatarFallback>
                         </Avatar>
                     </div>
 

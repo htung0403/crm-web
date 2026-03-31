@@ -11,12 +11,12 @@ import {
     Wrench,
     UserCog,
     BarChart3,
-    Settings,
+    // Settings,
     ChevronDown,
     ChevronRight,
     X,
     LogOut,
-    QrCode
+    // QrCode
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -85,7 +85,7 @@ const menuItems: MenuItem[] = [
     },
     {
         id: 'finance',
-        label: 'Thu Chi',
+        label: 'Sổ Quỹ',
         icon: <Wallet className="h-5 w-5" />,
         roles: ['admin', 'manager', 'accountant', 'sale'], // Sale can create but not edit/delete
         children: [
@@ -140,12 +140,12 @@ const menuItems: MenuItem[] = [
         icon: <BarChart3 className="h-5 w-5" />,
         roles: ['admin', 'manager', 'accountant'] // Only Manager and Accountant
     },
-    {
-        id: 'settings',
-        label: 'Cài đặt',
-        icon: <Settings className="h-5 w-5" />,
-        roles: ['admin', 'manager'] // Only Admin and Manager
-    }
+    // {
+    //     id: 'settings',
+    //     label: 'Cài đặt',
+    //     icon: <Settings className="h-5 w-5" />,
+    //     roles: ['admin', 'manager'] // Only Admin and Manager
+    // }
 ];
 
 export function Sidebar({ isOpen, onClose, isMobile, currentUser, onLogout }: SidebarProps) {

@@ -32,7 +32,7 @@ async function generateTransactionCode(type: 'income' | 'expense'): Promise<stri
 // Get all transactions
 router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { type, status, search, page = 1, limit = 50, start_date, end_date } = req.query;
+        const { type, status, search, payment_method, category, page = 1, limit = 50, start_date, end_date } = req.query;
         const offset = (Number(page) - 1) * Number(limit);
 
         let query = supabaseAdmin
@@ -47,6 +47,8 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
 
         if (type) query = query.eq('type', type);
         if (status) query = query.eq('status', status);
+        if (payment_method && payment_method !== 'all') query = query.eq('payment_method', payment_method);
+        if (category && category !== 'all') query = query.eq('category', category);
         if (search) {
             query = query.or(`code.ilike.%${search}%,category.ilike.%${search}%,notes.ilike.%${search}%`);
         }
@@ -54,16 +56,49 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
         if (end_date) query = query.lte('date', end_date);
 
         const { data: transactions, error, count } = await query;
-
+        
         if (error) {
             console.error('Error fetching transactions:', error);
             throw new ApiError('Lỗi khi lấy danh sách giao dịch', 500);
         }
 
+        // Enrich transactions with order + customer data (batch fetch)
+        const enrichedTransactions = transactions || [];
+        const orderIds = [...new Set(enrichedTransactions.filter(t => t.order_id).map(t => t.order_id))];
+        
+        if (orderIds.length > 0) {
+            const { data: orders, error: ordersError } = await supabaseAdmin
+                .from('orders')
+                .select(`
+                    id, 
+                    order_code, 
+                    customer_id,
+                    customer:customers(id, name, phone)
+                `)
+                .in('id', orderIds);
+            
+            if (!ordersError && orders) {
+                const orderMap = new Map(orders.map(o => {
+                    const orderItem = { ...o };
+                    // Handle array format from Supabase join
+                    if (Array.isArray(orderItem.customer)) {
+                        (orderItem as any).customer = orderItem.customer[0];
+                    }
+                    return [orderItem.id, orderItem];
+                }));
+                
+                for (const trans of enrichedTransactions) {
+                    if (trans.order_id && orderMap.has(trans.order_id)) {
+                        (trans as any).order = orderMap.get(trans.order_id);
+                    }
+                }
+            }
+        }
+
         res.json({
             status: 'success',
             data: {
-                transactions: transactions || [],
+                transactions: enrichedTransactions,
                 pagination: {
                     page: Number(page),
                     limit: Number(limit),
@@ -80,49 +115,57 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
 // Get transaction summary (totals)
 router.get('/summary', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { start_date, end_date } = req.query;
+        const { start_date, end_date, payment_method, category, status, search } = req.query;
 
-        let incomeQuery = supabaseAdmin
-            .from('transactions')
-            .select('amount')
-            .eq('type', 'income')
-            .eq('status', 'approved');
+        // Base queries
+        const getBaseQuery = () => supabaseAdmin.from('transactions');
 
-        let expenseQuery = supabaseAdmin
-            .from('transactions')
-            .select('amount')
-            .eq('type', 'expense')
-            .eq('status', 'approved');
+        let incomeQuery = getBaseQuery().select('amount').eq('type', 'income').eq('status', 'approved');
+        let expenseQuery = getBaseQuery().select('amount').eq('type', 'expense').eq('status', 'approved');
+        let incomeCountQuery = getBaseQuery().select('*', { count: 'exact', head: true }).eq('type', 'income');
+        let expenseCountQuery = getBaseQuery().select('*', { count: 'exact', head: true }).eq('type', 'expense');
+        let pendingIncomeQuery = getBaseQuery().select('*', { count: 'exact', head: true }).eq('type', 'income').eq('status', 'pending');
+        let pendingExpenseQuery = getBaseQuery().select('*', { count: 'exact', head: true }).eq('type', 'expense').eq('status', 'pending');
 
-        if (start_date) {
-            incomeQuery = incomeQuery.gte('date', start_date);
-            expenseQuery = expenseQuery.gte('date', start_date);
+        // Apply shared filters
+        const queries = [
+            incomeQuery, expenseQuery, 
+            incomeCountQuery, expenseCountQuery,
+            pendingIncomeQuery, pendingExpenseQuery
+        ];
+        
+        for (let q of queries) {
+            if (start_date) q.gte('date', start_date);
+            if (end_date) q.lte('date', end_date);
+            if (payment_method && payment_method !== 'all') q.eq('payment_method', payment_method);
+            if (category && category !== 'all') q.eq('category', category);
+            if (status && status !== 'all') q.eq('status', status);
+            if (search) {
+                q.or(`code.ilike.%${search}%,category.ilike.%${search}%,notes.ilike.%${search}%`);
+            }
         }
-        if (end_date) {
-            incomeQuery = incomeQuery.lte('date', end_date);
-            expenseQuery = expenseQuery.lte('date', end_date);
-        }
 
-        const [incomeResult, expenseResult] = await Promise.all([
+        const [incomeRes, expenseRes, incomeCountRes, expenseCountRes, pIncRes, pExpRes] = await Promise.all([
             incomeQuery,
-            expenseQuery
+            expenseQuery,
+            incomeCountQuery,
+            expenseCountQuery,
+            pendingIncomeQuery,
+            pendingExpenseQuery
         ]);
 
-        const totalIncome = (incomeResult.data || []).reduce((sum, t) => sum + (t.amount || 0), 0);
-        const totalExpense = (expenseResult.data || []).reduce((sum, t) => sum + (t.amount || 0), 0);
+        // Check for any errors
+        const errors = [incomeRes, expenseRes, incomeCountRes, expenseCountRes, pIncRes, pExpRes]
+            .filter(r => r.error)
+            .map(r => r.error);
+        
+        if (errors.length > 0) {
+            console.error('Error fetching summary data:', errors);
+            throw new ApiError('Lỗi khi lấy dữ liệu tổng hợp', 500);
+        }
 
-        // Get pending counts
-        const { count: pendingIncomeCount } = await supabaseAdmin
-            .from('transactions')
-            .select('id', { count: 'exact', head: true })
-            .eq('type', 'income')
-            .eq('status', 'pending');
-
-        const { count: pendingExpenseCount } = await supabaseAdmin
-            .from('transactions')
-            .select('id', { count: 'exact', head: true })
-            .eq('type', 'expense')
-            .eq('status', 'pending');
+        const totalIncome = (incomeRes.data || []).reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
+        const totalExpense = (expenseRes.data || []).reduce((sum: number, t: any) => sum + Number(t.amount || 0), 0);
 
         res.json({
             status: 'success',
@@ -130,8 +173,10 @@ router.get('/summary', authenticate, async (req: AuthenticatedRequest, res, next
                 totalIncome,
                 totalExpense,
                 balance: totalIncome - totalExpense,
-                pendingIncomeCount: pendingIncomeCount || 0,
-                pendingExpenseCount: pendingExpenseCount || 0,
+                incomeCount: incomeCountRes.count || 0,
+                expenseCount: expenseCountRes.count || 0,
+                pendingIncomeCount: pIncRes.count || 0,
+                pendingExpenseCount: pExpRes.count || 0,
             },
         });
     } catch (error) {
@@ -156,6 +201,19 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 
         if (error || !transaction) {
             throw new ApiError('Không tìm thấy giao dịch', 404);
+        }
+
+        // Enrich with order + customer data
+        if (transaction.order_id) {
+            const { data: order } = await supabaseAdmin
+                .from('orders')
+                .select('id, order_code, customer:customers(id, name, phone)')
+                .eq('id', transaction.order_id)
+                .single();
+            
+            if (order) {
+                (transaction as any).order = order;
+            }
         }
 
         res.json({
@@ -333,18 +391,22 @@ router.delete('/:id', authenticate, async (req: AuthenticatedRequest, res, next)
             throw new ApiError('Chỉ có thể xóa phiếu đang chờ duyệt', 400);
         }
 
+        // Instead of deleting, we update the status to cancelled as requested
         const { error } = await supabaseAdmin
             .from('transactions')
-            .delete()
+            .update({ 
+                status: 'cancelled',
+                updated_at: new Date().toISOString()
+            })
             .eq('id', id);
 
         if (error) {
-            throw new ApiError('Lỗi khi xóa giao dịch', 500);
+            throw new ApiError('Lỗi khi hủy giao dịch', 500);
         }
 
         res.json({
             status: 'success',
-            message: 'Đã xóa phiếu',
+            message: 'Đã hủy phiếu',
         });
     } catch (error) {
         next(error);
