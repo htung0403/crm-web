@@ -625,6 +625,8 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
     const [payerCode, setPayerCode] = useState('');
     const [payerPhone, setPayerPhone] = useState('');
     const [timeFilter, setTimeFilter] = useState('all');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
     const [categoryFilter, setCategoryFilter] = useState('all');
 
     // Sync activeTab with initialTab when navigation changes
@@ -752,6 +754,9 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
                 const now = new Date();
                 const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
                 params.start_date = startOfMonth;
+            } else if (timeFilter === 'custom') {
+                if (startDate) params.start_date = startDate;
+                if (endDate) params.end_date = endDate;
             }
 
             // Parallelize fetching transactions and summary
@@ -778,7 +783,7 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
         } finally {
             setLoading(false);
         }
-    }, [activeTab, statusFilter, searchTerm, fundFilter, categoryFilter, timeFilter]);
+    }, [activeTab, statusFilter, searchTerm, fundFilter, categoryFilter, timeFilter, startDate, endDate]);
 
     useEffect(() => {
         fetchTransactions();
@@ -885,8 +890,18 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
                             </label>
                             {timeFilter === 'custom' && (
                                 <div className="pt-2">
-                                    <Input type="date" className="h-9 mb-2" />
-                                    <Input type="date" className="h-9" />
+                                    <Input 
+                                        type="date" 
+                                        className="h-9 mb-2" 
+                                        value={startDate}
+                                        onChange={(e) => setStartDate(e.target.value)}
+                                    />
+                                    <Input 
+                                        type="date" 
+                                        className="h-9" 
+                                        value={endDate}
+                                        onChange={(e) => setEndDate(e.target.value)}
+                                    />
                                 </div>
                             )}
                         </div>
