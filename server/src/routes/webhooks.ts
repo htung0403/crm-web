@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
+import { getEffectivePassedMinutes, SLA_CYCLES } from '../utils/slaManager.js';
 
 const router = Router();
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -729,7 +730,7 @@ async function handleLeadUpdate(data: any) {
         // Search by fb_thread_id first
         if (fb_thread_id) {
             const { data: found } = await supabaseAdmin.from('leads')
-                .select('id, assigned_to, name, facebook_name')
+                .select('id, assigned_to, name, facebook_name, created_at, round_index, t_last_inbound, t_last_outbound')
                 .eq('fb_thread_id', fb_thread_id)
                 .maybeSingle();
             if (found) {
@@ -741,7 +742,7 @@ async function handleLeadUpdate(data: any) {
         // Fallback to pancake_conversation_id
         if (!leadId && pancake_conversation_id) {
             const { data: found } = await supabaseAdmin.from('leads')
-                .select('id, assigned_to, name, facebook_name')
+                .select('id, assigned_to, name, facebook_name, created_at, round_index, t_last_inbound, t_last_outbound')
                 .eq('pancake_conversation_id', pancake_conversation_id)
                 .maybeSingle();
             if (found) {
@@ -753,7 +754,7 @@ async function handleLeadUpdate(data: any) {
         // Fallback to pancake_customer_id
         if (!leadId && data.pancake_customer_id) {
             const { data: found } = await supabaseAdmin.from('leads')
-                .select('id, assigned_to, name, facebook_name')
+                .select('id, assigned_to, name, facebook_name, created_at, round_index, t_last_inbound, t_last_outbound')
                 .eq('pancake_customer_id', data.pancake_customer_id)
                 .maybeSingle();
             if (found) {
@@ -765,7 +766,7 @@ async function handleLeadUpdate(data: any) {
         // Fallback to phone
         if (!leadId && data.phone) {
             const { data: found } = await supabaseAdmin.from('leads')
-                .select('id, assigned_to, name, facebook_name')
+                .select('id, assigned_to, name, facebook_name, created_at, round_index, t_last_inbound, t_last_outbound')
                 .eq('phone', data.phone)
                 .maybeSingle();
             if (found) {
@@ -783,7 +784,7 @@ async function handleLeadUpdate(data: any) {
     if (!currentLead) {
         const { data: found } = await supabaseAdmin
             .from('leads')
-            .select('id, assigned_to, name, facebook_name')
+            .select('id, assigned_to, name, facebook_name, created_at, round_index, t_last_inbound, t_last_outbound')
             .eq('id', leadId)
             .single();
         currentLead = found;
@@ -897,6 +898,9 @@ async function handleLeadUpdate(data: any) {
 
         if (effectiveLastActor === 'lead') {
             updateData.t_last_inbound = updateData.last_message_time;
+            
+            // SLA SHIELD: Reset to 3m milestone on customer message
+            updateData.round_index = 0;
 
             // Log tin nhắn khách
             await logLeadActivity(leadId, {
@@ -906,6 +910,41 @@ async function handleLeadUpdate(data: any) {
             });
         } else if (effectiveLastActor === 'sale') {
             updateData.t_last_outbound = updateData.last_message_time;
+
+            // SLA SHIELD: Milestone Advancement logic
+            const now = new Date();
+            const createdAt = new Date(currentLead.created_at);
+            const isOldCustomer = (now.getTime() - createdAt.getTime()) > (24 * 60 * 60 * 1000);
+            
+            const lastIn = currentLead.t_last_inbound ? new Date(currentLead.t_last_inbound) : null;
+            const lastOut = currentLead.t_last_outbound ? new Date(currentLead.t_last_outbound) : null;
+            
+            // Wait time from the last relevant start point
+            const tStart = (lastIn && (!lastOut || lastIn >= lastOut)) ? lastIn : lastOut;
+            
+            if (tStart) {
+                const passedMin = getEffectivePassedMinutes(tStart, isOldCustomer);
+                const milestoneIndex = currentLead.round_index || 0;
+                const currentMilestoneLimit = SLA_CYCLES[milestoneIndex];
+
+                if (milestoneIndex === 0) {
+                    // Phase 3m: reply within 3m
+                    if (passedMin <= 3) {
+                        updateData.round_index = 1; // Advance to 60m
+                        console.log(`[SLA] Lead ${leadId} advanced to 60m milestone (Round 1)`);
+                    }
+                } else {
+                    // Care Phases (60m, 180m...): must reply in "Valid Window" (last 15%)
+                    const windowStart = currentMilestoneLimit * 0.85;
+                    // We allow a small buffer after the milestone if it hasn't been reclaimed yet
+                    if (passedMin >= windowStart && passedMin <= currentMilestoneLimit + 10) {
+                        updateData.round_index = milestoneIndex + 1;
+                        console.log(`[SLA] Lead ${leadId} advanced to Round ${updateData.round_index} (Milestone ${SLA_CYCLES[updateData.round_index]}m)`);
+                    } else {
+                        console.log(`[SLA] Lead ${leadId} reply ignored for advancement (Time: ${Math.round(passedMin)}m, Window: ${Math.round(windowStart)}-${currentMilestoneLimit}m)`);
+                    }
+                }
+            }
 
             // Log câu trả lời của Sale
             await logLeadActivity(leadId, {
@@ -1178,7 +1217,9 @@ async function logLeadActivity(leadId: string, activityData: {
 async function handleLeadSaleMemoryUpdate(data: any) {
     const {
         id, phone, fb_thread_id, pancake_conversation_id, pancake_customer_id,
-        sale_memory, has_important_ops_info
+        sale_memory, has_important_ops_info,
+        quoted_price_last, quoted_service, appointment_time, delivery_method,
+        deposit_info, eta_note, sale_note_summary
     } = data;
 
     // 1. Tìm Lead (Dùng helper lookup giống handleLeadAIUpdate)
@@ -1220,11 +1261,20 @@ async function handleLeadSaleMemoryUpdate(data: any) {
         updated_at: new Date().toISOString()
     };
 
-    // Chỉ cập nhật nếu có sale_memory (hoặc nếu has_important_ops_info là true thì có thể update dù rỗng?)
-    // Tạm thời chỉ add if valid để tránh overwrite bằng null/undefined không mong muốn.
-    if (sale_memory !== undefined && sale_memory !== null) {
-        updateData.sale_memory = sale_memory;
-    }
+    const addIfValid = (key: string, value: any) => {
+        if (value !== undefined && value !== null && value !== "") {
+            updateData[key] = value;
+        }
+    };
+
+    addIfValid('sale_memory', sale_memory);
+    addIfValid('quoted_price_last', quoted_price_last);
+    addIfValid('quoted_service', quoted_service);
+    addIfValid('appointment_time', appointment_time);
+    addIfValid('delivery_method', delivery_method);
+    addIfValid('deposit_info', deposit_info);
+    addIfValid('eta_note', eta_note);
+    addIfValid('sale_note_summary', sale_note_summary);
 
     // 4. Thực thi update
     const { error } = await supabaseAdmin
@@ -1237,10 +1287,10 @@ async function handleLeadSaleMemoryUpdate(data: any) {
     }
 
     // 5. Log activity nếu có sale_memory mới
-    if (sale_memory) {
+    if (sale_memory || sale_note_summary) {
         await logLeadActivity(leadId, {
             type: 'note',
-            content: `[Sale Memory Update] ${sale_memory}`,
+            content: `[Sale Memory Update] ${sale_note_summary || sale_memory}`,
             userName: 'Hệ thống'
         });
     }

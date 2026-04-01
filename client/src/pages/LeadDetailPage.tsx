@@ -11,6 +11,9 @@ import {
     X,
     Trash2,
     Camera,
+    Truck,
+    Layout,
+    Wallet,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -1004,6 +1007,82 @@ export function LeadDetailPage() {
                             )}
                         </CardContent>
                     </Card>
+
+                    {/* Sale Memory Box (Latest Context) */}
+                    {(lead.quoted_price_last || lead.quoted_service || lead.appointment_time || lead.delivery_method || lead.sale_note_summary) && (
+                        <Card className="border-emerald-100 bg-gradient-to-br from-emerald-50/30 to-white overflow-hidden shadow-sm">
+                            <CardHeader className="pb-3 border-b border-emerald-50 bg-emerald-50/20">
+                                <CardTitle className="text-xs font-extrabold flex items-center gap-2 text-emerald-800 uppercase tracking-wider">
+                                    <Layout className="h-4 w-4 text-emerald-500" />
+                                    Bộ nhớ sale gần nhất
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="p-4 space-y-4">
+                                {lead.quoted_price_last && (
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+                                            <Wallet className="h-4 w-4 text-emerald-600" />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-bold text-emerald-600 uppercase">Giá báo gần nhất</p>
+                                            <p className="text-sm font-black text-slate-900">{lead.quoted_price_last}đ</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {lead.quoted_service && (
+                                    <div className="flex items-start gap-3">
+                                        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0 mt-0.5">
+                                            <ArrowRightLeft className="h-4 w-4 text-blue-600" />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-bold text-blue-600 uppercase">Dịch vụ</p>
+                                            <p className="text-sm font-bold text-slate-800">{lead.quoted_service}</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {lead.appointment_time && (
+                                    <div className="flex items-start gap-3">
+                                        <div className="w-8 h-8 rounded-full bg-pink-100 flex items-center justify-center shrink-0 mt-0.5">
+                                            <Calendar className="h-4 w-4 text-pink-600" />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-bold text-pink-600 uppercase">Hẹn</p>
+                                            <p className="text-sm font-bold text-slate-800">{formatDateTime(lead.appointment_time)}</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {lead.delivery_method && (
+                                    <div className="flex items-start gap-3">
+                                        <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center shrink-0 mt-0.5">
+                                            <Truck className="h-4 w-4 text-amber-600" />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-bold text-amber-600 uppercase">Giao nhận</p>
+                                            <p className="text-sm font-bold text-slate-800">
+                                                {lead.delivery_method === 'direct' ? 'Qua shop' : 
+                                                 lead.delivery_method === 'ship' ? 'Gửi ship' : lead.delivery_method}
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {lead.sale_note_summary && (
+                                    <div className="mt-2 pt-3 border-t border-emerald-50">
+                                        <p className="text-[10px] font-bold text-slate-400 uppercase mb-1.5 flex items-center gap-1">
+                                            <MessageSquare className="h-3 w-3" />
+                                            Ghi chú sale
+                                        </p>
+                                        <div className="bg-white/60 p-3 rounded-lg border border-emerald-100/50 italic text-xs text-slate-700 leading-relaxed">
+                                            "{lead.sale_note_summary}"
+                                        </div>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    )}
  
                     {/* AI Analysis Card */}
                     {(lead.lead_score !== undefined || lead.loss_risk || lead.next_action || lead.customer_insight) && (

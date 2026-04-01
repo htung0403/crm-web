@@ -70,6 +70,14 @@ export interface Lead {
     next_followup_time?: string;
     care_note?: string;
     avatar_url?: string | null;
+
+    // Sale Memory (new from n8n)
+    sale_memory?: string;
+    quoted_price_last?: string;
+    quoted_service?: string;
+    sale_note_summary?: string;
+    deposit_info?: string;
+    eta_note?: string;
 }
 
 export interface UseLeadsReturn {

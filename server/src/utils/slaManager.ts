@@ -2,7 +2,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { fireWebhook } from './webhookNotifier.js';
 
 // Rule 2 configuration
-const SLA_CYCLES = [3, 60, 180, 300, 420, 1440, 2880, 3120, 4020, 5160, 6600];
+export const SLA_CYCLES = [3, 60, 180, 300, 420, 1440, 2880, 3120, 4020, 5160, 6600];
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 // Storage for tracking which alerts have been sent to avoid spamming
@@ -12,7 +12,7 @@ const firedAlerts = new Set<string>();
  * Calculates effective passed minutes, considering Off-Hours pause
  * Off hours: 00:00 (24:00) to 06:30
  */
-function getEffectivePassedMinutes(startTime: Date, isOldCustomer: boolean): number {
+export function getEffectivePassedMinutes(startTime: Date, isOldCustomer: boolean): number {
     const now = new Date();
     
     // If it's a new customer, don't pause. Just return actual differences
@@ -80,6 +80,7 @@ export async function checkAllSLA() {
                 pipeline_stage, 
                 appointment_time, 
                 assign_state,
+                round_index,
                 assigned_to_user: users!leads_assigned_to_fkey(name, email, telegram_chat_id)
             `)
             .eq('assign_state', 'assigned')
@@ -141,8 +142,13 @@ export async function checkAllSLA() {
             const lastOut = lead.t_last_outbound ? new Date(lead.t_last_outbound) : null;
             
             // If nobody spoke? Default to creation time as inbound
-            const effectiveStart = (lastIn && (!lastOut || lastIn > lastOut)) ? lastIn : lastOut;
-            const actor = (lastIn && (!lastOut || lastIn > lastOut)) ? 'lead' : 'sale';
+            const effectiveStart = (lastIn && (!lastOut || lastIn >= lastOut)) ? lastIn : lastOut;
+            const actor = (lastIn && (!lastOut || lastIn >= lastOut)) ? 'lead' : 'sale';
+
+            // Snapshot sale info for webhooks
+            const saleUser = Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0] : lead.assigned_to_user;
+            const saleName = (saleUser as any)?.name || 'Ẩn danh';
+            const teleIdSale = (saleUser as any)?.telegram_chat_id || null;
 
             if (!effectiveStart) continue;
 
@@ -150,8 +156,8 @@ export async function checkAllSLA() {
 
             if (actor === 'lead') {
                 // RULE 1: Customer replied, we wait for sale.
-                // Reset SLA is 3 minutes.
-                const SLA_MIN = 3;
+                // Milestone 0 is always 3 minutes.
+                const SLA_MIN = 3; 
                 const timeLeft = SLA_MIN - passedMin;
                 
                 const warnKey = `WARN_3M_${lead.id}_${effectiveStart.getTime()}`;
@@ -163,8 +169,8 @@ export async function checkAllSLA() {
                         lead_id: lead.id,
                         lead_name: lead.name,
                         sale_id: lead.assigned_to,
-                        sale_name: Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0]?.name : (lead.assigned_to_user as any)?.name,
-                        tele_id_sale: Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0]?.telegram_chat_id : (lead.assigned_to_user as any)?.telegram_chat_id,
+                        sale_name: saleName,
+                        tele_id_sale: teleIdSale,
                         link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
                         rule: 'Speed 3M',
                         time_left_sec: Math.round(timeLeft * 60)
@@ -176,13 +182,13 @@ export async function checkAllSLA() {
                     // Reclaim!
                     console.log(`[SLAManager] Reclaiming lead ${lead.id} due to SLA breach`);
                     
-                    // Fire webhook
+                    // Fire webhook with snapshot
                     fireWebhook('SLA_RECLAIM', {
                         lead_id: lead.id,
                         lead_name: lead.name,
                         sale_id: lead.assigned_to,
-                        sale_name: Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0]?.name : (lead.assigned_to_user as any)?.name,
-                        tele_id_sale: Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0]?.telegram_chat_id : (lead.assigned_to_user as any)?.telegram_chat_id,
+                        old_sale_name: saleName,
+                        old_tele_id_sale: teleIdSale,
                         link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
                         wait_minutes: Math.round(passedMin)
                     });
@@ -209,35 +215,30 @@ export async function checkAllSLA() {
 
             } else {
                 // RULE 2: Sale replied, waiting for customer within SLA Cycles
-                // 3, 60, 180, 300, 420, 1440, 2880...
+                // Use stateful round_index
+                const milestoneIndex = lead.round_index || 0;
+                const currentMilestone = SLA_CYCLES[milestoneIndex] || SLA_CYCLES[SLA_CYCLES.length - 1];
                 
-                // Find next milestone
-                let nextMilestone = SLA_CYCLES.find(m => m > passedMin);
+                const timeLeft = currentMilestone - passedMin;
+                const warnKey = `WARN_CYC_${lead.id}_${currentMilestone}_${effectiveStart.getTime()}`;
                 
-                if (nextMilestone) {
-                    const timeLeft = nextMilestone - passedMin;
-                    const warnKey = `WARN_CYC_${lead.id}_${nextMilestone}_${effectiveStart.getTime()}`;
-                    
-                    // Warning threshold
-                    let warnThreshold = 45; // default 45 minutes
-                    if (nextMilestone === 3) {
-                        warnThreshold = 1.5; // 90 seconds for 3m milestone
-                    }
+                // Warning threshold: 15% of current milestone or 1.5m for 3m
+                let warnThreshold = currentMilestone * 0.15;
+                if (currentMilestone === 3) warnThreshold = 1.5;
 
-                    if (timeLeft <= warnThreshold && timeLeft > 0 && !firedAlerts.has(warnKey)) {
-                        fireWebhook('SLA_WARNING', {
-                            lead_id: lead.id,
-                            lead_name: lead.name,
-                            sale_id: lead.assigned_to,
-                            sale_name: Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0]?.name : (lead.assigned_to_user as any)?.name,
-                            tele_id_sale: Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0]?.telegram_chat_id : (lead.assigned_to_user as any)?.telegram_chat_id,
-                            link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
-                            rule: `Cycle ${nextMilestone}M`,
-                            minutes_passed: Math.round(passedMin),
-                            time_left_min: Math.round(timeLeft)
-                        });
-                        firedAlerts.add(warnKey);
-                    }
+                if (timeLeft <= warnThreshold && timeLeft > 0 && !firedAlerts.has(warnKey)) {
+                    fireWebhook('SLA_WARNING', {
+                        lead_id: lead.id,
+                        lead_name: lead.name,
+                        sale_id: lead.assigned_to,
+                        sale_name: saleName,
+                        tele_id_sale: teleIdSale,
+                        link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
+                        rule: `Cycle ${currentMilestone}M`,
+                        minutes_passed: Math.round(passedMin),
+                        time_left_min: Math.round(timeLeft)
+                    });
+                    firedAlerts.add(warnKey);
                 }
             }
         }
