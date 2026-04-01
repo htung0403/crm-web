@@ -855,13 +855,16 @@ async function handleLeadUpdate(data: any) {
         const saleName = owner_sale || assigned_to;
         const resolvedId = await resolveUserByName(saleName);
         if (resolvedId && resolvedId !== currentLead.assigned_to) {
-            // Lấy telegram_chat_id của cả 2 sale
+            // Lấy telegram_chat_id và tên của cả 2 sale
             const { data: usersData } = await supabaseAdmin
                 .from('users')
-                .select('id, telegram_chat_id')
+                .select('id, name, telegram_chat_id')
                 .in('id', [currentLead.assigned_to, resolvedId]);
 
-            const ownerTele = usersData?.find(u => u.id === currentLead.assigned_to)?.telegram_chat_id;
+            const ownerUser = usersData?.find(u => u.id === currentLead.assigned_to);
+            const ownerTele = ownerUser?.telegram_chat_id;
+            const ownerName = ownerUser?.name || 'Ẩn danh';
+            
             const intruderTele = usersData?.find(u => u.id === resolvedId)?.telegram_chat_id;
 
             // Phát hiện vi phạm
@@ -869,6 +872,7 @@ async function handleLeadUpdate(data: any) {
                 lead_id: leadId,
                 lead_name: currentLead.name || currentLead.facebook_name,
                 owner_id: currentLead.assigned_to,
+                owner_name: ownerName,
                 tele_id_sale: ownerTele,
                 intruder_id: resolvedId,
                 intruder_name: saleName,
