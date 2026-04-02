@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
-import { getEffectivePassedMinutes, SLA_CYCLES } from '../utils/slaManager.js';
+import { on_customer_message, on_sale_message, on_lead_assigned } from '../utils/slaManager.js';
 
 const router = Router();
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -180,9 +180,9 @@ router.get('/leads/sla', verifyWebhookSecret, async (req: Request, res: Response
                 pipeline_stage: lead.pipeline_stage,
                 appointment_time: lead.appointment_time,
                 round_index: lead.round_index,
-                waitMinutes,
-                action_type,
-                sla_label: action_type === 'RECLAIM' ? `${SLA_MINUTES} phút (Thu hồi)` : `${WARN_MINUTES} phút (Cảnh báo)`
+                sla_label: action_type === 'RECLAIM' ? `${SLA_MINUTES} phút (Thu hồi)` : `${WARN_MINUTES} phút (Cảnh báo)`,
+                current_deadline_at: lead.current_deadline_at,
+                sla_state: lead.sla_state
             };
         }).filter((l: any) => l.action_type !== 'NONE');
 
@@ -612,8 +612,6 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
         last_message_text: last_message_text || null,
         last_message_time: last_message_time || new Date().toISOString(),
         last_actor: last_actor || null,
-        t_last_inbound: last_actor === 'lead' ? (last_message_time || new Date().toISOString()) : null,
-        t_last_outbound: last_actor === 'sale' ? (last_message_time || new Date().toISOString()) : null,
         assign_state: resolvedAssignedTo ? 'assigned' : 'unassigned'
     };
 
@@ -691,6 +689,16 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
             sender_name: last_actor === 'lead' ? (name || facebook_name) : 'Sale',
             created_at: last_message_time
         });
+        
+        // Trigger SLA Rule 1 or 2
+        if (last_actor === 'lead') {
+            await on_customer_message(lead);
+        } else if (last_actor === 'sale') {
+            await on_sale_message(lead, resolvedAssignedTo as string, saleName);
+        }
+    } else if (resolvedAssignedTo) {
+        // Mới gán Sale, chưa nhắn tin -> Rule 1 kích hoạt 3 phút
+        await on_lead_assigned(lead.id, resolvedAssignedTo as string);
     }
 
     return {
@@ -784,7 +792,7 @@ async function handleLeadUpdate(data: any) {
     if (!currentLead) {
         const { data: found } = await supabaseAdmin
             .from('leads')
-            .select('id, assigned_to, name, facebook_name, created_at, round_index, t_last_inbound, t_last_outbound')
+            .select('id, assigned_to, name, facebook_name, created_at, round_index, t_last_inbound, t_last_outbound, current_deadline_at, current_rule_index, sla_state, owner_sale')
             .eq('id', leadId)
             .single();
         currentLead = found;
@@ -848,6 +856,9 @@ async function handleLeadUpdate(data: any) {
                 userId: resolvedId,
                 userName: saleName
             });
+            
+            // Trigger 3 phút
+            await on_lead_assigned(leadId, resolvedId as string);
         }
     }
     // 3. Chống giành khách (Sale B nhắn vào Lead của Sale A)
@@ -901,56 +912,12 @@ async function handleLeadUpdate(data: any) {
         updateData.last_actor = effectiveLastActor;
 
         if (effectiveLastActor === 'lead') {
-            updateData.t_last_inbound = updateData.last_message_time;
-            
-            // SLA SHIELD: Reset to 3m milestone on customer message
-            updateData.round_index = 0;
-
-            // Log tin nhắn khách
             await logLeadActivity(leadId, {
                 type: 'customer_message',
                 content: last_message_text,
                 userName: currentLead.name || currentLead.facebook_name || 'Khách hàng'
             });
         } else if (effectiveLastActor === 'sale') {
-            updateData.t_last_outbound = updateData.last_message_time;
-
-            // SLA SHIELD: Milestone Advancement logic
-            const now = new Date();
-            const createdAt = new Date(currentLead.created_at);
-            const isOldCustomer = (now.getTime() - createdAt.getTime()) > (24 * 60 * 60 * 1000);
-            
-            const lastIn = currentLead.t_last_inbound ? new Date(currentLead.t_last_inbound) : null;
-            const lastOut = currentLead.t_last_outbound ? new Date(currentLead.t_last_outbound) : null;
-            
-            // Wait time from the last relevant start point
-            const tStart = (lastIn && (!lastOut || lastIn >= lastOut)) ? lastIn : lastOut;
-            
-            if (tStart) {
-                const passedMin = getEffectivePassedMinutes(tStart, isOldCustomer);
-                const milestoneIndex = currentLead.round_index || 0;
-                const currentMilestoneLimit = SLA_CYCLES[milestoneIndex];
-
-                if (milestoneIndex === 0) {
-                    // Phase 3m: reply within 3m
-                    if (passedMin <= 3) {
-                        updateData.round_index = 1; // Advance to 60m
-                        console.log(`[SLA] Lead ${leadId} advanced to 60m milestone (Round 1)`);
-                    }
-                } else {
-                    // Care Phases (60m, 180m...): must reply in "Valid Window" (last 15%)
-                    const windowStart = currentMilestoneLimit * 0.85;
-                    // We allow a small buffer after the milestone if it hasn't been reclaimed yet
-                    if (passedMin >= windowStart && passedMin <= currentMilestoneLimit + 10) {
-                        updateData.round_index = milestoneIndex + 1;
-                        console.log(`[SLA] Lead ${leadId} advanced to Round ${updateData.round_index} (Milestone ${SLA_CYCLES[updateData.round_index]}m)`);
-                    } else {
-                        console.log(`[SLA] Lead ${leadId} reply ignored for advancement (Time: ${Math.round(passedMin)}m, Window: ${Math.round(windowStart)}-${currentMilestoneLimit}m)`);
-                    }
-                }
-            }
-
-            // Log câu trả lời của Sale
             await logLeadActivity(leadId, {
                 type: 'sale_reply',
                 content: last_message_text,
@@ -989,6 +956,15 @@ async function handleLeadUpdate(data: any) {
             sender_name: rawLastActor === 'lead' ? (currentLead?.name || currentLead?.facebook_name) : 'Sale',
             created_at: last_message_time
         });
+        
+        // Cập nhật State Machine SLA rời theo đúng kiến trúc sau khi Update lõi Lead xog
+        if (effectiveLastActor === 'lead') {
+            await on_customer_message({ id: leadId });
+        } else if (effectiveLastActor === 'sale') {
+            const saleName = owner_sale || assigned_to;
+            const resolvedId = await resolveUserByName(saleName);
+            await on_sale_message(currentLead, resolvedId as string, saleName);
+        }
     }
 
     return {

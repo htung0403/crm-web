@@ -6,21 +6,16 @@ import { cn } from '@/lib/utils';
 interface SLACountdownProps {
     lead: {
         id: string;
-        created_at: string;
-        t_last_inbound?: string;
-        t_last_outbound?: string;
-        appointment_time?: string;
         pipeline_stage?: string;
         assigned_to?: string | null;
+        current_deadline_at?: string;
+        current_rule_index?: number;
+        sla_state?: string;
     };
     size?: 'sm' | 'md' | 'lg';
     className?: string;
 }
 
-/**
- * SLACountdown Component
- * Implements Rule 1, 2, 3 and 6 of the CRM Operating Rules.
- */
 export function SLACountdown({ lead, size = 'md', className }: SLACountdownProps) {
     const [now, setNow] = useState(new Date());
 
@@ -30,96 +25,85 @@ export function SLACountdown({ lead, size = 'md', className }: SLACountdownProps
     }, []);
 
     const slaData = useMemo(() => {
-        // Only show for assigned leads that are not finished or cancelled
-        if (!lead.assigned_to || lead.pipeline_stage === 'chot_don' || lead.pipeline_stage === 'fail') {
+        // Only show for assigned leads that are not chot_don, huy, fail, FINISHED, RECLAIMED, STOPPED
+        const endStages = ['chot_don', 'huy', 'fail'];
+        const endStates = ['FINISHED', 'RECLAIMED', 'STOPPED'];
+        
+        if (!lead.assigned_to || 
+            endStages.includes(lead.pipeline_stage || '') || 
+            endStates.includes(lead.sla_state || '')) {
             return null;
         }
 
-        const createdAt = new Date(lead.created_at);
-        const lastIn = lead.t_last_inbound ? new Date(lead.t_last_inbound) : null;
-        const lastOut = lead.t_last_outbound ? new Date(lead.t_last_outbound) : null;
-        const appointTime = lead.appointment_time ? new Date(lead.appointment_time) : null;
-        
-        // Rule 3: Define "Old Customer" as Lead created > 24 hours ago
-        const isOldCustomer = (now.getTime() - createdAt.getTime()) > (24 * 60 * 60 * 1000);
-
-        // Logic for Rule 3: Off-Hours Pause (00:00 - 06:30)
-        const getEffectivePassedMinutes = (startTime: Date) => {
-            if (!isOldCustomer) return (now.getTime() - startTime.getTime()) / 60000;
-            
-            let passedMs = now.getTime() - startTime.getTime();
-            if (passedMs < 0) return 0;
-
-            let totalPauseMs = 0;
-            let currentDay = new Date(startTime);
-            currentDay.setHours(0, 0, 0, 0);
-            
-            const endDay = new Date(now);
-            endDay.setHours(0, 0, 0, 0);
-
-            while (currentDay.getTime() <= endDay.getTime()) {
-                const pauseStart = new Date(currentDay);
-                pauseStart.setHours(0, 0, 0, 0);
-                const pauseEnd = new Date(currentDay);
-                pauseEnd.setHours(6, 30, 0, 0);
-
-                const intersectStart = Math.max(pauseStart.getTime(), startTime.getTime());
-                const intersectEnd = Math.min(pauseEnd.getTime(), now.getTime());
-
-                if (intersectStart < intersectEnd) {
-                    totalPauseMs += (intersectEnd - intersectStart);
-                }
-                currentDay.setDate(currentDay.getDate() + 1);
-            }
-            return (passedMs - totalPauseMs) / 60000;
-        };
-
-        // Rule 5: Appointment logic (already handled by t_last_inbound in backend, 
-        // but we can show time until appointment if needed)
-        
-        // Determine last interaction actor
-        const effectiveStart = (lastIn && (!lastOut || lastIn > lastOut)) ? lastIn : (lastOut || createdAt);
-        const actor = (lastIn && (!lastOut || lastIn > lastOut)) ? 'lead' : 'sale';
-        
-        const passedMin = getEffectivePassedMinutes(effectiveStart);
-        
-        let targetMin = 0;
-        let label = '';
-        let isSpeedRule = false;
-
-        if (actor === 'lead') {
-            // Rule 1: Reset SLA to 3 mins when customer speaks
-            targetMin = 3;
-            label = 'Sale cần rep';
-            isSpeedRule = true;
-        } else {
-            // Rule 2: Wait for customer in cycles
-            const nextMilestone = SLA_CYCLES.find(m => m > passedMin) || SLA_CYCLES[SLA_CYCLES.length - 1];
-            targetMin = nextMilestone;
-            label = 'Đợi khách';
-            if (nextMilestone === 3) isSpeedRule = true;
+        if (lead.sla_state === 'PAUSED_APPOINTMENT') {
+            return {
+                remainingTime: '--:--',
+                label: 'Lịch hẹn',
+                colorClass: 'bg-blue-500 text-white',
+                isBlinking: false,
+                isSpeedRule: false
+            };
         }
 
-        const remainingSec = Math.max(-999999, (targetMin - passedMin) * 60);
-        const totalSec = targetMin * 60;
-        const ratio = remainingSec / totalSec;
+        if (!lead.current_deadline_at) return null;
+
+        const deadline = new Date(lead.current_deadline_at);
+        const ruleIndex = lead.current_rule_index || 0;
+        const currentMilestone = SLA_CYCLES[ruleIndex] || 3;
+        const isSpeedRule = ruleIndex === 0;
+
+        const getVirtualSecsLeft = (nowTime: Date, deadTime: Date, isRule0: boolean) => {
+            if (nowTime.getTime() >= deadTime.getTime()) {
+                return Math.floor((deadTime.getTime() - nowTime.getTime()) / 1000);
+            }
+            const ms = deadTime.getTime() - nowTime.getTime();
+            let totalVirtualSecs = Math.floor(ms / 1000);
+            
+            if (!isRule0) {
+                let current = new Date(nowTime.getTime());
+                let pausedMins = 0;
+                let iters = 0;
+                while(current.getTime() < deadTime.getTime() && iters < 20000) {
+                    current = new Date(current.getTime() + 60000);
+                    iters++;
+                    const utcHours = current.getUTCHours();
+                    const vnHours = (utcHours + 7) % 24;
+                    const vnMin = current.getUTCMinutes();
+                    const t = vnHours * 60 + vnMin;
+                    if (t >= 0 && t < 390) {
+                        pausedMins++;
+                    }
+                }
+                totalVirtualSecs -= (pausedMins * 60);
+            }
+            return totalVirtualSecs;
+        };
+
+        const remainingSec = getVirtualSecsLeft(now, deadline, isSpeedRule);
+        const totalSec = currentMilestone * 60;
+        
+        let label = isSpeedRule ? 'Sale cần rep' : 'Đợi khách';
 
         let colorClass = 'bg-emerald-500 text-white';
         let isBlinking = false;
 
-        // Rule 6: Color logic
         if (remainingSec <= 0) {
             colorClass = 'bg-red-600 text-white';
             isBlinking = true;
-        } else if (ratio <= 0.5) {
-            // Yellow phase (< 50%)
-            colorClass = 'bg-amber-500 text-white';
-            
-            // Blinking phase (last 90s for 3m, or last 45m for others)
-            const blinkThreshold = isSpeedRule ? 90 : 2700;
-            if (remainingSec <= blinkThreshold) {
-                colorClass = 'bg-red-500 text-white';
-                isBlinking = true;
+        } else {
+            const ratio = remainingSec / totalSec;
+            if (ratio <= 0.5) {
+                // Warning phase
+                colorClass = 'bg-amber-500 text-white';
+                
+                // Alert threshold phase (bắt đầu nhấp nháy đỏ)
+                let warnThresholdSec = totalSec * 0.15;
+                if (currentMilestone === 3) warnThresholdSec = 90; // rule 1: 90s alert
+
+                if (remainingSec <= warnThresholdSec) {
+                    colorClass = 'bg-red-500 text-white';
+                    isBlinking = true;
+                }
             }
         }
 

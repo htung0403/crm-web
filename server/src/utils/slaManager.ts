@@ -1,230 +1,280 @@
 import { supabaseAdmin } from '../config/supabase.js';
 import { fireWebhook } from './webhookNotifier.js';
 
-// Rule 2 configuration
 export const SLA_CYCLES = [3, 60, 180, 300, 420, 1440, 2880, 3120, 4020, 5160, 6600];
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-// Storage for tracking which alerts have been sent to avoid spamming
 const firedAlerts = new Set<string>();
 
 /**
- * Calculates effective passed minutes, considering Off-Hours pause
- * Off hours: 00:00 (24:00) to 06:30
+ * Tính toán mốc Deadline mới dựa trên cơ chế Pause khi xuyên màn đêm 00:00 -> 06:30
  */
-export function getEffectivePassedMinutes(startTime: Date, isOldCustomer: boolean): number {
-    const now = new Date();
+export function calculateDeadline(now: Date, ruleMinutes: number, isRule0: boolean): Date {
+    let current = new Date(now.getTime());
+    let remaining = ruleMinutes;
     
-    // If it's a new customer, don't pause. Just return actual differences
-    if (!isOldCustomer) {
-        return (now.getTime() - startTime.getTime()) / 60000;
-    }
-
-    // For old customers, we need to subtract the time spent in 00:00-06:30 blocks
-    let passedMs = now.getTime() - startTime.getTime();
-    if (passedMs < 0) return 0;
-
-    // Advanced but fast approximation: 
-    // We walk day by day from startTime to now, finding intersection with 00:00-06:30 for each day
-    let totalPauseMs = 0;
-    
-    // Clone to iterate
-    let currentDay = new Date(startTime);
-    currentDay.setHours(0, 0, 0, 0); // start of first day
-    
-    const endDay = new Date(now);
-    endDay.setHours(0, 0, 0, 0);
-
-    while (currentDay.getTime() <= endDay.getTime()) {
-        const pauseStart = new Date(currentDay);
-        pauseStart.setHours(0, 0, 0, 0);
+    let iters = 0;
+    while(remaining > 0 && iters < 20000) {
+        current = new Date(current.getTime() + 60000); // Tiến thêm 1 phút
+        iters++;
         
-        const pauseEnd = new Date(currentDay);
-        pauseEnd.setHours(6, 30, 0, 0);
-
-        // Find intersection of [pauseStart, pauseEnd] and [startTime, now]
-        const intersectStart = Math.max(pauseStart.getTime(), startTime.getTime());
-        const intersectEnd = Math.min(pauseEnd.getTime(), now.getTime());
-
-        if (intersectStart < intersectEnd) {
-            totalPauseMs += (intersectEnd - intersectStart);
+        // Ngoại trừ Rule 0 (3 phút) chạy xuyên đêm, các Rule khác Pause ban đêm
+        if (!isRule0) {
+            const utcHours = current.getUTCHours();
+            const vnHours = (utcHours + 7) % 24; // UTC+7
+            const vnMin = current.getUTCMinutes();
+            const timeInMin = vnHours * 60 + vnMin;
+            
+            // Khung 00:00 đến 06:30 (390 phút) -> Pause SLA không giảm remaining
+            if (timeInMin >= 0 && timeInMin < 390) {
+                continue;
+            }
         }
-
-        // Move to next day
-        currentDay.setDate(currentDay.getDate() + 1);
+        remaining--;
     }
-
-    return (passedMs - totalPauseMs) / 60000;
+    return current;
 }
 
 /**
- * Main checking loop for SLA rules
+ * Tính số phút "hiệu lực" còn lại bằng cách nháp ngược logic Shift, 
+ * loại trừ khung giờ nghỉ đêm.
  */
-export async function checkAllSLA() {
+export function getVirtualTimeLeft(now: Date, deadline: Date, isRule0: boolean): number {
+    if (now.getTime() >= deadline.getTime()) return 0;
+    
+    let current = new Date(now.getTime());
+    let virtualMinutes = 0;
+    let iters = 0;
+    
+    while(current.getTime() < deadline.getTime() && iters < 20000) {
+        current = new Date(current.getTime() + 60000);
+        iters++;
+        
+        let isPaused = false;
+        if (!isRule0) {
+            const utcHours = current.getUTCHours();
+            const vnHours = (utcHours + 7) % 24;
+            const vnMin = current.getUTCMinutes();
+            const t = vnHours * 60 + vnMin;
+            if (t >= 0 && t < 390) {
+                isPaused = true;
+            }
+        }
+        if (!isPaused) {
+            virtualMinutes++;
+        }
+    }
+    return virtualMinutes;
+}
+
+/**
+ * Kiểm tra xem cú Follow-up của Sale có hợp lệ không (có nằm trong khung 10p, 30p cuối không)
+ */
+export function is_valid_followup(ruleIndex: number, timeLeftMinutes: number): boolean {
+    const rule = SLA_CYCLES[ruleIndex] || 3;
+    if (ruleIndex === 0 || rule === 3) return true;
+    if (ruleIndex === 1 || rule === 60) return timeLeftMinutes <= 10;
+    return timeLeftMinutes <= 30; // Các mốc >= 180 phút
+}
+
+/**
+ * Xử lý khi Khách Nhắn (Rule 1)
+ */
+export async function on_customer_message(lead: any) {
+    const now = new Date();
+    const nextRule = SLA_CYCLES[0];
+    const deadline = calculateDeadline(now, nextRule, true); // Rule 3 phút chạy xuyên đêm
+    
+    await supabaseAdmin.from('leads').update({
+        last_actor: 'lead',
+        t_last_inbound: now.toISOString(),
+        last_message_time: now.toISOString(),
+        current_rule_index: 0,
+        current_deadline_at: deadline.toISOString(),
+        sla_state: 'ACTIVE',
+        appointment_time: null, // Xoá sạch lịch hẹn vì có tương tác mới
+        updated_at: now.toISOString()
+    }).eq('id', lead.id);
+}
+
+/**
+ * Di chuyển SLA sang mốc tiếp theo
+ */
+export async function move_to_next_rule(lead: any, saleId: string | null = null, fromCron: boolean = false) {
+    const now = new Date();
+    const nextIndex = (lead.current_rule_index || 0) + 1;
+    
+    if (nextIndex >= SLA_CYCLES.length) {
+        await supabaseAdmin.from('leads').update({
+            sla_state: 'FINISHED',
+            updated_at: now.toISOString()
+        }).eq('id', lead.id);
+        return;
+    }
+    
+    const nextRule = SLA_CYCLES[nextIndex];
+    const deadline = calculateDeadline(now, nextRule, nextIndex === 0);
+    
+    const updates: any = {
+        current_rule_index: nextIndex,
+        current_deadline_at: deadline.toISOString(),
+        updated_at: now.toISOString()
+    };
+    
+    if (!fromCron) {
+        updates.last_valid_followup_at = now.toISOString();
+    }
+    
+    if (saleId) {
+        updates.last_actor = 'sale';
+        updates.t_last_outbound = now.toISOString();
+        updates.last_message_time = now.toISOString();
+    }
+    
+    await supabaseAdmin.from('leads').update(updates).eq('id', lead.id);
+}
+
+/**
+ * Xử lý khi Sale Nhắn (Rule 2 + Rule 4)
+ */
+export async function on_sale_message(lead: any, saleId: string, saleName: string) {
+    // Check Giành khách (Rule 4)
+    if (lead.assigned_to && saleId !== lead.assigned_to) {
+        await trigger_intrusion(lead, saleId, saleName);
+        return;
+    }
+    
+    if (['PAUSED_APPOINTMENT', 'FINISHED', 'RECLAIMED', 'STOPPED'].includes(lead.sla_state || '')) {
+        // Chỉ lưu vết tin nhắn, không tác động Rule khi bị Pause/Stop
+        await supabaseAdmin.from('leads').update({
+            last_actor: 'sale',
+            t_last_outbound: new Date().toISOString(),
+            last_message_time: new Date().toISOString()
+        }).eq('id', lead.id);
+        return; 
+    }
+    
+    const now = new Date();
+    const currDeadline = new Date(lead.current_deadline_at || now);
+    
+    // Bug Fix: Phải dùng Virtual Time vì deadline có thể đã bị dịch sang sáng hôm sau
+    const isRule0 = (lead.current_rule_index || 0) === 0;
+    const timeLeftMins = getVirtualTimeLeft(now, currDeadline, isRule0);
+    
+    if (is_valid_followup(lead.current_rule_index || 0, timeLeftMins)) {
+        await move_to_next_rule(lead, saleId);
+    } else {
+        // Sai khung -> Không hợp lệ -> Trôi tiếp chờ cron
+        await supabaseAdmin.from('leads').update({
+            last_actor: 'sale',
+            t_last_outbound: now.toISOString(),
+            last_message_time: now.toISOString(),
+            updated_at: now.toISOString()
+        }).eq('id', lead.id);
+    }
+}
+
+export async function on_lead_assigned(leadId: string, saleId: string) {
+    const now = new Date();
+    const deadline = calculateDeadline(now, SLA_CYCLES[0], true);
+    await supabaseAdmin.from('leads').update({
+        current_rule_index: 0,
+        current_deadline_at: deadline.toISOString(),
+        sla_state: 'ACTIVE',
+        updated_at: now.toISOString()
+    }).eq('id', leadId);
+}
+
+export async function trigger_intrusion(lead: any, intruder_id: string, intruder_name: string) {
+    fireWebhook('INTRUSION_DETECTED', {
+        lead_id: lead.id,
+        lead_name: lead.name,
+        owner_id: lead.assigned_to,
+        owner_name: lead.owner_sale || 'System',
+        tele_id_sale: lead.assigned_to_user?.telegram_chat_id || null,
+        intruder_id: intruder_id,
+        intruder_name: intruder_name,
+        tele_id_vi_pham: null,
+        link_lead: `${FRONTEND_URL}/leads/${lead.id}`
+    });
+}
+
+/**
+ * Cronjob thay thế hoàn toàn cho checkAllSLAũ
+ */
+export async function checkSlaCron() {
     try {
         const now = new Date();
         
-        // Fetch all assigned leads that are not finished
-        // We probably shouldn't track leads in 'chot_don' or 'huy'
+        // Fetch leads đang vận hành SLA (không ở trạng thái chốt/hủy)
         const { data: leads, error } = await supabaseAdmin
             .from('leads')
             .select(`
-                id, 
-                name, 
-                phone, 
-                created_at, 
-                t_last_inbound, 
-                t_last_outbound, 
-                last_actor, 
-                assigned_to, 
-                pipeline_stage, 
-                appointment_time, 
-                assign_state,
-                round_index,
-                assigned_to_user: users!leads_assigned_to_fkey(name, email, telegram_chat_id)
+                id, name, assigned_to, appointment_time, sla_state, current_deadline_at, current_rule_index, appointment_reminded_at, pipeline_stage, assigned_to_user: users!leads_assigned_to_fkey(name, telegram_chat_id)
             `)
             .eq('assign_state', 'assigned')
             .not('assigned_to', 'is', null)
-            .not('pipeline_stage', 'in', '("chot_don", "huy")');
+            .not('pipeline_stage', 'in', '("chot_don", "huy", "fail")');
 
-        if (error || !leads) {
-            console.error('[SLAManager] Error fetching leads', error);
-            return;
-        }
-
-        const updates: Promise<any>[] = [];
+        if (error || !leads) return;
 
         for (const lead of leads) {
-            const createdAt = new Date(lead.created_at);
-            const isOldCustomer = (now.getTime() - createdAt.getTime()) > (24 * 60 * 60 * 1000);
+            const saleUser = Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0] : lead.assigned_to_user;
+            const saleName = saleUser?.name || 'Ẩn danh';
+            const teleIdSale = saleUser?.telegram_chat_id || null;
 
-            // Rule 5: Appointments
-            if (lead.appointment_time) {
+            // Xử lý Lịch Hẹn (Rule 5)
+            if (lead.sla_state === 'PAUSED_APPOINTMENT' && lead.appointment_time) {
                 const appointTime = new Date(lead.appointment_time);
                 const msUntilAppoint = appointTime.getTime() - now.getTime();
                 const minUntilAppoint = msUntilAppoint / 60000;
 
-                // Fire warning at 10 minutes before
-                const remKey = `APPOINT_${lead.id}_${appointTime.getTime()}`;
-                if (minUntilAppoint > 0 && minUntilAppoint <= 10 && !firedAlerts.has(remKey)) {
+                // 1. Remind 10 min before
+                if (minUntilAppoint > 0 && minUntilAppoint <= 10 && !lead.appointment_reminded_at) {
                     fireWebhook('APPOINTMENT_REMIND', {
                         lead_id: lead.id,
                         lead_name: lead.name,
                         sale_id: lead.assigned_to,
-                        tele_id_sale: Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0]?.telegram_chat_id : (lead.assigned_to_user as any)?.telegram_chat_id,
+                        tele_id_sale: teleIdSale,
                         link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
                         appointment_time: lead.appointment_time,
                         minutes_left: Math.round(minUntilAppoint)
                     });
-                    firedAlerts.add(remKey);
+                    await supabaseAdmin.from('leads').update({
+                        appointment_reminded_at: now.toISOString()
+                    }).eq('id', lead.id);
                 }
 
-                // If appointment time is reached (within the last 2 minutes to prevent endless looping)
+                // 2. Đúng giờ hẹn: Reset về mốc 3 phút (ACTIVE)
                 if (minUntilAppoint <= 0 && minUntilAppoint > -2) {
-                    const resetKey = `APPOINT_RES_${lead.id}_${appointTime.getTime()}`;
-                    if (!firedAlerts.has(resetKey)) {
-                        console.log(`[SLAManager] Appointment reached for ${lead.id}, resetting SLA to 3 mins`);
-                        await supabaseAdmin.from('leads').update({
-                            t_last_inbound: now.toISOString(),
-                            last_message_time: now.toISOString(),
-                            last_actor: 'lead',
-                            updated_at: now.toISOString()
-                        }).eq('id', lead.id);
-                        firedAlerts.add(resetKey);
-                        // Skip other checks since we just updated it
-                        continue; 
-                    }
+                    const deadline = calculateDeadline(now, SLA_CYCLES[0], true);
+                    await supabaseAdmin.from('leads').update({
+                        current_rule_index: 0,
+                        current_deadline_at: deadline.toISOString(),
+                        last_message_time: now.toISOString(),
+                        t_last_inbound: now.toISOString(),
+                        last_actor: 'lead',
+                        sla_state: 'ACTIVE',
+                        updated_at: now.toISOString(),
+                        appointment_time: null, // Xoá hẹn sau khi kích nổ để tránh lặp
+                        appointment_reminded_at: null
+                    }).eq('id', lead.id);
                 }
+                continue;
             }
 
-            // Figure out who spoke last and when
-            const lastIn = lead.t_last_inbound ? new Date(lead.t_last_inbound) : null;
-            const lastOut = lead.t_last_outbound ? new Date(lead.t_last_outbound) : null;
-            
-            // If nobody spoke? Default to creation time as inbound
-            const effectiveStart = (lastIn && (!lastOut || lastIn >= lastOut)) ? lastIn : lastOut;
-            const actor = (lastIn && (!lastOut || lastIn >= lastOut)) ? 'lead' : 'sale';
-
-            // Snapshot sale info for webhooks
-            const saleUser = Array.isArray(lead.assigned_to_user) ? lead.assigned_to_user[0] : lead.assigned_to_user;
-            const saleName = (saleUser as any)?.name || 'Ẩn danh';
-            const teleIdSale = (saleUser as any)?.telegram_chat_id || null;
-
-            if (!effectiveStart) continue;
-
-            const passedMin = getEffectivePassedMinutes(effectiveStart, isOldCustomer);
-
-            if (actor === 'lead') {
-                // RULE 1: Customer replied, we wait for sale.
-                // Milestone 0 is always 3 minutes.
-                const SLA_MIN = 3; 
-                const timeLeft = SLA_MIN - passedMin;
+            // Theo dõi trạng thái ACTIVE
+            if (lead.sla_state === 'ACTIVE' && lead.current_deadline_at) {
+                const deadline = new Date(lead.current_deadline_at);
+                const timeLeft = (deadline.getTime() - now.getTime()) / 60000;
                 
-                const warnKey = `WARN_3M_${lead.id}_${effectiveStart.getTime()}`;
-                const reclaimKey = `RECLAIM_${lead.id}_${effectiveStart.getTime()}`;
+                const ruleIndex = lead.current_rule_index || 0;
+                const currentMilestone = SLA_CYCLES[ruleIndex] || 3;
 
-                if (timeLeft <= 1.5 && timeLeft > 0 && !firedAlerts.has(warnKey)) {
-                    // Warning at 90s
-                    fireWebhook('SLA_WARNING', {
-                        lead_id: lead.id,
-                        lead_name: lead.name,
-                        sale_id: lead.assigned_to,
-                        sale_name: saleName,
-                        tele_id_sale: teleIdSale,
-                        link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
-                        rule: 'Speed 3M',
-                        time_left_sec: Math.round(timeLeft * 60)
-                    });
-                    firedAlerts.add(warnKey);
-                }
-
-                if (timeLeft <= 0 && !firedAlerts.has(reclaimKey)) {
-                    // Reclaim!
-                    console.log(`[SLAManager] Reclaiming lead ${lead.id} due to SLA breach`);
-                    
-                    // Fire webhook with snapshot
-                    fireWebhook('SLA_RECLAIM', {
-                        lead_id: lead.id,
-                        lead_name: lead.name,
-                        sale_id: lead.assigned_to,
-                        old_sale_name: saleName,
-                        old_tele_id_sale: teleIdSale,
-                        link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
-                        wait_minutes: Math.round(passedMin)
-                    });
-
-                    // Database Update
-                    await supabaseAdmin.from('leads').update({
-                        assigned_to: null,
-                        assign_state: 'unassigned',
-                        updated_at: now.toISOString()
-                    }).eq('id', lead.id);
-
-                    // Add log note
-                    try {
-                        await supabaseAdmin.from('lead_activities').insert({
-                            lead_id: lead.id,
-                            activity_type: 'owner_unassigned',
-                            content: 'Lead đã bị thu hồi do quá hạn trả lời 3 phút (SLA Engine)',
-                            user_name: 'Hệ thống'
-                        });
-                    } catch (e) {}
-
-                    firedAlerts.add(reclaimKey);
-                }
-
-            } else {
-                // RULE 2: Sale replied, waiting for customer within SLA Cycles
-                // Use stateful round_index
-                const milestoneIndex = lead.round_index || 0;
-                const currentMilestone = SLA_CYCLES[milestoneIndex] || SLA_CYCLES[SLA_CYCLES.length - 1];
-                
-                const timeLeft = currentMilestone - passedMin;
-                const warnKey = `WARN_CYC_${lead.id}_${currentMilestone}_${effectiveStart.getTime()}`;
-                
-                // Warning threshold: 15% of current milestone or 1.5m for 3m
+                // Cảnh báo sớm
+                const warnKey = `WARN_${lead.id}_R${ruleIndex}`;
                 let warnThreshold = currentMilestone * 0.15;
-                if (currentMilestone === 3) warnThreshold = 1.5;
+                if (currentMilestone === 3) warnThreshold = 1.5; // 90s cho mốc 3p
 
                 if (timeLeft <= warnThreshold && timeLeft > 0 && !firedAlerts.has(warnKey)) {
                     fireWebhook('SLA_WARNING', {
@@ -235,14 +285,53 @@ export async function checkAllSLA() {
                         tele_id_sale: teleIdSale,
                         link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
                         rule: `Cycle ${currentMilestone}M`,
-                        minutes_passed: Math.round(passedMin),
                         time_left_min: Math.round(timeLeft)
                     });
                     firedAlerts.add(warnKey);
                 }
+
+                // Thủng SLA
+                if (timeLeft <= 0) {
+                    if (ruleIndex === 0) {
+                        // RECLAIM
+                        fireWebhook('SLA_RECLAIM', {
+                            lead_id: lead.id,
+                            lead_name: lead.name,
+                            sale_id: lead.assigned_to,
+                            old_sale_name: saleName,
+                            old_tele_id_sale: teleIdSale,
+                            link_lead: `${FRONTEND_URL}/leads/${lead.id}`
+                        });
+                        await supabaseAdmin.from('leads').update({
+                            assigned_to: null,
+                            assign_state: 'unassigned',
+                            sla_state: 'RECLAIMED',
+                            updated_at: now.toISOString()
+                        }).eq('id', lead.id);
+                        
+                        const { error: logErr } = await supabaseAdmin.from('lead_activities').insert({
+                            lead_id: lead.id,
+                            activity_type: 'owner_unassigned',
+                            content: 'Lead đã bị Thu Hồi do Sale bỏ lỡ mốc SLA 3 phút (State Machine)',
+                            user_name: 'Hệ thống'
+                        });
+                        if (logErr) console.error('[SLAManager] log error', logErr);
+                    } else {
+                        // Phạt cảnh cáo và cưỡng ép chuyển mốc
+                        fireWebhook('SLA_WARNING', {
+                            lead_id: lead.id,
+                            lead_name: lead.name,
+                            sale_name: saleName,
+                            tele_id_sale: teleIdSale,
+                            link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
+                            rule: `Quá hạn Cycle ${currentMilestone}M`,
+                            time_left_min: 0
+                        });
+                        await move_to_next_rule(lead, null, true);
+                    }
+                }
             }
         }
-
     } catch (err) {
         console.error('[SLAManager] Cron check failed', err);
     }
@@ -252,3 +341,6 @@ export async function checkAllSLA() {
 setInterval(() => {
     firedAlerts.clear();
 }, 24 * 60 * 60 * 1000);
+
+// Export them with original name too for backward compatibility in index.ts if needed
+export { checkSlaCron as checkAllSLA };
