@@ -798,6 +798,10 @@ async function handleLeadUpdate(data: any) {
         currentLead = found;
     }
 
+    if (!currentLead) {
+        throw new ApiError('Không tìm thấy bản ghi hiện tại của lead để cập nhật', 404);
+    }
+
     // 3. Chuẩn bị dữ liệu update (Lọc bỏ các giá trị null hoặc rỗng để tránh ghi đè dữ liệu cũ)
     const updateData: any = {
         updated_at: new Date().toISOString(),
