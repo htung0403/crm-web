@@ -137,9 +137,10 @@ export async function move_to_next_rule(lead: any, saleId: string | null = null,
 /**
  * Xử lý khi Sale Nhắn (Rule 2 + Rule 4)
  */
-export async function on_sale_message(lead: any, saleId: string, saleName: string) {
+export async function on_sale_message(lead: any, saleId: string | null, saleName: string) {
     // Check Giành khách (Rule 4)
-    if (lead.assigned_to && saleId !== lead.assigned_to) {
+    // Fix: Chỉ trigger giành khách nếu thực sự resolve được saleId và nó KHÁC với assigned_to
+    if (lead.assigned_to && saleId && saleId !== lead.assigned_to) {
         await trigger_intrusion(lead, saleId, saleName);
         return;
     }
