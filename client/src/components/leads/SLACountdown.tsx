@@ -56,27 +56,36 @@ export function SLACountdown({ lead, size = 'md', className }: SLACountdownProps
             if (nowTime.getTime() >= deadTime.getTime()) {
                 return Math.floor((deadTime.getTime() - nowTime.getTime()) / 1000);
             }
-            const ms = deadTime.getTime() - nowTime.getTime();
-            let totalVirtualSecs = Math.floor(ms / 1000);
-            
-            if (!isRule0) {
-                let current = new Date(nowTime.getTime());
-                let pausedMins = 0;
-                let iters = 0;
-                while(current.getTime() < deadTime.getTime() && iters < 20000) {
-                    current = new Date(current.getTime() + 60000);
-                    iters++;
-                    const utcHours = current.getUTCHours();
-                    const vnHours = (utcHours + 7) % 24;
-                    const vnMin = current.getUTCMinutes();
-                    const t = vnHours * 60 + vnMin;
-                    if (t >= 0 && t < 390) {
-                        pausedMins++;
-                    }
-                }
-                totalVirtualSecs -= (pausedMins * 60);
+            if (isRule0) {
+                return Math.floor((deadTime.getTime() - nowTime.getTime()) / 1000);
             }
-            return totalVirtualSecs;
+
+            const tStart = nowTime.getTime();
+            const tEnd = deadTime.getTime();
+            let totalPausedMs = 0;
+
+            // Tìm t 00:00 VN gần nhất trước đó
+            let currentMidnight = new Date(nowTime);
+            currentMidnight.setUTCHours(17, 0, 0, 0); // 17:00 UTC = 00:00 VN hôm sau
+            if (currentMidnight.getTime() > tStart) {
+                currentMidnight.setUTCDate(currentMidnight.getUTCDate() - 1);
+            }
+
+            while (currentMidnight.getTime() < tEnd) {
+                const pauseStart = currentMidnight.getTime(); // 00:00 VN
+                const pauseEnd = pauseStart + 390 * 60000; // 06:30 VN
+
+                const overlapStart = Math.max(tStart, pauseStart);
+                const overlapEnd = Math.min(tEnd, pauseEnd);
+
+                if (overlapStart < overlapEnd) {
+                    totalPausedMs += (overlapEnd - overlapStart);
+                }
+
+                currentMidnight.setUTCDate(currentMidnight.getUTCDate() + 1); // Quét ngày tiếp theo
+            }
+
+            return Math.floor((tEnd - tStart - totalPausedMs) / 1000);
         };
 
         const remainingSec = getVirtualSecsLeft(now, deadline, isSpeedRule);

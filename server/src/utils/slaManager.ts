@@ -101,8 +101,11 @@ export async function on_customer_message(lead: any) {
  * Di chuyển SLA sang mốc tiếp theo
  */
 export async function move_to_next_rule(lead: any, saleId: string | null = null, fromCron: boolean = false) {
+    const fs = require('fs');
+    fs.appendFileSync('sla_debug.log', `[move_to_next_rule] CALLED for lead ${lead.id}\n`);
     const now = new Date();
     const nextIndex = (lead.current_rule_index || 0) + 1;
+    console.log('[DEBUG SLA] nextIndex:', nextIndex);
     
     if (nextIndex >= SLA_CYCLES.length) {
         await supabaseAdmin.from('leads').update({
@@ -121,9 +124,9 @@ export async function move_to_next_rule(lead: any, saleId: string | null = null,
         updated_at: now.toISOString()
     };
     
-    if (!fromCron) {
-        updates.last_valid_followup_at = now.toISOString();
-    }
+    // if (!fromCron) {
+    //     updates.last_valid_followup_at = now.toISOString();
+    // }
     
     if (saleId) {
         updates.last_actor = 'sale';
@@ -131,13 +134,21 @@ export async function move_to_next_rule(lead: any, saleId: string | null = null,
         updates.last_message_time = now.toISOString();
     }
     
-    await supabaseAdmin.from('leads').update(updates).eq('id', lead.id);
+    fs.appendFileSync('sla_debug.log', `[move_to_next_rule] Calling update to index: ${nextIndex}\n`);
+    const { error } = await supabaseAdmin.from('leads').update(updates).eq('id', lead.id);
+    if (error) {
+        fs.appendFileSync('sla_debug.log', `[move_to_next_rule] ERROR: ${error.message}\n`);
+    } else {
+        fs.appendFileSync('sla_debug.log', `[move_to_next_rule] SUCCESS update\n`);
+    }
 }
 
 /**
  * Xử lý khi Sale Nhắn (Rule 2 + Rule 4)
  */
 export async function on_sale_message(lead: any, saleId: string | null, saleName: string) {
+    const fs = require('fs');
+    fs.appendFileSync('sla_debug.log', `[on_sale_message] lead ${lead.id}\n`);
     // Check Giành khách (Rule 4)
     // Fix: Chỉ trigger giành khách nếu thực sự resolve được saleId và nó KHÁC với assigned_to
     if (lead.assigned_to && saleId && saleId !== lead.assigned_to) {
@@ -147,31 +158,37 @@ export async function on_sale_message(lead: any, saleId: string | null, saleName
     
     if (['PAUSED_APPOINTMENT', 'FINISHED', 'RECLAIMED', 'STOPPED'].includes(lead.sla_state || '')) {
         // Chỉ lưu vết tin nhắn, không tác động Rule khi bị Pause/Stop
-        await supabaseAdmin.from('leads').update({
+        const { error } = await supabaseAdmin.from('leads').update({
             last_actor: 'sale',
             t_last_outbound: new Date().toISOString(),
             last_message_time: new Date().toISOString()
         }).eq('id', lead.id);
+        if (error) console.error('[SLA] Lỗi update khi paused/stopped:', error);
         return; 
     }
     
     const now = new Date();
     const currDeadline = new Date(lead.current_deadline_at || now);
+    console.log('[DEBUG SLA] currDeadline:', currDeadline);
     
     // Bug Fix: Phải dùng Virtual Time vì deadline có thể đã bị dịch sang sáng hôm sau
     const isRule0 = (lead.current_rule_index || 0) === 0;
     const timeLeftMins = getVirtualTimeLeft(now, currDeadline, isRule0);
+    fs.appendFileSync('sla_debug.log', `[timeLeftMins: ${timeLeftMins}] isRule0: ${isRule0}\n`);
     
     if (is_valid_followup(lead.current_rule_index || 0, timeLeftMins)) {
+        fs.appendFileSync('sla_debug.log', `[VALID FOLLOWUP] moving to next rule\n`);
         await move_to_next_rule(lead, saleId);
     } else {
+        fs.appendFileSync('sla_debug.log', `[INVALID FOLLOWUP]\n`);
         // Sai khung -> Không hợp lệ -> Trôi tiếp chờ cron
-        await supabaseAdmin.from('leads').update({
+        const { error } = await supabaseAdmin.from('leads').update({
             last_actor: 'sale',
             t_last_outbound: now.toISOString(),
             last_message_time: now.toISOString(),
             updated_at: now.toISOString()
         }).eq('id', lead.id);
+        if (error) console.error('[SLA] Lỗi update khi sai khung SLA:', error);
     }
 }
 

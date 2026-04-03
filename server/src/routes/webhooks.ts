@@ -724,6 +724,9 @@ async function handleLeadUpdate(data: any) {
         assign_state, // Bôi đậm trạng thái gán
         message_direction: _ignored_direction, // Không phải cột DB
         lead: _ignored_lead, // Bỏ qua key "lead" để không bị nhầm là cột database
+        t_last_message: _ignored_t1, // Bỏ key rác từ n8n
+        t_last_customer_message: _ignored_t2, // Bỏ key rác từ n8n
+        tags: _ignored_tags, // Bỏ key rác chưa hỗ trợ
         ...otherFields
     } = data;
 
@@ -820,10 +823,15 @@ async function handleLeadUpdate(data: any) {
     addIfValid('pancake_customer_id', pancake_customer_id);
     addIfValid('status', status);
 
-    // Các trường tự do khác
+    // Lọc bỏ danh sách các cột tuyệt đối không cho phép update bừa bãi
+    const BANNED_KEYS = ['id', 'created_at', 'current_rule_index', 'current_deadline_at', 'last_valid_followup_at', 'sla_state', 't_last_inbound', 't_last_outbound', 'appointment_reminded_at', 'round_index'];
+    
     Object.keys(otherFields).forEach(key => {
-        if (key !== 'notes' && key !== 'lead') {
-            addIfValid(key, otherFields[key]);
+        if (key !== 'notes' && key !== 'lead' && !BANNED_KEYS.includes(key)) {
+            // Check an toàn: chỉ cho phép lấy các giá trị scalar
+            if (typeof otherFields[key] !== 'object') {
+                addIfValid(key, otherFields[key]);
+            }
         }
     });
 
