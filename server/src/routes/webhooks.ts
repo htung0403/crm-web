@@ -835,6 +835,11 @@ async function handleLeadUpdate(data: any) {
         }
     });
 
+    // Rule 5: Khi set lịch hẹn -> Pause SLA
+    if (updateData.appointment_time) {
+        updateData.sla_state = 'PAUSED_APPOINTMENT';
+    }
+
     // AI fields removed from core update
     // Handled by handleLeadAIUpdate instead
 
@@ -1267,6 +1272,11 @@ async function handleLeadSaleMemoryUpdate(data: any) {
     addIfValid('deposit_info', deposit_info);
     addIfValid('eta_note', eta_note);
     addIfValid('sale_note_summary', sale_note_summary);
+
+    // Rule 5: Khi set lịch hẹn -> Pause SLA
+    if (updateData.appointment_time) {
+        updateData.sla_state = 'PAUSED_APPOINTMENT';
+    }
 
     // 4. Thực thi update
     const { error } = await supabaseAdmin

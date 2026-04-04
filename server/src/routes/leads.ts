@@ -179,6 +179,9 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         if (req.body.appointment_time !== undefined) {
             updateData.appointment_time = req.body.appointment_time;
             updateData.round_index = 0;
+            if (req.body.appointment_time) {
+                updateData.sla_state = 'PAUSED_APPOINTMENT';
+            }
         }
 
         const { data: lead, error } = await supabaseAdmin
