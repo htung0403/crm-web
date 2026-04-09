@@ -124,14 +124,20 @@ const menuItems: MenuItem[] = [
     },
     {
         id: 'hr',
-        label: 'Nhân sự',
+        label: 'Nhân viên',
         icon: <UserCog className="h-5 w-5" />,
         roles: ['admin', 'manager', 'accountant', 'sale', 'technician'],
         children: [
-            { id: 'employees', label: 'Danh sách', roles: ['admin', 'manager'] },
+            { id: 'employees', label: 'Danh sách nhân viên', roles: ['admin', 'manager'] },
+            { id: 'work-schedule', label: 'Lịch làm việc', roles: ['admin', 'manager', 'accountant', 'sale', 'technician'] },
+            { id: 'timesheets', label: 'Bảng chấm công', roles: ['admin', 'manager', 'accountant'] },
+            { id: 'leave-requests', label: 'Xin nghỉ/Xin muộn', roles: ['admin', 'manager', 'accountant', 'sale', 'technician'] },
             { id: 'kpi', label: 'KPI', roles: ['admin', 'manager'] },
-            { id: 'salary', label: 'Lương', roles: ['admin', 'manager', 'accountant'] },
-            { id: 'leave-requests', label: 'Xin nghỉ / muộn', roles: ['admin', 'manager', 'accountant', 'sale', 'technician'] }
+            { id: 'commissions', label: 'Bảng hoa hồng', roles: ['admin', 'manager', 'accountant'] },
+            { id: 'salary-advances', label: 'Ứng lương', roles: ['admin', 'manager', 'accountant'] },
+            { id: 'violations', label: 'Vi phạm/Thưởng', roles: ['admin', 'manager', 'accountant'] },
+            { id: 'salary', label: 'Bảng lương', roles: ['admin', 'manager', 'accountant'] },
+            { id: 'employee-settings', label: 'Thiết lập nhân viên', roles: ['admin', 'manager'] }
         ]
     },
     {

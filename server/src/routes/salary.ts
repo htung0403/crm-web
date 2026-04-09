@@ -17,7 +17,7 @@ router.get('/', authenticate, requireAccountant, async (req: AuthenticatedReques
             .from('salary_records')
             .select(`
         *,
-        user:users!salary_records_user_id_fkey(id, name, email, avatar, department, role)
+        user:users!salary_records_user_id_fkey(id, name, email, avatar, department, role, employee_code)
       `)
             .eq('month', currentMonth)
             .eq('year', currentYear)
@@ -112,7 +112,18 @@ router.get('/user/:userId', authenticate, async (req: AuthenticatedRequest, res,
     }
 });
 
-// Calculate salary (tính lương cho 1 nhân viên)
+// ====================================================================
+// Calculate salary (CÔNG THỨC MỚI)
+// ====================================================================
+// LƯƠNG THỰC NHẬN = Lương cơ bản
+//   + Làm thêm giờ (overtime_pay)
+//   + Hoa hồng (service + product + referral)
+//   + KPI Bonus
+//   + Thưởng (từ violations_rewards type=reward)
+//   − BHXH + BHYT + Thuế TNCN
+//   − Ứng lương (từ salary_advances status=approved)
+//   − Phạt vi phạm (từ violations_rewards type=violation)
+// ====================================================================
 router.post('/calculate', authenticate, requireAccountant, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { user_id, month, year } = req.body;
@@ -121,7 +132,7 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
             throw new ApiError('Thiếu thông tin bắt buộc', 400);
         }
 
-        // Lấy thông tin user
+        // ── 1. Lấy thông tin user ────────────────────────────────
         const { data: user, error: userError } = await supabaseAdmin
             .from('users')
             .select('id, name, email, avatar, role, department, base_salary, hourly_rate')
@@ -132,32 +143,77 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
             throw new ApiError('Không tìm thấy nhân viên', 404);
         }
 
-        // Tính hoa hồng từ invoices đã thanh toán trong tháng
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
         const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+        const baseSalary = user.base_salary || 15000000;
+        const hourlyRate = user.hourly_rate || Math.floor(baseSalary / 176);
 
-        // Get commissions from commissions table (includes V2 technician commissions)
-        let totalCommission = 0;
+        // ── 2. Tính giờ công từ TIMESHEETS ───────────────────────
+        let totalHours = 176; // Default 22 days * 8 hours
+        let overtimeHours = 0;
         try {
-            const { data: commissions } = await supabaseAdmin
-                .from('commissions')
-                .select('amount')
+            // Query timesheets table (new schema: check_in, check_out, schedule_date)
+            const { data: timesheets } = await supabaseAdmin
+                .from('timesheets')
+                .select('check_in, check_out, status, schedule_date')
                 .eq('user_id', user_id)
-                .in('status', ['pending', 'approved']) // Include pending V2 commissions
-                .gte('created_at', startDate)
-                .lte('created_at', endDate + 'T23:59:59');
-            totalCommission = commissions?.reduce((sum, c) => sum + (c.amount || 0), 0) || 0;
-            console.log(`[Salary] User ${user_id} - Commissions from table: ${totalCommission}`);
+                .gte('schedule_date', startDate)
+                .lte('schedule_date', endDate);
+
+            if (timesheets && timesheets.length > 0) {
+                let workedHours = 0;
+                for (const t of timesheets) {
+                    if (t.check_in && t.check_out && t.status !== 'day_off') {
+                        const checkIn = new Date(t.check_in);
+                        const checkOut = new Date(t.check_out);
+                        const hours = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60);
+                        workedHours += Math.min(hours, 12); // Cap at 12h per day
+                    }
+                }
+                totalHours = Math.round(workedHours * 100) / 100;
+                // Overtime = anything above 8h * working days
+                const standardDays = timesheets.filter(t => t.status !== 'day_off').length;
+                const standardHours = standardDays * 8;
+                overtimeHours = Math.max(0, Math.round((totalHours - standardHours) * 100) / 100);
+            }
         } catch (e) {
-            console.log('Commissions table may not exist, using 0');
+            console.log('[Salary] Timesheets table error, using defaults');
         }
 
-        // Calculate commission from order_items (OPTIMIZED)
-        let salesCommission = 0;
-        let techCommission = 0;
+        const hourlyWage = Math.round(totalHours * hourlyRate);
+        const overtimePay = Math.round(overtimeHours * hourlyRate * 1.5);
+
+        // ── 3. Tính HOA HỒNG từ orders ──────────────────────────
+        let serviceCommission = 0;
+        let productCommission = 0;
+        let referralCommission = 0;
 
         try {
-            // For sales: get commission from orders where user is sales_id
+            // Commission from commissions table
+            const { data: commissions } = await supabaseAdmin
+                .from('commissions')
+                .select('amount, commission_type')
+                .eq('user_id', user_id)
+                .in('status', ['pending', 'approved'])
+                .gte('created_at', startDate)
+                .lte('created_at', endDate + 'T23:59:59');
+
+            if (commissions) {
+                for (const c of commissions) {
+                    const amt = c.amount || 0;
+                    if (c.commission_type === 'referral') {
+                        referralCommission += amt;
+                    } else {
+                        serviceCommission += amt;
+                    }
+                }
+            }
+        } catch (e) {
+            console.log('[Salary] Commissions table may not exist');
+        }
+
+        try {
+            // Sales commission from order_items
             const { data: salesOrders } = await supabaseAdmin
                 .from('orders')
                 .select('id')
@@ -170,14 +226,22 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
                 const orderIds = salesOrders.map(o => o.id);
                 const { data: salesItems } = await supabaseAdmin
                     .from('order_items')
-                    .select('commission_sale_amount')
+                    .select('commission_sale_amount, item_type')
                     .in('order_id', orderIds);
 
-                salesCommission = salesItems?.reduce((sum, item) =>
-                    sum + (item.commission_sale_amount || 0), 0) || 0;
+                if (salesItems) {
+                    for (const item of salesItems) {
+                        const amt = item.commission_sale_amount || 0;
+                        if (item.item_type === 'product') {
+                            productCommission += amt;
+                        } else {
+                            serviceCommission += amt;
+                        }
+                    }
+                }
             }
 
-            // For technician: get commission from completed order_items where user is technician_id
+            // Technician commission from order_items
             const { data: completedOrders } = await supabaseAdmin
                 .from('orders')
                 .select('id')
@@ -193,55 +257,111 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
                     .eq('technician_id', user_id)
                     .in('order_id', completedOrderIds);
 
-                techCommission = techItems?.reduce((sum, item) =>
-                    sum + (item.commission_tech_amount || 0), 0) || 0;
+                if (techItems) {
+                    serviceCommission += techItems.reduce((sum, item) => sum + (item.commission_tech_amount || 0), 0);
+                }
             }
         } catch (e) {
-            console.log('Error calculating commission from order_items:', e);
+            console.log('[Salary] Error calculating commission from order_items:', e);
         }
 
-        // Total commission = legacy commissions + sales commission + tech commission
-        totalCommission += salesCommission + techCommission;
+        const totalCommission = serviceCommission + productCommission + referralCommission;
 
-        // Try to get timesheets (table may not exist)
-        let totalHours = 176; // Default 22 days * 8 hours
-        let overtimeHours = 0;
+        // ── 4. Tính KPI BONUS từ kpi table ──────────────────────
+        let kpiAchievement = 0;
+        let kpiBonus = 0;
         try {
-            const { data: timesheets } = await supabaseAdmin
-                .from('timesheets')
-                .select('hours_worked, overtime_hours')
+            const { data: kpis } = await supabaseAdmin
+                .from('kpi')
+                .select('achievement_rate, target, actual')
                 .eq('user_id', user_id)
-                .gte('work_date', startDate)
-                .lte('work_date', endDate);
+                .eq('month', month)
+                .eq('year', year);
 
-            if (timesheets && timesheets.length > 0) {
-                totalHours = timesheets.reduce((sum, t) => sum + (t.hours_worked || 0), 0);
-                overtimeHours = timesheets.reduce((sum, t) => sum + (t.overtime_hours || 0), 0);
+            if (kpis && kpis.length > 0) {
+                // Average achievement rate across all KPI types
+                kpiAchievement = Math.round(
+                    kpis.reduce((sum, k) => sum + (k.achievement_rate || 0), 0) / kpis.length
+                );
             }
+
+            // KPI bonus tiers
+            if (kpiAchievement >= 120) kpiBonus = 3000000;
+            else if (kpiAchievement >= 100) kpiBonus = 2000000;
+            else if (kpiAchievement >= 90) kpiBonus = 1000000;
+            else if (kpiAchievement >= 80) kpiBonus = 500000;
+            else kpiBonus = 0;
         } catch (e) {
-            console.log('Timesheets table may not exist, using defaults');
+            console.log('[Salary] KPI table may not exist');
         }
 
-        // Tính lương
-        const baseSalary = user.base_salary || 15000000; // Default 15M
-        const hourlyRate = user.hourly_rate || Math.floor(baseSalary / 176);
-        const hourlyWage = totalHours * hourlyRate;
-        const overtimePay = overtimeHours * hourlyRate * 1.5;
+        // ── 5. Tính THƯỞNG / PHẠT từ violations_rewards ─────────
+        let totalRewards = 0;
+        let totalViolations = 0;
+        try {
+            const { data: vrRecords } = await supabaseAdmin
+                .from('violations_rewards')
+                .select('type, amount')
+                .eq('user_id', user_id)
+                .eq('month', month)
+                .eq('year', year);
 
-        // Calculate KPI achievement (mock for now, can be enhanced later)
-        const kpiAchievement = 85 + Math.floor(Math.random() * 20);
-        const bonus = kpiAchievement >= 100 ? 2000000 : kpiAchievement >= 90 ? 1000000 : kpiAchievement >= 80 ? 500000 : 0;
+            if (vrRecords) {
+                for (const r of vrRecords) {
+                    if (r.type === 'reward') {
+                        totalRewards += Number(r.amount);
+                    } else {
+                        totalViolations += Number(r.amount);
+                    }
+                }
+            }
+        } catch (e) {
+            console.log('[Salary] violations_rewards table may not exist');
+        }
 
-        // Calculate deductions
-        const grossSalary = hourlyWage + overtimePay + totalCommission + bonus;
-        const socialInsurance = Math.floor(grossSalary * 0.08);
-        const healthInsurance = Math.floor(grossSalary * 0.015);
-        const personalTax = grossSalary > 11000000 ? Math.floor((grossSalary - 11000000) * 0.05) : 0;
-        const deduction = socialInsurance + healthInsurance + personalTax;
+        // ── 6. Tính ỨNG LƯƠNG từ salary_advances ─────────────────
+        let totalAdvances = 0;
+        try {
+            const { data: advances } = await supabaseAdmin
+                .from('salary_advances')
+                .select('amount')
+                .eq('user_id', user_id)
+                .eq('month', month)
+                .eq('year', year)
+                .eq('status', 'approved');
 
-        const netSalary = grossSalary - deduction;
+            if (advances) {
+                totalAdvances = advances.reduce((sum, a) => sum + Number(a.amount), 0);
+            }
+        } catch (e) {
+            console.log('[Salary] salary_advances table may not exist');
+        }
 
-        // Try to check for existing record
+        // ── 7. Tổng hợp: GROSS SALARY ───────────────────────────
+        const totalBonus = kpiBonus + totalRewards;
+        const grossSalary = baseSalary + overtimePay + totalCommission + totalBonus;
+
+        // ── 8. Tính KHẤU TRỪ ─────────────────────────────────────
+        const socialInsurance = Math.floor(baseSalary * 0.08);   // 8% lương cơ bản
+        const healthInsurance = Math.floor(baseSalary * 0.015);  // 1.5% lương cơ bản
+        const taxableIncome = grossSalary - 11000000;            // Giảm trừ gia cảnh 11M
+        const personalTax = taxableIncome > 0 ? Math.floor(taxableIncome * 0.05) : 0;
+
+        const totalDeduction = socialInsurance + healthInsurance + personalTax + totalAdvances + totalViolations;
+
+        // ── 9. NET SALARY ────────────────────────────────────────
+        const netSalary = grossSalary - totalDeduction;
+
+        console.log(`[Salary] User ${user.name} (${user_id}) - ${month}/${year}:`);
+        console.log(`  Base: ${baseSalary}, Overtime: ${overtimePay}`);
+        console.log(`  Commission: ${totalCommission} (service: ${serviceCommission}, product: ${productCommission}, referral: ${referralCommission})`);
+        console.log(`  KPI: ${kpiAchievement}% → bonus: ${kpiBonus}`);
+        console.log(`  Rewards: ${totalRewards}, Violations: ${totalViolations}`);
+        console.log(`  Advances: ${totalAdvances}`);
+        console.log(`  Insurance: ${socialInsurance + healthInsurance}, Tax: ${personalTax}`);
+        console.log(`  Gross: ${grossSalary} → Net: ${netSalary}`);
+
+        // ── 10. Upsert salary record ─────────────────────────────
         let existing = null;
         try {
             const { data } = await supabaseAdmin
@@ -266,13 +386,23 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
             overtime_pay: overtimePay,
             total_hours: totalHours,
             overtime_hours: overtimeHours,
+            // Commission breakdown
+            service_commission: serviceCommission,
+            product_commission: productCommission,
+            referral_commission: referralCommission,
             commission: totalCommission,
+            // KPI
             kpi_achievement: kpiAchievement,
-            bonus,
+            // Bonus = KPI bonus + rewards
+            bonus: totalBonus,
+            // Deductions breakdown
             social_insurance: socialInsurance,
             health_insurance: healthInsurance,
             personal_tax: personalTax,
-            deduction,
+            advances: totalAdvances,
+            // Violations as separate field
+            deduction: totalDeduction,
+            // Totals
             gross_salary: grossSalary,
             net_salary: netSalary,
             status: 'draft',
@@ -285,7 +415,7 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
                     .from('salary_records')
                     .update({ ...salaryData, updated_at: new Date().toISOString() })
                     .eq('id', existing.id)
-                    .select(`*, user:users!salary_records_user_id_fkey(id, name, email, avatar, role, department)`)
+                    .select(`*, user:users!salary_records_user_id_fkey(id, name, email, avatar, role, department, employee_code)`)
                     .single();
 
                 if (error) throw new ApiError('Lỗi khi cập nhật lương: ' + error.message, 500);
@@ -294,7 +424,7 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
                 const { data, error } = await supabaseAdmin
                     .from('salary_records')
                     .insert({ ...salaryData, created_by: req.user!.id })
-                    .select(`*, user:users!salary_records_user_id_fkey(id, name, email, avatar, role, department)`)
+                    .select(`*, user:users!salary_records_user_id_fkey(id, name, email, avatar, role, department, employee_code)`)
                     .single();
 
                 if (error) throw new ApiError('Lỗi khi tạo bản ghi lương: ' + error.message, 500);
@@ -302,9 +432,28 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
             }
         } catch (e: any) {
             if (e.message?.includes('does not exist')) {
-                throw new ApiError('Bảng salary_records chưa được tạo. Vui lòng chạy migration file: 20260127_salary_system.sql', 500);
+                throw new ApiError('Bảng salary_records chưa được tạo. Vui lòng chạy migration.', 500);
             }
             throw e;
+        }
+
+        // ── 11. Mark advances as deducted ────────────────────────
+        if (totalAdvances > 0 && salary) {
+            try {
+                await supabaseAdmin
+                    .from('salary_advances')
+                    .update({
+                        status: 'deducted',
+                        deducted_at: new Date().toISOString(),
+                        salary_record_id: salary.id,
+                    })
+                    .eq('user_id', user_id)
+                    .eq('month', month)
+                    .eq('year', year)
+                    .eq('status', 'approved');
+            } catch (e) {
+                console.log('[Salary] Error marking advances as deducted:', e);
+            }
         }
 
         res.json({
@@ -413,6 +562,7 @@ router.post('/send-payroll', authenticate, requireManager, async (req: Authentic
             kpi_achievement: s.kpi_achievement,
             bonus: s.bonus,
             deduction: s.deduction,
+            advances: s.advances,
             gross_salary: s.gross_salary,
             net_salary: s.net_salary,
             status: s.status,

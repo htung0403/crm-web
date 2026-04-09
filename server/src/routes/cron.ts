@@ -72,4 +72,85 @@ router.get('/test-webhook', verifyCronSecret, async (req: Request, res: Response
     }
 });
 
+/**
+ * GET /api/cron/auto-payroll
+ * Check if today is the last Sunday of the month, create payroll batch if so
+ * Should be called daily via external cron
+ */
+router.get('/auto-payroll', verifyCronSecret, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        console.log('[Cron] Auto-Payroll Check Triggered');
+
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = now.getMonth() + 1;
+
+        // Calculate last Sunday of current month
+        const lastDay = new Date(year, month, 0);
+        const dayOfWeek = lastDay.getDay();
+        const lastSunday = new Date(lastDay);
+        lastSunday.setDate(lastDay.getDate() - (dayOfWeek === 0 ? 0 : dayOfWeek));
+
+        const isLastSunday = now.getDate() === lastSunday.getDate();
+
+        if (!isLastSunday) {
+            return res.json({
+                status: 'skipped',
+                message: `Hôm nay (${now.toISOString().split('T')[0]}) không phải chủ nhật cuối tháng (${lastSunday.toISOString().split('T')[0]})`,
+            });
+        }
+
+        // Import supabase and create batch
+        const { supabaseAdmin } = await import('../config/supabase.js');
+
+        // Check if batch already exists
+        const { data: existing } = await supabaseAdmin
+            .from('payroll_batches')
+            .select('id, code')
+            .eq('month', month)
+            .eq('year', year)
+            .single();
+
+        if (existing) {
+            return res.json({
+                status: 'already_exists',
+                message: `Bảng lương tháng ${month}/${year} đã tồn tại: ${existing.code}`,
+            });
+        }
+
+        // Create new batch
+        const lastDayNum = new Date(year, month, 0).getDate();
+        const { data: batch, error } = await supabaseAdmin
+            .from('payroll_batches')
+            .insert({
+                code: '',
+                name: `Bảng lương tháng ${month}/${year}`,
+                month,
+                year,
+                pay_period: 'Hàng tháng',
+                work_period_start: `${year}-${String(month).padStart(2, '0')}-01`,
+                work_period_end: `${year}-${String(month).padStart(2, '0')}-${lastDayNum}`,
+                status: 'pending',
+                scope: 'Tất cả nhân viên',
+            })
+            .select()
+            .single();
+
+        if (error) {
+            console.error('[Cron] Error creating payroll batch:', error);
+            throw error;
+        }
+
+        console.log(`[Cron] Auto-created payroll batch: ${batch.code} for ${month}/${year}`);
+
+        res.json({
+            status: 'success',
+            message: `Tự động tạo bảng lương tháng ${month}/${year}: ${batch.code}`,
+            data: { batch },
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
 export { router as cronRouter };

@@ -1,6 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Edit, Trash2, Eye, Phone, Mail, Shield, Calendar, UserPlus, Loader2, ShoppingCart, FileText, ExternalLink } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Eye, Phone, Mail, Shield, Calendar, UserPlus, Loader2, ShoppingCart, FileText, ExternalLink, LayoutGrid } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Checkbox } from '@/components/ui/checkbox';
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,10 +13,15 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Separator } from '@/components/ui/separator';
+
+import { EmployeeFormDialog } from '@/components/employees/EmployeeFormDialog';
+
 import { formatCurrency } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useUsers } from '@/hooks/useUsers';
 import { useDepartments } from '@/hooks/useDepartments';
+import { useJobTitles } from '@/hooks/useJobTitles';
 import api from '@/lib/api';
 import type { User, UserRole } from '@/types';
 import { OrderDetailDialog } from '@/components/orders/OrderDetailDialog';
@@ -35,8 +43,9 @@ const roleLabels: Record<UserRole, string> = {
     admin: 'Admin',
     manager: 'Quản lý',
     accountant: 'Kế toán',
-    sale: 'Sale',
-    technician: 'Kỹ thuật',
+    sale: 'Nhân viên bán hàng',
+    technician: 'Nhân viên làm phục vụ',
+    cashier: 'Thu ngân',
 };
 
 const statusLabels = {
@@ -46,276 +55,13 @@ const statusLabels = {
 };
 
 const roleOptions: { value: UserRole; label: string }[] = [
-    { value: 'admin', label: 'Admin' },
-    { value: 'manager', label: 'Quản lý' },
     { value: 'accountant', label: 'Kế toán' },
-    { value: 'sale', label: 'Sale' },
-    { value: 'technician', label: 'Kỹ thuật' },
+    { value: 'sale', label: 'Nhân viên bán hàng' },
+    { value: 'technician', label: 'Nhân viên làm phục vụ' },
+    { value: 'manager', label: 'Quản lý' },
+    { value: 'cashier', label: 'Thu ngân' },
 ];
 
-// Employee Form Dialog
-function EmployeeFormDialog({
-    open,
-    onClose,
-    employee,
-    departments,
-    onSubmit
-}: {
-    open: boolean;
-    onClose: () => void;
-    employee?: Employee | null;
-    departments: { id: string; name: string }[];
-    onSubmit: (data: any) => Promise<void>;
-}) {
-    const [name, setName] = useState('');
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [phone, setPhone] = useState('');
-    const [role, setRole] = useState<UserRole>('sale');
-    const [department, setDepartment] = useState('');
-    const [salary, setSalary] = useState(0);
-    const [commission, setCommission] = useState(0);
-    const [bankAccount, setBankAccount] = useState('');
-    const [bankName, setBankName] = useState('');
-    const [telegramChatId, setTelegramChatId] = useState('');
-    const [joinDate, setJoinDate] = useState(new Date().toISOString().split('T')[0]);
-    const [submitting, setSubmitting] = useState(false);
-
-    const isEditing = !!employee;
-
-    // Reset form when employee changes
-    useEffect(() => {
-        if (employee) {
-            setName(employee.name || '');
-            setEmail(employee.email || '');
-            setPhone(employee.phone || '');
-            setRole(employee.role || 'sale');
-            // Keep existing department for technicians, auto-set for others
-            if (employee.role === 'technician') {
-                setDepartment(employee.department || '');
-            } else {
-                // Auto-set department based on role for non-technicians
-                const roleDepartmentMap: Record<string, string> = {
-                    admin: 'Admin',
-                    manager: 'Quản lý',
-                    accountant: 'Kế toán',
-                    sale: 'Sale',
-                };
-                setDepartment(roleDepartmentMap[employee.role] || employee.department || '');
-            }
-            setSalary(employee.salary || 0);
-            setCommission(employee.commission || 0);
-            setBankAccount(employee.bankAccount || '');
-            setBankName(employee.bankName || '');
-            setTelegramChatId(employee.telegramChatId || '');
-            setJoinDate(employee.joinDate || new Date().toISOString().split('T')[0]);
-            setPassword(''); // Don't show password for editing
-        } else {
-            setName('');
-            setEmail('');
-            setPassword('');
-            setPhone('');
-            setRole('sale');
-            setDepartment('Sale'); // Default department for sale role
-            setSalary(0);
-            setCommission(0);
-            setBankAccount('');
-            setBankName('');
-            setTelegramChatId('');
-            setJoinDate(new Date().toISOString().split('T')[0]);
-        }
-    }, [employee, open]);
-
-    const handleSubmit = async () => {
-        if (!name || !email || !phone) {
-            toast.error('Vui lòng điền đầy đủ thông tin bắt buộc');
-            return;
-        }
-
-        // Password required for new employees
-        if (!isEditing && (!password || password.length < 6)) {
-            toast.error('Mật khẩu phải có ít nhất 6 ký tự');
-            return;
-        }
-
-        setSubmitting(true);
-        try {
-            const submitData: any = {
-                name,
-                email,
-                phone,
-                role,
-                department: department || undefined,
-                salary,
-                commission,
-                bankAccount,
-                bankName,
-                telegramChatId,
-                joinDate,
-                status: employee?.status || 'active'
-            };
-
-            // Only include password for new employees
-            if (!isEditing && password) {
-                submitData.password = password;
-            }
-
-            await onSubmit(submitData);
-            onClose();
-        } catch (error) {
-            console.error('Error saving employee:', error);
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    return (
-        <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                        <UserPlus className="h-5 w-5 text-primary" />
-                        {employee ? 'Sửa thông tin nhân viên' : 'Thêm nhân viên mới'}
-                    </DialogTitle>
-                    <DialogDescription>Nhập thông tin nhân viên</DialogDescription>
-                </DialogHeader>
-
-                <div className="space-y-4 py-4">
-                    {/* Basic Info */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="col-span-2 space-y-2">
-                            <Label>Họ và tên *</Label>
-                            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nhập họ và tên" />
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Email *</Label>
-                            <Input
-                                type="email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                placeholder="email@company.com"
-                                disabled={isEditing} // Can't change email for existing users
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Số điện thoại *</Label>
-                            <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0912345678" />
-                        </div>
-                        {!isEditing && (
-                            <div className="col-span-2 space-y-2">
-                                <Label>Mật khẩu * (tối thiểu 6 ký tự)</Label>
-                                <Input
-                                    type="password"
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    placeholder="Nhập mật khẩu cho tài khoản"
-                                />
-                                <p className="text-xs text-muted-foreground">
-                                    Nhân viên sẽ dùng email và mật khẩu này để đăng nhập
-                                </p>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Role & Department */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <Label>Vai trò *</Label>
-                            <Select value={role} onValueChange={(v: UserRole) => {
-                                setRole(v);
-                                // Auto-set department based on role
-                                if (v === 'admin') {
-                                    setDepartment('Admin');
-                                } else if (v === 'manager') {
-                                    setDepartment('Quản lý');
-                                } else if (v === 'accountant') {
-                                    setDepartment('Kế toán');
-                                } else if (v === 'sale') {
-                                    setDepartment('Sale');
-                                } else if (v === 'technician') {
-                                    setDepartment(''); // Technician can choose department
-                                }
-                            }}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {roleOptions.map(r => (
-                                        <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        {role === 'technician' ? (
-                            <div className="space-y-2">
-                                <Label>Phòng ban kỹ thuật *</Label>
-                                <Select value={department || 'none'} onValueChange={(v) => setDepartment(v === 'none' ? '' : v)}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Chọn phòng ban" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value="none">Chọn phòng ban</SelectItem>
-                                        {departments.map(d => (
-                                            <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        ) : (
-                            <div className="space-y-2">
-                                <Label>Phòng ban</Label>
-                                <Input value={department} disabled className="bg-muted" />
-                                <p className="text-xs text-muted-foreground">Tự động theo vai trò</p>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Salary & Commission */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <Label>Lương cơ bản</Label>
-                            <Input type="number" value={salary} onChange={(e) => setSalary(Number(e.target.value))} />
-                            {salary > 0 && <p className="text-xs text-muted-foreground">{formatCurrency(salary)}</p>}
-                        </div>
-                        <div className="space-y-2">
-                            <Label>% Hoa hồng mặc định</Label>
-                            <Input type="number" min="0" max="100" value={commission} onChange={(e) => setCommission(Number(e.target.value))} />
-                        </div>
-                    </div>
-
-                    {/* Bank Info */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                            <Label>Ngân hàng</Label>
-                            <Input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="Tên ngân hàng" />
-                        </div>
-                        <div className="space-y-2">
-                            <Label>Số tài khoản</Label>
-                            <Input value={bankAccount} onChange={(e) => setBankAccount(e.target.value)} placeholder="Số tài khoản" />
-                        </div>
-                        <div className="col-span-2 space-y-2">
-                            <Label>Telegram Chat ID (Dùng cho n8n thông báo)</Label>
-                            <Input value={telegramChatId} onChange={(e) => setTelegramChatId(e.target.value)} placeholder="VD: 123456789" />
-                        </div>
-                    </div>
-
-                    {/* Join Date */}
-                    <div className="space-y-2">
-                        <Label>Ngày vào làm</Label>
-                        <Input type="date" value={joinDate} onChange={(e) => setJoinDate(e.target.value)} />
-                    </div>
-                </div>
-
-                <DialogFooter>
-                    <Button variant="outline" onClick={onClose}>Huỷ</Button>
-                    <Button onClick={handleSubmit} disabled={submitting}>
-                        {submitting ? 'Đang lưu...' : 'Lưu'}
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
-    );
-}
 
 // Order interface for employee orders
 interface EmployeeOrder {
@@ -586,20 +332,89 @@ function EmployeeDetailDialog({
 export function EmployeesPage() {
     const navigate = useNavigate();
     const { users, loading, fetchUsers, createUser, updateUser, deleteUser } = useUsers();
-    const { departments, fetchDepartments } = useDepartments();
+    const { departments, fetchDepartments, createDepartment } = useDepartments();
+    const { jobTitles, fetchJobTitles, createJobTitle } = useJobTitles();
     const [searchTerm, setSearchTerm] = useState('');
     const [roleFilter, setRoleFilter] = useState<string>('all');
-    const [statusFilter, setStatusFilter] = useState<string>('all');
+    const [statusFilter, setStatusFilter] = useState<string>('active');
     const [showForm, setShowForm] = useState(false);
     const [showDetail, setShowDetail] = useState(false);
     const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+    const [showDeptDialog, setShowDeptDialog] = useState(false);
+    const [showTitleDialog, setShowTitleDialog] = useState(false);
+    const [deptForm, setDeptForm] = useState({ name: '', description: '', status: 'active' as 'active' | 'inactive' });
+    const [titleForm, setTitleForm] = useState({ name: '', description: '', status: 'active' as 'active' | 'inactive' });
+    const [savingDept, setSavingDept] = useState(false);
+    const [savingTitle, setSavingTitle] = useState(false);
+    const [columnVisibility, setColumnVisibility] = useState({
+        avatar: true,
+        code: true,
+        timekeepingCode: true,
+        name: true,
+        phone: true,
+        idCard: true,
+        debt: true,
+        notes: true,
+        mobile: false,
+        birthday: false,
+        gender: false,
+        email: false,
+        facebook: false,
+        address: false,
+        department: false,
+        role: false,
+        joinDate: false,
+        account: false,
+    });
+
 
     // Fetch data on mount
     useEffect(() => {
         fetchUsers();
         fetchDepartments();
+        fetchJobTitles();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    // Department dialog handlers
+    const handleSaveDepartment = async () => {
+        if (!deptForm.name.trim()) {
+            toast.error('Vui lòng nhập tên phòng ban');
+            return;
+        }
+        setSavingDept(true);
+        try {
+            await createDepartment({ name: deptForm.name, description: deptForm.description, status: deptForm.status });
+            toast.success('Đã tạo phòng ban mới!');
+            setShowDeptDialog(false);
+            setDeptForm({ name: '', description: '', status: 'active' });
+            fetchDepartments();
+        } catch (error) {
+            toast.error('Lỗi khi tạo phòng ban');
+        } finally {
+            setSavingDept(false);
+        }
+    };
+
+    // Job title dialog handlers
+    const handleSaveJobTitle = async () => {
+        if (!titleForm.name.trim()) {
+            toast.error('Vui lòng nhập tên chức danh');
+            return;
+        }
+        setSavingTitle(true);
+        try {
+            await createJobTitle({ name: titleForm.name, description: titleForm.description, status: titleForm.status });
+            toast.success('Đã tạo chức danh mới!');
+            setShowTitleDialog(false);
+            setTitleForm({ name: '', description: '', status: 'active' });
+            fetchJobTitles();
+        } catch (error) {
+            toast.error('Lỗi khi tạo chức danh');
+        } finally {
+            setSavingTitle(false);
+        }
+    };
 
     // Map users to employees
     const employees: Employee[] = users.map(user => ({
@@ -675,249 +490,301 @@ export function EmployeesPage() {
     }
 
     return (
-        <div className="space-y-6 animate-fade-in">
-            {/* Page Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-foreground">Danh sách nhân viên</h1>
-                    <p className="text-muted-foreground">Quản lý thông tin nhân viên trong công ty</p>
-                </div>
-                <Button onClick={() => { setSelectedEmployee(null); setShowForm(true); }}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Thêm nhân viên
-                </Button>
-            </div>
+        <div className="flex h-[calc(100vh-6rem)] bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            {/* Sidebar / Filters (Left Panel) */}
+            <div className="w-[280px] border-r border-gray-200 bg-[#fbfcfd] flex flex-col p-5 flex-shrink-0">
+                <h1 className="text-[17px] font-bold mb-7 text-gray-900 tracking-tight">Danh sách nhân viên</h1>
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Card className="bg-blue-50 border-0">
-                    <CardContent className="p-4">
-                        <p className="text-sm text-muted-foreground">Tổng nhân viên</p>
-                        <p className="text-2xl font-bold text-blue-600">{totalEmployees}</p>
-                    </CardContent>
-                </Card>
-                <Card className="bg-emerald-50 border-0">
-                    <CardContent className="p-4">
-                        <p className="text-sm text-muted-foreground">Đang làm việc</p>
-                        <p className="text-2xl font-bold text-emerald-600">{activeEmployees}</p>
-                    </CardContent>
-                </Card>
-                <Card className="bg-amber-50 border-0">
-                    <CardContent className="p-4">
-                        <p className="text-sm text-muted-foreground">Đang nghỉ phép</p>
-                        <p className="text-2xl font-bold text-amber-600">{onLeaveEmployees}</p>
-                    </CardContent>
-                </Card>
-                <Card className="bg-purple-50 border-0">
-                    <CardContent className="p-4">
-                        <p className="text-sm text-muted-foreground">Tổng lương/tháng</p>
-                        <p className="text-2xl font-bold text-purple-600">{formatCurrency(totalSalary)}</p>
-                    </CardContent>
-                </Card>
-            </div>
+                <div className="space-y-8">
+                    <div className="space-y-4">
+                        <h3 className="text-[13px] font-bold text-gray-700">Trạng thái nhân viên</h3>
+                        <div className="space-y-3.5 mt-2">
+                            <label className="flex items-center gap-3 cursor-pointer">
+                                <input 
+                                    type="radio" 
+                                    className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 cursor-pointer" 
+                                    name="status" 
+                                    value="active" 
+                                    checked={statusFilter === 'active'} 
+                                    onChange={() => setStatusFilter('active')} 
+                                />
+                                <span className={statusFilter === 'active' ? "text-sm text-blue-600 font-medium" : "text-sm text-gray-700"}>Đang làm việc</span>
+                            </label>
+                            <label className="flex items-center gap-3 cursor-pointer">
+                                <input 
+                                    type="radio" 
+                                    className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 cursor-pointer" 
+                                    name="status" 
+                                    value="inactive" 
+                                    checked={statusFilter === 'inactive'}
+                                    onChange={() => setStatusFilter('inactive')} 
+                                />
+                                <span className={statusFilter === 'inactive' ? "text-sm text-blue-600 font-medium" : "text-sm text-gray-700"}>Đã nghỉ</span>
+                            </label>
+                        </div>
+                    </div>
 
-            {/* Filters */}
-            <Card>
-                <CardContent className="p-4">
-                    <div className="flex flex-col sm:flex-row gap-3">
-                        <div className="relative flex-1">
-                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                            <Input
-                                placeholder="Tìm theo tên, email, SĐT..."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="pl-9"
-                            />
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-[13px] font-bold text-gray-700">Phòng ban</h3>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full hover:bg-gray-200" onClick={() => { setDeptForm({ name: '', description: '', status: 'active' }); setShowDeptDialog(true); }}>
+                                <Plus className="h-3.5 w-3.5 text-gray-600" />
+                            </Button>
+                        </div>
+                        <Select>
+                            <SelectTrigger className="w-full h-[38px] bg-white border-gray-200 text-[13px] shadow-sm rounded-lg text-gray-500">
+                                <SelectValue placeholder="Chọn phòng ban" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {departments.map(d => (
+                                    <SelectItem key={d.id} value={d.id} className="text-[13px]">{d.name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                            <h3 className="text-[13px] font-bold text-gray-700">Chức danh</h3>
+                            <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full hover:bg-gray-200" onClick={() => { setTitleForm({ name: '', description: '', status: 'active' }); setShowTitleDialog(true); }}>
+                                <Plus className="h-3.5 w-3.5 text-gray-600" />
+                            </Button>
                         </div>
                         <Select value={roleFilter} onValueChange={setRoleFilter}>
-                            <SelectTrigger className="w-full sm:w-40">
-                                <SelectValue placeholder="Vai trò" />
+                            <SelectTrigger className="w-full h-[38px] bg-white border-gray-200 text-[13px] shadow-sm rounded-lg text-gray-500">
+                                <SelectValue placeholder="Chọn chức danh" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="all">Tất cả vai trò</SelectItem>
-                                {roleOptions.map(r => (
-                                    <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                                <SelectItem value="all" className="text-[13px]">Chọn chức danh</SelectItem>
+                                {jobTitles.map(jt => (
+                                    <SelectItem key={jt.id} value={jt.id} className="text-[13px]">{jt.name}</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
-                        <Select value={statusFilter} onValueChange={setStatusFilter}>
-                            <SelectTrigger className="w-full sm:w-40">
-                                <SelectValue placeholder="Trạng thái" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Tất cả</SelectItem>
-                                <SelectItem value="active">Đang làm</SelectItem>
-                                <SelectItem value="onleave">Nghỉ phép</SelectItem>
-                                <SelectItem value="inactive">Nghỉ việc</SelectItem>
-                            </SelectContent>
-                        </Select>
                     </div>
-                </CardContent>
-            </Card>
+                </div>
+            </div>
 
-            {/* Employee List */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>Danh sách ({filteredEmployees.length} nhân viên)</CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                    {/* Desktop Table */}
-                    <div className="hidden md:block overflow-x-auto">
-                        <table className="w-full">
-                            <thead className="bg-muted/50 border-y">
-                                <tr>
-                                    <th className="p-3 text-left text-sm font-medium text-muted-foreground">Nhân viên</th>
-                                    <th className="p-3 text-left text-sm font-medium text-muted-foreground">Liên hệ</th>
-                                    <th className="p-3 text-left text-sm font-medium text-muted-foreground">Vai trò</th>
-                                    <th className="p-3 text-left text-sm font-medium text-muted-foreground">Phòng ban</th>
-                                    <th className="p-3 text-right text-sm font-medium text-muted-foreground">Lương</th>
-                                    <th className="p-3 text-center text-sm font-medium text-muted-foreground">Trạng thái</th>
-                                    <th className="p-3 text-right text-sm font-medium text-muted-foreground">Thao tác</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {filteredEmployees.map((emp) => (
-                                    <tr key={emp.id} className="border-b hover:bg-muted/30 transition-colors">
-                                        <td className="p-3">
-                                            <div className="flex items-center gap-3">
-                                                <Avatar className="h-10 w-10">
-                                                    <AvatarImage src={emp.avatar} />
-                                                    <AvatarFallback>{emp.name.charAt(0)}</AvatarFallback>
-                                                </Avatar>
-                                                <div>
-                                                    <p className="font-medium">{emp.name}</p>
-                                                    <p className="text-xs text-muted-foreground">Từ {emp.joinDate}</p>
-                                                </div>
-                                            </div>
-                                        </td>
-                                        <td className="p-3">
-                                            <p className="text-sm">{emp.email}</p>
-                                            <p className="text-xs text-muted-foreground">{emp.phone}</p>
-                                        </td>
-                                        <td className="p-3">
-                                            <Badge variant={
-                                                emp.role === 'admin' ? 'danger' :
-                                                    emp.role === 'manager' ? 'purple' :
-                                                        emp.role === 'sale' ? 'info' :
-                                                            emp.role === 'accountant' ? 'warning' : 'secondary'
-                                            }>
-                                                {roleLabels[emp.role]}
-                                            </Badge>
-                                        </td>
-                                        <td className="p-3 text-sm">{getDepartmentName(emp.department)}</td>
-                                        <td className="p-3 text-right">
-                                            <p className="font-semibold">{formatCurrency(emp.salary || 0)}</p>
-                                            {(emp.commission || 0) > 0 && (
-                                                <p className="text-xs text-muted-foreground">+{emp.commission}% HH</p>
-                                            )}
-                                        </td>
-                                        <td className="p-3 text-center">
-                                            <Badge variant={statusLabels[emp.status]?.variant || 'secondary'}>
-                                                {statusLabels[emp.status]?.label || emp.status}
-                                            </Badge>
-                                        </td>
-                                        <td className="p-3 text-right">
-                                            <div className="flex items-center justify-end gap-1">
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    onClick={() => navigate(`/employees/${emp.id}`)}
-                                                >
-                                                    <Eye className="h-4 w-4" />
-                                                </Button>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    onClick={() => { setSelectedEmployee(emp); setShowForm(true); }}
-                                                >
-                                                    <Edit className="h-4 w-4" />
-                                                </Button>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    className="text-red-500 hover:bg-red-50"
-                                                    onClick={() => handleDeleteEmployee(emp.id)}
-                                                >
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+            {/* Main Content (Right Panel) */}
+            <div className="flex-1 flex flex-col min-w-0 bg-white">
+                {/* Search Bar & Actions */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 border-b border-gray-100 gap-3 bg-[#fbfcfd]">
+                    <div className="flex-1 relative max-w-sm">
+                        <Search className="absolute left-3 top-1/2 -translate-y-[45%] h-[15px] w-[15px] text-gray-400" />
+                        <Input 
+                            className="w-full pl-[34px] h-[36px] border-gray-200 text-[13px] placeholder:text-gray-400 bg-white shadow-sm rounded-lg focus-visible:ring-1 focus-visible:ring-blue-500" 
+                            placeholder="Tìm theo mã, tên nhân viên" 
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
                     </div>
-
-                    {/* Mobile Card View */}
-                    <div className="md:hidden p-4 space-y-4">
-                        {filteredEmployees.map((emp) => (
-                            <div key={emp.id} className="p-4 rounded-lg border bg-card">
-                                <div className="flex items-start justify-between mb-3">
-                                    <div className="flex items-center gap-3">
-                                        <Avatar className="h-12 w-12">
-                                            <AvatarImage src={emp.avatar} />
-                                            <AvatarFallback>{emp.name.charAt(0)}</AvatarFallback>
-                                        </Avatar>
-                                        <div>
-                                            <p className="font-semibold">{emp.name}</p>
-                                            <Badge variant={
-                                                emp.role === 'manager' ? 'purple' :
-                                                    emp.role === 'sale' ? 'info' : 'secondary'
-                                            } className="mt-1">
-                                                {roleLabels[emp.role]}
-                                            </Badge>
+                    <div className="flex items-center gap-2">
+                        <Button 
+                            variant="outline" 
+                            className="h-[36px] px-3.5 text-blue-600 border border-blue-200 bg-white hover:bg-blue-50 text-[13px] font-semibold rounded-lg shadow-sm"
+                            onClick={() => { setSelectedEmployee(null); setShowForm(true); }}
+                        >
+                            <Plus className="h-4 w-4 mr-1.5" />
+                            Nhân viên
+                        </Button>
+                        <Button variant="outline" className="h-[36px] px-3.5 border-gray-200 bg-white text-gray-700 text-[13px] font-semibold rounded-lg shadow-sm hover:bg-gray-50 flex items-center">
+                            <FileText className="h-[15px] w-[15px] mr-2 text-gray-500" />
+                            Duyệt yêu cầu
+                        </Button>
+                        <Button variant="outline" size="icon" className="h-[36px] w-[36px] border-gray-200 bg-white text-gray-600 rounded-lg shadow-sm hover:bg-gray-50">
+                            <span className="leading-none pb-2 text-[18px] font-bold">...</span>
+                        </Button>
+                        <Popover>
+                            <PopoverTrigger asChild>
+                                <Button variant="outline" size="icon" className="h-[36px] w-[36px] border-gray-200 bg-white text-gray-600 rounded-lg shadow-sm hover:bg-gray-50">
+                                    <LayoutGrid className="h-[15px] w-[15px]" />
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[500px] p-4" align="end">
+                                <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+                                    {[
+                                        { id: 'avatar', label: 'Ảnh' },
+                                        { id: 'code', label: 'Mã nhân viên' },
+                                        { id: 'timekeepingCode', label: 'Mã chấm công' },
+                                        { id: 'name', label: 'Tên nhân viên' },
+                                        { id: 'phone', label: 'Số điện thoại' },
+                                        { id: 'idCard', label: 'Số CMND/CCCD' },
+                                        { id: 'debt', label: 'Nợ và tạm ứng' },
+                                        { id: 'notes', label: 'Ghi chú' },
+                                        { id: 'mobile', label: 'Thiết bị di động' },
+                                    ].map((col) => (
+                                        <div key={col.id} className="flex items-center gap-3">
+                                            <Checkbox 
+                                                id={`col-${col.id}`} 
+                                                checked={columnVisibility[col.id as keyof typeof columnVisibility]} 
+                                                onCheckedChange={(checked) => 
+                                                    setColumnVisibility(prev => ({ ...prev, [col.id]: !!checked }))
+                                                }
+                                            />
+                                            <Label htmlFor={`col-${col.id}`} className="text-[13px] font-medium text-gray-700 cursor-pointer">
+                                                {col.label}
+                                            </Label>
                                         </div>
-                                    </div>
-                                    <Badge variant={statusLabels[emp.status]?.variant || 'secondary'}>
-                                        {statusLabels[emp.status]?.label || emp.status}
-                                    </Badge>
+                                    ))}
+                                    {[
+                                        { id: 'birthday', label: 'Ngày sinh' },
+                                        { id: 'gender', label: 'Giới tính' },
+                                        { id: 'email', label: 'Email' },
+                                        { id: 'facebook', label: 'Facebook' },
+                                        { id: 'address', label: 'Địa chỉ' },
+                                        { id: 'department', label: 'Phòng ban' },
+                                        { id: 'role', label: 'Chức danh' },
+                                        { id: 'joinDate', label: 'Ngày bắt đầu làm việc' },
+                                        { id: 'account', label: 'Tài khoản đăng nhập' },
+                                    ].map((col) => (
+                                        <div key={col.id} className="flex items-center gap-3">
+                                            <Checkbox 
+                                                id={`col-${col.id}`} 
+                                                checked={columnVisibility[col.id as keyof typeof columnVisibility]} 
+                                                onCheckedChange={(checked) => 
+                                                    setColumnVisibility(prev => ({ ...prev, [col.id]: !!checked }))
+                                                }
+                                            />
+                                            <Label htmlFor={`col-${col.id}`} className="text-[13px] font-medium text-gray-700 cursor-pointer">
+                                                {col.label}
+                                            </Label>
+                                        </div>
+                                    ))}
                                 </div>
+                            </PopoverContent>
+                        </Popover>
 
-                                <div className="space-y-2 text-sm mb-3">
-                                    <p className="flex items-center gap-2 text-muted-foreground">
-                                        <Mail className="h-4 w-4" />
-                                        {emp.email}
-                                    </p>
-                                    <p className="flex items-center gap-2 text-muted-foreground">
-                                        <Phone className="h-4 w-4" />
-                                        {emp.phone}
-                                    </p>
-                                </div>
-
-                                <div className="flex items-center justify-between pt-3 border-t">
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Lương</p>
-                                        <p className="font-bold text-primary">{formatCurrency(emp.salary || 0)}</p>
-                                    </div>
-                                    <div className="flex gap-1">
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            onClick={() => navigate(`/employees/${emp.id}`)}
-                                        >
-                                            <Eye className="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            onClick={() => { setSelectedEmployee(emp); setShowForm(true); }}
-                                        >
-                                            <Edit className="h-4 w-4" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
                     </div>
+                </div>
 
-                    {filteredEmployees.length === 0 && (
-                        <div className="p-8 text-center text-muted-foreground">
-                            Không tìm thấy nhân viên nào
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
+                {/* Table Area */}
+                <div className="flex-1 overflow-auto">
+                    <table className="w-full text-left border-collapse whitespace-nowrap">
+                        <thead className="bg-[#f2f6ff] sticky top-0 z-10 box-border">
+                            <tr>
+                                <th className="px-4 py-3 font-semibold text-gray-700 w-10 border-b border-gray-100">
+                                    <input type="checkbox" className="w-[14px] h-[14px] rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
+                                </th>
+                                {columnVisibility.avatar && <th className="px-2 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 uppercase tracking-widest text-center">Ảnh</th>}
+                                {columnVisibility.code && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">MÃ NHÂN VIÊN</th>}
+                                {columnVisibility.timekeepingCode && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">MÃ CHẤM CÔNG</th>}
+                                {columnVisibility.name && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">TÊN NHÂN VIÊN</th>}
+                                {columnVisibility.phone && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">SỐ ĐIỆN THOẠI</th>}
+                                {columnVisibility.idCard && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">SỐ CMND/CCCD</th>}
+                                {columnVisibility.debt && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide text-right">NỢ VÀ TẠM ỨNG</th>}
+                                {columnVisibility.notes && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">GHI CHÚ</th>}
+                                {columnVisibility.mobile && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">THIẾT BỊ DI ĐỘNG</th>}
+                                {columnVisibility.birthday && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">NGÀY SINH</th>}
+                                {columnVisibility.gender && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">GIỚI TÍNH</th>}
+                                {columnVisibility.email && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">EMAIL</th>}
+                                {columnVisibility.facebook && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">FACEBOOK</th>}
+                                {columnVisibility.address && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">ĐỊA CHỈ</th>}
+                                {columnVisibility.department && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">PHÒNG BAN</th>}
+                                {columnVisibility.role && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">CHỨC DANH</th>}
+                                {columnVisibility.joinDate && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">NGÀY VÀO LÀM</th>}
+                                {columnVisibility.account && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">TÀI KHOẢN</th>}
+                            </tr>
+                        </thead>
 
+                        <tbody className="divide-y divide-gray-100">
+                            {filteredEmployees.map((emp, index) => (
+                                <tr key={emp.id} className="hover:bg-blue-50/30 cursor-pointer transition-colors" onClick={(e) => {
+                                    if ((e.target as HTMLElement).tagName !== 'INPUT') {
+                                        setSelectedEmployee(emp); 
+                                        setShowDetail(true);
+                                    }
+                                }}>
+                                    <td className="px-4 py-[13px]">
+                                        <input type="checkbox" className="w-[14px] h-[14px] rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" onClick={(e) => e.stopPropagation()} />
+                                    </td>
+                                    {columnVisibility.avatar && (
+                                        <td className="px-2 py-[13px] text-center">
+                                            <Avatar className="h-[26px] w-[26px] rounded bg-gray-200 inline-block overflow-hidden">
+                                                {emp.avatar ? (
+                                                    <img src={emp.avatar} alt="avatar" className="w-full h-full object-cover" />
+                                                ) : (
+                                                    <div className="w-full h-full flex items-center justify-center text-gray-400 bg-gray-100 shadow-inner">
+                                                        {emp.name.charAt(0).toUpperCase()}
+                                                    </div>
+                                                )}
+                                            </Avatar>
+                                        </td>
+                                    )}
+                                    {columnVisibility.code && (
+                                        <td className="px-4 py-[13px] text-gray-800 font-medium text-[13px]">
+                                            {(emp as any).employee_code || `NV${String(index + 1).padStart(3, '0')}`}
+                                        </td>
+                                    )}
+                                    {columnVisibility.timekeepingCode && (
+                                        <td className="px-4 py-[13px] text-gray-800 font-medium text-[13px]">
+                                            {Math.floor(Math.random() * 30 + 1)}
+                                        </td>
+                                    )}
+                                    {columnVisibility.name && (
+                                        <td className="px-4 py-[13px] font-medium text-gray-800 text-[13px] uppercase">
+                                            {emp.name}
+                                        </td>
+                                    )}
+                                    {columnVisibility.phone && (
+                                        <td className="px-4 py-[13px] text-gray-600 text-[13px] font-medium">
+                                            {emp.phone || ''}
+                                        </td>
+                                    )}
+                                    {columnVisibility.idCard && (
+                                        <td className="px-4 py-[13px] text-gray-600 text-[13px]">
+                                            {/* Mock CCCD */}
+                                        </td>
+                                    )}
+                                    {columnVisibility.debt && (
+                                        <td className="px-4 py-[13px] text-gray-800 text-[13px] font-medium text-right">
+                                            0
+                                        </td>
+                                    )}
+                                    {columnVisibility.notes && (
+                                        <td className="px-4 py-[13px] text-gray-600 text-[13px]">
+                                        </td>
+                                    )}
+                                    {columnVisibility.mobile && <td className="px-4 py-[13px] text-gray-600 text-[13px]"></td>}
+                                    {columnVisibility.birthday && <td className="px-4 py-[13px] text-gray-600 text-[13px]"></td>}
+                                    {columnVisibility.gender && <td className="px-4 py-[13px] text-gray-600 text-[13px]"></td>}
+                                    {columnVisibility.email && <td className="px-4 py-[13px] text-gray-600 text-[13px]">{emp.email}</td>}
+                                    {columnVisibility.facebook && <td className="px-4 py-[13px] text-gray-600 text-[13px]"></td>}
+                                    {columnVisibility.address && <td className="px-4 py-[13px] text-gray-600 text-[13px]"></td>}
+                                    {columnVisibility.department && (
+                                        <td className="px-4 py-[13px] text-gray-600 text-[13px]">
+                                            {getDepartmentName(emp.department)}
+                                        </td>
+                                    )}
+                                    {columnVisibility.role && (
+                                        <td className="px-4 py-[13px] text-gray-600 text-[13px]">
+                                            {roleLabels[emp.role]}
+                                        </td>
+                                    )}
+                                    {columnVisibility.joinDate && (
+                                        <td className="px-4 py-[13px] text-gray-600 text-[13px]">
+                                            {emp.joinDate}
+                                        </td>
+                                    )}
+                                    {columnVisibility.account && (
+                                        <td className="px-4 py-[13px] text-gray-600 text-[13px]">
+                                            {emp.email}
+                                        </td>
+                                    )}
+                                </tr>
+                            ))}
+                            {filteredEmployees.length === 0 && (
+                                <tr>
+                                    <td colSpan={Object.values(columnVisibility).filter(v => v).length + 1} className="px-4 py-8 text-center text-[13px] text-gray-500">
+                                        Không tìm thấy nhân viên nào
+                                    </td>
+                                </tr>
+                            )}
+
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            
             {/* Dialogs */}
             <EmployeeFormDialog
                 open={showForm}
@@ -932,6 +799,124 @@ export function EmployeesPage() {
                 employee={selectedEmployee}
                 departments={departments}
             />
+
+            {/* Dialog Thêm mới phòng ban */}
+            <Dialog open={showDeptDialog} onOpenChange={setShowDeptDialog}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="text-[17px] font-bold">Thêm mới phòng ban</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-5 py-2">
+                        <div className="flex items-center gap-4">
+                            <Label className="w-[100px] text-[13px] font-medium text-gray-700 shrink-0">Tên phòng ban</Label>
+                            <Input
+                                className="flex-1 h-[38px] text-[13px] border-gray-200"
+                                value={deptForm.name}
+                                onChange={(e) => setDeptForm(prev => ({ ...prev, name: e.target.value }))}
+                                placeholder=""
+                            />
+                        </div>
+                        <div className="flex items-start gap-4">
+                            <Label className="w-[100px] text-[13px] font-medium text-gray-700 shrink-0 pt-2">Mô tả</Label>
+                            <textarea
+                                className="flex-1 min-h-[72px] px-3 py-2 text-[13px] border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                value={deptForm.description}
+                                onChange={(e) => setDeptForm(prev => ({ ...prev, description: e.target.value }))}
+                            />
+                        </div>
+                        <div className="flex items-center gap-4">
+                            <Label className="w-[100px] text-[13px] font-medium text-gray-700 shrink-0">Trạng thái</Label>
+                            <div className="flex items-center gap-6">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="dept-status"
+                                        className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                                        checked={deptForm.status === 'active'}
+                                        onChange={() => setDeptForm(prev => ({ ...prev, status: 'active' }))}
+                                    />
+                                    <span className="text-[13px] text-gray-700">Hoạt động</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="dept-status"
+                                        className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                                        checked={deptForm.status === 'inactive'}
+                                        onChange={() => setDeptForm(prev => ({ ...prev, status: 'inactive' }))}
+                                    />
+                                    <span className="text-[13px] text-gray-700">Ngừng hoạt động</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <DialogFooter className="mt-2">
+                        <Button variant="outline" onClick={() => setShowDeptDialog(false)} className="text-[13px]">Bỏ qua</Button>
+                        <Button onClick={handleSaveDepartment} disabled={savingDept} className="bg-blue-600 hover:bg-blue-700 text-[13px]">
+                            {savingDept ? 'Đang lưu...' : 'Lưu'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Dialog Thêm mới chức danh */}
+            <Dialog open={showTitleDialog} onOpenChange={setShowTitleDialog}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="text-[17px] font-bold">Thêm mới chức danh</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-5 py-2">
+                        <div className="flex items-center gap-4">
+                            <Label className="w-[100px] text-[13px] font-medium text-gray-700 shrink-0">Tên chức danh</Label>
+                            <Input
+                                className="flex-1 h-[38px] text-[13px] border-gray-200"
+                                value={titleForm.name}
+                                onChange={(e) => setTitleForm(prev => ({ ...prev, name: e.target.value }))}
+                                placeholder=""
+                            />
+                        </div>
+                        <div className="flex items-start gap-4">
+                            <Label className="w-[100px] text-[13px] font-medium text-gray-700 shrink-0 pt-2">Mô tả</Label>
+                            <textarea
+                                className="flex-1 min-h-[72px] px-3 py-2 text-[13px] border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                value={titleForm.description}
+                                onChange={(e) => setTitleForm(prev => ({ ...prev, description: e.target.value }))}
+                            />
+                        </div>
+                        <div className="flex items-center gap-4">
+                            <Label className="w-[100px] text-[13px] font-medium text-gray-700 shrink-0">Trạng thái</Label>
+                            <div className="flex items-center gap-6">
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="title-status"
+                                        className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                                        checked={titleForm.status === 'active'}
+                                        onChange={() => setTitleForm(prev => ({ ...prev, status: 'active' }))}
+                                    />
+                                    <span className="text-[13px] text-gray-700">Hoạt động</span>
+                                </label>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                        type="radio"
+                                        name="title-status"
+                                        className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500"
+                                        checked={titleForm.status === 'inactive'}
+                                        onChange={() => setTitleForm(prev => ({ ...prev, status: 'inactive' }))}
+                                    />
+                                    <span className="text-[13px] text-gray-700">Ngừng hoạt động</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <DialogFooter className="mt-2">
+                        <Button variant="outline" onClick={() => setShowTitleDialog(false)} className="text-[13px]">Bỏ qua</Button>
+                        <Button onClick={handleSaveJobTitle} disabled={savingTitle} className="bg-blue-600 hover:bg-blue-700 text-[13px]">
+                            {savingTitle ? 'Đang lưu...' : 'Lưu'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

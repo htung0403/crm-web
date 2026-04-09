@@ -9,6 +9,7 @@ interface CreateUserData {
     phone?: string;
     role: string;
     department?: string;
+    avatar?: string;
     salary?: number;
     commission?: number;
     bankAccount?: string;
@@ -22,6 +23,7 @@ interface UpdateUserData {
     role?: string;
     department?: string;
     status?: string;
+    avatar?: string;
     salary?: number;
     commission?: number;
     bankAccount?: string;

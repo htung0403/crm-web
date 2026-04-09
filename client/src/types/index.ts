@@ -1,4 +1,4 @@
-export type UserRole = 'admin' | 'manager' | 'accountant' | 'sale' | 'technician';
+export type UserRole = 'admin' | 'manager' | 'accountant' | 'sale' | 'technician' | 'cashier';
 
 export interface User {
     id: string;
@@ -15,6 +15,9 @@ export interface User {
     commission?: number;
     bankAccount?: string;
     bankName?: string;
+    employee_code?: string;
+    base_salary?: number;
+    hourly_rate?: number;
 }
 
 export interface Lead {

@@ -59,7 +59,7 @@ router.get('/', authenticate, requireManager, async (req: AuthenticatedRequest, 
 
         let query = supabaseAdmin
             .from('users')
-            .select('id, email, name, role, phone, avatar, department, status, created_at, last_login, salary, commission, bank_account, bank_name, telegram_chat_id')
+            .select('id, email, name, role, phone, avatar, department, status, created_at, last_login, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code')
             .order('created_at', { ascending: false });
 
         if (role) query = query.eq('role', role);
@@ -93,7 +93,7 @@ router.get('/', authenticate, requireManager, async (req: AuthenticatedRequest, 
 // Create new user (manager only) - Uses bcrypt for password hashing
 router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { email, password, name, phone, role, department, salary, commission, bankAccount, bankName, telegramChatId } = req.body;
+        const { email, password, name, phone, role, department, avatar, salary, commission, bankAccount, bankName, telegramChatId } = req.body;
 
         if (!email || !password || !name) {
             throw new ApiError('Email, mật khẩu và tên là bắt buộc', 400);
@@ -128,6 +128,7 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
                 phone: phone || null,
                 role: role || 'sale',
                 department: department || null,
+                avatar: avatar || null,
                 salary: salary || 0,
                 commission: commission || 0,
                 bank_account: bankAccount || null,

@@ -35,7 +35,13 @@ import productChatsRouter from './routes/product-chats.js';
 import { upsellTicketsRouter } from './routes/upsell-tickets.js';
 import webhooksRouter from './routes/webhooks.js';
 import leaveRequestsRouter from './routes/leave-requests.js';
+import jobTitlesRouter from './routes/job-titles.js';
+import { workSchedulesRouter } from './routes/work-schedules.js';
+import { timesheetsRouter } from './routes/timesheets.js';
 import { cronRouter } from './routes/cron.js';
+import { payrollBatchesRouter } from './routes/payroll-batches.js';
+import { salaryAdvancesRouter } from './routes/salary-advances.js';
+import { violationsRouter } from './routes/violations.js';
 import { checkAllSLA } from './utils/slaManager.js';
 
 dotenv.config();
@@ -107,7 +113,13 @@ app.use('/api/product-types', productTypesRouter);
 app.use('/api/upsell-tickets', upsellTicketsRouter);
 app.use('/api/webhooks', webhooksRouter);
 app.use('/api/leave-requests', leaveRequestsRouter);
+app.use('/api/job-titles', jobTitlesRouter);
+app.use('/api/work-schedules', workSchedulesRouter);
+app.use('/api/timesheets', timesheetsRouter);
 app.use('/api/cron', cronRouter);
+app.use('/api/payroll-batches', payrollBatchesRouter);
+app.use('/api/salary-advances', salaryAdvancesRouter);
+app.use('/api/violations', violationsRouter);
 
 // Error handling
 app.use(errorHandler);

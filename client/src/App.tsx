@@ -15,6 +15,7 @@ import { EmployeesPage } from '@/pages/EmployeesPage';
 import { EmployeeDetailPage } from '@/pages/EmployeeDetailPage';
 import { KPIPage } from '@/pages/KPIPage';
 import { SalaryPage } from '@/pages/SalaryPage';
+import { PayrollDetailPage } from '@/pages/PayrollDetailPage';
 import { CustomersPage } from '@/pages/CustomersPage';
 import { CustomerDetailPage } from '@/pages/CustomerDetailPage';
 import { InteractionsPage } from '@/pages/InteractionsPage';
@@ -36,6 +37,12 @@ import { CreatePackagePage } from '@/pages/CreatePackagePage';
 import { CreateProductPage } from '@/pages/CreateProductPage';
 import { UpsellManagementPage } from '@/pages/UpsellManagementPage';
 import { LeaveRequestsPage } from '@/pages/LeaveRequestsPage';
+import { WorkSchedulePage } from '@/pages/WorkSchedulePage';
+import { TimesheetsPage } from '@/pages/TimesheetsPage';
+import { CommissionsPage } from '@/pages/CommissionsPage';
+import { EmployeeSettingsPage } from '@/pages/EmployeeSettingsPage';
+import { SalaryAdvancesPage } from '@/pages/SalaryAdvancesPage';
+import { ViolationsPage } from '@/pages/ViolationsPage';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import type { UserRole, User } from '@/types';
@@ -87,6 +94,12 @@ const pagePermissions: Record<string, UserRole[]> = {
   'upsell-management': ['admin', 'manager'],
   settings: ['admin', 'manager'],
   'leave-requests': ['admin', 'manager', 'accountant', 'sale', 'technician'],
+  'work-schedule': ['admin', 'manager', 'accountant', 'sale', 'technician'],
+  timesheets: ['admin', 'manager', 'accountant'],
+  commissions: ['admin', 'manager', 'accountant'],
+  'employee-settings': ['admin', 'manager'],
+  'salary-advances': ['admin', 'manager', 'accountant'],
+  violations: ['admin', 'manager', 'accountant'],
 };
 
 // Protected Route Component
@@ -356,6 +369,24 @@ function AppContent() {
               </ProtectedRoute>
             } />
 
+            <Route path="/work-schedule" element={
+              <ProtectedRoute allowedRoles={pagePermissions['work-schedule']}>
+                <WorkSchedulePage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/commissions" element={
+              <ProtectedRoute allowedRoles={pagePermissions.commissions}>
+                <CommissionsPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/timesheets" element={
+              <ProtectedRoute allowedRoles={pagePermissions.timesheets}>
+                <TimesheetsPage />
+              </ProtectedRoute>
+            } />
+
             <Route path="/leave-requests" element={
               <ProtectedRoute allowedRoles={pagePermissions['leave-requests']}>
                 <LeaveRequestsPage />
@@ -424,6 +455,30 @@ function AppContent() {
               </ProtectedRoute>
             } />
 
+            <Route path="/leave-requests" element={
+              <ProtectedRoute allowedRoles={pagePermissions['leave-requests']}>
+                <LeaveRequestsPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/work-schedule" element={
+              <ProtectedRoute allowedRoles={pagePermissions['work-schedule']}>
+                <WorkSchedulePage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/timesheets" element={
+              <ProtectedRoute allowedRoles={pagePermissions.timesheets}>
+                <TimesheetsPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/commissions" element={
+              <ProtectedRoute allowedRoles={pagePermissions.commissions}>
+                <CommissionsPage />
+              </ProtectedRoute>
+            } />
+
             <Route path="/employees" element={
               <ProtectedRoute allowedRoles={pagePermissions.employees}>
                 <EmployeesPage />
@@ -436,6 +491,24 @@ function AppContent() {
               </ProtectedRoute>
             } />
 
+            <Route path="/employee-settings" element={
+              <ProtectedRoute allowedRoles={pagePermissions['employee-settings']}>
+                <EmployeeSettingsPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/salary-advances" element={
+              <ProtectedRoute allowedRoles={pagePermissions['salary-advances']}>
+                <SalaryAdvancesPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/violations" element={
+              <ProtectedRoute allowedRoles={pagePermissions.violations}>
+                <ViolationsPage />
+              </ProtectedRoute>
+            } />
+
             <Route path="/kpi" element={
               <ProtectedRoute allowedRoles={pagePermissions.kpi}>
                 <KPIPage />
@@ -445,6 +518,12 @@ function AppContent() {
             <Route path="/salary" element={
               <ProtectedRoute allowedRoles={pagePermissions.salary}>
                 <SalaryPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/salary/:id" element={
+              <ProtectedRoute allowedRoles={pagePermissions.salary}>
+                <PayrollDetailPage />
               </ProtectedRoute>
             } />
 

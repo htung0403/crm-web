@@ -109,7 +109,7 @@ export function useLeads(): UseLeadsReturn {
     const [error, setError] = useState<string | null>(null);
     const [pagination, setPagination] = useState({
         page: 1,
-        limit: 200,
+        limit: 500,
         total: 0,
         totalPages: 0,
     });
@@ -149,7 +149,7 @@ export function useLeads(): UseLeadsReturn {
         try {
             const response = await leadsApi.create(data);
             const newLead = response.data.data!.lead;
-            setLeads(prev => [newLead, ...prev]);
+            await fetchLeads({ limit: 500 });
             return newLead;
         } catch (err: any) {
             const message = err.response?.data?.message || 'Lỗi khi tạo lead';
@@ -158,7 +158,7 @@ export function useLeads(): UseLeadsReturn {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [fetchLeads]);
 
     const updateLead = useCallback(async (id: string, data: Partial<Lead>): Promise<Lead> => {
         setLoading(true);
@@ -182,7 +182,7 @@ export function useLeads(): UseLeadsReturn {
         setError(null);
         try {
             await leadsApi.delete(id);
-            setLeads(prev => prev.filter(l => l.id !== id));
+            await fetchLeads({ limit: 500 });
         } catch (err: any) {
             const message = err.response?.data?.message || 'Lỗi khi xóa lead';
             setError(message);
@@ -190,7 +190,7 @@ export function useLeads(): UseLeadsReturn {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [fetchLeads]);
 
     const convertLead = useCallback(async (id: string): Promise<any> => {
         setLoading(true);

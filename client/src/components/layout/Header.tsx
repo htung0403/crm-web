@@ -16,6 +16,7 @@ const roleLabels: Record<UserRole, string> = {
     accountant: 'Kế toán',
     sale: 'Nhân viên Sale',
     technician: 'Kỹ thuật viên',
+    cashier: 'Thu ngân',
 };
 
 const getMilestoneColor = (hours: number): string => {

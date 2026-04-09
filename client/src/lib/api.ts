@@ -546,6 +546,24 @@ export const salaryApi = {
         api.patch<ApiResponse<{ salary: any }>>(`/salary/${id}/pay`, { payment_method }),
 };
 
+// Payroll Batches API
+export const payrollBatchesApi = {
+    getAll: (params?: { month?: number; year?: number; status?: string }) =>
+        api.get<ApiResponse<{ batches: any[] }>>('/payroll-batches', { params }),
+
+    getById: (id: string) =>
+        api.get<ApiResponse<{ batch: any; records: any[] }>>(`/payroll-batches/${id}`),
+
+    generate: (data: { month: number; year: number }) =>
+        api.post<ApiResponse<{ batch: any }>>('/payroll-batches/generate', data),
+
+    updateStatus: (id: string, status: string) =>
+        api.patch<ApiResponse<{ batch: any }>>(`/payroll-batches/${id}/status`, { status }),
+
+    cancel: (id: string) =>
+        api.delete<ApiResponse<null>>(`/payroll-batches/${id}`),
+};
+
 // Reports API
 export const reportsApi = {
     getRevenue: (params?: { from_date?: string; to_date?: string; group_by?: string }) =>
@@ -675,6 +693,38 @@ export const leaveRequestsApi = {
         api.post<any>('/leave-requests', data),
     updateStatus: (id: string, status: 'approved' | 'rejected', approved_by: string) =>
         api.patch<any>(`/leave-requests/${id}/status`, { status, approved_by }),
+};
+
+// Salary Advances API (Ứng lương)
+export const salaryAdvancesApi = {
+    getAll: (params?: { month?: number; year?: number; status?: string; user_id?: string }) =>
+        api.get<ApiResponse<{ advances: any[]; summary: any }>>('/salary-advances', { params }),
+    getByUser: (userId: string, year?: number) =>
+        api.get<ApiResponse<{ advances: any[] }>>(`/salary-advances/user/${userId}`, { params: { year } }),
+    create: (data: { user_id: string; amount: number; month: number; year: number; reason?: string; notes?: string }) =>
+        api.post<ApiResponse<{ advance: any }>>('/salary-advances', data),
+    approve: (id: string) =>
+        api.patch<ApiResponse<{ advance: any }>>(`/salary-advances/${id}/approve`),
+    reject: (id: string, rejection_reason?: string) =>
+        api.patch<ApiResponse<{ advance: any }>>(`/salary-advances/${id}/reject`, { rejection_reason }),
+    delete: (id: string) =>
+        api.delete<ApiResponse<null>>(`/salary-advances/${id}`),
+};
+
+// Violations & Rewards API (Vi phạm / Thưởng)
+export const violationsApi = {
+    getAll: (params?: { month?: number; year?: number; type?: string; user_id?: string; category?: string }) =>
+        api.get<ApiResponse<{ records: any[]; summary: any }>>('/violations', { params }),
+    getByUser: (userId: string, params?: { month?: number; year?: number }) =>
+        api.get<ApiResponse<{ records: any[] }>>(`/violations/user/${userId}`, { params }),
+    create: (data: { user_id: string; type: 'violation' | 'reward'; category: string; amount?: number; date?: string; month?: number; year?: number; description?: string; timesheet_id?: string }) =>
+        api.post<ApiResponse<{ record: any }>>('/violations', data),
+    update: (id: string, data: Partial<{ type: string; category: string; amount: number; date: string; description: string }>) =>
+        api.put<ApiResponse<{ record: any }>>(`/violations/${id}`, data),
+    delete: (id: string) =>
+        api.delete<ApiResponse<null>>(`/violations/${id}`),
+    getSummary: (params: { month: number; year: number }) =>
+        api.get<ApiResponse<{ employees: Record<string, { violations: number; rewards: number; net: number }> }>>('/violations/summary', { params }),
 };
 
 export default api;

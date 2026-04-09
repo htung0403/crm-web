@@ -11,6 +11,7 @@ export interface SalaryRecord {
         avatar?: string;
         department?: string;
         role?: string;
+        employee_code?: string;
     };
     month: number;
     year: number;

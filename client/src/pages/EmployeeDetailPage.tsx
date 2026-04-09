@@ -68,6 +68,7 @@ const roleLabels: Record<UserRole, string> = {
     accountant: 'Kế toán',
     sale: 'Sale',
     technician: 'Kỹ thuật',
+    cashier: 'Thu ngân',
 };
 
 const statusLabels = {

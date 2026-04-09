@@ -1,460 +1,518 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-    DollarSign, Clock, Award, TrendingUp, Users, Send, Bot,
-    Download, Eye, CheckCircle, AlertCircle, Calculator,
-    FileText, Lock, MessageCircle, Sparkles, Loader2, RefreshCw
+    Search, Download, Calculator, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+    RefreshCw, Eye, Trash2, CreditCard,
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
-import { useSalary, type SalaryRecord, roleLabels } from '@/hooks/useSalary';
+import { payrollBatchesApi } from '@/lib/api';
+import { useSalary, type SalaryRecord } from '@/hooks/useSalary';
 import { formatCurrency } from '@/lib/utils';
 
-const statusLabels = {
-    draft: { label: 'Nháp', variant: 'secondary' as const, icon: FileText },
-    pending: { label: 'Chờ duyệt', variant: 'warning' as const, icon: Clock },
-    approved: { label: 'Đã duyệt', variant: 'info' as const, icon: CheckCircle },
-    paid: { label: 'Đã trả', variant: 'success' as const, icon: DollarSign },
-    locked: { label: 'Đã khóa', variant: 'danger' as const, icon: Lock },
-};
+// ========== STATUS CONFIG ==========
+const salaryStatusConfig = {
+    draft: { label: 'Đang tạo', color: '#2563eb' },
+    pending: { label: 'Tạm tính', color: '#2563eb' },
+    approved: { label: 'Đã chốt lương', color: '#16a34a' },
+    paid: { label: 'Đã trả', color: '#16a34a' },
+    locked: { label: 'Đã hủy', color: '#dc2626' },
+} as const;
 
-// Helper function to extract month/year from period string
-function parsePeriod(period: string): { month: number; year: number } {
-    const [monthStr, yearStr] = period.split('/');
-    return {
-        month: parseInt(monthStr, 10),
-        year: parseInt(yearStr, 10)
-    };
-}
+type SalaryStatus = keyof typeof salaryStatusConfig;
 
-// Helper to format period
+// ========== HELPERS ==========
 function formatPeriod(month: number, year: number): string {
     return `${String(month).padStart(2, '0')}/${year}`;
 }
 
-// AI Summary Dialog
-function AISummaryDialog({ open, onClose, data }: { open: boolean; onClose: () => void; data: SalaryRecord[] }) {
-    const totalGross = data.reduce((sum, d) => sum + (d.gross_salary || d.net_salary + d.deduction), 0);
-    const totalNet = data.reduce((sum, d) => sum + d.net_salary, 0);
-    const totalCommission = data.reduce((sum, d) => sum + d.commission, 0);
-    const totalBonus = data.reduce((sum, d) => sum + d.bonus, 0);
-    const avgKPI = data.length > 0
-        ? data.reduce((sum, d) => sum + (d.kpi_achievement || 0), 0) / data.length
-        : 0;
-    const topPerformer = data.length > 0
-        ? data.reduce((max, d) => d.net_salary > max.net_salary ? d : max, data[0])
-        : null;
-
-    const period = data.length > 0 ? formatPeriod(data[0].month, data[0].year) : '--/----';
-
-    const aiSummary = `
-📊 **BÁO CÁO LƯƠNG THÁNG ${period}**
-
-👥 Tổng số nhân viên: ${data.length}
-💰 Tổng lương gross: ${formatCurrency(totalGross)}
-💵 Tổng lương net: ${formatCurrency(totalNet)}
-
-📈 **PHÂN TÍCH:**
-• Tổng hoa hồng: ${formatCurrency(totalCommission)} (${totalGross > 0 ? ((totalCommission / totalGross) * 100).toFixed(1) : 0}% tổng lương)
-• Tổng thưởng: ${formatCurrency(totalBonus)}
-• KPI trung bình: ${avgKPI.toFixed(1)}%
-
-🏆 **TOP PERFORMER:**
-${topPerformer ? `${topPerformer.user?.name || 'N/A'} - ${formatCurrency(topPerformer.net_salary)}` : 'Chưa có dữ liệu'}
-
-📌 **NHẬN XÉT:**
-${avgKPI >= 90 ? '✅ Hiệu suất team xuất sắc, đa số đạt/vượt KPI' :
-            avgKPI >= 80 ? '👍 Hiệu suất team tốt, cần cải thiện một số vị trí' :
-                '⚠️ Cần review lại KPI và hỗ trợ nhân viên cải thiện'}
-
-${data.filter(d => (d.kpi_achievement || 0) < 80).length > 0 ?
-            `⚠️ ${data.filter(d => (d.kpi_achievement || 0) < 80).length} nhân viên chưa đạt KPI 80%` : ''}
-  `.trim();
-
-    return (
-        <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
-                <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                        <Sparkles className="h-5 w-5 text-purple-500" />
-                        AI Tổng hợp Bảng lương
-                    </DialogTitle>
-                    <DialogDescription>Phân tích tự động từ AI Agent</DialogDescription>
-                </DialogHeader>
-
-                <div className="space-y-4 py-4">
-                    <div className="p-4 rounded-lg bg-gradient-to-br from-purple-50 to-blue-50 border">
-                        <pre className="whitespace-pre-wrap text-sm font-mono">{aiSummary}</pre>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <Card className="bg-emerald-50 border-0">
-                            <CardContent className="p-3">
-                                <p className="text-xs text-muted-foreground">Lương cao nhất</p>
-                                <p className="font-bold text-emerald-600">
-                                    {data.length > 0 ? formatCurrency(Math.max(...data.map(d => d.net_salary))) : '--'}
-                                </p>
-                            </CardContent>
-                        </Card>
-                        <Card className="bg-amber-50 border-0">
-                            <CardContent className="p-3">
-                                <p className="text-xs text-muted-foreground">Lương thấp nhất</p>
-                                <p className="font-bold text-amber-600">
-                                    {data.length > 0 ? formatCurrency(Math.min(...data.map(d => d.net_salary))) : '--'}
-                                </p>
-                            </CardContent>
-                        </Card>
-                    </div>
-                </div>
-
-                <DialogFooter>
-                    <Button variant="outline" onClick={onClose}>Đóng</Button>
-                    <Button className="gap-2">
-                        <Download className="h-4 w-4" />
-                        Xuất báo cáo
-                    </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
-    );
+function formatWorkPeriodFull(month: number, year: number): string {
+    const lastDay = new Date(year, month, 0).getDate();
+    return `01/${String(month).padStart(2, '0')}/${year} - ${lastDay}/${String(month).padStart(2, '0')}/${year}`;
 }
 
-// Salary Detail Dialog
-function SalaryDetailDialog({
-    open,
-    onClose,
-    record
-}: {
-    open: boolean;
-    onClose: () => void;
-    record: SalaryRecord | null;
-}) {
-    if (!record) return null;
-
-    const grossSalary = record.gross_salary || (record.hourly_wage + record.overtime_pay + record.commission + record.bonus);
-    const employeeName = record.user?.name || 'N/A';
-    const employeeRole = record.user?.role || 'sale';
-
-    return (
-        <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-                <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                        <FileText className="h-5 w-5 text-primary" />
-                        Chi tiết bảng lương
-                    </DialogTitle>
-                    <DialogDescription>Kỳ lương: {formatPeriod(record.month, record.year)}</DialogDescription>
-                </DialogHeader>
-
-                <div className="space-y-4 py-4">
-                    {/* Employee Info */}
-                    <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/50">
-                        <Avatar className="h-12 w-12">
-                            <AvatarImage src={record.user?.avatar} />
-                            <AvatarFallback>{employeeName.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                            <p className="font-semibold">{employeeName}</p>
-                            <Badge variant="outline">{roleLabels[employeeRole] || employeeRole}</Badge>
-                        </div>
-                        <div className="ml-auto">
-                            <Badge variant={statusLabels[record.status]?.variant || 'secondary'}>
-                                {statusLabels[record.status]?.label || record.status}
-                            </Badge>
-                        </div>
-                    </div>
-
-                    {/* Earnings */}
-                    <div className="space-y-2">
-                        <h4 className="font-semibold flex items-center gap-2 text-emerald-600">
-                            <TrendingUp className="h-4 w-4" />
-                            THU NHẬP
-                        </h4>
-                        <div className="grid grid-cols-2 gap-2 text-sm">
-                            <div className="p-2 rounded bg-muted/30">
-                                <p className="text-muted-foreground">Lương theo giờ</p>
-                                <p className="font-medium">{record.total_hours}h làm việc</p>
-                                <p className="font-bold text-emerald-600">{formatCurrency(record.hourly_wage)}</p>
-                            </div>
-                            <div className="p-2 rounded bg-muted/30">
-                                <p className="text-muted-foreground">Làm thêm giờ</p>
-                                <p className="font-medium">{record.overtime_hours}h OT</p>
-                                <p className="font-bold text-emerald-600">{formatCurrency(record.overtime_pay)}</p>
-                            </div>
-                            <div className="p-2 rounded bg-muted/30">
-                                <p className="text-muted-foreground">Hoa hồng</p>
-                                <p className="font-bold text-emerald-600">{formatCurrency(record.commission)}</p>
-                            </div>
-                            <div className="p-2 rounded bg-purple-50">
-                                <p className="text-muted-foreground">Thưởng KPI ({record.kpi_achievement || 0}%)</p>
-                                <p className="font-bold text-purple-600">{formatCurrency(record.bonus)}</p>
-                            </div>
-                        </div>
-                        <div className="flex justify-between p-2 rounded bg-emerald-100">
-                            <span className="font-semibold">Tổng thu nhập (Gross)</span>
-                            <span className="font-bold text-emerald-700">{formatCurrency(grossSalary)}</span>
-                        </div>
-                    </div>
-
-                    {/* Deductions */}
-                    <div className="space-y-2">
-                        <h4 className="font-semibold flex items-center gap-2 text-red-500">
-                            <AlertCircle className="h-4 w-4" />
-                            KHẤU TRỪ
-                        </h4>
-                        <div className="space-y-1 text-sm">
-                            {record.social_insurance && record.social_insurance > 0 && (
-                                <div className="flex justify-between p-2 rounded bg-muted/30">
-                                    <span>BHXH</span>
-                                    <span className="text-red-500">-{formatCurrency(record.social_insurance)}</span>
-                                </div>
-                            )}
-                            {record.health_insurance && record.health_insurance > 0 && (
-                                <div className="flex justify-between p-2 rounded bg-muted/30">
-                                    <span>BHYT</span>
-                                    <span className="text-red-500">-{formatCurrency(record.health_insurance)}</span>
-                                </div>
-                            )}
-                            {record.personal_tax && record.personal_tax > 0 && (
-                                <div className="flex justify-between p-2 rounded bg-muted/30">
-                                    <span>Thuế TNCN</span>
-                                    <span className="text-red-500">-{formatCurrency(record.personal_tax)}</span>
-                                </div>
-                            )}
-                            {record.advances && record.advances > 0 && (
-                                <div className="flex justify-between p-2 rounded bg-muted/30">
-                                    <span>Tạm ứng</span>
-                                    <span className="text-red-500">-{formatCurrency(record.advances)}</span>
-                                </div>
-                            )}
-                            {record.deduction > 0 && (
-                                <div className="flex justify-between p-2 rounded bg-red-100">
-                                    <span className="font-semibold">Tổng khấu trừ</span>
-                                    <span className="font-bold text-red-600">-{formatCurrency(record.deduction)}</span>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Net Salary */}
-                    <div className="p-4 rounded-lg bg-gradient-to-r from-primary to-blue-600 text-white">
-                        <div className="flex justify-between items-center">
-                            <span className="text-lg font-semibold">THỰC LĨNH</span>
-                            <span className="text-2xl font-bold">{formatCurrency(record.net_salary)}</span>
-                        </div>
-                    </div>
-
-                    {/* Approval Info */}
-                    {record.approved_by && (
-                        <div className="text-xs text-muted-foreground text-center">
-                            Duyệt bởi: {record.approved_by} • {record.approved_at}
-                        </div>
-                    )}
-                </div>
-
-                <DialogFooter className="gap-2">
-                    <Button variant="outline" onClick={onClose}>Đóng</Button>
-                    {!record.telegram_sent && (
-                        <Button className="gap-2 bg-blue-500 hover:bg-blue-600">
-                            <MessageCircle className="h-4 w-4" />
-                            Gửi Telegram
-                        </Button>
-                    )}
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
-    );
+function formatDateTime(dateStr?: string): string {
+    if (!dateStr) return '--';
+    const d = new Date(dateStr);
+    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
 }
 
-// Telegram Send Dialog
-function TelegramDialog({
-    open,
-    onClose,
-    data,
-    selectedIds
-}: {
-    open: boolean;
-    onClose: () => void;
-    data: SalaryRecord[];
-    selectedIds: string[];
-}) {
-    const [sendToCEO, setSendToCEO] = useState(true);
-    const [sendToEmployees, setSendToEmployees] = useState(true);
-    const [isSending, setIsSending] = useState(false);
+// ========== PAYROLL BATCH TYPE ==========
+interface PayrollBatch {
+    id: string;
+    code: string;
+    name: string;
+    month: number;
+    year: number;
+    pay_period: string;
+    work_period_start: string;
+    work_period_end: string;
+    total_salary: number;
+    total_paid: number;
+    total_remaining: number;
+    employee_count: number;
+    status: SalaryStatus;
+    scope: string;
+    notes: string | null;
+    created_at: string;
+    created_by: string | null;
+    approved_by: string | null;
+    approved_at: string | null;
+}
 
-    const selectedRecords = data.filter(d => selectedIds.includes(d.id));
+// ========== EXPANDED ROW TABS ==========
+type ExpandedTab = 'info' | 'payslips' | 'history';
 
-    const handleSend = () => {
-        setIsSending(true);
-        // Simulate API call
-        setTimeout(() => {
-            setIsSending(false);
-            alert(`Đã gửi bảng lương qua Telegram cho ${selectedRecords.length} nhân viên${sendToCEO ? ' và tổng hợp cho CEO' : ''}`);
-            onClose();
-        }, 1500);
+// ========== PAYSLIP SUB-TABLE ==========
+function PayslipTable({ batchId }: { batchId: string }) {
+    const [records, setRecords] = useState<SalaryRecord[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [page, setPage] = useState(1);
+    const [selectedPayslipIds, setSelectedPayslipIds] = useState<string[]>([]);
+    const pageSize = 10;
+
+    useEffect(() => {
+        const fetchRecords = async () => {
+            setLoading(true);
+            try {
+                const res = await payrollBatchesApi.getById(batchId);
+                setRecords(res.data.data?.records || []);
+            } catch (e) {
+                console.error('Error fetching payslip records:', e);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchRecords();
+    }, [batchId]);
+
+    const totalItems = records.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+    const paginated = records.slice((page - 1) * pageSize, page * pageSize);
+
+    const totalSalary = records.reduce((s, r) => s + (r.gross_salary || r.net_salary + r.deduction), 0);
+    const totalPaidEmp = records.reduce((s, r) => s + (r.status === 'paid' ? r.net_salary : 0), 0);
+    const totalRemaining = totalSalary - totalPaidEmp;
+
+    const togglePayslip = (id: string) => {
+        setSelectedPayslipIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+    };
+    const selectAllPayslips = () => {
+        if (selectedPayslipIds.length === paginated.length) setSelectedPayslipIds([]);
+        else setSelectedPayslipIds(paginated.map(r => r.id));
     };
 
-    const firstRecord = selectedRecords[0];
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+            </div>
+        );
+    }
 
     return (
-        <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-md">
-                <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                        <Send className="h-5 w-5 text-blue-500" />
-                        Gửi bảng lương qua Telegram
-                    </DialogTitle>
-                    <DialogDescription>
-                        Gửi thông báo lương cho nhân viên và CEO
-                    </DialogDescription>
-                </DialogHeader>
-
-                <div className="space-y-4 py-4">
-                    <div className="p-4 rounded-lg bg-blue-50 border border-blue-200">
-                        <p className="text-sm font-medium text-blue-800">
-                            Đã chọn {selectedRecords.length} nhân viên
-                        </p>
-                        <p className="text-2xl font-bold text-blue-600 mt-1">
-                            {formatCurrency(selectedRecords.reduce((sum, r) => sum + r.net_salary, 0))}
-                        </p>
-                        <p className="text-xs text-blue-600">Tổng lương thực lĩnh</p>
-                    </div>
-
-                    <div className="space-y-3">
-                        <div className="flex items-center space-x-2">
-                            <Checkbox
-                                id="sendToEmployees"
-                                checked={sendToEmployees}
-                                onCheckedChange={(c) => setSendToEmployees(!!c)}
+        <div>
+            <table className="w-full text-left border-collapse whitespace-nowrap">
+                <thead className="bg-white border-b border-gray-200">
+                    <tr>
+                        <th className="px-4 py-2.5 w-10">
+                            <input
+                                type="checkbox"
+                                className="w-[14px] h-[14px] rounded border-gray-300 text-blue-600 cursor-pointer"
+                                checked={selectedPayslipIds.length === paginated.length && paginated.length > 0}
+                                onChange={selectAllPayslips}
                             />
-                            <Label htmlFor="sendToEmployees" className="cursor-pointer">
-                                Gửi bảng lương chi tiết cho từng nhân viên
-                            </Label>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                            <Checkbox
-                                id="sendToCEO"
-                                checked={sendToCEO}
-                                onCheckedChange={(c) => setSendToCEO(!!c)}
-                            />
-                            <Label htmlFor="sendToCEO" className="cursor-pointer">
-                                Gửi báo cáo tổng hợp cho CEO
-                            </Label>
-                        </div>
-                    </div>
+                        </th>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide">MÃ PHIẾU</th>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide">TÊN NHÂN VIÊN</th>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide text-right">TỔNG LƯƠNG</th>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide text-right">ĐÃ TRẢ NV</th>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide text-right">CÒN CẦN TRẢ</th>
+                    </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                    {/* Summary */}
+                    {records.length > 0 && (
+                        <tr className="bg-white border-b border-gray-200">
+                            <td className="px-4 py-2.5" colSpan={3}></td>
+                            <td className="px-4 py-2.5 text-right font-bold text-[13px] text-gray-900">{formatCurrency(totalSalary)}</td>
+                            <td className="px-4 py-2.5 text-right font-bold text-[13px] text-gray-900">{formatCurrency(totalPaidEmp)}</td>
+                            <td className="px-4 py-2.5 text-right font-bold text-[13px] text-gray-900">{formatCurrency(totalRemaining)}</td>
+                        </tr>
+                    )}
+                    {paginated.length === 0 ? (
+                        <tr>
+                            <td colSpan={6} className="px-4 py-8 text-center text-[13px] text-gray-400">
+                                Không có phiếu lương
+                            </td>
+                        </tr>
+                    ) : (
+                        paginated.map((record, idx) => {
+                            const gross = record.gross_salary || (record.hourly_wage + record.commission + record.bonus);
+                            const paid = record.status === 'paid' ? record.net_salary : 0;
+                            const remaining = gross - paid;
+                            const plCode = `PL${String(totalItems - ((page - 1) * pageSize + idx) + 140).padStart(6, '0')}`;
 
-                    {/* Preview */}
-                    <div className="p-3 rounded-lg bg-muted/50 text-sm">
-                        <p className="font-medium mb-2">📱 Preview tin nhắn:</p>
-                        <div className="p-2 rounded bg-white border text-xs">
-                            <p>💰 <strong>BẢNG LƯƠNG THÁNG {firstRecord ? formatPeriod(firstRecord.month, firstRecord.year) : '--/----'}</strong></p>
-                            <p>Họ tên: {firstRecord?.user?.name || 'Nhân viên'}</p>
-                            <p>Lương gross: {formatCurrency(firstRecord?.gross_salary || (firstRecord?.hourly_wage || 0) + (firstRecord?.commission || 0) + (firstRecord?.bonus || 0))}</p>
-                            <p>Khấu trừ: -{formatCurrency(firstRecord?.deduction || 0)}</p>
-                            <p className="font-bold text-emerald-600">Thực lĩnh: {formatCurrency(firstRecord?.net_salary || 0)}</p>
-                        </div>
-                    </div>
-                </div>
+                            return (
+                                <tr key={record.id} className="hover:bg-blue-50/30 transition-colors">
+                                    <td className="px-4 py-2.5">
+                                        <input
+                                            type="checkbox"
+                                            className="w-[14px] h-[14px] rounded border-gray-300 text-blue-600 cursor-pointer"
+                                            checked={selectedPayslipIds.includes(record.id)}
+                                            onChange={() => togglePayslip(record.id)}
+                                        />
+                                    </td>
+                                    <td className="px-4 py-2.5 text-blue-600 font-medium text-[13px]">{plCode}</td>
+                                    <td className="px-4 py-2.5 text-gray-800 font-medium text-[13px] uppercase">
+                                        {record.user?.name || 'N/A'}
+                                    </td>
+                                    <td className="px-4 py-2.5 text-right text-gray-800 text-[13px] font-medium">{formatCurrency(gross)}</td>
+                                    <td className="px-4 py-2.5 text-right text-gray-800 text-[13px] font-medium">{formatCurrency(paid)}</td>
+                                    <td className="px-4 py-2.5 text-right text-gray-800 text-[13px] font-medium">{formatCurrency(remaining)}</td>
+                                </tr>
+                            );
+                        })
+                    )}
+                </tbody>
+            </table>
 
-                <DialogFooter>
-                    <Button variant="outline" onClick={onClose}>Huỷ</Button>
-                    <Button
-                        onClick={handleSend}
-                        disabled={isSending || (!sendToEmployees && !sendToCEO)}
-                        className="gap-2 bg-blue-500 hover:bg-blue-600"
-                    >
-                        {isSending ? (
-                            <>Đang gửi...</>
-                        ) : (
-                            <>
-                                <Send className="h-4 w-4" />
-                                Gửi Telegram
-                            </>
-                        )}
+            {/* Pagination */}
+            {totalItems > 0 && (
+                <div className="flex items-center gap-2 px-4 py-2 text-[12px] text-gray-500">
+                    <Button variant="ghost" size="icon" className="h-6 w-6" disabled={page === 1} onClick={() => setPage(1)}>
+                        <ChevronsLeft className="h-3 w-3" />
                     </Button>
-                </DialogFooter>
-            </DialogContent>
-        </Dialog>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" disabled={page === 1} onClick={() => setPage(p => p - 1)}>
+                        <ChevronLeft className="h-3 w-3" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>
+                        <ChevronRight className="h-3 w-3" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" disabled={page === totalPages} onClick={() => setPage(totalPages)}>
+                        <ChevronsRight className="h-3 w-3" />
+                    </Button>
+                    <span className="ml-1">Hiển thị {(page - 1) * pageSize + 1} - {Math.min(page * pageSize, totalItems)} Tổng {totalItems} Phiếu lương</span>
+                </div>
+            )}
+
+            {/* Bottom action */}
+            <div className="flex justify-end px-4 py-3 border-t border-gray-100">
+                <Button className="gap-2 bg-blue-600 hover:bg-blue-700 text-white text-[13px] h-[34px] px-4 rounded-lg shadow-sm">
+                    <CreditCard className="h-4 w-4" />
+                    Thanh toán
+                </Button>
+            </div>
+        </div>
     );
 }
 
+// ========== PAYMENT HISTORY TABLE ==========
+function PaymentHistoryTable() {
+    return (
+        <div>
+            <table className="w-full text-left border-collapse whitespace-nowrap">
+                <thead className="bg-white border-b border-gray-200">
+                    <tr>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide">MÃ PHIẾU</th>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide">TÊN NHÂN VIÊN</th>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide">THỜI GIAN</th>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide">NGƯỜI TẠO</th>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide">PHƯƠNG THỨC</th>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide">TRẠNG THÁI</th>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide text-right">TIỀN CHI</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td colSpan={7} className="px-4 py-8 text-center text-[13px] text-gray-400">
+                            Không có dữ liệu
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    );
+}
+
+// ========== EXPANDED ROW DETAIL ==========
+function ExpandedRowDetail({ batch, onReload, onViewDetail }: { batch: PayrollBatch; onReload: () => void; onViewDetail: () => void }) {
+    const [activeTab, setActiveTab] = useState<ExpandedTab>('info');
+
+    const tabs: { key: ExpandedTab; label: string }[] = [
+        { key: 'info', label: 'Thông tin' },
+        { key: 'payslips', label: 'Phiếu lương' },
+        { key: 'history', label: 'Lịch sử thanh toán' },
+    ];
+
+    const statusLabel = salaryStatusConfig[batch.status]?.label || batch.status;
+
+    return (
+        <div className="bg-[#fafbfc] border-b-2 border-gray-200">
+            {/* Tabs */}
+            <div className="flex border-b border-gray-200 px-4">
+                {tabs.map(tab => (
+                    <button
+                        key={tab.key}
+                        onClick={() => setActiveTab(tab.key)}
+                        className={`px-4 py-2.5 text-[13px] font-medium border-b-2 transition-colors -mb-px ${
+                            activeTab === tab.key
+                                ? 'border-blue-600 text-blue-600'
+                                : 'border-transparent text-gray-500 hover:text-gray-700'
+                        }`}
+                    >
+                        {tab.label}
+                    </button>
+                ))}
+            </div>
+
+            {/* Tab Content */}
+            {activeTab === 'info' && (
+                <div className="p-5 space-y-6">
+                    {/* Row 1 */}
+                    <div className="grid grid-cols-4 gap-6">
+                        <div>
+                            <p className="text-[11px] text-gray-400 mb-1">Mã:</p>
+                            <p className="text-[13px] font-semibold text-gray-800">{batch.code}</p>
+                        </div>
+                        <div>
+                            <p className="text-[11px] text-gray-400 mb-1">Tên:</p>
+                            <p className="text-[13px] font-semibold text-blue-600">{batch.name}</p>
+                        </div>
+                        <div>
+                            <p className="text-[11px] text-gray-400 mb-1">Kỳ hạn trả:</p>
+                            <p className="text-[13px] text-gray-800">{batch.pay_period}</p>
+                        </div>
+                        <div>
+                            <p className="text-[11px] text-gray-400 mb-1">Kỳ làm việc:</p>
+                            <p className="text-[13px] text-gray-800">{formatWorkPeriodFull(batch.month, batch.year)}</p>
+                        </div>
+                    </div>
+
+                    {/* Row 2 */}
+                    <div className="grid grid-cols-4 gap-6">
+                        <div>
+                            <p className="text-[11px] text-gray-400 mb-1">Ngày tạo:</p>
+                            <p className="text-[13px] text-gray-800">{formatDateTime(batch.created_at)}</p>
+                        </div>
+                        <div>
+                            <p className="text-[11px] text-gray-400 mb-1">Người tạo:</p>
+                            <p className="text-[13px] text-gray-800">{batch.created_by ? batch.created_by : 'Auto'}</p>
+                        </div>
+                        <div>
+                            <p className="text-[11px] text-gray-400 mb-1">Người lập bảng:</p>
+                            <p className="text-[13px] text-gray-800">Auto</p>
+                        </div>
+                        <div>
+                            <p className="text-[11px] text-gray-400 mb-1">Trạng thái:</p>
+                            <p className="text-[13px] font-medium text-blue-600">{statusLabel}</p>
+                        </div>
+                    </div>
+
+                    {/* Row 3 */}
+                    <div className="grid grid-cols-4 gap-6">
+                        <div>
+                            <p className="text-[11px] text-gray-400 mb-1">Tổng số nhân viên:</p>
+                            <p className="text-[13px] font-semibold text-gray-800">{batch.employee_count}</p>
+                        </div>
+                        <div>
+                            <p className="text-[11px] text-gray-400 mb-1">Tổng lương:</p>
+                            <p className="text-[13px] font-semibold text-gray-800">{formatCurrency(batch.total_salary)}</p>
+                        </div>
+                        <div>
+                            <p className="text-[11px] text-gray-400 mb-1">Đã trả nhân viên:</p>
+                            <p className="text-[13px] font-semibold text-gray-800">{formatCurrency(batch.total_paid)}</p>
+                        </div>
+                        <div>
+                            <p className="text-[11px] text-gray-400 mb-1">Còn cần trả:</p>
+                            <p className="text-[13px] font-semibold text-gray-800">{formatCurrency(batch.total_remaining)}</p>
+                        </div>
+                    </div>
+
+                    {/* Row 4 */}
+                    <div className="grid grid-cols-4 gap-6">
+                        <div>
+                            <p className="text-[11px] text-gray-400 mb-1">Phạm vi áp dụng:</p>
+                            <p className="text-[13px] text-gray-800">{batch.scope || 'Tất cả nhân viên'}</p>
+                        </div>
+                        <div>
+                            <p className="text-[11px] text-gray-400 mb-1">Người chốt lương:</p>
+                            <p className="text-[13px] text-gray-800">{batch.approved_by || '--'}</p>
+                        </div>
+                        <div className="col-span-2">
+                            <p className="text-[11px] text-gray-400 mb-1">Ghi chú...</p>
+                            <div className="border border-gray-200 rounded-lg bg-white px-3 py-2 min-h-[60px] text-[13px] text-gray-500">
+                                {batch.notes || ''}
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center justify-between pt-2 border-t border-gray-200">
+                        <div className="flex items-center gap-3">
+                            <Button variant="ghost" className="text-[13px] text-gray-500 hover:text-red-500 gap-1.5 h-[34px] px-3">
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Huỷ bỏ
+                            </Button>
+                            <span className="text-[12px] text-gray-400">
+                                Dữ liệu được cập nhật vào: {formatDateTime(batch.created_at)} ⓘ
+                            </span>
+                            <Button
+                                variant="outline"
+                                className="text-[13px] text-gray-600 gap-1.5 h-[34px] px-3 border-gray-200"
+                                onClick={onReload}
+                            >
+                                <RefreshCw className="h-3.5 w-3.5" />
+                                Tải lại dữ liệu
+                            </Button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            <Button
+                                className="gap-1.5 bg-green-600 hover:bg-green-700 text-white text-[13px] h-[34px] px-4 rounded-lg shadow-sm"
+                                onClick={onViewDetail}
+                            >
+                                <Eye className="h-3.5 w-3.5" />
+                                Xem bảng lương
+                            </Button>
+                            <Button variant="outline" className="gap-1.5 text-[13px] text-gray-600 h-[34px] px-4 border-gray-200">
+                                <Download className="h-3.5 w-3.5" />
+                                Xuất file
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {activeTab === 'payslips' && (
+                <PayslipTable batchId={batch.id} />
+            )}
+
+            {activeTab === 'history' && (
+                <PaymentHistoryTable />
+            )}
+        </div>
+    );
+}
+
+// ========== MAIN PAGE ==========
 export function SalaryPage() {
     const currentDate = new Date();
-    const defaultPeriod = formatPeriod(currentDate.getMonth() + 1, currentDate.getFullYear());
+    const navigate = useNavigate();
 
-    const [period, setPeriod] = useState(defaultPeriod);
-    const [statusFilter, setStatusFilter] = useState('all');
+    const [batches, setBatches] = useState<PayrollBatch[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [searchTerm, setSearchTerm] = useState('');
+    const [statusFilters, setStatusFilters] = useState<SalaryStatus[]>(['draft', 'pending', 'approved', 'locked']);
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
-    const [showDetail, setShowDetail] = useState(false);
-    const [showAISummary, setShowAISummary] = useState(false);
-    const [showTelegramDialog, setShowTelegramDialog] = useState(false);
-    const [selectedRecord, setSelectedRecord] = useState<SalaryRecord | null>(null);
+    const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
+    const [periodFilter, setPeriodFilter] = useState('all');
+    const [generating, setGenerating] = useState(false);
 
-    const {
-        salaries,
-        summary,
-        loading,
-        error,
-        fetchSalaries,
-        calculateAllSalaries,
-        approveBulk
-    } = useSalary();
+    // Pagination
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(15);
 
-    // Generate period options for last 12 months
-    const periodOptions = Array.from({ length: 12 }, (_, i) => {
+    // Fetch payroll batches
+    const fetchBatches = useCallback(async () => {
+        setLoading(true);
+        setError(null);
+        try {
+            const params: Record<string, any> = {};
+            if (periodFilter !== 'all') {
+                const [monthStr, yearStr] = periodFilter.split('/');
+                params.month = parseInt(monthStr, 10);
+                params.year = parseInt(yearStr, 10);
+            }
+            const res = await payrollBatchesApi.getAll(params);
+            setBatches(res.data.data?.batches || []);
+        } catch (err: any) {
+            // If table doesn't exist, show empty
+            if (err.response?.status === 500 && err.response?.data?.message?.includes('does not exist')) {
+                setBatches([]);
+            } else {
+                setError(err.response?.data?.message || 'Lỗi khi tải bảng lương');
+            }
+        } finally {
+            setLoading(false);
+        }
+    }, [periodFilter]);
+
+    useEffect(() => {
+        fetchBatches();
+    }, [fetchBatches]);
+
+    // Filter batches client-side
+    const filteredBatches = useMemo(() => {
+        let result = batches;
+
+        // Status filter
+        if (statusFilters.length > 0 && statusFilters.length < Object.keys(salaryStatusConfig).length) {
+            result = result.filter(b => statusFilters.includes(b.status));
+        }
+
+        // Search filter
+        if (searchTerm.trim()) {
+            const term = searchTerm.toLowerCase();
+            result = result.filter(b =>
+                b.code.toLowerCase().includes(term) ||
+                b.name.toLowerCase().includes(term)
+            );
+        }
+
+        return result;
+    }, [batches, statusFilters, searchTerm]);
+
+    // Pagination
+    const totalItems = filteredBatches.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+    const paginatedBatches = filteredBatches.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+    useEffect(() => { setCurrentPage(1); }, [statusFilters, searchTerm, periodFilter]);
+
+    // Summary
+    const totalSalary = filteredBatches.reduce((s, b) => s + (b.total_salary || 0), 0);
+    const totalPaid = filteredBatches.reduce((s, b) => s + (b.total_paid || 0), 0);
+    const totalRemaining = filteredBatches.reduce((s, b) => s + (b.total_remaining || 0), 0);
+
+    // Selection
+    const toggleSelect = (id: string) => {
+        setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+    };
+    const selectAll = () => {
+        if (selectedIds.length === paginatedBatches.length && paginatedBatches.length > 0) setSelectedIds([]);
+        else setSelectedIds(paginatedBatches.map(b => b.id));
+    };
+
+    const toggleStatusFilter = (status: SalaryStatus) => {
+        setStatusFilters(prev =>
+            prev.includes(status) ? prev.filter(s => s !== status) : [...prev, status]
+        );
+    };
+
+    const handleGenerate = async () => {
+        const month = currentDate.getMonth() + 1;
+        const year = currentDate.getFullYear();
+        setGenerating(true);
+        try {
+            await payrollBatchesApi.generate({ month, year });
+            await fetchBatches();
+        } catch (err: any) {
+            setError(err.response?.data?.message || 'Lỗi khi tạo bảng lương');
+        } finally {
+            setGenerating(false);
+        }
+    };
+
+    // Period options
+    const periodOptions = Array.from({ length: 24 }, (_, i) => {
         const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
         return formatPeriod(date.getMonth() + 1, date.getFullYear());
     });
 
-    // Fetch data when period changes
-    useEffect(() => {
-        const { month, year } = parsePeriod(period);
-        fetchSalaries({ month, year, status: statusFilter !== 'all' ? statusFilter : undefined });
-    }, [period, statusFilter, fetchSalaries]);
-
-    // Filter data based on status
-    const filteredData = statusFilter === 'all'
-        ? salaries
-        : salaries.filter(d => d.status === statusFilter);
-
-    // Summary stats
-    const totalGross = summary?.totalBaseSalary
-        ? summary.totalBaseSalary + summary.totalCommission + summary.totalBonus
-        : filteredData.reduce((sum, d) => sum + (d.gross_salary || d.hourly_wage + d.commission + d.bonus), 0);
-    const totalNet = summary?.totalNet || filteredData.reduce((sum, d) => sum + d.net_salary, 0);
-    const totalCommission = summary?.totalCommission || filteredData.reduce((sum, d) => sum + d.commission, 0);
-    const pendingCount = filteredData.filter(d => d.status === 'pending').length;
-
-    const toggleSelect = (id: string) => {
-        setSelectedIds(prev =>
-            prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
-        );
-    };
-
-    const selectAll = () => {
-        if (selectedIds.length === filteredData.length) {
-            setSelectedIds([]);
-        } else {
-            setSelectedIds(filteredData.map(d => d.id));
-        }
-    };
-
-    const handleCalculateAll = async () => {
-        const { month, year } = parsePeriod(period);
-        await calculateAllSalaries(month, year);
-    };
-
-    const handleApproveBulk = async () => {
-        await approveBulk(selectedIds);
-        setSelectedIds([]);
-    };
-
-    if (loading && salaries.length === 0) {
+    if (loading && batches.length === 0) {
         return (
             <div className="flex items-center justify-center h-64">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -463,278 +521,262 @@ export function SalaryPage() {
     }
 
     return (
-        <div className="space-y-6 animate-fade-in">
-            {/* Page Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                <div>
-                    <h1 className="text-2xl font-bold text-foreground">Quản lý Lương</h1>
-                    <p className="text-muted-foreground">Tính lương theo giờ + hoa hồng + KPI</p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                    <Select value={period} onValueChange={setPeriod}>
-                        <SelectTrigger className="w-32">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {periodOptions.map(p => (
-                                <SelectItem key={p} value={p}>{p}</SelectItem>
+        <div className="flex h-[calc(100vh-6rem)] bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            {/* ===== LEFT SIDEBAR ===== */}
+            <div className="w-[220px] border-r border-gray-200 bg-[#fbfcfd] flex flex-col p-5 flex-shrink-0">
+                <h1 className="text-[17px] font-bold mb-7 text-gray-900 tracking-tight">Bảng lương</h1>
+
+                <div className="space-y-7">
+                    {/* Payment Period Filter */}
+                    <div className="space-y-3">
+                        <h3 className="text-[13px] font-bold text-gray-700">Kỳ hạn trả lương</h3>
+                        <Select value={periodFilter} onValueChange={setPeriodFilter}>
+                            <SelectTrigger className="w-full h-[38px] bg-white border-gray-200 text-[13px] shadow-sm rounded-lg text-gray-600">
+                                <SelectValue placeholder="Chọn kỳ hạn trả lương" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all" className="text-[13px]">Tất cả kỳ</SelectItem>
+                                {periodOptions.map(p => (
+                                    <SelectItem key={p} value={p} className="text-[13px]">
+                                        Tháng {p}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    {/* Status Filter */}
+                    <div className="space-y-3">
+                        <h3 className="text-[13px] font-bold text-gray-700">Trạng thái</h3>
+                        <div className="space-y-2.5">
+                            {(Object.entries(salaryStatusConfig) as [SalaryStatus, typeof salaryStatusConfig[SalaryStatus]][]).map(([key, config]) => (
+                                <label key={key} className="flex items-center gap-2.5 cursor-pointer group">
+                                    <Checkbox
+                                        checked={statusFilters.includes(key)}
+                                        onCheckedChange={() => toggleStatusFilter(key)}
+                                        className="h-4 w-4 rounded border-gray-300 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                                    />
+                                    <span className={`text-[13px] ${statusFilters.includes(key) ? 'text-blue-600 font-medium' : 'text-gray-700'} group-hover:text-blue-600 transition-colors`}>
+                                        {config.label}
+                                    </span>
+                                </label>
                             ))}
-                        </SelectContent>
-                    </Select>
-                    <Button
-                        variant="outline"
-                        className="gap-2"
-                        onClick={handleCalculateAll}
-                        disabled={loading}
-                    >
-                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                        Tính lương
-                    </Button>
-                    <Button variant="outline" className="gap-2" onClick={() => setShowAISummary(true)}>
-                        <Bot className="h-4 w-4" />
-                        AI Tổng hợp
-                    </Button>
-                    <Button
-                        className="gap-2 bg-blue-500 hover:bg-blue-600"
-                        disabled={selectedIds.length === 0}
-                        onClick={() => setShowTelegramDialog(true)}
-                    >
-                        <MessageCircle className="h-4 w-4" />
-                        Gửi Telegram
-                    </Button>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            {/* Error message */}
-            {error && (
-                <div className="bg-red-50 text-red-600 p-4 rounded-lg">
-                    {error}
+            {/* ===== MAIN CONTENT ===== */}
+            <div className="flex-1 flex flex-col min-w-0 bg-white">
+                {/* Search Bar & Actions */}
+                <div className="flex items-center justify-between p-3 border-b border-gray-100 gap-3 bg-[#fbfcfd]">
+                    <div className="flex-1 relative max-w-md">
+                        <Search className="absolute left-3 top-1/2 -translate-y-[45%] h-[15px] w-[15px] text-gray-400" />
+                        <Input
+                            className="w-full pl-[34px] h-[36px] border-gray-200 text-[13px] placeholder:text-gray-400 bg-white shadow-sm rounded-lg focus-visible:ring-1 focus-visible:ring-blue-500"
+                            placeholder="Theo mã, tên bảng lương"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            className="h-[36px] px-3.5 text-blue-600 border border-blue-200 bg-white hover:bg-blue-50 text-[13px] font-semibold rounded-lg shadow-sm"
+                            onClick={handleGenerate}
+                            disabled={generating}
+                        >
+                            {generating ? (
+                                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                            ) : (
+                                <Calculator className="h-4 w-4 mr-1.5" />
+                            )}
+                            Bảng tính lương
+                        </Button>
+                        <Button
+                            variant="outline"
+                            className="h-[36px] px-3.5 border-gray-200 bg-white text-gray-700 text-[13px] font-semibold rounded-lg shadow-sm hover:bg-gray-50"
+                        >
+                            <Download className="h-[15px] w-[15px] mr-1.5 text-gray-500" />
+                            Xuất file
+                        </Button>
+                    </div>
                 </div>
-            )}
 
-            {/* Summary Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <Card className="bg-gradient-to-br from-emerald-50 to-emerald-100 border-0">
-                    <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm text-muted-foreground">Tổng lương Gross</p>
-                                <p className="text-xl font-bold text-emerald-600">{formatCurrency(totalGross)}</p>
-                            </div>
-                            <DollarSign className="h-8 w-8 text-emerald-500/50" />
-                        </div>
-                    </CardContent>
-                </Card>
+                {/* Error */}
+                {error && (
+                    <div className="mx-3 mt-2 bg-red-50 text-red-600 p-3 rounded-lg text-sm">
+                        {error}
+                    </div>
+                )}
 
-                <Card className="bg-gradient-to-br from-blue-50 to-blue-100 border-0">
-                    <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm text-muted-foreground">Tổng thực lĩnh</p>
-                                <p className="text-xl font-bold text-blue-600">{formatCurrency(totalNet)}</p>
-                            </div>
-                            <Calculator className="h-8 w-8 text-blue-500/50" />
-                        </div>
-                    </CardContent>
-                </Card>
+                {/* Table */}
+                <div className="flex-1 overflow-auto">
+                    <table className="w-full text-left border-collapse whitespace-nowrap">
+                        <thead className="bg-[#f2f6ff] sticky top-0 z-10">
+                            <tr>
+                                <th className="px-4 py-3 w-10 border-b border-gray-100">
+                                    <input
+                                        type="checkbox"
+                                        className="w-[14px] h-[14px] rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                        checked={selectedIds.length === paginatedBatches.length && paginatedBatches.length > 0}
+                                        onChange={selectAll}
+                                    />
+                                </th>
+                                <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">MÃ</th>
+                                <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">TÊN</th>
+                                <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">KỲ HẠN TRẢ</th>
+                                <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">KỲ LÀM VIỆC</th>
+                                <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide text-right">TỔNG LƯƠNG</th>
+                                <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide text-right">ĐÃ TRẢ NHÂN VIÊN</th>
+                                <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide text-right">CÒN CẦN TRẢ</th>
+                                <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">TRẠNG THÁI</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                            {/* Summary row */}
+                            {filteredBatches.length > 0 && (
+                                <tr className="bg-white border-b-2 border-gray-200">
+                                    <td className="px-4 py-3" colSpan={5}></td>
+                                    <td className="px-4 py-3 text-right font-bold text-[13px] text-gray-900">{formatCurrency(totalSalary)}</td>
+                                    <td className="px-4 py-3 text-right font-bold text-[13px] text-gray-900">{formatCurrency(totalPaid)}</td>
+                                    <td className="px-4 py-3 text-right font-bold text-[13px] text-gray-900">{formatCurrency(totalRemaining)}</td>
+                                    <td className="px-4 py-3"></td>
+                                </tr>
+                            )}
 
-                <Card className="bg-gradient-to-br from-purple-50 to-purple-100 border-0">
-                    <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm text-muted-foreground">Tổng hoa hồng</p>
-                                <p className="text-xl font-bold text-purple-600">{formatCurrency(totalCommission)}</p>
-                            </div>
-                            <Award className="h-8 w-8 text-purple-500/50" />
-                        </div>
-                    </CardContent>
-                </Card>
+                            {paginatedBatches.length === 0 ? (
+                                <tr>
+                                    <td colSpan={9} className="px-4 py-12 text-center text-[13px] text-gray-500">
+                                        {loading ? (
+                                            <div className="flex items-center justify-center gap-2">
+                                                <Loader2 className="h-5 w-5 animate-spin" />
+                                                Đang tải...
+                                            </div>
+                                        ) : (
+                                            <div>
+                                                <p>Chưa có bảng lương.</p>
+                                                <p className="text-[12px] text-gray-400 mt-1">
+                                                    Bảng lương sẽ tự động tạo vào chủ nhật cuối cùng của tháng, hoặc nhấn "Bảng tính lương" để tạo thủ công.
+                                                </p>
+                                            </div>
+                                        )}
+                                    </td>
+                                </tr>
+                            ) : (
+                                paginatedBatches.map((batch) => {
+                                    const isExpanded = expandedBatchId === batch.id;
+                                    const statusInfo = salaryStatusConfig[batch.status] || { label: batch.status, color: '#6b7280' };
 
-                <Card className="bg-gradient-to-br from-amber-50 to-amber-100 border-0">
-                    <CardContent className="p-4">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm text-muted-foreground">Chờ duyệt</p>
-                                <p className="text-xl font-bold text-amber-600">{pendingCount} phiếu</p>
-                            </div>
-                            <Clock className="h-8 w-8 text-amber-500/50" />
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
+                                    return (
+                                        <Fragment key={batch.id}>
+                                            <tr
+                                                className={`cursor-pointer transition-colors ${
+                                                    isExpanded ? 'bg-blue-50/50' : 'hover:bg-blue-50/30'
+                                                }`}
+                                                onClick={(e) => {
+                                                    if ((e.target as HTMLElement).tagName !== 'INPUT') {
+                                                        setExpandedBatchId(isExpanded ? null : batch.id);
+                                                    }
+                                                }}
+                                            >
+                                                <td className="px-4 py-[13px]">
+                                                    <input
+                                                        type="checkbox"
+                                                        className="w-[14px] h-[14px] rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                                        checked={selectedIds.includes(batch.id)}
+                                                        onChange={() => toggleSelect(batch.id)}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    />
+                                                </td>
+                                                <td className="px-4 py-[13px] text-blue-600 font-medium text-[13px]">{batch.code}</td>
+                                                <td className="px-4 py-[13px] text-[13px]">
+                                                    <p className="font-semibold text-blue-600">{batch.name}</p>
+                                                </td>
+                                                <td className="px-4 py-[13px] text-gray-700 text-[13px]">{batch.pay_period}</td>
+                                                <td className="px-4 py-[13px] text-gray-700 text-[13px]">
+                                                    {formatWorkPeriodFull(batch.month, batch.year)}
+                                                </td>
+                                                <td className="px-4 py-[13px] text-right text-gray-800 text-[13px] font-medium">
+                                                    {formatCurrency(batch.total_salary)}
+                                                </td>
+                                                <td className="px-4 py-[13px] text-right text-gray-800 text-[13px] font-medium">
+                                                    {formatCurrency(batch.total_paid)}
+                                                </td>
+                                                <td className="px-4 py-[13px] text-right text-gray-800 text-[13px] font-medium">
+                                                    {formatCurrency(batch.total_remaining)}
+                                                </td>
+                                                <td className="px-4 py-[13px] text-[13px]">
+                                                    <span className="text-blue-600">{statusInfo.label}</span>
+                                                </td>
+                                            </tr>
 
-            {/* Filters & Actions */}
-            <Card>
-                <CardContent className="p-4">
-                    <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-                        <div className="flex gap-2">
-                            <Select value={statusFilter} onValueChange={setStatusFilter}>
-                                <SelectTrigger className="w-40">
-                                    <SelectValue placeholder="Trạng thái" />
+                                            {isExpanded && (
+                                                <tr>
+                                                    <td colSpan={9} className="p-0">
+                                                        <ExpandedRowDetail batch={batch} onReload={fetchBatches} onViewDetail={() => navigate(`/salary/${batch.id}`)} />
+                                                    </td>
+                                                </tr>
+                                            )}
+                                        </Fragment>
+                                    );
+                                })
+                            )}
+                        </tbody>
+                    </table>
+                </div>
+
+                {/* Pagination */}
+                {totalItems > 0 && (
+                    <div className="flex items-center justify-between px-4 py-2.5 border-t border-gray-200 bg-[#fbfcfd]">
+                        <div className="flex items-center gap-2 text-[13px] text-gray-600">
+                            <span>Hiển thị</span>
+                            <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setCurrentPage(1); }}>
+                                <SelectTrigger className="w-[80px] h-[30px] text-[13px] border-gray-200 bg-white">
+                                    <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="all">Tất cả</SelectItem>
-                                    <SelectItem value="draft">Nháp</SelectItem>
-                                    <SelectItem value="pending">Chờ duyệt</SelectItem>
-                                    <SelectItem value="approved">Đã duyệt</SelectItem>
-                                    <SelectItem value="paid">Đã trả</SelectItem>
+                                    <SelectItem value="15" className="text-[13px]">15 bản ghi</SelectItem>
+                                    <SelectItem value="25" className="text-[13px]">25 bản ghi</SelectItem>
+                                    <SelectItem value="50" className="text-[13px]">50 bản ghi</SelectItem>
+                                    <SelectItem value="100" className="text-[13px]">100 bản ghi</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
 
-                        <div className="flex gap-2">
-                            <Button variant="outline" size="sm" onClick={selectAll}>
-                                {selectedIds.length === filteredData.length && filteredData.length > 0 ? 'Bỏ chọn tất cả' : 'Chọn tất cả'}
+                        <div className="flex items-center gap-1.5">
+                            <Button variant="outline" size="icon" className="h-[30px] w-[30px] border-gray-200" disabled={currentPage === 1} onClick={() => setCurrentPage(1)}>
+                                <ChevronsLeft className="h-3.5 w-3.5" />
                             </Button>
-                            {selectedIds.length > 0 && (
-                                <>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="gap-1"
-                                        onClick={handleApproveBulk}
-                                        disabled={loading}
-                                    >
-                                        <CheckCircle className="h-4 w-4" />
-                                        Duyệt ({selectedIds.length})
-                                    </Button>
-                                    <Button variant="outline" size="sm" className="gap-1">
-                                        <Lock className="h-4 w-4" />
-                                        Khóa kỳ
-                                    </Button>
-                                </>
-                            )}
+                            <Button variant="outline" size="icon" className="h-[30px] w-[30px] border-gray-200" disabled={currentPage === 1} onClick={() => setCurrentPage(p => Math.max(1, p - 1))}>
+                                <ChevronLeft className="h-3.5 w-3.5" />
+                            </Button>
+                            <div className="flex items-center gap-1 mx-1">
+                                <Input
+                                    type="number"
+                                    min={1}
+                                    max={totalPages}
+                                    value={currentPage}
+                                    onChange={(e) => {
+                                        const val = Number(e.target.value);
+                                        if (val >= 1 && val <= totalPages) setCurrentPage(val);
+                                    }}
+                                    className="w-[40px] h-[30px] text-center text-[13px] border-gray-200 bg-white px-1"
+                                />
+                            </div>
+                            <Button variant="outline" size="icon" className="h-[30px] w-[30px] border-gray-200" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}>
+                                <ChevronRight className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button variant="outline" size="icon" className="h-[30px] w-[30px] border-gray-200" disabled={currentPage === totalPages} onClick={() => setCurrentPage(totalPages)}>
+                                <ChevronsRight className="h-3.5 w-3.5" />
+                            </Button>
+                            <span className="text-[13px] text-gray-500 ml-2">
+                                {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, totalItems)} trong {totalItems} bảng lương
+                            </span>
                         </div>
                     </div>
-                </CardContent>
-            </Card>
-
-            {/* Salary Table */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>Bảng lương tháng {period}</CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                    <div className="overflow-x-auto">
-                        <table className="w-full">
-                            <thead className="bg-muted/50 border-y">
-                                <tr>
-                                    <th className="p-3 text-left w-10">
-                                        <Checkbox
-                                            checked={selectedIds.length === filteredData.length && filteredData.length > 0}
-                                            onCheckedChange={selectAll}
-                                        />
-                                    </th>
-                                    <th className="p-3 text-left text-sm font-medium text-muted-foreground">Nhân viên</th>
-                                    <th className="p-3 text-right text-sm font-medium text-muted-foreground">Giờ công</th>
-                                    <th className="p-3 text-right text-sm font-medium text-muted-foreground">Lương giờ</th>
-                                    <th className="p-3 text-right text-sm font-medium text-muted-foreground">Hoa hồng</th>
-                                    <th className="p-3 text-right text-sm font-medium text-muted-foreground">KPI</th>
-                                    <th className="p-3 text-right text-sm font-medium text-muted-foreground">Gross</th>
-                                    <th className="p-3 text-right text-sm font-medium text-muted-foreground">Thực lĩnh</th>
-                                    <th className="p-3 text-center text-sm font-medium text-muted-foreground">TT</th>
-                                    <th className="p-3 text-center text-sm font-medium text-muted-foreground">TG</th>
-                                    <th className="p-3 text-right text-sm font-medium text-muted-foreground">Thao tác</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {filteredData.length === 0 ? (
-                                    <tr>
-                                        <td colSpan={11} className="p-8 text-center text-muted-foreground">
-                                            {loading ? 'Đang tải...' : 'Chưa có dữ liệu lương cho kỳ này. Nhấn "Tính lương" để bắt đầu.'}
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    filteredData.map((record) => {
-                                        const grossSalary = record.gross_salary || (record.hourly_wage + record.commission + record.bonus);
-                                        const kpiAchievement = record.kpi_achievement || 0;
-                                        const employeeName = record.user?.name || 'N/A';
-                                        const employeeRole = record.user?.role || 'sale';
-
-                                        return (
-                                            <tr key={record.id} className="border-b hover:bg-muted/30 transition-colors">
-                                                <td className="p-3">
-                                                    <Checkbox
-                                                        checked={selectedIds.includes(record.id)}
-                                                        onCheckedChange={() => toggleSelect(record.id)}
-                                                    />
-                                                </td>
-                                                <td className="p-3">
-                                                    <div className="flex items-center gap-3">
-                                                        <Avatar className="h-8 w-8">
-                                                            <AvatarImage src={record.user?.avatar} />
-                                                            <AvatarFallback>{employeeName.charAt(0)}</AvatarFallback>
-                                                        </Avatar>
-                                                        <div>
-                                                            <p className="font-medium">{employeeName}</p>
-                                                            <Badge variant="outline" className="text-xs">
-                                                                {roleLabels[employeeRole] || employeeRole}
-                                                            </Badge>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td className="p-3 text-right">{record.total_hours}h</td>
-                                                <td className="p-3 text-right">{formatCurrency(record.hourly_wage)}</td>
-                                                <td className="p-3 text-right text-emerald-600 font-medium">
-                                                    {formatCurrency(record.commission)}
-                                                </td>
-                                                <td className="p-3 text-right">
-                                                    <Badge variant={kpiAchievement >= 100 ? 'success' : kpiAchievement >= 80 ? 'warning' : 'danger'}>
-                                                        {kpiAchievement}%
-                                                    </Badge>
-                                                </td>
-                                                <td className="p-3 text-right font-medium">{formatCurrency(grossSalary)}</td>
-                                                <td className="p-3 text-right font-bold text-primary">{formatCurrency(record.net_salary)}</td>
-                                                <td className="p-3 text-center">
-                                                    <Badge variant={statusLabels[record.status]?.variant || 'secondary'}>
-                                                        {statusLabels[record.status]?.label || record.status}
-                                                    </Badge>
-                                                </td>
-                                                <td className="p-3 text-center">
-                                                    {record.telegram_sent ? (
-                                                        <Badge variant="success" className="gap-1">
-                                                            <CheckCircle className="h-3 w-3" />
-                                                        </Badge>
-                                                    ) : (
-                                                        <span className="text-muted-foreground">-</span>
-                                                    )}
-                                                </td>
-                                                <td className="p-3 text-right">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        onClick={() => { setSelectedRecord(record); setShowDetail(true); }}
-                                                    >
-                                                        <Eye className="h-4 w-4" />
-                                                    </Button>
-                                                </td>
-                                            </tr>
-                                        );
-                                    })
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                </CardContent>
-            </Card>
-
-            {/* Dialogs */}
-            <SalaryDetailDialog
-                open={showDetail}
-                onClose={() => { setShowDetail(false); setSelectedRecord(null); }}
-                record={selectedRecord}
-            />
-            <AISummaryDialog
-                open={showAISummary}
-                onClose={() => setShowAISummary(false)}
-                data={filteredData}
-            />
-            <TelegramDialog
-                open={showTelegramDialog}
-                onClose={() => setShowTelegramDialog(false)}
-                data={filteredData}
-                selectedIds={selectedIds}
-            />
+                )}
+            </div>
         </div>
     );
 }
