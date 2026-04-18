@@ -22,7 +22,7 @@ import { useCustomers } from '@/hooks/useCustomers';
 import { useProducts } from '@/hooks/useProducts';
 import { usePackages } from '@/hooks/usePackages';
 import { useUsers } from '@/hooks/useUsers';
-import { ordersApi, transactionsApi } from '@/lib/api';
+import { ordersApi, transactionsApi, salaryConfigsApi, commissionTablesApi } from '@/lib/api';
 import { CreateCustomerDialog } from '@/components/customers/CreateCustomerDialog';
 import { ImageUpload } from '@/components/products/ImageUpload';
 import { useProductTypes } from '@/hooks/useProductTypes';
@@ -104,6 +104,9 @@ export function CreateOrderPage() {
     const { packages, fetchPackages } = usePackages();
     const { users, fetchUsers, fetchTechnicians, fetchSales } = useUsers();
     const { productTypes, fetchProductTypes } = useProductTypes();
+
+    const [salaryConfigs, setSalaryConfigs] = useState<any[]>([]);
+    const [commissionTables, setCommissionTables] = useState<any[]>([]);
 
     // Form state
     const [customerId, setCustomerId] = useState('');
@@ -189,7 +192,9 @@ export function CreateOrderPage() {
                     fetchPackages(),
                     fetchTechnicians(),
                     fetchSales(),
-                    fetchProductTypes()
+                    fetchProductTypes(),
+                    salaryConfigsApi.getAll().then(res => setSalaryConfigs(res.data?.data?.configs || [])).catch(() => {}),
+                    commissionTablesApi.getAll().then(res => setCommissionTables(res.data?.data?.tables || [])).catch(() => {})
                 ];
 
                 // If editing, add order fetch to the parallel pool
@@ -475,6 +480,45 @@ export function CreateOrderPage() {
         setTechDialogOpen(true);
     };
 
+    // Helper: Resolve dynamic commission rate from salary configuration
+    const resolveCommissionRate = (employeeId: string, itemCatalogId: string, itemCategoryType: 'service' | 'sales_consulting', isProduct: boolean) => {
+        // Find employee's salary config
+        const config = salaryConfigs.find(c => c.user_id === employeeId);
+        if (!config || !config.commission_enabled) return undefined;
+
+        // Find matching rule in commission_rules
+        const rule = config.commission_rules?.find((r: any) => r.category === itemCategoryType);
+        if (!rule || !rule.commission_type) return undefined;
+
+        const tableId = rule.commission_type;
+
+        // Look up item from catalog to get its commission_data
+        let catalogItem: any = null;
+        if (isProduct) {
+            catalogItem = catalogProducts.find(p => p.id === itemCatalogId);
+        } else {
+            catalogItem = services.find(s => s.id === itemCatalogId) || packages.find(p => p.id === itemCatalogId);
+        }
+
+        if (!catalogItem) return undefined;
+
+        const commissionData = catalogItem.commission_data || {};
+
+        if (tableId === 'shared_table' || tableId === 'common') {
+            if (itemCategoryType === 'service') {
+                return typeof catalogItem.commission_tech !== 'undefined' ? catalogItem.commission_tech : catalogItem.commission_rate;
+            } else {
+                return catalogItem.commission_sale;
+            }
+        } else {
+            const tableConfig = commissionData[tableId];
+            if (tableConfig) {
+                 return itemCategoryType === 'service' ? tableConfig.tech_rate : tableConfig.sale_rate;
+            }
+        }
+        return undefined;
+    };
+
     // Confirm adding service with technicians
     const handleConfirmAddService = (selectedTechnicians: Array<{ id: string; name: string; commission: number }> = []) => {
         if (!pendingService) return;
@@ -487,10 +531,13 @@ export function CreateOrderPage() {
                 ...p,
                 services: [...p.services, {
                     ...service,
-                    technicians: selectedTechnicians.map(t => ({
-                        ...t,
-                        commission: t.commission || service.commission_tech || (availableTechnicians.find(at => at.id === t.id)?.commission || 0)
-                    })),
+                    technicians: selectedTechnicians.map(t => {
+                        const dynamicRate = resolveCommissionRate(t.id, service.id, 'service', false);
+                        return {
+                            ...t,
+                            commission: t.commission || (dynamicRate !== undefined ? dynamicRate : (service.commission_tech || (availableTechnicians.find(at => at.id === t.id)?.commission || 0)))
+                        };
+                    }),
                     sales: [] // Initialize with empty sales
                 }]
             };
@@ -522,12 +569,14 @@ export function CreateOrderPage() {
                         ? services.find(sv => sv.id === s.id)
                         : packages.find(pk => pk.id === s.id);
 
+                    const dynamicRate = resolveCommissionRate(technicianId, s.id, 'service', false);
+
                     return {
                         ...s,
                         technicians: [...s.technicians, {
                             id: technician.id,
                             name: technician.name,
-                            commission: commission || service?.commission_tech || technician.commission || 0
+                            commission: commission || (dynamicRate !== undefined ? dynamicRate : (service?.commission_tech || technician.commission || 0))
                         }]
                     };
                 })
@@ -599,12 +648,14 @@ export function CreateOrderPage() {
                         ? services.find(sv => sv.id === s.id)
                         : packages.find(pk => pk.id === s.id);
 
+                    const dynamicRate = resolveCommissionRate(saleId, s.id, 'sales_consulting', false);
+
                     return {
                         ...s,
                         sales: [...s.sales, {
                             id: sale.id,
                             name: sale.name,
-                            commission: commission || service?.commission_sale || sale.commission || 0
+                            commission: commission || (dynamicRate !== undefined ? dynamicRate : (service?.commission_sale || sale.commission || 0))
                         }]
                     };
                 })
@@ -691,13 +742,14 @@ export function CreateOrderPage() {
                 return a;
             }
             const catalogProduct = catalogProducts.find(p => p.id === addOnId);
+            const dynamicRate = resolveCommissionRate(saleId, addOnId, 'sales_consulting', true);
             setLastAddedAddOnSale({ addOnId, saleId });
             return {
                 ...a,
                 sales: [...a.sales, {
                     id: sale.id,
                     name: sale.name,
-                    commission: commission || catalogProduct?.commission_sale || sale.commission || 0
+                    commission: commission || (dynamicRate !== undefined ? dynamicRate : (catalogProduct?.commission_sale || sale.commission || 0))
                 }]
             };
         }));

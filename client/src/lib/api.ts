@@ -644,6 +644,16 @@ export const salaryApi = {
         api.patch<ApiResponse<{ salary: any }>>(`/salary/${id}/pay`, data),
 };
 
+// Salary Configs API
+export const salaryConfigsApi = {
+    getAll: () =>
+        api.get<ApiResponse<{ configs: any[] }>>('/salary-configs'),
+    getByUserId: (userId: string) =>
+        api.get<ApiResponse<{ config: any }>>(`/salary-configs/${userId}`),
+    update: (userId: string, data: any) =>
+        api.put<ApiResponse<{ config: any }>>(`/salary-configs/${userId}`, data)
+};
+
 // Payroll Batches API
 export const payrollBatchesApi = {
     getAll: (params?: { month?: number; year?: number; status?: string }) =>
@@ -788,6 +798,20 @@ export const commissionTablesApi = {
     create: (data: any) => api.post('/commission-tables', data),
     update: (id: string, data: any) => api.patch(`/commission-tables/${id}`, data),
     delete: (id: string) => api.delete(`/commission-tables/${id}`),
+};
+
+// Departments API
+export const departmentsApi = {
+    getAll: (status?: string) =>
+        api.get<any[]>('/departments', { params: { status } }),
+    getById: (id: string) =>
+        api.get<any>(`/departments/${id}`),
+    create: (data: any) =>
+        api.post<any>('/departments', data),
+    update: (id: string, data: any) =>
+        api.put<any>(`/departments/${id}`, data),
+    delete: (id: string) =>
+        api.delete(`/departments/${id}`),
 };
 
 // Leave Requests API

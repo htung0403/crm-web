@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from 'react';
 import { Search, Plus, Download, Upload, ChevronRight, ChevronDown, Loader2, Save, RotateCcw, Check } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -10,12 +10,19 @@ import {
     PopoverTrigger,
 } from '@/components/ui/popover';
 
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select';
 import { formatNumber } from '@/lib/utils';
 import { toast } from 'sonner';
 import { useProducts } from '@/hooks/useProducts';
 import { useProductTypes } from '@/hooks/useProductTypes';
 import { useUsers } from '@/hooks/useUsers';
-import { commissionTablesApi } from '@/lib/api';
+import { commissionTablesApi, salaryConfigsApi, departmentsApi } from '@/lib/api';
 import { AddCommissionConditionDialog } from '@/components/commissions/AddCommissionConditionDialog';
 
 // Commission table types
@@ -67,26 +74,78 @@ export function CommissionsPage() {
     const [searchCodeTerm, setSearchCodeTerm] = useState('');
     const [searchNameTerm, setSearchNameTerm] = useState('');
     const [commissionTables, setCommissionTables] = useState<CommissionTable[]>([]);
+    const [allDepartments, setAllDepartments] = useState<any[]>([]);
     const [commissionTableSearch, setCommissionTableSearch] = useState('');
     const [productGroups, setProductGroups] = useState<ProductGroup[]>([{ id: 'all', name: 'Tất cả' }]);
     const [selectedGroup, setSelectedGroup] = useState('all');
     const [groupSearch, setGroupSearch] = useState('');
+    const [userSearch, setUserSearch] = useState('');
+    const [selectedDepartment, setSelectedDepartment] = useState('all');
     const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
     const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
     const [selectAll, setSelectAll] = useState(false);
     const [showAddTableDialog, setShowAddTableDialog] = useState(false);
 
+    const [salaryConfigs, setSalaryConfigs] = useState<any[]>([]);
+    const [loadingConfigs, setLoadingConfigs] = useState(false);
+
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 15;
 
+    const fetchDepartments = useCallback(async () => {
+        try {
+            const response = await departmentsApi.getAll();
+            const body = (response as any).data || response;
+            // Handle both { data: [...] } and just [...]
+            const depts = Array.isArray(body) ? body : (body.data || []);
+            setAllDepartments(depts);
+        } catch (error) {
+            console.error('Error fetching departments:', error);
+        }
+    }, []);
+
+    const fetchSalaryConfigs = useCallback(async () => {
+        setLoadingConfigs(true);
+        try {
+            const response = await salaryConfigsApi.getAll();
+            const body = (response as any).data || response;
+            // Many routes return { data: { configs: [...] } }
+            const configs = body.data?.configs || body.configs || (Array.isArray(body) ? body : []);
+            setSalaryConfigs(configs);
+        } catch (error) {
+            console.error('Error fetching salary configs:', error);
+        } finally {
+            setLoadingConfigs(false);
+        }
+    }, []);
+
     const fetchCommissionTables = useCallback(async () => {
         try {
             const response = await commissionTablesApi.getAll();
-            setCommissionTables(response.data.data.tables);
+            const body = (response as any).data || response;
+            // Many routes return { data: { tables: [...] } }
+            const tables = body.data?.tables || body.tables || (Array.isArray(body) ? body : []);
+            
+            const dbTables = tables.map((t: any) => ({ ...t, checked: true }));
+            
+            // Avoid duplication of "Bảng hoa hồng chung"
+            const hasShared = dbTables.some((t: any) => 
+                t.id === 'common' || 
+                t.id === 'shared_table' || 
+                t.name === 'Bảng hoa hồng chung'
+            );
+
+            if (hasShared) {
+                setCommissionTables(dbTables);
+            } else {
+                setCommissionTables([
+                    { id: 'shared_table', name: 'Bảng hoa hồng chung', type: 'common', checked: true },
+                    ...dbTables
+                ]);
+            }
         } catch (error) {
             console.error('Error fetching commission tables:', error);
-            toast.error('Không thể tải danh sách bảng hoa hồng');
         }
     }, []);
 
@@ -96,8 +155,10 @@ export function CommissionsPage() {
         fetchProductTypes();
         fetchUsers();
         fetchCommissionTables();
+        fetchSalaryConfigs();
+        fetchDepartments();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [fetchCommissionTables]);
+    }, [fetchCommissionTables, fetchSalaryConfigs, fetchDepartments]);
 
     // Build product groups: product types as parents, services as children
     useEffect(() => {
@@ -269,11 +330,19 @@ export function CommissionsPage() {
     const displayItems = useMemo(() => {
         let items = baseFilteredItems;
 
-        const checkedTables = commissionTables.filter(t => t.checked && t.id !== 'common');
-        if (checkedTables.length > 0) {
+        const checkedTableIds = new Set(commissionTables.filter(t => t.checked).map(t => t.id));
+        
+        // If some tables are checked, filter items that have data for at least one of them
+        if (checkedTableIds.size > 0) {
             items = items.filter(item => {
                 const commissionData = item.commission_data || {};
-                return checkedTables.some(t => commissionData[t.id] !== undefined);
+                return Array.from(checkedTableIds).some(id => {
+                    // Check for BOTH common and shared_table if either is selected
+                    if (id === 'common' || id === 'shared_table') {
+                        return commissionData['common'] !== undefined || commissionData['shared_table'] !== undefined;
+                    }
+                    return commissionData[id] !== undefined;
+                });
             });
         }
 
@@ -453,6 +522,81 @@ export function CommissionsPage() {
         setEditingCommission(null);
     };
 
+    const employeesWithCommissions = useMemo(() => {
+        let list = users.filter(u => u.status === 'active');
+
+        if (userSearch) {
+            const term = userSearch.toLowerCase().trim();
+            list = list.filter(u => 
+                u.name.toLowerCase().includes(term) || 
+                (u as any).employee_code?.toLowerCase().includes(term)
+            );
+        }
+
+        if (selectedDepartment && selectedDepartment !== 'all') {
+            list = list.filter(u => {
+                const dept = allDepartments.find(d => d.id === u.department);
+                const deptName = dept ? dept.name : u.department;
+                return deptName === selectedDepartment;
+            });
+        }
+
+        const checkedTableIds = new Set(commissionTables.filter(t => t.checked).map(t => t.id));
+
+        return list
+            .map(user => {
+                // Find config with case-insensitive and trimmed ID matching
+                const config = salaryConfigs.find(c => 
+                    String(c.user_id).toLowerCase().trim() === String(user.id).toLowerCase().trim()
+                );
+                
+                // Be more lenient with truthiness check (handles string "true", number 1, etc)
+                const isEnabled = config && (
+                    config.commission_enabled === true || 
+                    config.commission_enabled === 'true' || 
+                    config.commission_enabled === 1 || 
+                    config.commission_enabled === '1'
+                );
+                
+                let rules = Array.isArray(config?.commission_rules) ? config.commission_rules : [];
+
+                // If some tables are checked, filter the rules to ONLY show those tables
+                if (checkedTableIds.size > 0) {
+                    rules = rules.filter((r: any) => {
+                        const type = r.commission_type;
+                        if (checkedTableIds.has(type)) return true;
+                        // Handle shared_table/common synonym
+                        if (type === 'common' && checkedTableIds.has('shared_table')) return true;
+                        if (type === 'shared_table' && checkedTableIds.has('common')) return true;
+                        return false;
+                    });
+                }
+
+                if (isEnabled && rules.length > 0) {
+                    return { 
+                        ...user, 
+                        commission_rules: rules 
+                    };
+                }
+                return null;
+            })
+            .filter((u): u is any => u !== null);
+    }, [users, salaryConfigs, userSearch, commissionTables, selectedDepartment, allDepartments]);
+
+
+    const COMMISSION_CATEGORIES: Record<string, string> = {
+        sales_consulting: 'Tư vấn bán hàng',
+        service: 'Thực hiện dịch vụ',
+        other: 'Khác',
+    };
+
+    const COMMISSION_TYPES_LABELS: Record<string, string> = {
+        shared_table: 'Bảng hoa hồng chung',
+        common: 'Bảng hoa hồng chung',
+        fixed_percent: 'Hoa hồng cố định (%)',
+        fixed_amount: 'Hoa hồng cố định (VNĐ)',
+    };
+
     if (loading && allItems.length === 0) {
         return (
             <div className="flex items-center justify-center h-64">
@@ -540,79 +684,100 @@ export function CommissionsPage() {
                         </button>
                     </div>
 
-                    {/* Product Groups */}
-                    <div>
-                        <h3 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wide mb-2.5">Nhóm hàng</h3>
-                        <div className="relative mb-2">
-                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-[13px] w-[13px] text-gray-400" />
-                            <input
-                                type="text"
-                                className="w-full pl-7 pr-3 h-[30px] text-[12px] border border-gray-200 rounded-md bg-white placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                placeholder="Tìm kiếm nhóm hàng"
-                                value={groupSearch}
-                                onChange={(e) => setGroupSearch(e.target.value)}
-                            />
-                        </div>
-                        <div className="space-y-0.5">
-                            {productGroups
-                                .filter(g => !groupSearch || g.name.toLowerCase().includes(groupSearch.toLowerCase()) ||
-                                    (g.children || []).some(c => c.name.toLowerCase().includes(groupSearch.toLowerCase())))
-                                .map(group => (
-                                    <div key={group.id}>
-                                        <div
-                                            className={`w-full flex items-center gap-1.5 px-1.5 py-[5px] rounded text-left transition-colors ${selectedGroup === group.id
-                                                    ? 'text-blue-600 bg-blue-50 font-medium'
-                                                    : 'text-gray-700 hover:bg-gray-100'
-                                                }`}
-                                            style={{ cursor: 'pointer' }}
-                                            onClick={() => {
-                                                setSelectedGroup(group.id);
-                                                if (group.children && group.children.length > 0) toggleGroupExpand(group.id);
-                                            }}
-                                        >
-                                            {group.children && group.children.length > 0 ? (
-                                                expandedGroups.has(group.id) ? (
-                                                    <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
-                                                ) : (
-                                                    <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
-                                                )
-                                            ) : (
-                                                <span className="w-3.5" />
-                                            )}
-                                            <span className="text-[12px] truncate">{group.name}</span>
-                                            {group.id === 'all' && (
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleBulkAssignToTables('all');
-                                                    }}
-                                                    className="ml-auto p-1 hover:bg-blue-100 rounded text-blue-600 transition-colors"
-                                                    title="Áp dụng cho các bảng hoa hồng đã chọn"
+                    {/* Switching Section based on displayMode */}
+                    <div className="mt-5 border-t border-gray-100 pt-5">
+                        {displayMode === 'products' ? (
+                            /* Product Groups */
+                            <div>
+                                <h3 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wide mb-2.5">Nhóm hàng</h3>
+                                <div className="relative mb-2">
+                                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-[13px] w-[13px] text-gray-400" />
+                                    <input
+                                        type="text"
+                                        className="w-full pl-7 pr-3 h-[30px] text-[12px] border border-gray-200 rounded-md bg-white placeholder:text-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                        placeholder="Tìm kiếm nhóm hàng"
+                                        value={groupSearch}
+                                        onChange={(e) => setGroupSearch(e.target.value)}
+                                    />
+                                </div>
+                                <div className="space-y-0.5 max-h-[400px] overflow-y-auto pr-1">
+                                    {productGroups
+                                        .filter(g => !groupSearch || g.name.toLowerCase().includes(groupSearch.toLowerCase()) ||
+                                            (g.children || []).some(c => c.name.toLowerCase().includes(groupSearch.toLowerCase())))
+                                        .map(group => (
+                                            <div key={group.id}>
+                                                <div
+                                                    className={`w-full flex items-center gap-1.5 px-1.5 py-[5px] rounded text-left transition-colors cursor-pointer ${selectedGroup === group.id
+                                                        ? 'bg-blue-50 text-blue-600 font-medium'
+                                                        : 'text-gray-600 hover:bg-gray-50'
+                                                    }`}
+                                                    onClick={() => setSelectedGroup(group.id === selectedGroup ? 'all' : group.id)}
                                                 >
-                                                    <span className="text-[14px] font-bold">→</span>
-                                                </button>
-                                            )}
-                                        </div>
-                                        {expandedGroups.has(group.id) && group.children && group.children.length > 0 && (
-                                            <div className="ml-5 space-y-0.5">
-                                                {group.children.map(child => (
-                                                    <button
-                                                        key={child.id}
-                                                        className={`w-full text-left px-1.5 py-[4px] rounded text-[11px] cursor-pointer transition-colors ${selectedGroup === child.id
-                                                                ? 'text-blue-600 bg-blue-50 font-medium'
-                                                                : 'text-gray-600 hover:bg-gray-50'
-                                                            }`}
-                                                        onClick={(e) => { e.stopPropagation(); setSelectedGroup(child.id); }}
-                                                    >
-                                                        {child.name}
-                                                    </button>
-                                                ))}
+                                                    {group.children && group.children.length > 0 && (
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); toggleGroupExpand(group.id); }}
+                                                            className="p-0.5 hover:bg-blue-100 rounded transition-colors"
+                                                        >
+                                                            {expandedGroups.has(group.id) ? (
+                                                                <ChevronDown className="h-3 w-3" />
+                                                            ) : (
+                                                                <ChevronRight className="h-3 w-3" />
+                                                            )}
+                                                        </button>
+                                                    )}
+                                                    <span className="text-[12px] truncate">{group.name}</span>
+                                                    <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                        <button
+                                                            onClick={(e) => { e.stopPropagation(); handleBulkAssignToTables(group.id); }}
+                                                            className="p-1 hover:text-blue-600 text-gray-400"
+                                                            title="Áp dụng cho tất cả"
+                                                        >
+                                                            <RotateCcw className="h-3 w-3" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+
+                                                {expandedGroups.has(group.id) && group.children && (
+                                                    <div className="ml-4 mt-0.5 space-y-0.5 border-l border-gray-100 pl-2">
+                                                        {group.children.map(child => (
+                                                            <button
+                                                                key={child.id}
+                                                                className={`w-full text-left px-2 py-1 rounded text-[11px] transition-colors ${selectedGroup === child.id
+                                                                    ? 'bg-blue-50 text-blue-600 font-medium'
+                                                                    : 'text-gray-600 hover:bg-gray-50'
+                                                                }`}
+                                                                onClick={(e) => { e.stopPropagation(); setSelectedGroup(child.id); }}
+                                                            >
+                                                                {child.name}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
                                             </div>
-                                        )}
-                                    </div>
-                                ))
-                            }
-                        </div>
+                                        ))
+                                    }
+                                </div>
+                            </div>
+                        ) : (
+                            /* Departments */
+                            <div>
+                                <h3 className="text-[12px] font-semibold text-gray-500 uppercase tracking-wide mb-2.5">Phòng ban</h3>
+                                <Select value={selectedDepartment} onValueChange={setSelectedDepartment}>
+                                    <SelectTrigger className="w-full h-[36px] text-[13px] bg-white border-gray-200 focus:ring-1 focus:ring-blue-500">
+                                        <SelectValue placeholder="Chọn phòng ban" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">Tất cả phòng ban</SelectItem>
+                                        {allDepartments
+                                            .sort((a, b) => a.name.localeCompare(b.name))
+                                            .map(dept => (
+                                                <SelectItem key={dept.id} value={dept.name}>{dept.name}</SelectItem>
+                                            ))
+                                        }
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
@@ -625,9 +790,16 @@ export function CommissionsPage() {
                         <Search className="absolute left-3 top-1/2 -translate-y-[45%] h-[15px] w-[15px] text-gray-400" />
                         <Input
                             className="w-full pl-[34px] h-[36px] border-gray-200 text-[13px] placeholder:text-gray-400 bg-white shadow-sm rounded-lg focus-visible:ring-1 focus-visible:ring-blue-500"
-                            placeholder="Thêm hàng hóa vào bảng hoa hồng"
-                            value={searchTerm}
-                            onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
+                            placeholder={displayMode === 'employees' ? "Tìm theo tên hoặc mã nhân viên..." : "Thêm hàng hóa vào bảng hoa hồng"}
+                            value={displayMode === 'employees' ? userSearch : searchTerm}
+                            onChange={(e) => { 
+                                if (displayMode === 'employees') {
+                                    setUserSearch(e.target.value);
+                                } else {
+                                    setSearchTerm(e.target.value); 
+                                    setCurrentPage(1); 
+                                }
+                            }}
                         />
                     </div>
                     <div className="flex items-center gap-2">
@@ -942,100 +1114,90 @@ export function CommissionsPage() {
                         </table>
                     ) : (
                         /* Employee display mode */
-                        <table className="w-full text-left border-collapse whitespace-nowrap">
-                            <thead className="bg-[#f2f6ff] sticky top-0 z-10">
-                                <tr>
-                                    <th className="px-4 py-3 font-semibold text-gray-700 w-10 border-b border-gray-100">
-                                        <input
-                                            type="checkbox"
-                                            className="w-[14px] h-[14px] rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                                        />
-                                    </th>
-                                    <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">
-                                        MÃ NHÂN VIÊN
-                                    </th>
-                                    <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">
-                                        TÊN NHÂN VIÊN
-                                    </th>
-                                    <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">
-                                        CHỨC DANH
-                                    </th>
-                                    <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide text-right">
-                                        BẢNG HOA HỒNG ÁP DỤNG
-                                    </th>
-                                    <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide text-right">
-                                        % HOA HỒNG
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {users
-                                    .filter(u => u.status === 'active')
-                                    .map((user, idx) => (
-                                        <tr key={user.id} className="hover:bg-blue-50/30 cursor-pointer transition-colors">
-                                            <td className="px-4 py-[11px]">
-                                                <input
-                                                    type="checkbox"
-                                                    className="w-[14px] h-[14px] rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                                                />
-                                            </td>
-                                            <td className="px-4 py-[11px] text-gray-800 font-medium text-[13px]">
-                                                {(user as any).employee_code || `NV${String(idx + 1).padStart(3, '0')}`}
-                                            </td>
-                                            <td className="px-4 py-[11px] text-gray-800 font-medium text-[13px] uppercase">
-                                                {user.name}
-                                            </td>
-                                            <td className="px-4 py-[11px] text-gray-600 text-[13px]">
-                                                {user.role === 'sale' ? 'Nhân viên bán hàng' :
-                                                    user.role === 'technician' ? 'Kỹ thuật viên' :
-                                                        user.role === 'manager' ? 'Quản lý' :
-                                                            user.role === 'accountant' ? 'Kế toán' :
-                                                                user.role === 'admin' ? 'Admin' : user.role}
-                                            </td>
-                                            <td className="px-4 py-[11px] text-gray-600 text-[13px] text-right">
-                                                Bảng hoa hồng chung
-                                            </td>
-                                            <td className="px-4 py-[11px] text-right">
-                                                {editingCommission?.id === user.id ? (
-                                                    <input
-                                                        type="number"
-                                                        className="w-[60px] h-[26px] px-2 text-[13px] text-right border border-blue-400 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium text-blue-600"
-                                                        value={editingCommission.value}
-                                                        onChange={(e) => setEditingCommission({ id: user.id, value: e.target.value })}
-                                                        onBlur={() => handleSaveEmployeeCommission(user.id, editingCommission.value)}
-                                                        onKeyDown={(e) => {
-                                                            if (e.key === 'Enter') handleSaveEmployeeCommission(user.id, editingCommission.value);
-                                                            if (e.key === 'Escape') setEditingCommission(null);
-                                                        }}
-                                                        autoFocus
-                                                        min={0}
-                                                        step={0.1}
-                                                    />
-                                                ) : (
-                                                    <span
-                                                        className="inline-flex items-center gap-1 text-[13px] text-blue-600 font-medium cursor-pointer hover:bg-blue-50 px-2 py-0.5 rounded transition-colors"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setEditingCommission({ id: user.id, value: String((user as any).commission || 1) });
-                                                        }}
-                                                    >
-                                                        {(user as any).commission || 1}
-                                                        <span className="text-gray-500">%</span>
-                                                    </span>
-                                                )}
+                        /* Employee display mode */
+                        <div className="flex-1 overflow-auto bg-white">
+                            <table className="w-full text-left border-collapse">
+                                <thead className="bg-[#f2f6ff] sticky top-0 z-10">
+                                    <tr>
+                                        <th className="px-6 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide uppercase w-[300px]">
+                                            Loại hình
+                                        </th>
+                                        <th className="px-6 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide uppercase">
+                                            Mức áp dụng
+                                        </th>
+                                        <th className="px-6 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide uppercase">
+                                            Hoa hồng thụ hưởng
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {employeesWithCommissions.length === 0 ? (
+                                        <tr>
+                                            <td colSpan={3} className="px-6 py-12 text-center text-gray-500 italic">
+                                                {loadingConfigs ? 'Đang tải thiết lập...' : 'Không tìm thấy nhân viên nào có thiết lập hoa hồng'}
                                             </td>
                                         </tr>
-                                    ))
-                                }
-                                {users.filter(u => u.status === 'active').length === 0 && (
-                                    <tr>
-                                        <td colSpan={6} className="px-4 py-8 text-center text-[13px] text-gray-500">
-                                            Không tìm thấy nhân viên nào
-                                        </td>
-                                    </tr>
-                                )}
-                            </tbody>
-                        </table>
+                                    ) : (
+                                        employeesWithCommissions.map((emp) => (
+                                            <Fragment key={emp.id}>
+                                                {/* Header Row for Employee */}
+                                                <tr className="bg-gray-50/80">
+                                                    <td colSpan={3} className="px-6 py-2.5">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="font-bold text-[13px] text-gray-900">
+                                                                {emp.name.toUpperCase()} - {emp.employee_code || `NV${emp.id.substring(0, 6)}`}
+                                                            </span>
+                                                            <span className="px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded text-[10px] font-bold uppercase">
+                                                                {emp.role === 'technician' ? 'Kỹ thuật viên' : 
+                                                                 emp.role === 'sale' ? 'Bán hàng' : emp.role}
+                                                            </span>
+                                                            {(() => {
+                                                                const dept = allDepartments.find(d => d.id === emp.department);
+                                                                const deptName = dept ? dept.name : emp.department;
+                                                                // Don't show if it looks like a UUID
+                                                                const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+                                                                if (deptName && !isUUID(deptName)) {
+                                                                    return (
+                                                                        <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded text-[10px] font-bold uppercase">
+                                                                            {deptName}
+                                                                        </span>
+                                                                    );
+                                                                }
+                                                                return null;
+                                                            })()}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                                {/* Rule Rows */}
+                                                {(emp.commission_rules || []).map((rule: any, idx: number) => (
+                                                    <tr key={`${emp.id}-rule-${idx}`} className="hover:bg-blue-50/30 transition-colors border-b border-gray-50 last:border-b-2 last:border-gray-100">
+                                                        <td className="px-10 py-3 text-[13px] text-gray-700">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-1.5 h-1.5 rounded-full bg-blue-400" />
+                                                                {COMMISSION_CATEGORIES[rule.category] || rule.category}
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-3 text-[13px] text-gray-600">
+                                                            Từ {formatNumber(rule.from_amount || 0)}
+                                                        </td>
+                                                        <td className="px-6 py-3 text-[13px] font-medium text-blue-600">
+                                                            {(() => {
+                                                                const typeLabel = COMMISSION_TYPES_LABELS[rule.commission_type];
+                                                                if (typeLabel) return typeLabel;
+                                                                
+                                                                // Lookup in custom tables
+                                                                const table = commissionTables.find(t => t.id === rule.commission_type);
+                                                                return table ? table.name : rule.commission_type;
+                                                            })()}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </Fragment>
+                                        ))
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
                     )}
                 </div>
 

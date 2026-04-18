@@ -1,7 +1,33 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { supabaseAdmin as supabase } from '../config/supabase';
+import { authenticate } from '../middleware/auth';
 
 const router = Router();
+
+// ─── GET /api/salary-configs ──────────────────────────────
+// Lấy cấu hình lương của tất cả nhân viên (kèm bonus_tiers + deduction_rules)
+router.get('/', authenticate, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        const { data, error } = await supabase
+            .from('salary_configs')
+            .select(`
+                *,
+                bonus_tiers(*),
+                deduction_rules(*)
+            `);
+
+        if (error) throw error;
+
+        res.json({
+            status: 'success',
+            data: {
+                configs: data || [],
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
 
 // ─── GET /api/salary-configs/:userId ─────────────────────────
 // Lấy cấu hình lương của 1 nhân viên (kèm bonus_tiers + deduction_rules)
