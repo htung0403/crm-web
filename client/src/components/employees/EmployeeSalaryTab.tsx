@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
-import api from '@/lib/api';
+import api, { commissionTablesApi } from '@/lib/api';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -325,12 +325,7 @@ export function EmployeeSalaryTab({ employeeId }: Props) {
     
     // Commission Table States
     const [isCommissionDialogOpen, setIsCommissionDialogOpen] = useState(false);
-    const [commissionTables, setCommissionTables] = useState([
-        { id: 'mgr', name: 'Hoa Hồng Quản Lý' },
-        { id: 'ktv_tuan', name: 'HOA HỒNG KTV TUẤN' },
-        { id: 'sale', name: 'HOA HỒNG SALE' },
-        { id: 'dung', name: 'HOA HỒNG CHO A DŨNG' },
-    ]);
+    const [commissionTables, setCommissionTables] = useState<any[]>([]);
     const [newCommTable, setNewCommTable] = useState({
         name: '',
         scope: 'system',
@@ -348,7 +343,19 @@ export function EmployeeSalaryTab({ employeeId }: Props) {
         }
     }, []);
 
-    useEffect(() => { fetchShifts(); }, [fetchShifts]);
+    const fetchCommissionTables = useCallback(async () => {
+        try {
+            const res = await commissionTablesApi.getAll();
+            setCommissionTables(res.data?.data?.tables || []);
+        } catch (err) {
+            console.error('Lỗi khi tải bảng hoa hồng:', err);
+        }
+    }, []);
+
+    useEffect(() => { 
+        fetchShifts(); 
+        fetchCommissionTables();
+    }, [fetchShifts, fetchCommissionTables]);
 
     const fetchConfig = useCallback(async () => {
         setLoading(true);
@@ -1155,7 +1162,9 @@ export function EmployeeSalaryTab({ employeeId }: Props) {
                                                         <SelectValue />
                                                     </SelectTrigger>
                                                     <SelectContent>
-                                                        <SelectItem value="shared_table">Bảng hoa hồng chung</SelectItem>
+                                                        {(!commissionTables.some(t => t.id === 'shared_table' || t.id === 'common')) && (
+                                                            <SelectItem value="shared_table">Bảng hoa hồng chung</SelectItem>
+                                                        )}
                                                         {commissionTables.map(table => (
                                                             <SelectItem key={table.id} value={table.id}>{table.name}</SelectItem>
                                                         ))}
@@ -1521,20 +1530,33 @@ export function EmployeeSalaryTab({ employeeId }: Props) {
                         </Button>
                         <Button
                             className="h-9 px-8 text-[13px] font-bold bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-200/50"
-                            onClick={() => {
+                            onClick={async () => {
                                 if (!newCommTable.name.trim()) {
                                     toast.error('Vui lòng nhập tên điều kiện hoa hồng');
                                     return;
                                 }
-                                const id = 'custom_' + Date.now();
-                                const newTable = { id, name: newCommTable.name };
-                                setCommissionTables(prev => [...prev, newTable]);
-                                if (currentRuleIndex !== null) {
-                                    updateCommissionRule(currentRuleIndex, 'commission_type', id);
+                                try {
+                                    const res = await commissionTablesApi.create({
+                                        id: 'custom_' + Date.now(),
+                                        name: newCommTable.name,
+                                        type: newCommTable.scope === 'branch' ? 'branch' : 'system'
+                                    });
+                                    
+                                    const newTable = res.data?.data?.table;
+                                    if (newTable) {
+                                        await fetchCommissionTables();
+                                        if (currentRuleIndex !== null) {
+                                            updateCommissionRule(currentRuleIndex, 'commission_type', newTable.id);
+                                        }
+                                        toast.success('Đã thêm bảng hoa hồng mới!');
+                                    }
+                                } catch (err) {
+                                    console.error('Lỗi khi tạo bảng hoa hồng:', err);
+                                    toast.error('Lỗi khi lưu bảng hoa hồng');
+                                } finally {
+                                    setIsCommissionDialogOpen(false);
+                                    setNewCommTable({ name: '', scope: 'system', branch: 'none', status: 'active' });
                                 }
-                                setIsCommissionDialogOpen(false);
-                                setNewCommTable({ name: '', scope: 'system', branch: 'none', status: 'active' });
-                                toast.success('Đã thêm bảng hoa hồng mới!');
                             }}
                         >
                             Lưu

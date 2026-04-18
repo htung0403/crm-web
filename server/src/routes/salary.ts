@@ -241,9 +241,9 @@ router.get('/user/:userId/commissions', authenticate, async (req: AuthenticatedR
             // 4. V2: sales from order_item_sales
             try {
                 const { data: saleItems } = await supabaseAdmin
-                     .from('order_item_sales')
-                     .select('commission, item:order_item_id ( id, order_id, item_name, total_price, quantity )')
-                     .eq('sale_id', userId);
+                    .from('order_item_sales')
+                    .select('commission, item:order_item_id ( id, order_id, item_name, total_price, quantity )')
+                    .eq('sale_id', userId);
                 if (saleItems) {
                     for (const row of saleItems) {
                         const item = (row as any).item;
@@ -266,14 +266,14 @@ router.get('/user/:userId/commissions', authenticate, async (req: AuthenticatedR
                         }
                     }
                 }
-            } catch(e){}
+            } catch (e) { }
 
             // 5. V2: sales from order_product_service_sales
             try {
                 const { data: saleServices } = await supabaseAdmin
-                     .from('order_product_service_sales')
-                     .select('commission, service:order_product_service_id ( id, item_name, unit_price, order_product:order_product_id ( order_id ) )')
-                     .eq('sale_id', userId);
+                    .from('order_product_service_sales')
+                    .select('commission, service:order_product_service_id ( id, item_name, unit_price, order_product:order_product_id ( order_id ) )')
+                    .eq('sale_id', userId);
                 if (saleServices) {
                     for (const row of saleServices) {
                         const svc = (row as any).service;
@@ -297,14 +297,14 @@ router.get('/user/:userId/commissions', authenticate, async (req: AuthenticatedR
                         }
                     }
                 }
-            } catch(e){}
+            } catch (e) { }
 
             // 6. V2: tech from order_product_service_technicians
             try {
                 const { data: techServices } = await supabaseAdmin
-                     .from('order_product_service_technicians')
-                     .select('commission, service:order_product_service_id ( id, item_name, unit_price, order_product:order_product_id ( order_id ) )')
-                     .eq('technician_id', userId);
+                    .from('order_product_service_technicians')
+                    .select('commission, service:order_product_service_id ( id, item_name, unit_price, order_product:order_product_id ( order_id ) )')
+                    .eq('technician_id', userId);
                 if (techServices) {
                     for (const row of techServices) {
                         const svc = (row as any).service;
@@ -328,7 +328,7 @@ router.get('/user/:userId/commissions', authenticate, async (req: AuthenticatedR
                         }
                     }
                 }
-            } catch(e){}
+            } catch (e) { }
         }
 
         res.json({
@@ -436,7 +436,7 @@ router.get('/user/:userId/bonuses', authenticate, async (req: AuthenticatedReque
                     });
                 }
             }
-        } catch (e) {}
+        } catch (e) { }
 
         res.json({
             status: 'success',
@@ -467,7 +467,7 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
             throw new ApiError('Thiếu thông tin bắt buộc', 400);
         }
 
-        // ── 1. Lấy thông tin user ────────────────────────────────
+        // ── 1. Lấy thông tin user & config ─────────────────────────
         const { data: user, error: userError } = await supabaseAdmin
             .from('users')
             .select('id, name, email, avatar, role, department, base_salary, hourly_rate')
@@ -478,16 +478,25 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
             throw new ApiError('Không tìm thấy nhân viên', 404);
         }
 
+        let salaryConfig: any = null;
+        try {
+            const { data } = await supabaseAdmin.from('salary_configs').select('*').eq('user_id', user_id).single();
+            salaryConfig = data;
+        } catch (e) { }
+
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
         const endDate = new Date(year, month, 0).toISOString().split('T')[0];
-        const baseSalary = user.base_salary || 15000000;
-        const hourlyRate = user.hourly_rate || Math.floor(baseSalary / 176);
+
+        const configBase = salaryConfig?.base_amount || user.base_salary || 15000000;
+        const configType = salaryConfig?.salary_type || 'standard_day';
+        const hourlyRate = user.hourly_rate || Math.floor(configBase / 176);
 
         // ── 2. Tính giờ công từ TIMESHEETS ───────────────────────
         let totalHours = 176; // Default 22 days * 8 hours
         let overtimeHours = 0;
+        let daysWorked = 22; // Mặc định 22 ngày công chuẩn
         try {
-            // Query timesheets table (new schema: check_in, check_out, schedule_date)
+            // Query timesheets table (new schema: check_in, check_out, status, schedule_date)
             const { data: timesheets } = await supabaseAdmin
                 .from('timesheets')
                 .select('check_in, check_out, status, schedule_date')
@@ -497,6 +506,7 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
 
             if (timesheets && timesheets.length > 0) {
                 let workedHours = 0;
+                daysWorked = timesheets.filter(t => t.check_in && t.status !== 'day_off').length;
                 for (const t of timesheets) {
                     if (t.check_in && t.check_out && t.status !== 'day_off') {
                         const checkIn = new Date(t.check_in);
@@ -515,8 +525,26 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
             console.log('[Salary] Timesheets table error, using defaults');
         }
 
+        let actualBasePay = configBase;
+        if (configType === 'hourly' || configType === 'standard_day') {
+            const standardWorkedHours = Math.max(0, totalHours - overtimeHours);
+            actualBasePay = Math.round(standardWorkedHours * hourlyRate);
+        } else if (configType === 'shift') {
+            // For shift based, standard base pay uses hours for now unless strict shift tables are provided
+            const standardWorkedHours = Math.max(0, totalHours - overtimeHours);
+            actualBasePay = Math.round(standardWorkedHours * hourlyRate);
+        } else if (configType === 'fixed') {
+            actualBasePay = configBase;
+        }
+
+        const baseSalary = actualBasePay;
         const hourlyWage = Math.round(totalHours * hourlyRate);
-        const overtimePay = Math.round(overtimeHours * hourlyRate * 1.5);
+
+        let overtimePay = Math.round(overtimeHours * hourlyRate * 1.5);
+        if (salaryConfig && salaryConfig.overtime_enabled === false) {
+            overtimePay = 0;
+            overtimeHours = 0;
+        }
 
         // ── 3. Tính HOA HỒNG từ orders ──────────────────────────
         let serviceCommission = 0;
@@ -548,59 +576,100 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
         }
 
         try {
-            // Sales commission from order_items
-            const { data: salesOrders } = await supabaseAdmin
+            // Fetch all valid orders to filter by order status consistently
+            const { data: validOrders } = await supabaseAdmin
                 .from('orders')
-                .select('id')
-                .eq('sales_id', user_id)
-                .in('status', ['done', 'completed', 'delivered', 'after_sale'])
+                .select('id, sales_id')
+                .or('payment_status.eq.paid,status.in.(done,completed,delivered,after_sale)')
                 .gte('created_at', startDate)
                 .lte('created_at', endDate + 'T23:59:59');
 
-            if (salesOrders && salesOrders.length > 0) {
-                const orderIds = salesOrders.map(o => o.id);
-                const { data: salesItems } = await supabaseAdmin
-                    .from('order_items')
-                    .select('commission_sale_amount, item_type')
-                    .in('order_id', orderIds);
+            const validOrderIds = validOrders ? validOrders.map(o => o.id) : [];
+            const saleOrderIds = validOrders ? validOrders.filter(o => o.sales_id === user_id).map(o => o.id) : [];
 
-                if (salesItems) {
-                    for (const item of salesItems) {
-                        const amt = item.commission_sale_amount || 0;
-                        if (item.item_type === 'product') {
+            if (validOrderIds.length > 0) {
+                // 1. V1 Sales
+                if (saleOrderIds.length > 0) {
+                    const { data: v1Sales } = await supabaseAdmin
+                        .from('order_items')
+                        .select('commission_sale_amount, item_type')
+                        .in('order_id', saleOrderIds);
+                    if (v1Sales) {
+                        for (const it of v1Sales) {
+                            if (it.item_type === 'product') productCommission += (it.commission_sale_amount || 0);
+                            else serviceCommission += (it.commission_sale_amount || 0);
+                        }
+                    }
+                }
+
+                // 2. V1 Tech
+                const { data: v1Tech } = await supabaseAdmin
+                    .from('order_items')
+                    .select('commission_tech_amount')
+                    .eq('technician_id', user_id)
+                    .in('order_id', validOrderIds);
+                if (v1Tech) {
+                    serviceCommission += v1Tech.reduce((sum, item) => sum + (item.commission_tech_amount || 0), 0);
+                }
+
+                // 3. V2 Sales - order_item_sales
+                const { data: v2SalesItem } = await supabaseAdmin
+                    .from('order_item_sales')
+                    .select('commission, item:order_item_id(order_id, total_price)')
+                    .eq('sale_id', user_id);
+                if (v2SalesItem) {
+                    for (const row of v2SalesItem) {
+                        const item = (row as any).item;
+                        if (item && validOrderIds.includes(item.order_id)) {
+                            const amt = Math.floor(((item.total_price || 0) * (row.commission || 0)) / 100);
                             productCommission += amt;
-                        } else {
+                        }
+                    }
+                }
+
+                // 4. V2 Sales - order_product_service_sales
+                const { data: v2SalesSvc } = await supabaseAdmin
+                    .from('order_product_service_sales')
+                    .select('commission, service:order_product_service_id(unit_price, order_product:order_product_id(order_id))')
+                    .eq('sale_id', user_id);
+                if (v2SalesSvc) {
+                    for (const row of v2SalesSvc) {
+                        const svc = (row as any).service;
+                        const oId = svc?.order_product?.order_id;
+                        if (oId && validOrderIds.includes(oId)) {
+                            const amt = Math.floor(((svc.unit_price || 0) * (row.commission || 0)) / 100);
                             serviceCommission += amt;
                         }
                     }
                 }
-            }
 
-            // Technician commission from order_items
-            const { data: completedOrders } = await supabaseAdmin
-                .from('orders')
-                .select('id')
-                .in('status', ['done', 'completed', 'delivered', 'after_sale'])
-                .gte('created_at', startDate)
-                .lte('created_at', endDate + 'T23:59:59');
-
-            if (completedOrders && completedOrders.length > 0) {
-                const completedOrderIds = completedOrders.map(o => o.id);
-                const { data: techItems } = await supabaseAdmin
-                    .from('order_items')
-                    .select('commission_tech_amount')
-                    .eq('technician_id', user_id)
-                    .in('order_id', completedOrderIds);
-
-                if (techItems) {
-                    serviceCommission += techItems.reduce((sum, item) => sum + (item.commission_tech_amount || 0), 0);
+                // 5. V2 Tech - order_product_service_technicians
+                const { data: v2TechSvc } = await supabaseAdmin
+                    .from('order_product_service_technicians')
+                    .select('commission, service:order_product_service_id(unit_price, order_product:order_product_id(order_id))')
+                    .eq('technician_id', user_id);
+                if (v2TechSvc) {
+                    for (const row of v2TechSvc) {
+                        const svc = (row as any).service;
+                        const oId = svc?.order_product?.order_id;
+                        if (oId && validOrderIds.includes(oId)) {
+                            const amt = Math.floor(((svc.unit_price || 0) * (row.commission || 0)) / 100);
+                            serviceCommission += amt;
+                        }
+                    }
                 }
             }
         } catch (e) {
             console.log('[Salary] Error calculating commission from order_items:', e);
         }
 
-        const totalCommission = serviceCommission + productCommission + referralCommission;
+        let totalCommission = serviceCommission + productCommission + referralCommission;
+        if (salaryConfig && salaryConfig.commission_enabled === false) {
+            totalCommission = 0;
+            serviceCommission = 0;
+            productCommission = 0;
+            referralCommission = 0;
+        }
 
         // ── 4. Tính KPI BONUS từ kpi_monthly (locked records) ──────────────────────
         let kpiAchievement = 0;
@@ -670,65 +739,6 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
         }
 
         // ── 7. Tổng hợp: GROSS SALARY ───────────────────────────
-        let manualBonus = 0;
-        try {
-            const { data: record } = await supabaseAdmin
-                .from('salary_records')
-                .select('bonus_details')
-                .eq('user_id', user_id)
-                .eq('month', month)
-                .eq('year', year)
-                .single();
-            if (record?.bonus_details) {
-                const det = record.bonus_details;
-                const dSum = (det.byDay || []).reduce((s: number, b: any) => s + (b.amount || 0) * (b.count || 1), 0);
-                const oSum = (det.other || []).reduce((s: number, b: any) => s + (b.amount || 0) * (b.count || 1), 0);
-                manualBonus = dSum + oSum;
-            }
-        } catch (e) {}
-
-        const totalBonus = kpiBonus + totalRewards + manualBonus;
-        const grossSalary = baseSalary + overtimePay + totalCommission + totalBonus;
-
-        // ── 8. Tính KHẤU TRỪ ─────────────────────────────────────
-        const socialInsurance = Math.floor(baseSalary * 0.08);   // 8% lương cơ bản
-        const healthInsurance = Math.floor(baseSalary * 0.015);  // 1.5% lương cơ bản
-        const taxableIncome = grossSalary - 11000000;            // Giảm trừ gia cảnh 11M
-        const personalTax = taxableIncome > 0 ? Math.floor(taxableIncome * 0.05) : 0;
-
-        // ── 7.5. Tính KHẤU TRỪ THỦ CÔNG ──────────────────────────
-        let manualDeduction = 0;
-        try {
-            const { data: record } = await supabaseAdmin
-                .from('salary_records')
-                .select('deduction_details')
-                .eq('user_id', user_id)
-                .eq('month', month)
-                .eq('year', year)
-                .single();
-            if (record?.deduction_details) {
-                const det = record.deduction_details;
-                const dSum = (det.byDay || []).reduce((s: number, d: any) => s + (d.amount || 0) * (d.count || 1), 0);
-                const oSum = (det.other || []).reduce((s: number, d: any) => s + (d.amount || 0) * (d.count || 1), 0);
-                manualDeduction = dSum + oSum;
-            }
-        } catch (e) {}
-
-        const totalDeduction = socialInsurance + healthInsurance + personalTax + totalAdvances + totalViolations + manualDeduction;
-
-        // ── 9. NET SALARY ────────────────────────────────────────
-        const netSalary = grossSalary - totalDeduction;
-
-        console.log(`[Salary] User ${user.name} (${user_id}) - ${month}/${year}:`);
-        console.log(`  Base: ${baseSalary}, Overtime: ${overtimePay}`);
-        console.log(`  Commission: ${totalCommission} (service: ${serviceCommission}, product: ${productCommission}, referral: ${referralCommission})`);
-        console.log(`  KPI: ${kpiAchievement}% → bonus: ${kpiBonus}`);
-        console.log(`  Rewards: ${totalRewards}, Violations: ${totalViolations}`);
-        console.log(`  Advances: ${totalAdvances}`);
-        console.log(`  Insurance: ${socialInsurance + healthInsurance}, Tax: ${personalTax}`);
-        console.log(`  Gross: ${grossSalary} → Net: ${netSalary}`);
-
-        // ── 10. Upsert salary record ─────────────────────────────
         let existing: any = null;
         try {
             const { data } = await supabaseAdmin
@@ -740,8 +750,79 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
                 .single();
             existing = data;
         } catch (e) {
-            // Table may not exist
+            // Table may not exist or no record found
         }
+
+        let manualBonus = 0;
+        if (existing?.bonus_details) {
+            const det = existing.bonus_details;
+            const dSum = (det.byDay || []).reduce((s: number, b: any) => s + (b.amount || 0) * (b.count || 1), 0);
+            const oSum = (det.other || []).reduce((s: number, b: any) => s + (b.amount || 0) * (b.count || 1), 0);
+            manualBonus = dSum + oSum;
+        }
+
+        let totalAllowances = 0;
+        if (salaryConfig?.allowance_enabled) {
+            const aRules = salaryConfig.allowance_rules || [];
+            if (aRules.length > 0) {
+                for (const r of aRules) {
+                    if (r.type === 'fixed_day') {
+                        totalAllowances += (Number(r.amount) * daysWorked);
+                    } else {
+                        totalAllowances += Number(r.amount);
+                    }
+                }
+            } else {
+                totalAllowances += Number(salaryConfig.allowance_amount || 0);
+            }
+        }
+
+        // Add allowances into totalBonus so it's incorporated to grossSalary natively
+        const totalBonus = kpiBonus + totalRewards + manualBonus + totalAllowances;
+
+        let bonusDetailsObj = manualBonus > 0 ? (existing?.bonus_details || {}) : {};
+        if (totalAllowances > 0) {
+            bonusDetailsObj = {
+                ...bonusDetailsObj,
+                allowances: totalAllowances,
+                allowances_desc: 'Phụ cấp (từ cấu hình)'
+            };
+        }
+
+        // Nhân hệ số KPI vào phần Hoa hồng trước khi cộng vào Lương Gross
+        totalCommission = Math.floor(totalCommission * kpiFactor);
+        const grossSalary = baseSalary + overtimePay + totalCommission + totalBonus;
+
+        // ── 8. Tính KHẤU TRỪ ─────────────────────────────────────
+        const socialInsurance = Math.floor(baseSalary * 0.08);   // 8% lương cơ bản
+        const healthInsurance = Math.floor(baseSalary * 0.015);  // 1.5% lương cơ bản
+        const taxableIncome = grossSalary - 11000000;            // Giảm trừ gia cảnh 11M
+        const personalTax = taxableIncome > 0 ? Math.floor(taxableIncome * 0.05) : 0;
+
+        // ── 7.5. Tính KHẤU TRỪ THỦ CÔNG ──────────────────────────
+        let manualDeduction = 0;
+        if (existing?.deduction_details) {
+            const det = existing.deduction_details;
+            const dSum = (det.byDay || []).reduce((s: number, d: any) => s + (d.amount || 0) * (d.count || 1), 0);
+            const oSum = (det.other || []).reduce((s: number, d: any) => s + (d.amount || 0) * (d.count || 1), 0);
+            manualDeduction = dSum + oSum;
+        }
+
+        const totalDeduction = socialInsurance + healthInsurance + personalTax + totalAdvances + totalViolations + manualDeduction + kpiPenalty;
+
+        // ── 9. NET SALARY ────────────────────────────────────────
+        const netSalary = grossSalary - totalDeduction;
+
+        console.log(`[Salary] User ${user.name} (${user_id}) - ${month}/${year}:`);
+        console.log(`  Base: ${baseSalary} (Type: ${configType}), Overtime: ${overtimePay} (${overtimeHours}h)`);
+        console.log(`  Commission: ${totalCommission} (service: ${serviceCommission}, product: ${productCommission}, referral: ${referralCommission})`);
+        console.log(`  KPI: ${kpiAchievement}% → bonus: ${kpiBonus}, penalty: ${kpiPenalty}, factor: ${kpiFactor}`);
+        console.log(`  Rewards: ${totalRewards}, Allowances: ${totalAllowances}, Violations: ${totalViolations}`);
+        console.log(`  Advances: ${totalAdvances}`);
+        console.log(`  Insurance: ${socialInsurance + healthInsurance}, Tax: ${personalTax}`);
+        console.log(`  Gross: ${grossSalary} → Net: ${netSalary}`);
+
+        // ── 10. Upsert salary record ─────────────────────────────
 
         const salaryData = {
             user_id,
@@ -760,9 +841,9 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
             commission: totalCommission,
             // KPI
             kpi_achievement: kpiAchievement,
-            // Bonus = KPI bonus + rewards + manual
+            // Bonus = KPI bonus + rewards + manual + allowances
             bonus: totalBonus,
-            bonus_details: manualBonus > 0 ? existing?.bonus_details : null,
+            bonus_details: (manualBonus > 0 || totalAllowances > 0) ? bonusDetailsObj : null,
             // Deductions breakdown
             social_insurance: socialInsurance,
             health_insurance: healthInsurance,
@@ -853,17 +934,17 @@ router.patch('/:id/update-base', authenticate, requireManager, async (req: Authe
 
         // We use applied_salary as the new base_salary for calculation natively
         const newBaseSalary = applied_salary !== undefined ? Number(applied_salary) : Number(base_salary || record.base_salary);
-        
+
         let newTotalHours = record.total_hours;
         if (actual_work_days !== undefined) {
-             newTotalHours = Number(actual_work_days) * 8;
+            newTotalHours = Number(actual_work_days) * 8;
         }
 
         const hourlyRate = Math.floor(newBaseSalary / (standard_work_days ? Number(standard_work_days) * 8 : 176));
         const hourlyWage = Math.round(newTotalHours * hourlyRate);
 
         const grossSalary = newBaseSalary + (record.overtime_pay || 0) + (record.commission || 0) + (record.bonus || 0);
-        
+
         const socialInsurance = Math.floor(newBaseSalary * 0.08);
         const healthInsurance = Math.floor(newBaseSalary * 0.015);
         const taxableIncome = grossSalary - 11000000;
@@ -932,11 +1013,11 @@ router.patch('/:id/update-bonus', authenticate, requireManager, async (req: Auth
         // but they aren't saved separately in columns.
         // However, standard recalculation logic is in /calculate.
         // For a quick patch, we can adjust the bonus field based on the delta or just re-calculate the whole thing.
-        
+
         // Let's re-calculate to be safe.
         // Actually, let's just update the record and then let the user "Calculate" if they want full sync,
         // OR we implement the same logic as /calculate here.
-        
+
         // Re-calculating total bonus:
         // We need KPI bonus and Rewards.
         const month = record.month;
@@ -958,21 +1039,21 @@ router.patch('/:id/update-bonus', authenticate, requireManager, async (req: Auth
             if (kpiResult) {
                 kpiBonus = Number(kpiResult.kpi_bonus_amount) || 0;
             }
-        } catch (e) {}
+        } catch (e) { }
 
         // Rewards
         let totalRewards = 0;
         try {
             const { data: vr } = await supabaseAdmin.from('violations_rewards').select('amount').eq('user_id', user_id).eq('month', month).eq('year', year).eq('type', 'reward');
             if (vr) totalRewards = vr.reduce((s, r) => s + Number(r.amount), 0);
-        } catch (e) {}
+        } catch (e) { }
 
         const newTotalBonus = kpiBonus + totalRewards + manualBonusTotal;
         const newGrossSalary = (record.base_salary || 0) + (record.overtime_pay || 0) + (record.commission || 0) + newTotalBonus;
-        
+
         const taxableIncome = newGrossSalary - 11000000;
         const newPersonalTax = taxableIncome > 0 ? Math.floor(taxableIncome * 0.05) : 0;
-        
+
         const oldDeductionWithoutTax = (record.deduction || 0) - (record.personal_tax || 0);
         const newDeduction = oldDeductionWithoutTax + newPersonalTax;
         const newNetSalary = newGrossSalary - newDeduction;
@@ -1027,13 +1108,13 @@ router.patch('/:id/update-deduction', authenticate, requireManager, async (req: 
         const socialInsurance = record.social_insurance || 0;
         const healthInsurance = record.health_insurance || 0;
         const totalAdvances = record.advances || 0;
-        
+
         // Table violations from violations_rewards
         let tableViolations = 0;
         try {
             const { data: vr } = await supabaseAdmin.from('violations_rewards').select('amount').eq('user_id', record.user_id).eq('month', record.month).eq('year', record.year).eq('type', 'violation');
             if (vr) tableViolations = vr.reduce((s, r) => s + Number(r.amount), 0);
-        } catch (e) {}
+        } catch (e) { }
 
         const taxableIncome = grossSalary - 11000000;
         const personalTax = taxableIncome > 0 ? Math.floor(taxableIncome * 0.05) : 0;

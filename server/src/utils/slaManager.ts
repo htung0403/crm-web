@@ -334,6 +334,9 @@ export async function checkSlaCron() {
                             user_name: 'Hệ thống'
                         });
                         if (logErr) console.error('[SLAManager] log error', logErr);
+
+                        // AUTO LOG KPI: Thu hồi lead
+                        await autoLogKpiViolation(lead.assigned_to, lead.id, 'lead_reclaimed', 'Thu hồi Lead (quá hạn SLA 3 phút)', 0.5);
                     } else {
                         // Phạt cảnh cáo và cưỡng ép chuyển mốc
                         fireWebhook('SLA_WARNING', {
@@ -346,6 +349,9 @@ export async function checkSlaCron() {
                             time_left_min: 0
                         });
                         await move_to_next_rule(lead, null, true);
+                        
+                        // AUTO LOG KPI: Trễ SLA
+                        await autoLogKpiViolation(lead.assigned_to, lead.id, 'sla_missed', `Trễ SLA (mốc ${currentMilestone} phút)`, 0.5);
                     }
                 }
             }
@@ -359,6 +365,49 @@ export async function checkSlaCron() {
 setInterval(() => {
     firedAlerts.clear();
 }, 24 * 60 * 60 * 1000);
+
+async function autoLogKpiViolation(
+    employeeId: string, 
+    leadId: string, 
+    ruleCode: string, 
+    ruleName: string, 
+    deductPoint: number
+) {
+    if (!employeeId) return;
+    const now = new Date();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    
+    // Đảm bảo không log trùng do cron chạy đè
+    const { data: existing } = await supabaseAdmin.from('kpi_violation_logs')
+        .select('id')
+        .eq('employee_id', employeeId)
+        .eq('related_lead_id', leadId)
+        .eq('rule_code', ruleCode)
+        .eq('rule_name', ruleName)
+        .limit(1)
+        // Dùng maybeSingle() vì nếu không có sẽ ném lỗi khi dùng single() (đặc thù supabase grpc)
+        .maybeSingle();
+        
+    if (existing) return;
+    
+    const { error } = await supabaseAdmin.from('kpi_violation_logs').insert({
+        employee_id: employeeId,
+        month_key: monthKey,
+        violation_type: 'auto',
+        rule_code: ruleCode,
+        rule_name: ruleName,
+        source_type: 'auto',
+        deduct_kpi_point: deductPoint,
+        deduct_amount: 0,
+        related_lead_id: leadId,
+        note: `Hệ thống tự động ghi nhận vào lúc ${now.toLocaleString('vi-VN')}`,
+        status: 'approved'
+    });
+    
+    if (error) {
+        console.error('[SLA KPI] Error auto logging KPI violation:', error);
+    }
+}
 
 // Export them with original name too for backward compatibility in index.ts if needed
 export { checkSlaCron as checkAllSLA };

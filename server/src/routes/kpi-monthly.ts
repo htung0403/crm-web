@@ -755,6 +755,18 @@ router.post('/monthly/generate', authenticate, requireManager, async (req: Authe
                     }
                 }
 
+                // Subtract violations penalty
+                const { data: violations } = await supabaseAdmin
+                    .from('kpi_violation_logs')
+                    .select('deduct_kpi_point')
+                    .eq('employee_id', emp.id)
+                    .eq('month_key', month_key)
+                    .eq('status', 'approved');
+                
+                const totalDeduct = (violations || []).reduce((sum: number, v: any) => sum + Number(v.deduct_kpi_point || 0), 0);
+                totalScore -= totalDeduct;
+                totalScore = Math.max(0, totalScore);
+
                 // Determine rank
                 const rankResult = await determineRank(totalScore);
 
@@ -869,7 +881,19 @@ router.post('/monthly/:id/recalculate', authenticate, requireManager, async (req
         }
 
         // Add manual adjustment from monthly level
-        totalScore += Number(monthly.manual_adjustment_score);
+        totalScore += Number(monthly.manual_adjustment_score || 0);
+
+        // Subtract violations penalty
+        const { data: violations } = await supabaseAdmin
+            .from('kpi_violation_logs')
+            .select('deduct_kpi_point')
+            .eq('employee_id', monthly.employee_id)
+            .eq('month_key', monthly.month_key)
+            .eq('status', 'approved');
+        
+        const totalDeduct = (violations || []).reduce((sum: number, v: any) => sum + Number(v.deduct_kpi_point || 0), 0);
+        totalScore -= totalDeduct;
+        totalScore = Math.max(0, totalScore);
 
         // Determine rank
         const rankResult = await determineRank(totalScore);
