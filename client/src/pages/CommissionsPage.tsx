@@ -1,22 +1,32 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Search, Plus, Download, Upload, ChevronRight, ChevronDown, Loader2 } from 'lucide-react';
+import { Search, Plus, Download, Upload, ChevronRight, ChevronDown, Loader2, Save, RotateCcw, Check } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from '@/components/ui/popover';
 
+import { formatNumber } from '@/lib/utils';
+import { toast } from 'sonner';
 import { useProducts } from '@/hooks/useProducts';
 import { useProductTypes } from '@/hooks/useProductTypes';
 import { useUsers } from '@/hooks/useUsers';
-import { formatNumber } from '@/lib/utils';
-import { toast } from 'sonner';
+import { commissionTablesApi } from '@/lib/api';
+import { AddCommissionConditionDialog } from '@/components/commissions/AddCommissionConditionDialog';
 
 // Commission table types
 interface CommissionTable {
     id: string;
     name: string;
-    type: 'common' | 'management' | 'ktv_weekly' | 'sale';
+    type: 'common' | 'management' | 'ktv_weekly' | 'sale' | 'custom';
     checked: boolean;
+    scope?: 'all' | 'branch';
+    branchId?: string;
+    status?: 'active' | 'inactive';
 }
 
 const defaultCommissionTables: CommissionTable[] = [
@@ -27,14 +37,11 @@ const defaultCommissionTables: CommissionTable[] = [
 ];
 
 // Product group tree structure
-// Services are parent nodes, their applicable_product_types are children
+// Product types are parent nodes, their services/packages are children
 interface ProductGroup {
     id: string;
     name: string;
     children?: ProductGroup[];
-    expanded?: boolean;
-    // For service nodes: list of product type IDs this service applies to
-    applicableProductTypeIds?: string[];
 }
 
 type DisplayMode = 'products' | 'employees';
@@ -47,102 +54,171 @@ export function CommissionsPage() {
     // Inline editing state: { id, value } of the cell currently being edited
     const [editingCommission, setEditingCommission] = useState<{ id: string; value: string } | null>(null);
 
+    // New Popover State
+    const [popoverOpen, setPopoverOpen] = useState<string | null>(null); // "itemId-tableId"
+    const [popoverForm, setPopoverForm] = useState({
+        value: '',
+        isVND: false,
+        applyAll: false
+    });
+
     const [displayMode, setDisplayMode] = useState<DisplayMode>('products');
     const [searchTerm, setSearchTerm] = useState('');
     const [searchCodeTerm, setSearchCodeTerm] = useState('');
     const [searchNameTerm, setSearchNameTerm] = useState('');
-    const [commissionTables, setCommissionTables] = useState(defaultCommissionTables);
+    const [commissionTables, setCommissionTables] = useState<CommissionTable[]>([]);
     const [commissionTableSearch, setCommissionTableSearch] = useState('');
     const [productGroups, setProductGroups] = useState<ProductGroup[]>([{ id: 'all', name: 'Tất cả' }]);
     const [selectedGroup, setSelectedGroup] = useState('all');
     const [groupSearch, setGroupSearch] = useState('');
+    const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
     const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
     const [selectAll, setSelectAll] = useState(false);
-    const [addTableName, setAddTableName] = useState('');
-    const [showAddTable, setShowAddTable] = useState(false);
+    const [showAddTableDialog, setShowAddTableDialog] = useState(false);
 
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 15;
+
+    const fetchCommissionTables = useCallback(async () => {
+        try {
+            const response = await commissionTablesApi.getAll();
+            setCommissionTables(response.data.data.tables);
+        } catch (error) {
+            console.error('Error fetching commission tables:', error);
+            toast.error('Không thể tải danh sách bảng hoa hồng');
+        }
+    }, []);
 
     useEffect(() => {
         fetchProducts();
         fetchServices();
         fetchProductTypes();
         fetchUsers();
+        fetchCommissionTables();
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [fetchCommissionTables]);
 
-    // Build product groups from services → each service shows its applicable product types as children
+    // Build product groups: product types as parents, services as children
     useEffect(() => {
-        if (services.length > 0 || productTypes.length > 0) {
-            // Services as flat items (no children)
-            const serviceItems: ProductGroup[] = services.map(svc => ({
-                id: `svc:${svc.id}`,
-                name: svc.name,
-                applicableProductTypeIds: svc.applicable_product_types || [],
-            }));
-
-            // Product types not linked to any service
-            const linkedPtIds = new Set(services.flatMap(s => s.applicable_product_types || []));
-            const unlinkedTypes: ProductGroup[] = productTypes
-                .filter(pt => !linkedPtIds.has(pt.id))
-                .map(pt => ({ id: `pt:${pt.id}`, name: pt.name }));
-
+        if (productTypes.length > 0) {
             const groups: ProductGroup[] = [
                 { id: 'all', name: 'Tất cả' },
-                ...serviceItems,
-                ...(unlinkedTypes.length > 0 ? [{ id: '__divider__', name: '── Loại sản phẩm khác ──' }] : []),
-                ...unlinkedTypes,
+                ...productTypes.map(pt => {
+                    // Find services that apply to this product type (check ID or Code)
+                    const ptServices = services.filter(svc =>
+                        (svc.applicable_product_types || []).some(ref => ref === pt.id || ref === pt.code)
+                    );
+                    return {
+                        id: `pt:${pt.id}`,
+                        name: pt.name,
+                        children: ptServices.map(svc => ({
+                            id: `pt:${pt.id}:svc:${svc.id}`,
+                            name: svc.name,
+                        })),
+                    };
+                }),
             ];
+
+            // Add an "Other Services" group for services that don't belong to any product type
+            const linkedServiceIds = new Set();
+            groups.forEach(g => {
+                if (g.id !== 'all' && g.children) {
+                    g.children.forEach(c => {
+                        const svcId = c.id.split(':svc:')[1];
+                        linkedServiceIds.add(svcId);
+                    });
+                }
+            });
+
+            const unlinkedServices = services.filter(s => !linkedServiceIds.has(s.id));
+            if (unlinkedServices.length > 0) {
+                groups.push({
+                    id: 'pt:other',
+                    name: 'Dịch vụ khác',
+                    children: unlinkedServices.map(s => ({
+                        id: `pt:other:svc:${s.id}`,
+                        name: s.name,
+                    })),
+                });
+            }
+
             setProductGroups(groups);
         }
     }, [services, productTypes]);
 
-    // Build a lookup: product_type_id → list of service IDs that apply to it
+    // Build a lookup: product_type_id or code → list of service IDs that apply to it
     const ptToServiceIds = useMemo(() => {
         const map = new Map<string, string[]>();
         services.forEach(svc => {
-            (svc.applicable_product_types || []).forEach(ptId => {
-                if (!map.has(ptId)) map.set(ptId, []);
-                map.get(ptId)!.push(svc.id);
+            (svc.applicable_product_types || []).forEach(ptRef => {
+                if (!map.has(ptRef)) map.set(ptRef, []);
+                map.get(ptRef)!.push(svc.id);
             });
         });
         return map;
     }, [services]);
 
+    // Product type ID/Code → name lookup
+    const ptNameMap = useMemo(() => {
+        const map = new Map<string, string>();
+        productTypes.forEach(pt => {
+            map.set(pt.id, pt.name);
+            map.set(pt.code, pt.name);
+        });
+        return map;
+    }, [productTypes]);
+
     // Combine products and services for display
     const allItems = useMemo(() => {
         const items = [
-            ...products.map(p => ({
-                id: p.id,
-                code: p.code,
-                name: p.name,
-                unit: p.unit || '',
-                price: p.price || 0,
-                cost: p.cost || 0,
-                category: p.category || '',
-                commissionRate: 1, // Default commission rate
-                // Which service IDs this product belongs to (through its category/product type)
-                serviceIds: p.category ? (ptToServiceIds.get(p.category) || []) : [],
-            })),
-            ...services.map(s => ({
-                id: s.id,
-                code: s.code,
-                name: s.name,
-                unit: '',
-                price: s.price || 0,
-                cost: 0,
-                category: s.category || '',
-                commissionRate: s.commission_rate || 1,
-                serviceIds: [s.id], // A service item matches itself
-            })),
+            ...products.map(p => {
+                const ptName = p.category ? ptNameMap.get(p.category) || '' : '';
+                return {
+                    id: p.id,
+                    code: p.code,
+                    name: p.name,
+                    productTypeName: ptName,
+                    unit: p.unit || '',
+                    price: p.price || 0,
+                    cost: p.cost || 0,
+                    category: p.category || '',
+                    itemType: 'product' as const,
+                    commissionRate: 1,
+                    serviceIds: p.category ? (ptToServiceIds.get(p.category) || []) : [],
+                    productTypeIds: p.category ? [p.category] : [],
+                    commission_data: p.commission_data,
+                    commission_sale: p.commission_sale,
+                    commission_tech: p.commission_tech,
+                };
+            }),
+            ...services.map(s => {
+                const ptIds = s.applicable_product_types || [];
+                const ptName = ptIds.length > 0 ? ptNameMap.get(ptIds[0]) || '' : '';
+                return {
+                    id: s.id,
+                    code: s.code,
+                    name: s.name,
+                    productTypeName: ptName,
+                    unit: '',
+                    price: s.price || 0,
+                    cost: 0,
+                    category: s.category || '',
+                    itemType: 'service' as const,
+                    commissionRate: s.commission_rate || 1,
+                    serviceIds: [s.id],
+                    productTypeIds: ptIds,
+                    commission_data: s.commission_data,
+                    commission_sale: s.commission_sale,
+                    commission_tech: s.commission_tech,
+                };
+            }),
         ];
         return items;
-    }, [products, services, ptToServiceIds]);
+    }, [products, services, ptToServiceIds, ptNameMap]);
 
-    // Filter items
-    const filteredItems = useMemo(() => {
+    // 1. Base filtering (Search + Group)
+    const baseFilteredItems = useMemo(() => {
         let items = allItems;
 
         if (searchTerm) {
@@ -166,46 +242,81 @@ export function CommissionsPage() {
         }
 
         if (selectedGroup && selectedGroup !== 'all') {
-            if (selectedGroup.startsWith('svc:')) {
-                // Filter by service: show items whose category is in this service's applicable product types
-                const svcId = selectedGroup.replace('svc:', '');
-                const svc = services.find(s => s.id === svcId);
-                const applicablePtIds = svc?.applicable_product_types || [];
-                if (applicablePtIds.length > 0) {
-                    items = items.filter(item =>
-                        applicablePtIds.includes(item.category) || item.serviceIds.includes(svcId)
-                    );
-                } else {
-                    // Service with no applicable types, only show the service itself
-                    items = items.filter(item => item.serviceIds.includes(svcId));
-                }
+            if (selectedGroup.includes(':svc:')) {
+                const svcId = selectedGroup.split(':svc:')[1];
+                items = items.filter(item => item.serviceIds.includes(svcId));
             } else if (selectedGroup.startsWith('pt:')) {
-                // Filter by product type
-                const ptId = selectedGroup.replace('pt:', '');
-                items = items.filter(item => item.category === ptId);
+                const ptRef = selectedGroup.replace('pt:', '');
+                if (ptRef === 'other') {
+                    const ptIds = new Set(productTypes.map(pt => pt.id));
+                    const ptCodes = new Set(productTypes.map(pt => pt.code));
+                    items = items.filter(item => {
+                        if (item.productTypeIds.length === 0) return true;
+                        return !item.productTypeIds.some(ref => ptIds.has(ref) || ptCodes.has(ref));
+                    });
+                } else {
+                    const pt = productTypes.find(p => p.id === ptRef);
+                    items = items.filter(item =>
+                        item.productTypeIds.includes(ptRef) || (pt && item.productTypeIds.includes(pt.code))
+                    );
+                }
             }
+        }
+        return items;
+    }, [allItems, searchTerm, searchCodeTerm, searchNameTerm, selectedGroup, productTypes]);
+
+    // 2. Table filtering for display
+    const displayItems = useMemo(() => {
+        let items = baseFilteredItems;
+
+        const checkedTables = commissionTables.filter(t => t.checked && t.id !== 'common');
+        if (checkedTables.length > 0) {
+            items = items.filter(item => {
+                const commissionData = item.commission_data || {};
+                return checkedTables.some(t => commissionData[t.id] !== undefined);
+            });
         }
 
         return items;
-    }, [allItems, searchTerm, searchCodeTerm, searchNameTerm, selectedGroup, services]);
+    }, [baseFilteredItems, commissionTables]);
 
     // Pagination
-    const totalPages = Math.ceil(filteredItems.length / itemsPerPage);
-    const paginatedItems = filteredItems.slice(
+    const totalPages = Math.ceil(displayItems.length / itemsPerPage);
+    const paginatedItems = displayItems.slice(
         (currentPage - 1) * itemsPerPage,
         currentPage * itemsPerPage
     );
 
-    const toggleCommissionTable = (id: string) => {
+    const toggleCommissionTable = async (id: string) => {
+        const table = commissionTables.find(t => t.id === id);
+        if (!table) return;
+
+        const newChecked = !table.checked;
+
+        // Optimistic update
         setCommissionTables(prev =>
-            prev.map(t => t.id === id ? { ...t, checked: !t.checked } : t)
+            prev.map(t => t.id === id ? { ...t, checked: newChecked } : t)
         );
+
+        try {
+            await commissionTablesApi.update(id, { checked: newChecked });
+        } catch (error) {
+            console.error('Error updating table visibility:', error);
+            // Rollback
+            setCommissionTables(prev =>
+                prev.map(t => t.id === id ? { ...t, checked: !newChecked } : t)
+            );
+            toast.error('Lỗi khi lưu trạng thái bảng');
+        }
     };
 
     const toggleGroupExpand = (id: string) => {
-        setProductGroups(prev =>
-            prev.map(g => g.id === id ? { ...g, expanded: !g.expanded } : g)
-        );
+        setExpandedGroups(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
     };
 
     const toggleSelectItem = (id: string) => {
@@ -226,17 +337,80 @@ export function CommissionsPage() {
         setSelectAll(!selectAll);
     };
 
-    const handleAddTable = () => {
-        if (!addTableName.trim()) return;
+    const handleSaveNewTable = async (data: {
+        name: string;
+        scope: 'all' | 'branch';
+        branchId?: string;
+        status: 'active' | 'inactive';
+    }) => {
         const newTable: CommissionTable = {
             id: `custom-${Date.now()}`,
-            name: addTableName,
-            type: 'common',
-            checked: false,
+            name: data.name,
+            type: 'custom',
+            checked: true, // Auto-select the new table
+            scope: data.scope,
+            branchId: data.branchId,
+            status: data.status,
         };
-        setCommissionTables(prev => [...prev, newTable]);
-        setAddTableName('');
-        setShowAddTable(false);
+
+        try {
+            await commissionTablesApi.create(newTable);
+            setCommissionTables(prev => [...prev, newTable]);
+            toast.success('Đã thêm bảng hoa hồng mới');
+        } catch (error) {
+            console.error('Error creating table:', error);
+            toast.error('Lỗi khi tạo bảng hoa hồng mới');
+        }
+    };
+
+    const handleBulkAssignToTables = async (groupId: string) => {
+        const targetTables = commissionTables.filter(t => t.checked && t.id !== 'common');
+        if (targetTables.length === 0) {
+            toast.error('Vui lòng chọn ít nhất một bảng hoa hồng (khác bảng chung) để áp dụng');
+            return;
+        }
+
+        const itemsToUpdate = baseFilteredItems;
+        if (itemsToUpdate.length === 0) {
+            toast.error('Không có sản phẩm/dịch vụ nào trong nhóm này để áp dụng');
+            return;
+        }
+
+        const loadingToast = toast.loading(`Đang áp dụng cho ${itemsToUpdate.length} mục...`);
+
+        try {
+            let successCount = 0;
+            for (const item of itemsToUpdate) {
+                const newCommissionData = { ...(item.commission_data || {}) };
+
+                targetTables.forEach(table => {
+                    if (!newCommissionData[table.id]) {
+                        newCommissionData[table.id] = {
+                            sale_rate: item.commission_sale || 0,
+                            tech_rate: item.commission_tech || (item.category === 'service' ? (item as any).commission_rate : 0) || 0
+                        };
+                    }
+                });
+
+                if (item.itemType === 'product') {
+                    await updateProduct(item.id, { commission_data: newCommissionData });
+                } else {
+                    await updateService(item.id, { commission_data: newCommissionData });
+                }
+                successCount++;
+            }
+
+            toast.dismiss(loadingToast);
+            toast.success(`Đã áp dụng thành công cho ${successCount} mục`);
+
+            // Refresh counts
+            await fetchProducts();
+            await fetchServices();
+        } catch (error) {
+            console.error('Apply all error:', error);
+            toast.dismiss(loadingToast);
+            toast.error('Đã xảy ra lỗi khi áp dụng hàng loạt');
+        }
     };
 
     // Save commission rate for a product or service
@@ -358,28 +532,12 @@ export function CommissionsPage() {
                             }
                         </div>
                         <button
-                            onClick={() => setShowAddTable(true)}
+                            onClick={() => setShowAddTableDialog(true)}
                             className="flex items-center gap-1.5 mt-2.5 text-[12px] text-gray-500 hover:text-blue-600 transition-colors cursor-pointer"
                         >
                             <Plus className="h-3.5 w-3.5" />
                             Thêm bảng
                         </button>
-                        {showAddTable && (
-                            <div className="mt-2 flex gap-1">
-                                <input
-                                    type="text"
-                                    className="flex-1 h-[28px] px-2 text-[11px] border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                    placeholder="Tên bảng..."
-                                    value={addTableName}
-                                    onChange={(e) => setAddTableName(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleAddTable()}
-                                    autoFocus
-                                />
-                                <button onClick={handleAddTable} className="px-2 h-[28px] text-[11px] bg-blue-600 text-white rounded hover:bg-blue-700">
-                                    Lưu
-                                </button>
-                            </div>
-                        )}
                     </div>
 
                     {/* Product Groups */}
@@ -397,27 +555,23 @@ export function CommissionsPage() {
                         </div>
                         <div className="space-y-0.5">
                             {productGroups
-                                .filter(g => g.id === '__divider__' || !groupSearch || g.name.toLowerCase().includes(groupSearch.toLowerCase()))
+                                .filter(g => !groupSearch || g.name.toLowerCase().includes(groupSearch.toLowerCase()) ||
+                                    (g.children || []).some(c => c.name.toLowerCase().includes(groupSearch.toLowerCase())))
                                 .map(group => (
                                     <div key={group.id}>
-                                        {group.id === '__divider__' ? (
-                                            <div className="text-[10px] text-gray-400 uppercase tracking-wider py-2 px-1.5 select-none">
-                                                {group.name}
-                                            </div>
-                                        ) : (
-                                        <button
-                                            className={`w-full flex items-center gap-1.5 px-1.5 py-[5px] rounded text-left cursor-pointer transition-colors ${
-                                                selectedGroup === group.id
+                                        <div
+                                            className={`w-full flex items-center gap-1.5 px-1.5 py-[5px] rounded text-left transition-colors ${selectedGroup === group.id
                                                     ? 'text-blue-600 bg-blue-50 font-medium'
                                                     : 'text-gray-700 hover:bg-gray-100'
-                                            }`}
+                                                }`}
+                                            style={{ cursor: 'pointer' }}
                                             onClick={() => {
                                                 setSelectedGroup(group.id);
                                                 if (group.children && group.children.length > 0) toggleGroupExpand(group.id);
                                             }}
                                         >
                                             {group.children && group.children.length > 0 ? (
-                                                group.expanded ? (
+                                                expandedGroups.has(group.id) ? (
                                                     <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
                                                 ) : (
                                                     <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
@@ -426,19 +580,29 @@ export function CommissionsPage() {
                                                 <span className="w-3.5" />
                                             )}
                                             <span className="text-[12px] truncate">{group.name}</span>
-                                        </button>
-                                        )}
-                                        {group.expanded && group.children && group.children.length > 0 && (
+                                            {group.id === 'all' && (
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleBulkAssignToTables('all');
+                                                    }}
+                                                    className="ml-auto p-1 hover:bg-blue-100 rounded text-blue-600 transition-colors"
+                                                    title="Áp dụng cho các bảng hoa hồng đã chọn"
+                                                >
+                                                    <span className="text-[14px] font-bold">→</span>
+                                                </button>
+                                            )}
+                                        </div>
+                                        {expandedGroups.has(group.id) && group.children && group.children.length > 0 && (
                                             <div className="ml-5 space-y-0.5">
                                                 {group.children.map(child => (
                                                     <button
                                                         key={child.id}
-                                                        className={`w-full text-left px-1.5 py-[4px] rounded text-[11px] cursor-pointer transition-colors ${
-                                                            selectedGroup === child.id
+                                                        className={`w-full text-left px-1.5 py-[4px] rounded text-[11px] cursor-pointer transition-colors ${selectedGroup === child.id
                                                                 ? 'text-blue-600 bg-blue-50 font-medium'
                                                                 : 'text-gray-600 hover:bg-gray-50'
-                                                        }`}
-                                                        onClick={() => setSelectedGroup(child.id)}
+                                                            }`}
+                                                        onClick={(e) => { e.stopPropagation(); setSelectedGroup(child.id); }}
                                                     >
                                                         {child.name}
                                                     </button>
@@ -516,9 +680,11 @@ export function CommissionsPage() {
                                     <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide text-right">
                                         LỢI NHUẬN TẠM TÍNH
                                     </th>
-                                    <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide text-right">
-                                        BẢNG HOA HỒNG CHUNG
-                                    </th>
+                                    {commissionTables.filter(t => t.checked).map(table => (
+                                        <th key={table.id} className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide text-right">
+                                            {table.name.toUpperCase()}
+                                        </th>
+                                    ))}
                                 </tr>
                                 {/* Sub-header filters */}
                                 <tr className="bg-white">
@@ -545,7 +711,9 @@ export function CommissionsPage() {
                                     <th className="px-4 py-1.5 border-b border-gray-100"></th>
                                     <th className="px-4 py-1.5 border-b border-gray-100"></th>
                                     <th className="px-4 py-1.5 border-b border-gray-100"></th>
-                                    <th className="px-4 py-1.5 border-b border-gray-100"></th>
+                                    {commissionTables.filter(t => t.checked).map(table => (
+                                        <th key={`filter-${table.id}`} className="px-4 py-1.5 border-b border-gray-100"></th>
+                                    ))}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
@@ -567,8 +735,16 @@ export function CommissionsPage() {
                                             <td className="px-4 py-[11px] text-gray-800 font-medium text-[13px]">
                                                 {item.code}
                                             </td>
-                                            <td className="px-4 py-[11px] text-blue-600 font-medium text-[13px] uppercase">
-                                                {item.name}
+                                            <td className="px-4 py-[11px] text-[13px] uppercase">
+                                                {item.productTypeName ? (
+                                                    <>
+                                                        <span className="text-gray-500">{item.productTypeName}</span>
+                                                        <span className="text-gray-400 mx-1">›</span>
+                                                        <span className="text-blue-600 font-medium">{item.name}</span>
+                                                    </>
+                                                ) : (
+                                                    <span className="text-blue-600 font-medium">{item.name}</span>
+                                                )}
                                             </td>
                                             <td className="px-4 py-[11px] text-gray-600 text-[13px] text-center">
                                                 {item.unit || ''}
@@ -582,35 +758,176 @@ export function CommissionsPage() {
                                             <td className="px-4 py-[11px] text-gray-800 text-[13px] font-medium text-right">
                                                 {item.price > 0 ? formatNumber(profit) : ''}
                                             </td>
-                                            <td className="px-4 py-[11px] text-right">
-                                                {editingCommission?.id === item.id ? (
-                                                    <input
-                                                        type="number"
-                                                        className="w-[60px] h-[26px] px-2 text-[13px] text-right border border-blue-400 rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 font-medium text-blue-600"
-                                                        value={editingCommission.value}
-                                                        onChange={(e) => setEditingCommission({ id: item.id, value: e.target.value })}
-                                                        onBlur={() => handleSaveProductCommission(item.id, editingCommission.value)}
-                                                        onKeyDown={(e) => {
-                                                            if (e.key === 'Enter') handleSaveProductCommission(item.id, editingCommission.value);
-                                                            if (e.key === 'Escape') setEditingCommission(null);
-                                                        }}
-                                                        autoFocus
-                                                        min={0}
-                                                        step={0.1}
-                                                    />
-                                                ) : (
-                                                    <span
-                                                        className="inline-flex items-center gap-1 text-[13px] text-blue-600 font-medium cursor-pointer hover:bg-blue-50 px-2 py-0.5 rounded transition-colors"
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            setEditingCommission({ id: item.id, value: String(item.commissionRate) });
-                                                        }}
-                                                    >
-                                                        {item.commissionRate}
-                                                        <span className="text-gray-500">%</span>
-                                                    </span>
-                                                )}
-                                            </td>
+                                            {commissionTables.filter(t => t.checked).map(table => {
+                                                const commissionData = (item as any).commission_data || {};
+                                                const tableConfig = commissionData[table.id];
+
+                                                // Default to global rates if not explicitly set for this table
+                                                const rate = tableConfig
+                                                    ? (item.itemType === 'product' ? tableConfig.sale_rate : tableConfig.tech_rate)
+                                                    : (table.id === 'common'
+                                                        ? (item.itemType === 'product' ? (item as any).commission_sale : (item as any).commission_tech)
+                                                        : undefined
+                                                    );
+
+                                                return (
+                                                    <td key={table.id} className="px-4 py-[11px] text-right">
+                                                        <Popover
+                                                            open={popoverOpen === `${item.id}-${table.id}`}
+                                                            onOpenChange={(open) => {
+                                                                if (open) {
+                                                                    setPopoverOpen(`${item.id}-${table.id}`);
+                                                                    setPopoverForm({
+                                                                        value: rate?.toString() || '0',
+                                                                        isVND: tableConfig?.unit === 'vnd',
+                                                                        applyAll: false
+                                                                    });
+                                                                } else {
+                                                                    setPopoverOpen(null);
+                                                                }
+                                                            }}
+                                                        >
+                                                            <PopoverTrigger asChild>
+                                                                <button className="inline-flex items-center gap-1 text-[13px] text-blue-600 font-medium cursor-pointer hover:bg-blue-50 px-2 py-0.5 rounded transition-colors w-full justify-end">
+                                                                    {rate !== undefined ? formatNumber(rate) : '0'}
+                                                                    <span className="text-gray-500">{tableConfig?.unit === 'vnd' ? 'đ' : '%'}</span>
+                                                                </button>
+                                                            </PopoverTrigger>
+                                                            <PopoverContent className="w-[450px] p-4 bg-white border border-gray-200 shadow-xl rounded-lg z-[100]" align="end">
+                                                                <div className="space-y-4">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <span className="text-[13px] text-gray-600 flex-1 font-medium leading-tight">
+                                                                            Mức hoa hồng áp dụng mỗi sản phẩm bán ra
+                                                                        </span>
+                                                                        <div className="flex items-center gap-2">
+                                                                            <Input
+                                                                                type="text"
+                                                                                className="w-[120px] h-9 text-right font-medium border-blue-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                                                                                value={popoverForm.isVND
+                                                                                    ? popoverForm.value.replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+                                                                                    : popoverForm.value
+                                                                                }
+                                                                                onChange={(e) => {
+                                                                                    const val = e.target.value;
+                                                                                    if (popoverForm.isVND) {
+                                                                                        // Only allow digits
+                                                                                        const digits = val.replace(/\D/g, '');
+                                                                                        setPopoverForm(prev => ({ ...prev, value: digits }));
+                                                                                    } else {
+                                                                                        setPopoverForm(prev => ({ ...prev, value: val }));
+                                                                                    }
+                                                                                }}
+                                                                                autoFocus
+                                                                            />
+                                                                            <div className="flex bg-gray-100 p-0.5 rounded-lg border border-gray-200">
+                                                                                <button
+                                                                                    onClick={() => {
+                                                                                        const numericValue = popoverForm.value.replace(/\D/g, '');
+                                                                                        setPopoverForm(prev => ({ ...prev, isVND: true, value: numericValue }));
+                                                                                    }}
+                                                                                    className={`px-3 py-1.5 text-[10px] font-bold rounded-md transition-all ${popoverForm.isVND ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                                                                                >
+                                                                                    VNĐ
+                                                                                </button>
+                                                                                <button
+                                                                                    onClick={() => {
+                                                                                        const numericValue = popoverForm.value.replace(/\D/g, '');
+                                                                                        setPopoverForm(prev => ({ ...prev, isVND: false, value: numericValue }));
+                                                                                    }}
+                                                                                    className={`px-3 py-1.5 text-[10px] font-bold rounded-md transition-all ${!popoverForm.isVND ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                                                                                >
+                                                                                    % DOANH THU
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    <div className="flex items-center space-x-2 bg-gray-50 p-3 rounded-lg border border-gray-100 group hover:border-blue-100 transition-colors">
+                                                                        <Checkbox
+                                                                            id={`apply-all-${item.id}`}
+                                                                            className="border-gray-300 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
+                                                                            checked={popoverForm.applyAll}
+                                                                            onCheckedChange={(checked) => setPopoverForm(prev => ({ ...prev, applyAll: checked as boolean }))}
+                                                                        />
+                                                                        <label
+                                                                            htmlFor={`apply-all-${item.id}`}
+                                                                            className="text-[12.5px] text-gray-700 cursor-pointer select-none font-medium flex-1"
+                                                                        >
+                                                                            Áp dụng cho <span className="text-blue-600 font-bold underline decoration-blue-200 underline-offset-2">{baseFilteredItems.length}</span> hàng hóa, nhóm hàng trong bảng hoa hồng
+                                                                        </label>
+                                                                    </div>
+
+                                                                    <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 mt-2">
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="sm"
+                                                                            className="px-4 h-9 text-gray-500 hover:bg-gray-100 font-medium text-[13px]"
+                                                                            onClick={() => setPopoverOpen(null)}
+                                                                        >
+                                                                            Bỏ qua
+                                                                        </Button>
+                                                                        <Button
+                                                                            size="sm"
+                                                                            className="px-6 h-9 bg-blue-600 hover:bg-blue-700 text-white shadow-md transition-all font-semibold text-[13px] active:scale-95"
+                                                                            onClick={async () => {
+                                                                                const rawValue = popoverForm.isVND
+                                                                                    ? popoverForm.value.replace(/\D/g, '')
+                                                                                    : popoverForm.value.replace(/[^0-9.]/g, '');
+                                                                                const newValue = parseFloat(rawValue) || 0;
+                                                                                const newUnit = popoverForm.isVND ? 'vnd' : 'percent';
+
+                                                                                if (popoverForm.applyAll) {
+                                                                                    const loadingToast = toast.loading(`Đang áp dụng cho ${baseFilteredItems.length} mục...`);
+                                                                                    try {
+                                                                                        let successCount = 0;
+                                                                                        for (const di of baseFilteredItems) {
+                                                                                            const currentData = { ...((di as any).commission_data || {}) };
+                                                                                            currentData[table.id] = di.itemType === 'product'
+                                                                                                ? { ...currentData[table.id], sale_rate: newValue, unit: newUnit }
+                                                                                                : { ...currentData[table.id], tech_rate: newValue, unit: newUnit };
+
+                                                                                            if (di.itemType === 'product') {
+                                                                                                await updateProduct(di.id, { commission_data: currentData });
+                                                                                            } else {
+                                                                                                await updateService(di.id, { commission_data: currentData });
+                                                                                            }
+                                                                                            successCount++;
+                                                                                        }
+                                                                                        toast.dismiss(loadingToast);
+                                                                                        toast.success(`Đã áp dụng thành công cho ${successCount} mục`);
+                                                                                        await fetchProducts();
+                                                                                        await fetchServices();
+                                                                                    } catch (err) {
+                                                                                        console.error('Bulk apply error:', err);
+                                                                                        toast.dismiss(loadingToast);
+                                                                                        toast.error('Lỗi khi áp dụng hàng loạt');
+                                                                                    }
+                                                                                } else {
+                                                                                    const currentData = { ...((item as any).commission_data || {}) };
+                                                                                    currentData[table.id] = item.itemType === 'product'
+                                                                                        ? { ...currentData[table.id], sale_rate: newValue, unit: newUnit }
+                                                                                        : { ...currentData[table.id], tech_rate: newValue, unit: newUnit };
+
+                                                                                    if (item.itemType === 'product') {
+                                                                                        await updateProduct(item.id, { commission_data: currentData });
+                                                                                    } else {
+                                                                                        await updateService(item.id, { commission_data: currentData });
+                                                                                    }
+                                                                                    toast.success('Đã cập nhật hoa hồng');
+                                                                                    (item as any).commission_data = currentData;
+                                                                                }
+                                                                                setPopoverOpen(null);
+                                                                            }}
+                                                                        >
+                                                                            Đồng ý
+                                                                        </Button>
+                                                                    </div>
+                                                                </div>
+                                                            </PopoverContent>
+                                                        </Popover>
+                                                    </td>
+                                                );
+                                            })}
                                         </tr>
                                     );
                                 })}
@@ -759,14 +1076,20 @@ export function CommissionsPage() {
                             </button>
                         </div>
                         <span className="text-gray-500">
-                            {filteredItems.length > 0
-                                ? `${(currentPage - 1) * itemsPerPage + 1} - ${Math.min(currentPage * itemsPerPage, filteredItems.length)} trong ${filteredItems.length} hàng hóa`
+                            {displayItems.length > 0
+                                ? `${(currentPage - 1) * itemsPerPage + 1} - ${Math.min(currentPage * itemsPerPage, displayItems.length)} trong ${displayItems.length} hàng hóa`
                                 : '0 hàng hóa'
                             }
                         </span>
                     </div>
                 )}
             </div>
+
+            <AddCommissionConditionDialog
+                open={showAddTableDialog}
+                onClose={() => setShowAddTableDialog(false)}
+                onSave={handleSaveNewTable}
+            />
         </div>
     );
 }

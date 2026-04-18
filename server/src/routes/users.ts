@@ -59,7 +59,7 @@ router.get('/', authenticate, requireManager, async (req: AuthenticatedRequest, 
 
         let query = supabaseAdmin
             .from('users')
-            .select('id, email, name, role, phone, avatar, department, status, created_at, last_login, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code')
+            .select('id, email, name, role, phone, avatar, department, status, created_at, last_login, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes')
             .order('created_at', { ascending: false });
 
         if (role) query = query.eq('role', role);
@@ -79,6 +79,15 @@ router.get('/', authenticate, requireManager, async (req: AuthenticatedRequest, 
             bankAccount: user.bank_account,
             bankName: user.bank_name,
             telegramChatId: user.telegram_chat_id,
+            employeeCode: user.employee_code,
+            timekeepingCode: user.timekeeping_code,
+            jobTitleId: user.job_title_id,
+            joinDate: user.join_date,
+            payrollBranchId: user.payroll_branch_id,
+            workingBranchId: user.working_branch_id,
+            kiotvietAccount: user.kiotviet_account,
+            mobileDevice: user.mobile_device,
+            identityCard: user.identity_card,
         }));
 
         res.json({
@@ -93,7 +102,10 @@ router.get('/', authenticate, requireManager, async (req: AuthenticatedRequest, 
 // Create new user (manager only) - Uses bcrypt for password hashing
 router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { email, password, name, phone, role, department, avatar, salary, commission, bankAccount, bankName, telegramChatId } = req.body;
+        const { 
+            email, password, name, phone, role, department, avatar, salary, commission, bankAccount, bankName, telegramChatId,
+            dob, gender, identityCard, jobTitleId, joinDate, payrollBranchId, workingBranchId, kiotvietAccount, facebook, address, mobileDevice, notes 
+        } = req.body;
 
         if (!email || !password || !name) {
             throw new ApiError('Email, mật khẩu và tên là bắt buộc', 400);
@@ -118,6 +130,20 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
         const saltRounds = 10;
         const passwordHash = await bcrypt.hash(password, saltRounds);
 
+        // Generate timekeepingCode
+        const { data: lastTimekeeping } = await supabaseAdmin
+            .from('users')
+            .select('timekeeping_code')
+            .order('created_at', { ascending: false })
+            .limit(1);
+        
+        let nt = 1;
+        if (lastTimekeeping && lastTimekeeping.length > 0 && lastTimekeeping[0].timekeeping_code) {
+            const match = lastTimekeeping[0].timekeeping_code.match(/CC(\d+)/);
+            if (match) nt = parseInt(match[1]) + 1;
+        }
+        const timekeepingCode = `CC${nt.toString().padStart(4, '0')}`;
+
         // Insert user record into users table
         const { data: user, error: insertError } = await supabaseAdmin
             .from('users')
@@ -136,8 +162,21 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
                 telegram_chat_id: telegramChatId || null,
                 status: 'active',
                 created_at: new Date().toISOString(),
+                timekeeping_code: timekeepingCode,
+                dob: dob || null,
+                gender: gender || null,
+                identity_card: identityCard || null,
+                job_title_id: jobTitleId || null,
+                join_date: joinDate || null,
+                payroll_branch_id: payrollBranchId || null,
+                working_branch_id: workingBranchId || null,
+                kiotviet_account: kiotvietAccount || null,
+                facebook: facebook || null,
+                address: address || null,
+                mobile_device: mobileDevice || null,
+                notes: notes || null
             })
-            .select('id, email, name, role, phone, avatar, department, status, created_at, salary, commission, bank_account, bank_name, telegram_chat_id')
+            .select('id, email, name, role, phone, avatar, department, status, created_at, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes')
             .single();
 
         if (insertError) {
@@ -150,6 +189,15 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
             bankAccount: user.bank_account,
             bankName: user.bank_name,
             telegramChatId: user.telegram_chat_id,
+            employeeCode: user.employee_code,
+            timekeepingCode: user.timekeeping_code,
+            jobTitleId: user.job_title_id,
+            joinDate: user.join_date,
+            payrollBranchId: user.payroll_branch_id,
+            workingBranchId: user.working_branch_id,
+            kiotvietAccount: user.kiotviet_account,
+            mobileDevice: user.mobile_device,
+            identityCard: user.identity_card,
         };
 
         res.status(201).json({
@@ -174,7 +222,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 
         const { data: user, error } = await supabaseAdmin
             .from('users')
-            .select('id, email, name, role, phone, avatar, department, status, created_at, last_login, salary, commission, bank_account, bank_name, telegram_chat_id')
+            .select('id, email, name, role, phone, avatar, department, status, created_at, last_login, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes')
             .eq('id', id)
             .single();
 
@@ -190,6 +238,15 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                     bankAccount: user.bank_account,
                     bankName: user.bank_name,
                     telegramChatId: user.telegram_chat_id,
+                    employeeCode: user.employee_code,
+                    timekeepingCode: user.timekeeping_code,
+                    jobTitleId: user.job_title_id,
+                    joinDate: user.join_date,
+                    payrollBranchId: user.payroll_branch_id,
+                    workingBranchId: user.working_branch_id,
+                    kiotvietAccount: user.kiotviet_account,
+                    mobileDevice: user.mobile_device,
+                    identityCard: user.identity_card,
                 } 
             },
         });
@@ -202,7 +259,11 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { name, phone, avatar, department, status, role, salary, commission, bankAccount, bankName, telegramChatId } = req.body;
+        const { 
+            name, phone, avatar, department, status, role, salary, commission, bankAccount, bankName, telegramChatId,
+            dob, gender, identityCard, jobTitleId, joinDate, payrollBranchId, workingBranchId, kiotvietAccount, facebook, address, mobileDevice, notes,
+            kpiPolicyId
+        } = req.body;
 
         // Chỉ cho phép cập nhật thông tin của chính mình hoặc quản lý
         const isOwner = req.user!.id === id;
@@ -218,9 +279,16 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 
         // Thông tin cơ bản - ai cũng có thể cập nhật cho mình
         if (name) updateData.name = name;
-        if (phone) updateData.phone = phone;
-        if (avatar) updateData.avatar = avatar;
+        if (phone !== undefined) updateData.phone = phone || null;
+        if (avatar !== undefined) updateData.avatar = avatar || null;
         if (telegramChatId !== undefined) updateData.telegram_chat_id = telegramChatId || null;
+        if (dob !== undefined) updateData.dob = dob || null;
+        if (gender !== undefined) updateData.gender = gender || null;
+        if (identityCard !== undefined) updateData.identity_card = identityCard || null;
+        if (facebook !== undefined) updateData.facebook = facebook || null;
+        if (address !== undefined) updateData.address = address || null;
+        if (mobileDevice !== undefined) updateData.mobile_device = mobileDevice || null;
+        if (notes !== undefined) updateData.notes = notes || null;
 
         // Chỉ manager mới được cập nhật role, status, department, salary, etc.
         if (isManager) {
@@ -231,16 +299,25 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             if (commission !== undefined) updateData.commission = commission;
             if (bankAccount !== undefined) updateData.bank_account = bankAccount || null;
             if (bankName !== undefined) updateData.bank_name = bankName || null;
+            if (jobTitleId !== undefined) updateData.job_title_id = jobTitleId || null;
+            if (joinDate !== undefined) updateData.join_date = joinDate || null;
+            if (payrollBranchId !== undefined) updateData.payroll_branch_id = payrollBranchId || null;
+            if (workingBranchId !== undefined) updateData.working_branch_id = workingBranchId || null;
+            if (kiotvietAccount !== undefined) updateData.kiotviet_account = kiotvietAccount || null;
+            if (kpiPolicyId !== undefined) updateData.kpi_policy_id = kpiPolicyId || null;
         }
+
+        console.log('[DEBUG PUT /users/:id] req.body.jobTitleId =', jobTitleId, '| updateData =', JSON.stringify(updateData));
 
         const { data: user, error } = await supabaseAdmin
             .from('users')
             .update(updateData)
             .eq('id', id)
-            .select('id, email, name, role, phone, avatar, department, status, salary, commission, bank_account, bank_name, telegram_chat_id')
+            .select('id, email, name, role, phone, avatar, department, status, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes, kpi_policy_id')
             .single();
 
         if (error) {
+            console.error('[DEBUG PUT /users/:id] Supabase error:', error);
             throw new ApiError('Lỗi khi cập nhật người dùng', 500);
         }
 
@@ -250,6 +327,16 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             bankAccount: user.bank_account,
             bankName: user.bank_name,
             telegramChatId: user.telegram_chat_id,
+            employeeCode: user.employee_code,
+            timekeepingCode: user.timekeeping_code,
+            jobTitleId: user.job_title_id,
+            joinDate: user.join_date,
+            payrollBranchId: user.payroll_branch_id,
+            workingBranchId: user.working_branch_id,
+            kiotvietAccount: user.kiotviet_account,
+            mobileDevice: user.mobile_device,
+            identityCard: user.identity_card,
+            kpiPolicyId: user.kpi_policy_id,
         };
 
         res.json({

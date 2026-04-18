@@ -126,21 +126,24 @@ router.put('/:id', authenticate, requireManager, async (req: AuthenticatedReques
     try {
         const { id } = req.params;
         const updateFields = req.body;
-
+        
         const { data: product, error } = await supabaseAdmin
             .from('products')
             .update({ ...updateFields, updated_at: new Date().toISOString() })
             .eq('id', id)
-            .select()
-            .single();
+            .select();
 
         if (error) {
             throw new ApiError('Lỗi khi cập nhật sản phẩm: ' + error.message, 500);
         }
 
+        if (!product || product.length === 0) {
+            throw new ApiError('Không tìm thấy sản phẩm để cập nhật', 404);
+        }
+
         res.json({
             status: 'success',
-            data: { product },
+            data: { product: product[0] },
         });
     } catch (error) {
         next(error);

@@ -1,16 +1,28 @@
-import { useState, useEffect, useMemo, useCallback, Fragment } from 'react';
+import { useState, useEffect, useMemo, useCallback, Fragment, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     Search, Download, Calculator, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
-    RefreshCw, Eye, Trash2, CreditCard,
+    RefreshCw, Eye, Trash2, CreditCard, ListPlus, Calendar, X, ChevronDown
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
-import { payrollBatchesApi } from '@/lib/api';
+import { payrollBatchesApi, usersApi } from '@/lib/api';
 import { useSalary, type SalaryRecord } from '@/hooks/useSalary';
+import { useDepartments } from '@/hooks/useDepartments';
 import { formatCurrency } from '@/lib/utils';
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogFooter,
+    DialogClose,
+} from '@/components/ui/dialog';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
+import { PersonalPaysheetDialog } from '@/components/salary/PersonalPaysheetDialog';
 
 // ========== STATUS CONFIG ==========
 const salaryStatusConfig = {
@@ -60,6 +72,484 @@ interface PayrollBatch {
     created_by: string | null;
     approved_by: string | null;
     approved_at: string | null;
+    creator?: { id: string; name: string };
+    approver?: { id: string; name: string };
+}
+
+// ========== DEPARTMENT SELECT DIALOG ==========
+interface EmployeeItem {
+    id: string;
+    name: string;
+    code?: string;
+    department?: string;
+}
+
+function DepartmentSelectDialog({
+    open,
+    onOpenChange,
+    onConfirm,
+}: {
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    onConfirm: (departmentIds: string[]) => void;
+}) {
+    const { departments, fetchDepartments, loading } = useDepartments();
+    const [search, setSearch] = useState('');
+    const [selected, setSelected] = useState<string[]>([]);
+    const [allExpanded, setAllExpanded] = useState(true);
+
+    useEffect(() => {
+        if (open) {
+            fetchDepartments({ status: 'active' });
+            setSearch('');
+            setSelected([]);
+        }
+    }, [open]);
+
+    const filtered = useMemo(() => {
+        if (!search.trim()) return departments;
+        return departments.filter(d => d.name.toLowerCase().includes(search.toLowerCase()));
+    }, [departments, search]);
+
+    const allIds = filtered.map(d => d.id);
+    const allChecked = allIds.length > 0 && allIds.every(id => selected.includes(id));
+    const someChecked = allIds.some(id => selected.includes(id));
+
+    const toggleAll = () => {
+        if (allChecked) setSelected([]);
+        else setSelected(allIds);
+    };
+
+    const toggle = (id: string) => {
+        setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+    };
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className="sm:max-w-[400px] p-0 gap-0">
+                <DialogHeader className="p-4 border-b flex-row items-center justify-between">
+                    <DialogTitle className="text-[15px] font-semibold text-gray-800">Chọn phòng ban</DialogTitle>
+                </DialogHeader>
+                <div className="p-4 space-y-3">
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                        <Input
+                            className="pl-9 h-9 text-[13px] border-gray-200"
+                            placeholder="Tìm phòng ban..."
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                        />
+                    </div>
+                    {loading ? (
+                        <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-gray-400" /></div>
+                    ) : (
+                        <div className="space-y-1 max-h-[300px] overflow-y-auto">
+                            {/* All departments row */}
+                            <div className="flex items-center gap-3 px-1 py-1.5 cursor-pointer hover:bg-gray-50 rounded" onClick={toggleAll}>
+                                <button
+                                    className="text-gray-400 hover:text-gray-600"
+                                    onClick={e => { e.stopPropagation(); setAllExpanded(v => !v); }}
+                                >
+                                    <ChevronDown className={`h-4 w-4 transition-transform ${allExpanded ? '' : '-rotate-90'}`} />
+                                </button>
+                                <input
+                                    type="checkbox"
+                                    className="w-4 h-4 rounded border-gray-300 text-blue-600 cursor-pointer"
+                                    checked={allChecked}
+                                    ref={el => { if (el) el.indeterminate = someChecked && !allChecked; }}
+                                    onChange={toggleAll}
+                                    onClick={e => e.stopPropagation()}
+                                />
+                                <span className="text-[13px] text-gray-700">Tất cả phòng ban</span>
+                            </div>
+                            {allExpanded && filtered.map(dept => (
+                                <div
+                                    key={dept.id}
+                                    className="flex items-center gap-3 px-1 py-1.5 pl-9 cursor-pointer hover:bg-gray-50 rounded"
+                                    onClick={() => toggle(dept.id)}
+                                >
+                                    <input
+                                        type="checkbox"
+                                        className="w-4 h-4 rounded border-gray-300 text-blue-600 cursor-pointer"
+                                        checked={selected.includes(dept.id)}
+                                        onChange={() => toggle(dept.id)}
+                                        onClick={e => e.stopPropagation()}
+                                    />
+                                    <span className="text-[13px] text-gray-700">{dept.name}</span>
+                                </div>
+                            ))}
+                            <div
+                                className="flex items-center gap-3 px-1 py-1.5 pl-9 cursor-pointer hover:bg-gray-50 rounded"
+                                onClick={() => toggle('__no_dept__')}
+                            >
+                                <input
+                                    type="checkbox"
+                                    className="w-4 h-4 rounded border-gray-300 text-blue-600 cursor-pointer"
+                                    checked={selected.includes('__no_dept__')}
+                                    onChange={() => toggle('__no_dept__')}
+                                    onClick={e => e.stopPropagation()}
+                                />
+                                <span className="text-[13px] text-gray-700">Không thuộc phòng ban nào</span>
+                            </div>
+                        </div>
+                    )}
+                </div>
+                <DialogFooter className="p-4 border-t gap-2 sm:justify-end bg-gray-50/50">
+                    <DialogClose asChild>
+                        <Button variant="outline" className="h-9 px-5 text-[13px] font-medium min-w-[80px]">Bỏ qua</Button>
+                    </DialogClose>
+                    <Button
+                        onClick={() => { onConfirm(selected); onOpenChange(false); }}
+                        className="h-9 px-5 bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-medium min-w-[80px]"
+                    >
+                        Lưu
+                    </Button>
+                </DialogFooter>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+// ========== GENERATE PAYROLL DIALOG ==========
+function GeneratePayrollDialog({ open, onOpenChange, onGenerate }: { open: boolean, onOpenChange: (open: boolean) => void, onGenerate: () => void }) {
+    const today = new Date();
+    const todayStr = `${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+
+    const [payPeriod, setPayPeriod] = useState('monthly');
+    const [workPeriod, setWorkPeriod] = useState('');
+    // Custom date range
+    const [customStartDate, setCustomStartDate] = useState(todayStr);
+    const [customEndDate, setCustomEndDate] = useState(todayStr);
+    const [scope, setScope] = useState('all');
+    const [generating, setGenerating] = useState(false);
+
+    // Departments for name lookup
+    const { departments, fetchDepartments } = useDepartments();
+    useEffect(() => { fetchDepartments(); }, []);
+
+    // Helper: resolve department display name from raw value (could be UUID or name string)
+    const resolveDeptName = useCallback((raw: string | undefined): string => {
+        if (!raw) return '--';
+        // Try to find by id (UUID case)
+        const byId = departments.find(d => d.id === raw);
+        if (byId) return byId.name;
+        // Try to find by name (exact or case-insensitive)
+        const byName = departments.find(d => d.name.toLowerCase() === raw.toLowerCase());
+        if (byName) return byName.name;
+        // Fallback: raw value
+        return raw;
+    }, [departments]);
+
+    // Employee search
+    const [empSearch, setEmpSearch] = useState('');
+    const [empDropdownOpen, setEmpDropdownOpen] = useState(false);
+    const [empResults, setEmpResults] = useState<EmployeeItem[]>([]);
+    const [empSearchLoading, setEmpSearchLoading] = useState(false);
+    const [selectedEmployees, setSelectedEmployees] = useState<EmployeeItem[]>([]);
+    const empSearchRef = useRef<HTMLDivElement>(null);
+
+    // Department dialog
+    const [deptDialogOpen, setDeptDialogOpen] = useState(false);
+
+    const workPeriodOptions = useMemo(() => {
+        const currentDate = new Date();
+        const options = [];
+        for (let i = 0; i < 12; i++) {
+            const date = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
+            const month = date.getMonth() + 1;
+            const year = date.getFullYear();
+            const lastDay = new Date(year, month, 0).getDate();
+            const value = `${String(month).padStart(2, '0')}/${year}`;
+            const label = `01/${String(month).padStart(2, '0')}/${year} - ${lastDay}/${String(month).padStart(2, '0')}/${year}`;
+            options.push({ value, label });
+        }
+        return options;
+    }, []);
+
+    useEffect(() => {
+        if (workPeriodOptions.length > 0 && !workPeriod) {
+            setWorkPeriod(workPeriodOptions[0].value);
+        }
+    }, [workPeriodOptions, workPeriod]);
+
+    // Search employees
+    useEffect(() => {
+        if (!empSearch.trim()) {
+            setEmpResults([]);
+            setEmpDropdownOpen(false);
+            return;
+        }
+        const timer = setTimeout(async () => {
+            setEmpSearchLoading(true);
+            try {
+                const res = await usersApi.getAll({ search: empSearch.trim() });
+                const users = res.data.data?.users || [];
+                setEmpResults(users.map((u: any) => ({
+                    id: u.id,
+                    name: u.name,
+                    code: u.employeeCode || u.employee_code || u.code,
+                    department: u.department,
+                })));
+                setEmpDropdownOpen(true);
+            } catch {
+                setEmpResults([]);
+            } finally {
+                setEmpSearchLoading(false);
+            }
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [empSearch]);
+
+    // Close dropdown on outside click
+    useEffect(() => {
+        const handler = (e: MouseEvent) => {
+            if (empSearchRef.current && !empSearchRef.current.contains(e.target as Node)) {
+                setEmpDropdownOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handler);
+        return () => document.removeEventListener('mousedown', handler);
+    }, []);
+
+    const selectEmployee = (emp: EmployeeItem) => {
+        if (!selectedEmployees.find(e => e.id === emp.id)) {
+            setSelectedEmployees(prev => [...prev, emp]);
+        }
+        setEmpSearch('');
+        setEmpDropdownOpen(false);
+    };
+
+    const removeEmployee = (id: string) => {
+        setSelectedEmployees(prev => prev.filter(e => e.id !== id));
+    };
+
+    const handleGenerateClick = async () => {
+        if (payPeriod === 'monthly' && !workPeriod) return;
+
+        setGenerating(true);
+        try {
+            if (payPeriod === 'monthly') {
+                const [monthStr, yearStr] = workPeriod.split('/');
+                const month = parseInt(monthStr, 10);
+                const year = parseInt(yearStr, 10);
+                await payrollBatchesApi.generate({ month, year });
+            } else {
+                // Custom date range — pass as-is or convert
+                await payrollBatchesApi.generate({ start_date: customStartDate, end_date: customEndDate } as any);
+            }
+            onGenerate();
+            onOpenChange(false);
+        } catch (err: unknown) {
+            console.error('Error generating payroll:', err);
+        } finally {
+            setGenerating(false);
+        }
+    };
+
+    // Convert dd/MM/yyyy string to input[type=date] value (yyyy-MM-dd)
+    const toInputDate = (ddmmyyyy: string) => {
+        const [d, m, y] = ddmmyyyy.split('/');
+        if (!d || !m || !y) return '';
+        return `${y}-${m}-${d}`;
+    };
+    const fromInputDate = (yyyymmdd: string) => {
+        const [y, m, d] = yyyymmdd.split('-');
+        if (!y || !m || !d) return '';
+        return `${d}/${m}/${y}`;
+    };
+
+    return (
+        <>
+            <DepartmentSelectDialog
+                open={deptDialogOpen}
+                onOpenChange={setDeptDialogOpen}
+                onConfirm={(_ids) => {
+                    // Could filter employees by department here if needed
+                }}
+            />
+            <Dialog open={open} onOpenChange={onOpenChange}>
+                <DialogContent className="sm:max-w-[700px] p-0 gap-0">
+                    <DialogHeader className="p-4 border-b">
+                        <DialogTitle className="text-[16px] font-semibold text-gray-800">Thêm bảng tính lương</DialogTitle>
+                    </DialogHeader>
+                    <div className="p-6 space-y-5">
+                        {/* Kỳ hạn trả lương */}
+                        <div className="flex items-center">
+                            <div className="w-[180px] text-[13px] font-medium text-gray-700">Kỳ hạn trả lương</div>
+                            <div className="flex-1">
+                                <Select value={payPeriod} onValueChange={setPayPeriod}>
+                                    <SelectTrigger className="w-full h-9 text-[13px] border-gray-200">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="monthly" className="text-[13px]">Hàng tháng</SelectItem>
+                                        <SelectItem value="custom" className="text-[13px]">Tùy chọn</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+
+                        {/* Kỳ làm việc */}
+                        <div className="flex items-center">
+                            <div className="w-[180px] text-[13px] font-medium text-gray-700">Kỳ làm việc</div>
+                            <div className="flex-1">
+                                {payPeriod === 'monthly' ? (
+                                    <Select value={workPeriod} onValueChange={setWorkPeriod}>
+                                        <SelectTrigger className="w-full h-9 text-[13px] border-gray-200">
+                                            <SelectValue placeholder="Chọn kỳ làm việc" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {workPeriodOptions.map(option => (
+                                                <SelectItem key={option.value} value={option.value} className="text-[13px]">
+                                                    {option.label}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                ) : (
+                                    <div className="flex items-center gap-2">
+                                        <div className="relative flex-1">
+                                            <input
+                                                type="date"
+                                                value={toInputDate(customStartDate)}
+                                                onChange={e => setCustomStartDate(fromInputDate(e.target.value))}
+                                                className="w-full h-9 px-3 pr-9 text-[13px] border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-700"
+                                            />
+                                            <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                                        </div>
+                                        <span className="text-[13px] text-gray-500 shrink-0">Đến</span>
+                                        <div className="relative flex-1">
+                                            <input
+                                                type="date"
+                                                value={toInputDate(customEndDate)}
+                                                onChange={e => setCustomEndDate(fromInputDate(e.target.value))}
+                                                className="w-full h-9 px-3 pr-9 text-[13px] border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-700"
+                                            />
+                                            <Calendar className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Phạm vi áp dụng */}
+                        <div className="flex items-start pt-1">
+                            <div className="w-[180px] text-[13px] font-medium text-gray-700 mt-1">Phạm vi áp dụng</div>
+                            <div className="flex-1 space-y-4">
+                                <RadioGroup value={scope} onValueChange={setScope} className="flex items-center space-x-6">
+                                    <div className="flex items-center space-x-2">
+                                        <RadioGroupItem value="all" id="scope-all" className="h-4 w-4 text-blue-600" />
+                                        <Label htmlFor="scope-all" className="text-[13px] font-normal cursor-pointer">Tất cả nhân viên</Label>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <RadioGroupItem value="custom" id="scope-custom" className="h-4 w-4 text-blue-600" />
+                                        <Label htmlFor="scope-custom" className="text-[13px] font-normal cursor-pointer">Tùy chọn</Label>
+                                    </div>
+                                </RadioGroup>
+
+                                {scope === 'custom' && (
+                                    <div className="space-y-3">
+                                        {/* Search + Department button */}
+                                        <div className="flex items-center gap-2" ref={empSearchRef}>
+                                            <div className="relative flex-1">
+                                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                                                <Input
+                                                    className="pl-9 h-9 text-[13px] border-gray-200"
+                                                    placeholder="Tìm theo mã, tên nhân viên"
+                                                    value={empSearch}
+                                                    onChange={e => setEmpSearch(e.target.value)}
+                                                    onFocus={() => empResults.length > 0 && setEmpDropdownOpen(true)}
+                                                />
+                                                {/* Dropdown */}
+                                                {empDropdownOpen && (
+                                                    <div className="absolute top-full left-0 right-0 z-50 mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-[200px] overflow-y-auto">
+                                                        {empSearchLoading ? (
+                                                            <div className="flex justify-center py-3">
+                                                                <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+                                                            </div>
+                                                        ) : empResults.length === 0 ? (
+                                                            <div className="px-3 py-3 text-[13px] text-gray-500">Không tìm thấy nhân viên</div>
+                                                        ) : (
+                                                            empResults.map(emp => (
+                                                                <div
+                                                                    key={emp.id}
+                                                                    className="px-3 py-2 cursor-pointer hover:bg-blue-50"
+                                                                    onMouseDown={() => selectEmployee(emp)}
+                                                                >
+                                                                    <p className="text-[13px] font-semibold text-gray-800 uppercase">{emp.name}</p>
+                                                                    {emp.code && <p className="text-[12px] text-blue-600">{emp.code}</p>}
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <Button
+                                                variant="outline"
+                                                size="icon"
+                                                className="h-9 w-9 border-gray-200 text-gray-600 shrink-0"
+                                                onClick={() => setDeptDialogOpen(true)}
+                                                title="Chọn theo phòng ban"
+                                            >
+                                                <ListPlus className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+
+                                        {/* Selected employees table */}
+                                        <div className="border border-gray-200 rounded-md overflow-hidden bg-white">
+                                            <table className="w-full">
+                                                <thead className="bg-[#f0f4f8]">
+                                                    <tr className="border-b border-gray-200">
+                                                        <th className="px-3 py-2 text-left text-[13px] font-medium text-gray-700 w-[150px]">Mã nhân viên</th>
+                                                        <th className="px-3 py-2 text-left text-[13px] font-medium text-gray-700">Tên nhân viên</th>
+                                                        <th className="px-3 py-2 text-left text-[13px] font-medium text-gray-700 w-[150px]">Phòng ban</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {selectedEmployees.length === 0 ? (
+                                                        <tr>
+                                                            <td colSpan={3} className="px-3 py-8 text-center text-[13px] text-gray-500">
+                                                                Chưa có nhân viên nào được chọn
+                                                            </td>
+                                                        </tr>
+                                                    ) : (
+                                                        selectedEmployees.map(emp => (
+                                                            <tr key={emp.id} className="border-b border-gray-100 hover:bg-gray-50">
+                                                                <td className="px-3 py-2 text-[13px] text-blue-600">{emp.code || '--'}</td>
+                                                                <td className="px-3 py-2 text-[13px] text-gray-800 uppercase font-medium">{emp.name}</td>
+                                                                <td className="px-3 py-2 text-[13px] text-gray-600 flex items-center justify-between">
+                                                                    <span>{resolveDeptName(emp.department)}</span>
+                                                                    <button
+                                                                        className="ml-2 text-gray-400 hover:text-red-500"
+                                                                        onClick={() => removeEmployee(emp.id)}
+                                                                    >
+                                                                        <X className="h-3.5 w-3.5" />
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        ))
+                                                    )}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                    <DialogFooter className="p-4 border-t gap-2 sm:justify-end bg-gray-50/50">
+                        <DialogClose asChild>
+                            <Button variant="outline" className="h-9 px-5 text-[13px] font-medium min-w-[80px]">Bỏ qua</Button>
+                        </DialogClose>
+                        <Button onClick={handleGenerateClick} disabled={generating} className="h-9 px-5 bg-blue-600 hover:bg-blue-700 text-white text-[13px] font-medium min-w-[80px]">
+                            {generating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Lưu
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+        </>
+    );
 }
 
 // ========== EXPANDED ROW TABS ==========
@@ -71,20 +561,23 @@ function PayslipTable({ batchId }: { batchId: string }) {
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(1);
     const [selectedPayslipIds, setSelectedPayslipIds] = useState<string[]>([]);
+    const [selectedPaysheetRecord, setSelectedPaysheetRecord] = useState<{ record: SalaryRecord, plCode: string } | null>(null);
+    const [isPaysheetDialogOpen, setIsPaysheetDialogOpen] = useState(false);
     const pageSize = 10;
 
+    const fetchRecords = async () => {
+        setLoading(true);
+        try {
+            const res = await payrollBatchesApi.getById(batchId);
+            setRecords(res.data.data?.records || []);
+        } catch (e) {
+            console.error('Error fetching payslip records:', e);
+        } finally {
+            setLoading(false);
+        }
+    };
+
     useEffect(() => {
-        const fetchRecords = async () => {
-            setLoading(true);
-            try {
-                const res = await payrollBatchesApi.getById(batchId);
-                setRecords(res.data.data?.records || []);
-            } catch (e) {
-                console.error('Error fetching payslip records:', e);
-            } finally {
-                setLoading(false);
-            }
-        };
         fetchRecords();
     }, [batchId]);
 
@@ -114,6 +607,15 @@ function PayslipTable({ batchId }: { batchId: string }) {
 
     return (
         <div>
+            {selectedPaysheetRecord && (
+                <PersonalPaysheetDialog
+                    open={isPaysheetDialogOpen}
+                    onOpenChange={setIsPaysheetDialogOpen}
+                    record={selectedPaysheetRecord.record}
+                    plCode={selectedPaysheetRecord.plCode}
+                    onReload={fetchRecords}
+                />
+            )}
             <table className="w-full text-left border-collapse whitespace-nowrap">
                 <thead className="bg-white border-b border-gray-200">
                     <tr>
@@ -167,7 +669,15 @@ function PayslipTable({ batchId }: { batchId: string }) {
                                     </td>
                                     <td className="px-4 py-2.5 text-blue-600 font-medium text-[13px]">{plCode}</td>
                                     <td className="px-4 py-2.5 text-gray-800 font-medium text-[13px] uppercase">
-                                        {record.user?.name || 'N/A'}
+                                        <button
+                                            onClick={() => {
+                                                setSelectedPaysheetRecord({ record, plCode });
+                                                setIsPaysheetDialogOpen(true);
+                                            }}
+                                            className="text-blue-600 hover:text-blue-800 hover:underline transition-colors"
+                                        >
+                                            {record.user?.name || 'N/A'}
+                                        </button>
                                     </td>
                                     <td className="px-4 py-2.5 text-right text-gray-800 text-[13px] font-medium">{formatCurrency(gross)}</td>
                                     <td className="px-4 py-2.5 text-right text-gray-800 text-[13px] font-medium">{formatCurrency(paid)}</td>
@@ -299,7 +809,7 @@ function ExpandedRowDetail({ batch, onReload, onViewDetail }: { batch: PayrollBa
                         </div>
                         <div>
                             <p className="text-[11px] text-gray-400 mb-1">Người tạo:</p>
-                            <p className="text-[13px] text-gray-800">{batch.created_by ? batch.created_by : 'Auto'}</p>
+                            <p className="text-[13px] text-gray-800">{batch.creator?.name || batch.created_by || 'Auto'}</p>
                         </div>
                         <div>
                             <p className="text-[11px] text-gray-400 mb-1">Người lập bảng:</p>
@@ -339,7 +849,7 @@ function ExpandedRowDetail({ batch, onReload, onViewDetail }: { batch: PayrollBa
                         </div>
                         <div>
                             <p className="text-[11px] text-gray-400 mb-1">Người chốt lương:</p>
-                            <p className="text-[13px] text-gray-800">{batch.approved_by || '--'}</p>
+                            <p className="text-[13px] text-gray-800">{batch.approver?.name || batch.approved_by || '--'}</p>
                         </div>
                         <div className="col-span-2">
                             <p className="text-[11px] text-gray-400 mb-1">Ghi chú...</p>
@@ -352,9 +862,22 @@ function ExpandedRowDetail({ batch, onReload, onViewDetail }: { batch: PayrollBa
                     {/* Actions */}
                     <div className="flex items-center justify-between pt-2 border-t border-gray-200">
                         <div className="flex items-center gap-3">
-                            <Button variant="ghost" className="text-[13px] text-gray-500 hover:text-red-500 gap-1.5 h-[34px] px-3">
+                            <Button 
+                                variant="ghost" 
+                                className="text-[13px] text-gray-500 hover:text-red-500 gap-1.5 h-[34px] px-3"
+                                onClick={async () => {
+                                    if (window.confirm('Bạn có chắc chắn muốn xóa bảng lương này? Hành động này không thể hoàn tác.')) {
+                                        try {
+                                            await payrollBatchesApi.cancel(batch.id);
+                                            onReload();
+                                        } catch (e: any) {
+                                            alert(e.response?.data?.message || 'Có lỗi xảy ra khi xóa');
+                                        }
+                                    }
+                                }}
+                            >
                                 <Trash2 className="h-3.5 w-3.5" />
-                                Huỷ bỏ
+                                Xóa bảng lương
                             </Button>
                             <span className="text-[12px] text-gray-400">
                                 Dữ liệu được cập nhật vào: {formatDateTime(batch.created_at)} ⓘ
@@ -409,7 +932,7 @@ export function SalaryPage() {
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [expandedBatchId, setExpandedBatchId] = useState<string | null>(null);
     const [periodFilter, setPeriodFilter] = useState('all');
-    const [generating, setGenerating] = useState(false);
+    const [isGenerateDialogOpen, setIsGenerateDialogOpen] = useState(false);
 
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
@@ -492,19 +1015,7 @@ export function SalaryPage() {
         );
     };
 
-    const handleGenerate = async () => {
-        const month = currentDate.getMonth() + 1;
-        const year = currentDate.getFullYear();
-        setGenerating(true);
-        try {
-            await payrollBatchesApi.generate({ month, year });
-            await fetchBatches();
-        } catch (err: any) {
-            setError(err.response?.data?.message || 'Lỗi khi tạo bảng lương');
-        } finally {
-            setGenerating(false);
-        }
-    };
+
 
     // Period options
     const periodOptions = Array.from({ length: 24 }, (_, i) => {
@@ -568,6 +1079,11 @@ export function SalaryPage() {
 
             {/* ===== MAIN CONTENT ===== */}
             <div className="flex-1 flex flex-col min-w-0 bg-white">
+                <GeneratePayrollDialog 
+                    open={isGenerateDialogOpen} 
+                    onOpenChange={setIsGenerateDialogOpen}
+                    onGenerate={fetchBatches}
+                />
                 {/* Search Bar & Actions */}
                 <div className="flex items-center justify-between p-3 border-b border-gray-100 gap-3 bg-[#fbfcfd]">
                     <div className="flex-1 relative max-w-md">
@@ -583,15 +1099,9 @@ export function SalaryPage() {
                         <Button
                             variant="outline"
                             className="h-[36px] px-3.5 text-blue-600 border border-blue-200 bg-white hover:bg-blue-50 text-[13px] font-semibold rounded-lg shadow-sm"
-                            onClick={handleGenerate}
-                            disabled={generating}
+                            onClick={() => setIsGenerateDialogOpen(true)}
                         >
-                            {generating ? (
-                                <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
-                            ) : (
-                                <Calculator className="h-4 w-4 mr-1.5" />
-                            )}
-                            Bảng tính lương
+                            + Bảng tính lương
                         </Button>
                         <Button
                             variant="outline"

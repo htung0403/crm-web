@@ -112,6 +112,341 @@ router.get('/user/:userId', authenticate, async (req: AuthenticatedRequest, res,
     }
 });
 
+// Get commission details for user
+router.get('/user/:userId/commissions', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { userId } = req.params;
+        const { month, year } = req.query;
+
+        if (!month || !year) {
+            throw new ApiError('Thiếu tháng hoặc năm', 400);
+        }
+
+        const m = Number(month);
+        const y = Number(year);
+        const startDate = `${y}-${String(m).padStart(2, '0')}-01`;
+        const endDate = new Date(y, m, 0).toISOString().split('T')[0];
+
+        const details: any[] = [];
+
+        // 1. Commissions table
+        try {
+            const { data: commissions } = await supabaseAdmin
+                .from('commissions')
+                .select('amount, commission_type, created_at, order_id, notes')
+                .eq('user_id', userId)
+                .in('status', ['pending', 'approved'])
+                .gte('created_at', startDate)
+                .lte('created_at', endDate + 'T23:59:59');
+
+            if (commissions) {
+                for (const c of commissions) {
+                    details.push({
+                        invoice: c.order_id || c.notes || 'Khác',
+                        time: new Date(c.created_at).toLocaleDateString('vi-VN'),
+                        customer_name: '--',
+                        type: c.commission_type === 'referral' ? 'Hoa hồng giới thiệu' : 'Hoa hồng dịch vụ',
+                        product_name: '--',
+                        quantity: 1,
+                        revenue: 0,
+                        rate: '--',
+                        commission_amount: c.amount || 0
+                    });
+                }
+            }
+        } catch (e) { }
+
+        // Step 1: Fetch all valid orders for this timeframe
+        let validOrders: any[] = [];
+        try {
+            const { data } = await supabaseAdmin
+                .from('orders')
+                .select('id, order_code, created_at, customer:customers(name)')
+                .or('payment_status.eq.paid,status.in.(done,completed,delivered,after_sale)')
+                .gte('created_at', startDate)
+                .lte('created_at', endDate + 'T23:59:59');
+            if (data) validOrders = data;
+        } catch (e) {
+            console.error('Error fetching valid orders', e);
+        }
+
+        const validOrderIds = validOrders.map(o => o.id);
+        const getOrderMeta = (orderId: string) => {
+            const o = validOrders.find(x => x.id === orderId);
+            const cName = o?.customer && !Array.isArray(o.customer) ? o.customer.name : '--';
+            return {
+                invoice: o?.order_code || orderId,
+                time: o?.created_at ? new Date(o.created_at).toLocaleDateString('vi-VN') : '--',
+                customer_name: cName
+            };
+        };
+
+        if (validOrderIds.length > 0) {
+            // 2. Legacy: sales from order_items
+            try {
+                const { data: salesOrders } = await supabaseAdmin
+                    .from('orders')
+                    .select('id')
+                    .eq('sales_id', userId)
+                    .in('id', validOrderIds);
+                if (salesOrders && salesOrders.length > 0) {
+                    const { data: items } = await supabaseAdmin
+                        .from('order_items')
+                        .select('*')
+                        .in('order_id', salesOrders.map(o => o.id));
+                    if (items) {
+                        for (const item of items) {
+                            if (item.commission_sale_amount > 0) {
+                                const meta = getOrderMeta(item.order_id);
+                                details.push({
+                                    ...meta,
+                                    type: item.item_type === 'product' ? 'Bán hàng hóa' : 'Bán dịch vụ',
+                                    product_name: item.item_name || item.product_name || item.service_name || '--',
+                                    quantity: item.quantity || item.qty || 1,
+                                    revenue: (item.unit_price || item.price || 0) * (item.quantity || 1),
+                                    rate: `${item.commission_sale_rate || item.commission_sale || 0}%`,
+                                    commission_amount: item.commission_sale_amount
+                                });
+                            }
+                        }
+                    }
+                }
+            } catch (e) { }
+
+            // 3. Legacy: tech from order_items
+            try {
+                const { data: items } = await supabaseAdmin
+                    .from('order_items')
+                    .select('*')
+                    .eq('technician_id', userId)
+                    .in('order_id', validOrderIds);
+                if (items) {
+                    for (const item of items) {
+                        if (item.commission_tech_amount > 0) {
+                            const meta = getOrderMeta(item.order_id);
+                            details.push({
+                                ...meta,
+                                type: 'Thực hiện dịch vụ',
+                                product_name: item.item_name || item.product_name || item.service_name || '--',
+                                quantity: item.quantity || item.qty || 1,
+                                revenue: (item.unit_price || item.price || 0) * (item.quantity || 1),
+                                rate: `${item.commission_tech_rate || item.commission_tech || 0}%`,
+                                commission_amount: item.commission_tech_amount
+                            });
+                        }
+                    }
+                }
+            } catch (e) { }
+
+            // 4. V2: sales from order_item_sales
+            try {
+                const { data: saleItems } = await supabaseAdmin
+                     .from('order_item_sales')
+                     .select('commission, item:order_item_id ( id, order_id, item_name, total_price, quantity )')
+                     .eq('sale_id', userId);
+                if (saleItems) {
+                    for (const row of saleItems) {
+                        const item = (row as any).item;
+                        if (item && validOrderIds.includes(item.order_id)) {
+                            const meta = getOrderMeta(item.order_id);
+                            const rev = item.total_price || 0;
+                            const rate = row.commission || 0;
+                            const amt = Math.floor((rev * rate) / 100);
+                            if (amt > 0) {
+                                details.push({
+                                    ...meta,
+                                    type: 'Bán hàng hóa',
+                                    product_name: item.item_name || '--',
+                                    quantity: item.quantity || 1,
+                                    revenue: rev,
+                                    rate: `${rate}%`,
+                                    commission_amount: amt
+                                });
+                            }
+                        }
+                    }
+                }
+            } catch(e){}
+
+            // 5. V2: sales from order_product_service_sales
+            try {
+                const { data: saleServices } = await supabaseAdmin
+                     .from('order_product_service_sales')
+                     .select('commission, service:order_product_service_id ( id, item_name, unit_price, order_product:order_product_id ( order_id ) )')
+                     .eq('sale_id', userId);
+                if (saleServices) {
+                    for (const row of saleServices) {
+                        const svc = (row as any).service;
+                        const orderId = svc?.order_product?.order_id;
+                        if (orderId && validOrderIds.includes(orderId)) {
+                            const meta = getOrderMeta(orderId);
+                            const rev = svc.unit_price || 0;
+                            const rate = row.commission || 0;
+                            const amt = Math.floor((rev * rate) / 100);
+                            if (amt > 0) {
+                                details.push({
+                                    ...meta,
+                                    type: 'Bán dịch vụ',
+                                    product_name: svc.item_name || '--',
+                                    quantity: 1,
+                                    revenue: rev,
+                                    rate: `${rate}%`,
+                                    commission_amount: amt
+                                });
+                            }
+                        }
+                    }
+                }
+            } catch(e){}
+
+            // 6. V2: tech from order_product_service_technicians
+            try {
+                const { data: techServices } = await supabaseAdmin
+                     .from('order_product_service_technicians')
+                     .select('commission, service:order_product_service_id ( id, item_name, unit_price, order_product:order_product_id ( order_id ) )')
+                     .eq('technician_id', userId);
+                if (techServices) {
+                    for (const row of techServices) {
+                        const svc = (row as any).service;
+                        const orderId = svc?.order_product?.order_id;
+                        if (orderId && validOrderIds.includes(orderId)) {
+                            const meta = getOrderMeta(orderId);
+                            const rev = svc.unit_price || 0;
+                            const rate = row.commission || 0;
+                            const amt = Math.floor((rev * rate) / 100);
+                            if (amt > 0) {
+                                details.push({
+                                    ...meta,
+                                    type: 'Thực hiện dịch vụ',
+                                    product_name: svc.item_name || '--',
+                                    quantity: 1,
+                                    revenue: rev,
+                                    rate: `${rate}%`,
+                                    commission_amount: amt
+                                });
+                            }
+                        }
+                    }
+                }
+            } catch(e){}
+        }
+
+        res.json({
+            status: 'success',
+            data: { commissions: details }
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Get bonus details for user
+router.get('/user/:userId/bonuses', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { userId } = req.params;
+        const { month, year } = req.query;
+
+        if (!month || !year) {
+            throw new ApiError('Thiếu tháng hoặc năm', 400);
+        }
+
+        const bonuses: any[] = [];
+
+        // 1. KPI Bonus (from kpi_monthly locked records)
+        try {
+            const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+            const { data: kpiResult } = await supabaseAdmin
+                .from('kpi_monthly')
+                .select('total_score, rank, kpi_bonus_amount, kpi_penalty_amount, kpi_commission_factor')
+                .eq('employee_id', userId)
+                .eq('month_key', monthKey)
+                .eq('status', 'locked')
+                .single();
+
+            if (kpiResult) {
+                const kpiBonus = Number(kpiResult.kpi_bonus_amount) || 0;
+                const kpiPenalty = Number(kpiResult.kpi_penalty_amount) || 0;
+                const kpiScore = Number(kpiResult.total_score) || 0;
+
+                if (kpiBonus > 0) {
+                    bonuses.push({
+                        type: `Thưởng KPI (${kpiScore} điểm - ${kpiResult.rank})`,
+                        amount: kpiBonus
+                    });
+                }
+                if (kpiPenalty > 0) {
+                    bonuses.push({
+                        type: `Phạt KPI (${kpiScore} điểm - ${kpiResult.rank})`,
+                        amount: -kpiPenalty
+                    });
+                }
+            }
+        } catch (e) {
+            console.error('Lỗi khi lấy thưởng KPI:', e);
+        }
+
+        // 2. Other Rewards
+        try {
+            const { data: vrRecords } = await supabaseAdmin
+                .from('violations_rewards')
+                .select('type, amount, category, description')
+                .eq('user_id', userId)
+                .eq('month', month)
+                .eq('year', year)
+                .eq('type', 'reward');
+
+            if (vrRecords) {
+                for (const r of vrRecords) {
+                    bonuses.push({
+                        type: r.description || r.category || 'Thưởng khác',
+                        amount: Number(r.amount)
+                    });
+                }
+            }
+        } catch (e) {
+            console.error('Lỗi khi lấy thưởng khác:', e);
+        }
+
+        // 3. Manual Bonus Details from salary_records
+        try {
+            const { data: record } = await supabaseAdmin
+                .from('salary_records')
+                .select('bonus_details')
+                .eq('user_id', userId)
+                .eq('month', month)
+                .eq('year', year)
+                .single();
+
+            if (record?.bonus_details) {
+                const details = record.bonus_details;
+                if (details.byDay) {
+                    details.byDay.forEach((b: any) => {
+                        bonuses.push({
+                            type: `Thưởng ngày: ${b.type} (${b.count} lần)`,
+                            amount: (b.amount || 0) * (b.count || 1)
+                        });
+                    });
+                }
+                if (details.other) {
+                    details.other.forEach((b: any) => {
+                        bonuses.push({
+                            type: b.type || 'Thưởng khác (thủ công)',
+                            amount: (b.amount || 0) * (b.count || 1)
+                        });
+                    });
+                }
+            }
+        } catch (e) {}
+
+        res.json({
+            status: 'success',
+            data: { bonuses }
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 // ====================================================================
 // Calculate salary (CÔNG THỨC MỚI)
 // ====================================================================
@@ -267,32 +602,29 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
 
         const totalCommission = serviceCommission + productCommission + referralCommission;
 
-        // ── 4. Tính KPI BONUS từ kpi table ──────────────────────
+        // ── 4. Tính KPI BONUS từ kpi_monthly (locked records) ──────────────────────
         let kpiAchievement = 0;
         let kpiBonus = 0;
+        let kpiPenalty = 0;
+        let kpiFactor = 1.0;
         try {
-            const { data: kpis } = await supabaseAdmin
-                .from('kpi')
-                .select('achievement_rate, target, actual')
-                .eq('user_id', user_id)
-                .eq('month', month)
-                .eq('year', year);
+            const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+            const { data: kpiResult } = await supabaseAdmin
+                .from('kpi_monthly')
+                .select('total_score, rank, kpi_bonus_amount, kpi_penalty_amount, kpi_commission_factor')
+                .eq('employee_id', user_id)
+                .eq('month_key', monthKey)
+                .eq('status', 'locked')
+                .single();
 
-            if (kpis && kpis.length > 0) {
-                // Average achievement rate across all KPI types
-                kpiAchievement = Math.round(
-                    kpis.reduce((sum, k) => sum + (k.achievement_rate || 0), 0) / kpis.length
-                );
+            if (kpiResult) {
+                kpiAchievement = Number(kpiResult.total_score) || 0;
+                kpiBonus = Number(kpiResult.kpi_bonus_amount) || 0;
+                kpiPenalty = Number(kpiResult.kpi_penalty_amount) || 0;
+                kpiFactor = Number(kpiResult.kpi_commission_factor) || 1.0;
             }
-
-            // KPI bonus tiers
-            if (kpiAchievement >= 120) kpiBonus = 3000000;
-            else if (kpiAchievement >= 100) kpiBonus = 2000000;
-            else if (kpiAchievement >= 90) kpiBonus = 1000000;
-            else if (kpiAchievement >= 80) kpiBonus = 500000;
-            else kpiBonus = 0;
         } catch (e) {
-            console.log('[Salary] KPI table may not exist');
+            console.log('[Salary] KPI monthly data not found');
         }
 
         // ── 5. Tính THƯỞNG / PHẠT từ violations_rewards ─────────
@@ -338,7 +670,24 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
         }
 
         // ── 7. Tổng hợp: GROSS SALARY ───────────────────────────
-        const totalBonus = kpiBonus + totalRewards;
+        let manualBonus = 0;
+        try {
+            const { data: record } = await supabaseAdmin
+                .from('salary_records')
+                .select('bonus_details')
+                .eq('user_id', user_id)
+                .eq('month', month)
+                .eq('year', year)
+                .single();
+            if (record?.bonus_details) {
+                const det = record.bonus_details;
+                const dSum = (det.byDay || []).reduce((s: number, b: any) => s + (b.amount || 0) * (b.count || 1), 0);
+                const oSum = (det.other || []).reduce((s: number, b: any) => s + (b.amount || 0) * (b.count || 1), 0);
+                manualBonus = dSum + oSum;
+            }
+        } catch (e) {}
+
+        const totalBonus = kpiBonus + totalRewards + manualBonus;
         const grossSalary = baseSalary + overtimePay + totalCommission + totalBonus;
 
         // ── 8. Tính KHẤU TRỪ ─────────────────────────────────────
@@ -347,7 +696,25 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
         const taxableIncome = grossSalary - 11000000;            // Giảm trừ gia cảnh 11M
         const personalTax = taxableIncome > 0 ? Math.floor(taxableIncome * 0.05) : 0;
 
-        const totalDeduction = socialInsurance + healthInsurance + personalTax + totalAdvances + totalViolations;
+        // ── 7.5. Tính KHẤU TRỪ THỦ CÔNG ──────────────────────────
+        let manualDeduction = 0;
+        try {
+            const { data: record } = await supabaseAdmin
+                .from('salary_records')
+                .select('deduction_details')
+                .eq('user_id', user_id)
+                .eq('month', month)
+                .eq('year', year)
+                .single();
+            if (record?.deduction_details) {
+                const det = record.deduction_details;
+                const dSum = (det.byDay || []).reduce((s: number, d: any) => s + (d.amount || 0) * (d.count || 1), 0);
+                const oSum = (det.other || []).reduce((s: number, d: any) => s + (d.amount || 0) * (d.count || 1), 0);
+                manualDeduction = dSum + oSum;
+            }
+        } catch (e) {}
+
+        const totalDeduction = socialInsurance + healthInsurance + personalTax + totalAdvances + totalViolations + manualDeduction;
 
         // ── 9. NET SALARY ────────────────────────────────────────
         const netSalary = grossSalary - totalDeduction;
@@ -362,11 +729,11 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
         console.log(`  Gross: ${grossSalary} → Net: ${netSalary}`);
 
         // ── 10. Upsert salary record ─────────────────────────────
-        let existing = null;
+        let existing: any = null;
         try {
             const { data } = await supabaseAdmin
                 .from('salary_records')
-                .select('id')
+                .select('id, bonus_details, deduction_details')
                 .eq('user_id', user_id)
                 .eq('month', month)
                 .eq('year', year)
@@ -393,8 +760,9 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
             commission: totalCommission,
             // KPI
             kpi_achievement: kpiAchievement,
-            // Bonus = KPI bonus + rewards
+            // Bonus = KPI bonus + rewards + manual
             bonus: totalBonus,
+            bonus_details: manualBonus > 0 ? existing?.bonus_details : null,
             // Deductions breakdown
             social_insurance: socialInsurance,
             health_insurance: healthInsurance,
@@ -402,6 +770,7 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
             advances: totalAdvances,
             // Violations as separate field
             deduction: totalDeduction,
+            deduction_details: manualDeduction > 0 ? existing?.deduction_details : null,
             // Totals
             gross_salary: grossSalary,
             net_salary: netSalary,
@@ -465,6 +834,234 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
     }
 });
 
+// Update single salary record manual fields (Base Salary)
+router.patch('/:id/update-base', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { base_salary, standard_work_days, actual_work_days, applied_salary } = req.body;
+
+        const { data: record, error: getErr } = await supabaseAdmin
+            .from('salary_records')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (getErr || !record) throw new ApiError('Không tìm thấy phiếu lương', 404);
+        if (record.status === 'locked' || record.status === 'paid') {
+            throw new ApiError('Phiếu lương đã chốt hoặc thanh toán, không thể sửa', 400);
+        }
+
+        // We use applied_salary as the new base_salary for calculation natively
+        const newBaseSalary = applied_salary !== undefined ? Number(applied_salary) : Number(base_salary || record.base_salary);
+        
+        let newTotalHours = record.total_hours;
+        if (actual_work_days !== undefined) {
+             newTotalHours = Number(actual_work_days) * 8;
+        }
+
+        const hourlyRate = Math.floor(newBaseSalary / (standard_work_days ? Number(standard_work_days) * 8 : 176));
+        const hourlyWage = Math.round(newTotalHours * hourlyRate);
+
+        const grossSalary = newBaseSalary + (record.overtime_pay || 0) + (record.commission || 0) + (record.bonus || 0);
+        
+        const socialInsurance = Math.floor(newBaseSalary * 0.08);
+        const healthInsurance = Math.floor(newBaseSalary * 0.015);
+        const taxableIncome = grossSalary - 11000000;
+        const personalTax = taxableIncome > 0 ? Math.floor(taxableIncome * 0.05) : 0;
+
+        const violations = (record.deduction || 0) - (record.social_insurance || 0) - (record.health_insurance || 0) - (record.personal_tax || 0) - (record.advances || 0);
+
+        const newDeduction = socialInsurance + healthInsurance + personalTax + (record.advances || 0) + violations;
+        const netSalary = grossSalary - newDeduction;
+
+        const updateData: any = {
+            base_salary: newBaseSalary,
+            hourly_wage: hourlyWage,
+            total_hours: newTotalHours,
+            social_insurance: socialInsurance,
+            health_insurance: healthInsurance,
+            personal_tax: personalTax,
+            deduction: newDeduction,
+            gross_salary: grossSalary,
+            net_salary: netSalary,
+        };
+
+        const { data: updated, error: updateErr } = await supabaseAdmin
+            .from('salary_records')
+            .update({ ...updateData, updated_at: new Date().toISOString() })
+            .eq('id', id)
+            .select(`*, user:users!salary_records_user_id_fkey(id, name, email, avatar, role, department, employee_code)`)
+            .single();
+
+        if (updateErr) throw new ApiError('Lỗi cập nhật lương: ' + updateErr.message, 500);
+
+        res.json({ status: 'success', data: { salary: updated } });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Update manual bonus details
+router.patch('/:id/update-bonus', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { bonus_details } = req.body;
+
+        const { data: record, error: getErr } = await supabaseAdmin
+            .from('salary_records')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (getErr || !record) throw new ApiError('Không tìm thấy phiếu lương', 404);
+        if (record.status === 'locked' || record.status === 'paid') {
+            throw new ApiError('Phiếu lương đã chốt hoặc thanh toán, không thể sửa', 400);
+        }
+
+        // Calculate manual bonus total
+        const byDaySum = (bonus_details.byDay || []).reduce((s: number, b: any) => s + (b.amount || 0) * (b.count || 1), 0);
+        const otherSum = (bonus_details.other || []).reduce((s: number, b: any) => s + (b.amount || 0) * (b.count || 1), 0);
+        const manualBonusTotal = byDaySum + otherSum;
+
+        // Recalculate totals
+        // We need to re-fetch or calculate based on existing fields
+        // totalBonus = KPI Bonus + totalRewards (from violations_rewards) + manualBonusTotal
+        // But we don't know totalRewards here without re-querying or relying on old 'bonus' field.
+        // Old 'bonus' = KPI + Rewards + OLD manual bonus.
+        // It's safer to re-calculate total bonus based on components if they were saved, 
+        // but they aren't saved separately in columns.
+        // However, standard recalculation logic is in /calculate.
+        // For a quick patch, we can adjust the bonus field based on the delta or just re-calculate the whole thing.
+        
+        // Let's re-calculate to be safe.
+        // Actually, let's just update the record and then let the user "Calculate" if they want full sync,
+        // OR we implement the same logic as /calculate here.
+        
+        // Re-calculating total bonus:
+        // We need KPI bonus and Rewards.
+        const month = record.month;
+        const year = record.year;
+        const user_id = record.user_id;
+
+        // KPI (from kpi_monthly locked records)
+        let kpiBonus = 0;
+        try {
+            const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+            const { data: kpiResult } = await supabaseAdmin
+                .from('kpi_monthly')
+                .select('kpi_bonus_amount, kpi_penalty_amount')
+                .eq('employee_id', user_id)
+                .eq('month_key', monthKey)
+                .eq('status', 'locked')
+                .single();
+
+            if (kpiResult) {
+                kpiBonus = Number(kpiResult.kpi_bonus_amount) || 0;
+            }
+        } catch (e) {}
+
+        // Rewards
+        let totalRewards = 0;
+        try {
+            const { data: vr } = await supabaseAdmin.from('violations_rewards').select('amount').eq('user_id', user_id).eq('month', month).eq('year', year).eq('type', 'reward');
+            if (vr) totalRewards = vr.reduce((s, r) => s + Number(r.amount), 0);
+        } catch (e) {}
+
+        const newTotalBonus = kpiBonus + totalRewards + manualBonusTotal;
+        const newGrossSalary = (record.base_salary || 0) + (record.overtime_pay || 0) + (record.commission || 0) + newTotalBonus;
+        
+        const taxableIncome = newGrossSalary - 11000000;
+        const newPersonalTax = taxableIncome > 0 ? Math.floor(taxableIncome * 0.05) : 0;
+        
+        const oldDeductionWithoutTax = (record.deduction || 0) - (record.personal_tax || 0);
+        const newDeduction = oldDeductionWithoutTax + newPersonalTax;
+        const newNetSalary = newGrossSalary - newDeduction;
+
+        const { data: updated, error: updateErr } = await supabaseAdmin
+            .from('salary_records')
+            .update({
+                bonus_details,
+                bonus: newTotalBonus,
+                personal_tax: newPersonalTax,
+                deduction: newDeduction,
+                gross_salary: newGrossSalary,
+                net_salary: newNetSalary,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', id)
+            .select(`*, user:users!salary_records_user_id_fkey(id, name, email, avatar, role, department, employee_code)`)
+            .single();
+
+        if (updateErr) throw new ApiError('Lỗi cập nhật thưởng: ' + updateErr.message, 500);
+
+        res.json({ status: 'success', data: { salary: updated } });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Update manual deduction details
+router.patch('/:id/update-deduction', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { deduction_details } = req.body;
+
+        const { data: record, error: getErr } = await supabaseAdmin
+            .from('salary_records')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (getErr || !record) throw new ApiError('Không tìm thấy phiếu lương', 404);
+        if (record.status === 'locked' || record.status === 'paid') {
+            throw new ApiError('Phiếu lương đã chốt hoặc thanh toán, không thể sửa', 400);
+        }
+
+        // Calculate manual deduction total
+        const byDaySum = (deduction_details.byDay || []).reduce((s: number, d: any) => s + (d.amount || 0) * (d.count || 1), 0);
+        const otherSum = (deduction_details.other || []).reduce((s: number, d: any) => s + (d.amount || 0) * (d.count || 1), 0);
+        const manualDeductionTotal = byDaySum + otherSum;
+
+        // Recalculate totals
+        const grossSalary = record.gross_salary || 0;
+        const socialInsurance = record.social_insurance || 0;
+        const healthInsurance = record.health_insurance || 0;
+        const totalAdvances = record.advances || 0;
+        
+        // Table violations from violations_rewards
+        let tableViolations = 0;
+        try {
+            const { data: vr } = await supabaseAdmin.from('violations_rewards').select('amount').eq('user_id', record.user_id).eq('month', record.month).eq('year', record.year).eq('type', 'violation');
+            if (vr) tableViolations = vr.reduce((s, r) => s + Number(r.amount), 0);
+        } catch (e) {}
+
+        const taxableIncome = grossSalary - 11000000;
+        const personalTax = taxableIncome > 0 ? Math.floor(taxableIncome * 0.05) : 0;
+
+        const newDeduction = socialInsurance + healthInsurance + personalTax + totalAdvances + tableViolations + manualDeductionTotal;
+        const newNetSalary = grossSalary - newDeduction;
+
+        const { data: updated, error: updateErr } = await supabaseAdmin
+            .from('salary_records')
+            .update({
+                deduction_details,
+                personal_tax: personalTax,
+                deduction: newDeduction,
+                net_salary: newNetSalary,
+                updated_at: new Date().toISOString()
+            })
+            .eq('id', id)
+            .select(`*, user:users!salary_records_user_id_fkey(id, name, email, avatar, role, department, employee_code)`)
+            .single();
+
+        if (updateErr) throw new ApiError('Lỗi cập nhật khấu trừ: ' + updateErr.message, 500);
+
+        res.json({ status: 'success', data: { salary: updated } });
+    } catch (error) {
+        next(error);
+    }
+});
+
 // Approve salary
 router.patch('/:id/approve', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -494,31 +1091,100 @@ router.patch('/:id/approve', authenticate, requireManager, async (req: Authentic
     }
 });
 
-// Mark as paid
+// Helper for PC code
+async function generatePCCOde(): Promise<string> {
+    const { data: transactions } = await supabaseAdmin
+        .from('transactions')
+        .select('code')
+        .like('code', 'PC%')
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+    let maxNumber = 0;
+    if (transactions && transactions.length > 0) {
+        for (const trans of transactions) {
+            const numStr = trans.code.replace('PC', '');
+            const num = parseInt(numStr, 10);
+            if (!isNaN(num) && num > maxNumber) maxNumber = num;
+        }
+    }
+    return `PC${String(maxNumber + 1).padStart(6, '0')}`;
+}
+
+// Mark as paid & create PC record
 router.patch('/:id/pay', authenticate, requireAccountant, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { payment_method } = req.body;
+        const { payment_method, payment_date, notes } = req.body;
 
-        const { data: salary, error } = await supabaseAdmin
+        // 1. Lấy thông tin phiếu lương
+        const { data: salary, error: fetchError } = await supabaseAdmin
+            .from('salary_records')
+            .select(`
+                *,
+                user:users!salary_records_user_id_fkey(name)
+            `)
+            .eq('id', id)
+            .single();
+
+        if (fetchError || !salary) {
+            throw new ApiError('Không tìm thấy phiếu lương', 404);
+        }
+
+        if (salary.status === 'paid') {
+            throw new ApiError('Phiếu lương này đã được thanh toán', 400);
+        }
+
+        const netSalary = (salary.gross_salary || 0) - (salary.deduction || 0);
+        const code = await generatePCCOde();
+
+        // 2. Tạo phiếu chi (Transaction)
+        const { error: transError } = await supabaseAdmin
+            .from('transactions')
+            .insert({
+                code,
+                type: 'expense',
+                category: 'Lương nhân viên',
+                amount: netSalary,
+                payment_method: payment_method || 'transfer',
+                notes: notes || `Chi lương cho nhân viên ${salary.user?.name || ''} tháng ${salary.month}/${salary.year}`,
+                date: payment_date || new Date().toISOString().split('T')[0],
+                status: 'approved',
+                created_by: req.user!.id,
+                approved_by: req.user!.id,
+                approved_at: new Date().toISOString(),
+                metadata: {
+                    payer_name: salary.user?.name,
+                    customer_code: salary.user?.employee_code || `NV${salary.user_id?.slice(0, 6).toUpperCase()}`,
+                    customer_phone: salary.user?.phone || 'N/A'
+                }
+            });
+
+        if (transError) {
+            console.error('[SalaryPay] Error creating transaction:', transError);
+            throw new ApiError('Lỗi khi tạo phiếu chi: ' + transError.message, 500);
+        }
+
+        // 3. Cập nhật phiếu lương
+        const { data: updatedSalary, error: updateError } = await supabaseAdmin
             .from('salary_records')
             .update({
                 status: 'paid',
                 payment_method: payment_method || 'bank_transfer',
-                paid_at: new Date().toISOString(),
+                paid_at: payment_date || new Date().toISOString(),
                 paid_by: req.user!.id,
             })
             .eq('id', id)
             .select()
             .single();
 
-        if (error) {
+        if (updateError) {
             throw new ApiError('Lỗi khi cập nhật trạng thái thanh toán', 500);
         }
 
         res.json({
             status: 'success',
-            data: { salary },
+            data: { salary: updatedSalary },
         });
     } catch (error) {
         next(error);

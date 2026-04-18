@@ -125,22 +125,24 @@ router.put('/:id', authenticate, requireManager, async (req: AuthenticatedReques
     try {
         const { id } = req.params;
         const updateFields = req.body;
-
+        
         const { data: service, error } = await supabaseAdmin
             .from('services')
             .update({ ...updateFields, updated_at: new Date().toISOString() })
             .eq('id', id)
-            .select()
-            .single();
+            .select();
 
         if (error) {
-            console.error('Supabase update error:', error);
             throw new ApiError('Lỗi khi cập nhật dịch vụ: ' + error.message, 500);
+        }
+
+        if (!service || service.length === 0) {
+            throw new ApiError('Không tìm thấy dịch vụ để cập nhật', 404);
         }
 
         res.json({
             status: 'success',
-            data: { service },
+            data: { service: service[0] },
         });
     } catch (error) {
         next(error);

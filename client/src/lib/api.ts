@@ -512,20 +512,103 @@ export const financeApi = {
 
 // KPI API
 export const kpiApi = {
-    getOverview: (params?: { month?: number; year?: number }) =>
-        api.get<ApiResponse<{ kpis: any[]; summary: any }>>('/kpi/overview', { params }),
+    // Policies
+    getPolicies: (params?: { role?: string; is_active?: string }) =>
+        api.get<ApiResponse<{ policies: any[] }>>('/kpi/policies', { params }),
 
-    getByUser: (userId: string, year?: number) =>
-        api.get<ApiResponse<{ kpis: any[] }>>(`/kpi/user/${userId}`, { params: { year } }),
+    getPolicy: (id: string) =>
+        api.get<ApiResponse<{ policy: any }>>(`/kpi/policies/${id}`),
 
-    setTarget: (data: { user_id: string; month: number; year: number; target: number; target_type?: string }) =>
-        api.post<ApiResponse<{ kpi: any }>>('/kpi/target', data),
+    createPolicy: (data: { code: string; name: string; role: string; description?: string; effective_from?: string; effective_to?: string }) =>
+        api.post<ApiResponse<{ policy: any }>>('/kpi/policies', data),
 
-    updateActual: (userId: string, data: { month: number; year: number; actual: number }) =>
-        api.patch<ApiResponse<{ kpi: any }>>(`/kpi/update/${userId}`, data),
+    updatePolicy: (id: string, data: any) =>
+        api.patch<ApiResponse<{ policy: any }>>(`/kpi/policies/${id}`, data),
 
-    getLeaderboard: (params?: { month?: number; year?: number; limit?: number }) =>
-        api.get<ApiResponse<{ leaderboard: any[] }>>('/kpi/leaderboard', { params }),
+    // Metrics
+    addMetric: (policyId: string, data: any) =>
+        api.post<ApiResponse<{ metric: any }>>(`/kpi/policies/${policyId}/metrics`, data),
+
+    updateMetric: (id: string, data: any) =>
+        api.patch<ApiResponse<{ metric: any }>>(`/kpi/metrics/${id}`, data),
+
+    deleteMetric: (id: string) =>
+        api.delete<ApiResponse<void>>(`/kpi/metrics/${id}`),
+
+    // Rank configs
+    getRankConfigs: () =>
+        api.get<ApiResponse<{ configs: any[] }>>('/kpi/rank-configs'),
+
+    createRankConfig: (data: any) =>
+        api.post<ApiResponse<{ config: any }>>('/kpi/rank-configs', data),
+
+    updateRankConfig: (id: string, data: any) =>
+        api.put<ApiResponse<{ config: any }>>(`/kpi/rank-configs/${id}`, data),
+
+    deleteRankConfig: (id: string) =>
+        api.delete<ApiResponse<void>>(`/kpi/rank-configs/${id}`),
+
+    // Monthly KPI
+    getMonthly: (params?: { month_key?: string; status?: string; employee_id?: string }) =>
+        api.get<ApiResponse<{ records: any[]; month_key: string; summary: any; pagination: any }>>('/kpi/monthly', { params }),
+
+    getMonthlyDetail: (id: string) =>
+        api.get<ApiResponse<{ record: any }>>(`/kpi/monthly/${id}`),
+
+    generateMonthly: (data: { month_key: string }) =>
+        api.post<ApiResponse<{ generated: number; errors: number; results: any[]; errors_detail: any[] }>>('/kpi/monthly/generate', data),
+
+    recalculateMonthly: (id: string) =>
+        api.post<ApiResponse<{ record: any }>>(`/kpi/monthly/${id}/recalculate`),
+
+    updateMonthly: (id: string, data: any) =>
+        api.patch<ApiResponse<any>>(`/kpi/monthly/${id}`, data),
+
+    lockMonthly: (id: string) =>
+        api.post<ApiResponse<{ record: any }>>(`/kpi/monthly/${id}/lock`),
+
+    batchLock: (data: { month_key: string }) =>
+        api.post<ApiResponse<{ locked_count: number }>>('/kpi/monthly/batch-lock', data),
+
+    pushToPayroll: (id: string) =>
+        api.post<ApiResponse<any>>(`/kpi/monthly/${id}/push-to-payroll`),
+
+    batchPush: (data: { month_key: string }) =>
+        api.post<ApiResponse<any>>('/kpi/monthly/batch-push', data),
+
+    // Violations
+    getViolations: (params?: { month_key?: string; employee_id?: string; status?: string; violation_type?: string }) =>
+        api.get<ApiResponse<{ violations: any[]; pagination: any }>>('/kpi/violations', { params }),
+
+    createViolation: (data: any) =>
+        api.post<ApiResponse<{ violation: any }>>('/kpi/violations', data),
+
+    updateViolation: (id: string, data: any) =>
+        api.patch<ApiResponse<{ violation: any }>>(`/kpi/violations/${id}`, data),
+
+    approveViolation: (id: string) =>
+        api.post<ApiResponse<{ violation: any }>>(`/kpi/violations/${id}/approve`),
+
+    rejectViolation: (id: string) =>
+        api.post<ApiResponse<{ violation: any }>>(`/kpi/violations/${id}/reject`),
+
+    // Leaderboard
+    getLeaderboard: (params?: { month_key?: string; role?: string; limit?: number }) =>
+        api.get<ApiResponse<{ leaderboard: any[]; month_key: string }>>('/kpi/leaderboard', { params }),
+
+    // Adjustments (for locked KPIs)
+    getAdjustments: (monthlyId: string) =>
+        api.get<ApiResponse<{ adjustments: any[] }>>(`/kpi/monthly/${monthlyId}/adjustments`),
+
+    createAdjustment: (monthlyId: string, data: { field_name: string; old_value: any; new_value: any; reason: string; item_id?: string }) =>
+        api.post<ApiResponse<{ adjustment: any }>>(`/kpi/monthly/${monthlyId}/adjustments`, data),
+
+    // Employee KPI Policy Assignments
+    getEmployeeAssignments: (params?: { role?: string; department?: string; status?: string }) =>
+        api.get<ApiResponse<{ employees: any[]; policies: any[] }>>('/kpi/employee-assignments', { params }),
+
+    batchAssignPolicies: (data: { assignments: Array<{ employee_id: string; policy_id: string | null }> }) =>
+        api.post<ApiResponse<{ updated: number; errors: number; results: any[]; errors_detail: any[] }>>('/kpi/employee-assignments', data),
 };
 
 // Salary API
@@ -536,14 +619,29 @@ export const salaryApi = {
     getByUser: (userId: string, year?: number) =>
         api.get<ApiResponse<{ salaries: any[] }>>(`/salary/user/${userId}`, { params: { year } }),
 
+    getCommissionDetails: (userId: string, month: number, year: number) =>
+        api.get<ApiResponse<{ commissions: any[] }>>(`/salary/user/${userId}/commissions`, { params: { month, year } }),
+
+    getBonusDetails: (userId: string, month: number, year: number) =>
+        api.get<ApiResponse<{ bonuses: any[] }>>(`/salary/user/${userId}/bonuses`, { params: { month, year } }),
+
     calculate: (data: { user_id: string; month: number; year: number }) =>
         api.post<ApiResponse<{ salary: any }>>('/salary/calculate', data),
+
+    updateBase: (id: string, data: { base_salary: number; standard_work_days: number; actual_work_days: number; applied_salary: number }) =>
+        api.patch<ApiResponse<{ salary: any }>>(`/salary/${id}/update-base`, data),
+
+    updateBonus: (id: string, data: { bonus_details: any }) =>
+        api.patch<ApiResponse<{ salary: any }>>(`/salary/${id}/update-bonus`, data),
+
+    updateDeduction: (id: string, data: { deduction_details: any }) =>
+        api.patch<ApiResponse<{ salary: any }>>(`/salary/${id}/update-deduction`, data),
 
     approve: (id: string) =>
         api.patch<ApiResponse<{ salary: any }>>(`/salary/${id}/approve`),
 
-    pay: (id: string, payment_method?: string) =>
-        api.patch<ApiResponse<{ salary: any }>>(`/salary/${id}/pay`, { payment_method }),
+    pay: (id: string, data?: { payment_method?: string, payment_date?: string, notes?: string }) =>
+        api.patch<ApiResponse<{ salary: any }>>(`/salary/${id}/pay`, data),
 };
 
 // Payroll Batches API
@@ -683,6 +781,13 @@ export const productTypesApi = {
 
     delete: (id: string) =>
         api.delete<ApiResponse<null>>(`/product-types/${id}`),
+};
+
+export const commissionTablesApi = {
+    getAll: () => api.get('/commission-tables'),
+    create: (data: any) => api.post('/commission-tables', data),
+    update: (id: string, data: any) => api.patch(`/commission-tables/${id}`, data),
+    delete: (id: string) => api.delete(`/commission-tables/${id}`),
 };
 
 // Leave Requests API

@@ -14,6 +14,7 @@ export interface Product {
     image?: string;
     commission_sale?: number;
     commission_tech?: number;
+    commission_data?: Record<string, any>;
     status: string;
     created_at: string;
 }
@@ -30,6 +31,7 @@ export interface Service {
     commission_rate: number;
     commission_sale?: number;
     commission_tech?: number;
+    commission_data?: Record<string, any>;
     department?: string; // Department ID for technician assignment
     workflow_id?: string; // Linked workflow for this service
     applicable_product_types?: string[];

@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Edit, Trash2, Eye, Phone, Mail, Shield, Calendar, UserPlus, Loader2, ShoppingCart, FileText, ExternalLink, LayoutGrid } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Eye, Phone, Mail, Shield, Calendar, UserPlus, Loader2, ShoppingCart, FileText, ExternalLink, LayoutGrid, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 
@@ -16,6 +16,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Separator } from '@/components/ui/separator';
 
 import { EmployeeFormDialog } from '@/components/employees/EmployeeFormDialog';
+import { EmployeeScheduleTab } from '@/components/employees/EmployeeScheduleTab';
+import { EmployeeSalaryTab } from '@/components/employees/EmployeeSalaryTab';
 
 import { formatCurrency } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -334,12 +336,18 @@ export function EmployeesPage() {
     const { users, loading, fetchUsers, createUser, updateUser, deleteUser } = useUsers();
     const { departments, fetchDepartments, createDepartment } = useDepartments();
     const { jobTitles, fetchJobTitles, createJobTitle } = useJobTitles();
+    const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+    const [loadingBranches, setLoadingBranches] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [roleFilter, setRoleFilter] = useState<string>('all');
     const [statusFilter, setStatusFilter] = useState<string>('active');
     const [showForm, setShowForm] = useState(false);
-    const [showDetail, setShowDetail] = useState(false);
     const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+    const [detailActiveTab, setDetailActiveTab] = useState('info');
+    const [detailOrders, setDetailOrders] = useState<EmployeeOrder[]>([]);
+    const [detailOrdersLoading, setDetailOrdersLoading] = useState(false);
+    const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+    const [showOrderDetail, setShowOrderDetail] = useState(false);
     const [showDeptDialog, setShowDeptDialog] = useState(false);
     const [showTitleDialog, setShowTitleDialog] = useState(false);
     const [deptForm, setDeptForm] = useState({ name: '', description: '', status: 'active' as 'active' | 'inactive' });
@@ -373,8 +381,49 @@ export function EmployeesPage() {
         fetchUsers();
         fetchDepartments();
         fetchJobTitles();
+        fetchBranches();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    // Fetch orders when selected employee changes and Orders tab is active
+    useEffect(() => {
+        if (selectedEmployee && detailActiveTab === 'orders') {
+            fetchSelectedEmployeeOrders();
+        }
+    }, [selectedEmployee, detailActiveTab]);
+
+    // Reset tab when selected employee changes
+    useEffect(() => {
+        setDetailActiveTab('info');
+        setDetailOrders([]);
+    }, [selectedEmployee?.id]);
+
+    const fetchSelectedEmployeeOrders = async () => {
+        if (!selectedEmployee) return;
+        setDetailOrdersLoading(true);
+        try {
+            const queryParam = selectedEmployee.role === 'technician'
+                ? `technician_id=${selectedEmployee.id}`
+                : `sale_id=${selectedEmployee.id}`;
+            const response = await api.get(`/orders?${queryParam}`);
+            let ordersData: EmployeeOrder[] = [];
+            if (Array.isArray(response.data)) {
+                ordersData = response.data;
+            } else if (response.data?.data?.orders && Array.isArray(response.data.data.orders)) {
+                ordersData = response.data.data.orders;
+            } else if (response.data?.orders && Array.isArray(response.data.orders)) {
+                ordersData = response.data.orders;
+            } else if (response.data?.data && Array.isArray(response.data.data)) {
+                ordersData = response.data.data;
+            }
+            setDetailOrders(ordersData);
+        } catch (error) {
+            console.error('Error fetching employee orders:', error);
+            setDetailOrders([]);
+        } finally {
+            setDetailOrdersLoading(false);
+        }
+    };
 
     // Department dialog handlers
     const handleSaveDepartment = async () => {
@@ -413,6 +462,20 @@ export function EmployeesPage() {
             toast.error('Lỗi khi tạo chức danh');
         } finally {
             setSavingTitle(false);
+        }
+    };
+
+    const fetchBranches = async () => {
+        setLoadingBranches(true);
+        try {
+            const response = await api.get('/branches');
+            const data = response.data?.data?.branches || [];
+            setBranches(data);
+        } catch (error) {
+            console.error('Error fetching branches:', error);
+            toast.error('Lỗi khi lấy danh sách chi nhánh');
+        } finally {
+            setLoadingBranches(false);
         }
     };
 
@@ -687,11 +750,14 @@ export function EmployeesPage() {
                         </thead>
 
                         <tbody className="divide-y divide-gray-100">
-                            {filteredEmployees.map((emp, index) => (
-                                <tr key={emp.id} className="hover:bg-blue-50/30 cursor-pointer transition-colors" onClick={(e) => {
+                            {filteredEmployees.map((emp, index) => {
+                                const isExpanded = selectedEmployee?.id === emp.id;
+                                const totalCols = Object.values(columnVisibility).filter(v => v).length + 1;
+                                return (
+                                <React.Fragment key={emp.id}>
+                                <tr className={`hover:bg-blue-50/30 cursor-pointer transition-colors ${isExpanded ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' : ''}`} onClick={(e) => {
                                     if ((e.target as HTMLElement).tagName !== 'INPUT') {
-                                        setSelectedEmployee(emp); 
-                                        setShowDetail(true);
+                                        setSelectedEmployee(prev => prev?.id === emp.id ? null : emp);
                                     }
                                 }}>
                                     <td className="px-4 py-[13px]">
@@ -771,7 +837,279 @@ export function EmployeesPage() {
                                         </td>
                                     )}
                                 </tr>
-                            ))}
+                                {/* Expandable detail row - appears right below the clicked employee */}
+                                {isExpanded && (
+                                    <tr className="bg-[#f8faff]">
+                                        <td colSpan={totalCols} className="p-0 border-b-2 border-blue-200">
+                                            <div className="whitespace-normal">
+                                                {/* Detail Header */}
+                                                <div className="flex items-center justify-between px-5 py-3 border-b border-blue-100/50 bg-gradient-to-r from-blue-50/80 to-transparent">
+                                                    <div className="flex items-center gap-3">
+                                                        <Avatar className="h-9 w-9 rounded-full border-2 border-blue-200 shadow-sm">
+                                                            {emp.avatar ? (
+                                                                <img src={emp.avatar} alt="avatar" className="w-full h-full object-cover" />
+                                                            ) : (
+                                                                <AvatarFallback className="bg-blue-100 text-blue-700 text-sm font-bold">{emp.name.charAt(0)}</AvatarFallback>
+                                                            )}
+                                                        </Avatar>
+                                                        <div>
+                                                            <h3 className="text-[15px] font-bold text-gray-900">{emp.name}</h3>
+                                                            <div className="flex items-center gap-2 mt-0.5">
+                                                                <Badge variant={emp.role === 'manager' ? 'purple' : emp.role === 'sale' ? 'info' : 'secondary'} className="text-[10px] px-1.5 py-0">
+                                                                    {roleLabels[emp.role]}
+                                                                </Badge>
+                                                                <Badge variant={statusLabels[emp.status]?.variant || 'secondary'} className="text-[10px] px-1.5 py-0">
+                                                                    {statusLabels[emp.status]?.label || emp.status}
+                                                                </Badge>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-400 hover:text-gray-600 hover:bg-gray-100" onClick={(e) => { e.stopPropagation(); setSelectedEmployee(null); }}>
+                                                            <X className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                </div>
+
+                                                {/* Detail Tabs */}
+                                                <div className="flex border-b border-gray-100 bg-white px-2">
+                                                    <button
+                                                        className={`px-4 py-2.5 text-[13px] font-medium transition-colors relative ${detailActiveTab === 'info' ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
+                                                        onClick={(e) => { e.stopPropagation(); setDetailActiveTab('info'); }}
+                                                    >
+                                                        Thông tin
+                                                        {detailActiveTab === 'info' && <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-600 rounded-t" />}
+                                                    </button>
+                                                    <button
+                                                        className={`px-4 py-2.5 text-[13px] font-medium transition-colors relative ${detailActiveTab === 'schedule' ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
+                                                        onClick={(e) => { e.stopPropagation(); setDetailActiveTab('schedule'); }}
+                                                    >
+                                                        Lịch làm việc
+                                                        {detailActiveTab === 'schedule' && <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-600 rounded-t" />}
+                                                    </button>
+                                                    <button
+                                                        className={`px-4 py-2.5 text-[13px] font-medium transition-colors relative ${detailActiveTab === 'salary_setup' ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
+                                                        onClick={(e) => { e.stopPropagation(); setDetailActiveTab('salary_setup'); }}
+                                                    >
+                                                        Thiết lập lương
+                                                        {detailActiveTab === 'salary_setup' && <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-600 rounded-t" />}
+                                                    </button>
+                                                    <button
+                                                        className={`px-4 py-2.5 text-[13px] font-medium transition-colors relative ${detailActiveTab === 'payslip' ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
+                                                        onClick={(e) => { e.stopPropagation(); setDetailActiveTab('payslip'); }}
+                                                    >
+                                                        Phiếu lương
+                                                        {detailActiveTab === 'payslip' && <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-600 rounded-t" />}
+                                                    </button>
+                                                    <button
+                                                        className={`px-4 py-2.5 text-[13px] font-medium transition-colors relative ${detailActiveTab === 'debt' ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
+                                                        onClick={(e) => { e.stopPropagation(); setDetailActiveTab('debt'); }}
+                                                    >
+                                                        Nợ và tạm ứng
+                                                        {detailActiveTab === 'debt' && <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-blue-600 rounded-t" />}
+                                                    </button>
+                                                </div>
+
+                                                {/* Detail Content */}
+                                                <div className="" style={{ height: 'auto' }}>
+                                                    {detailActiveTab === 'info' && (
+                                                        <div className="p-5">
+                                                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-x-8 gap-y-4">
+                                                                {/* Col 1 */}
+                                                                <div className="space-y-4">
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Mã nhân viên</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800">{emp.employee_code || 'Chưa cập nhật'}</p>
+                                                                    </div>
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Giới tính</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800">{emp.gender || 'Chưa cập nhật'}</p>
+                                                                    </div>
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Ngày bắt đầu làm việc</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800 flex items-center gap-1.5">
+                                                                            <Calendar className="h-3.5 w-3.5 text-gray-400" />
+                                                                            {emp.joinDate || 'Chưa cập nhật'}
+                                                                        </p>
+                                                                    </div>
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Số điện thoại</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800 flex items-center gap-1.5">
+                                                                            <Phone className="h-3.5 w-3.5 text-gray-400" />
+                                                                            {emp.phone || 'Chưa cập nhật'}
+                                                                        </p>
+                                                                    </div>
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Thiết bị di động</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800">{emp.mobile_device || 'Chưa cập nhật'}</p>
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Col 2 */}
+                                                                <div className="space-y-4">
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Tên nhân viên</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800">{emp.name}</p>
+                                                                    </div>
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Số CMND/CCCD</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800">{emp.identity_card || 'Chưa cập nhật'}</p>
+                                                                    </div>
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Chi nhánh trả lương</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800">
+                                                                            {branches.find(b => b.id === emp.payroll_branch_id)?.name || 'Chưa cập nhật'}
+                                                                        </p>
+                                                                    </div>
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Email</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800 flex items-center gap-1.5">
+                                                                            <Mail className="h-3.5 w-3.5 text-gray-400" />
+                                                                            {emp.email}
+                                                                        </p>
+                                                                    </div>
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Ghi chú</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800 line-clamp-2" title={emp.notes || undefined}>{emp.notes || 'Không có'}</p>
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Col 3 */}
+                                                                <div className="space-y-4">
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Mã chấm công</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800">{emp.timekeeping_code || 'Chưa có'}</p>
+                                                                    </div>
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Phòng ban</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800">{getDepartmentName(emp.department)}</p>
+                                                                    </div>
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Chi nhánh làm việc</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800">
+                                                                            {branches.find(b => b.id === emp.working_branch_id)?.name || 'Chưa cập nhật'}
+                                                                        </p>
+                                                                    </div>
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Facebook</p>
+                                                                        <p className="text-[13px] font-medium text-blue-600 line-clamp-1">{emp.facebook || 'Chưa cập nhật'}</p>
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Col 4 */}
+                                                                <div className="space-y-4">
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Ngày sinh</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800">{emp.dob || 'Chưa cập nhật'}</p>
+                                                                    </div>
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Chức danh</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800">
+                                                                            {jobTitles.find(t => t.id === emp.job_title_id)?.name || 'Chưa cập nhật'}
+                                                                        </p>
+                                                                    </div>
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Tài khoản KiotViet</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800">{emp.kiotviet_account || 'Chưa cập nhật'}</p>
+                                                                    </div>
+                                                                    <div className="space-y-0.5">
+                                                                        <p className="text-[11px] text-gray-400 uppercase tracking-wider">Địa chỉ</p>
+                                                                        <p className="text-[13px] font-medium text-gray-800 line-clamp-2" title={emp.address || undefined}>{emp.address || 'Chưa cập nhật'}</p>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            {/* Actions footer */}
+                                                            <div className="mt-6 flex justify-end gap-3">
+                                                                <Button variant="outline" className="h-9 px-4 text-[13px] text-gray-700 bg-white border-gray-300 hover:bg-gray-50 font-medium shadow-sm">
+                                                                    Ngừng làm việc
+                                                                </Button>
+                                                                <Button 
+                                                                    className="h-9 px-6 text-[13px] bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm transition-all flex items-center gap-1.5"
+                                                                    onClick={(e) => { e.stopPropagation(); setShowForm(true); }}
+                                                                >
+                                                                    <Edit className="h-3.5 w-3.5" />
+                                                                    Cập nhật
+                                                                </Button>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {detailActiveTab === 'orders' && (
+                                                        <div className="p-5">
+                                                            {detailOrdersLoading ? (
+                                                                <div className="flex items-center justify-center py-8">
+                                                                    <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+                                                                </div>
+                                                            ) : detailOrders.length === 0 ? (
+                                                                <div className="text-center py-8 text-gray-400">
+                                                                    <ShoppingCart className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                                                    <p className="text-[13px]">Nhân viên chưa có đơn hàng nào</p>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="space-y-2">
+                                                                    {detailOrders.map((order) => {
+                                                                        const statusInfo = orderStatusLabels[order.status] || { label: order.status, variant: 'secondary' as const };
+                                                                        return (
+                                                                            <div
+                                                                                key={order.id}
+                                                                                className="flex items-center justify-between p-3 border border-gray-100 rounded-lg hover:bg-white hover:border-blue-100 hover:shadow-sm transition-all cursor-pointer"
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    setSelectedOrder(order as unknown as Order);
+                                                                                    setShowOrderDetail(true);
+                                                                                }}
+                                                                            >
+                                                                                <div className="flex items-center gap-3">
+                                                                                    <span className="font-semibold font-mono text-[13px] text-gray-800">{order.order_code}</span>
+                                                                                    <Badge variant={statusInfo.variant} className="text-[10px]">{statusInfo.label}</Badge>
+                                                                                    {order.customer && (
+                                                                                        <span className="text-[12px] text-gray-500">KH: {order.customer.name}</span>
+                                                                                    )}
+                                                                                </div>
+                                                                                <div className="flex items-center gap-3">
+                                                                                    <span className="text-xs text-gray-400">{new Date(order.created_at).toLocaleDateString('vi-VN')}</span>
+                                                                                    <span className="font-bold text-[13px] text-blue-600">{formatCurrency(order.total_amount)}</span>
+                                                                                </div>
+                                                                            </div>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {/* Tab Lịch làm việc */}
+                                                    {detailActiveTab === 'schedule' && emp && (
+                                                        <EmployeeScheduleTab employeeId={emp.id} />
+                                                    )}
+
+                                                    {/* Tab Thiết lập lương */}
+                                                    {detailActiveTab === 'salary_setup' && emp && (
+                                                        <EmployeeSalaryTab employeeId={emp.id} />
+                                                    )}
+
+                                                    {/* Các sub-tabs đang phát triển */}
+                                                    {(detailActiveTab === 'payslip' || detailActiveTab === 'debt') && (
+                                                        <div className="p-10 flex flex-col items-center justify-center text-center">
+                                                            <div className="h-12 w-12 rounded-full bg-blue-50 flex items-center justify-center mb-3">
+                                                                <FileText className="h-6 w-6 text-blue-300" />
+                                                            </div>
+                                                            <h3 className="text-sm font-medium text-gray-900 mb-1">
+                                                                {detailActiveTab === 'payslip' ? 'Phiếu lương' : 'Nợ và tạm ứng'}
+                                                            </h3>
+                                                            <p className="text-xs text-gray-500">
+                                                                Tính năng này đang trong quá trình phát triển và sẽ sớm ra mắt.
+                                                            </p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                )}
+                                </React.Fragment>
+                                );
+                            })}
                             {filteredEmployees.length === 0 && (
                                 <tr>
                                     <td colSpan={Object.values(columnVisibility).filter(v => v).length + 1} className="px-4 py-8 text-center text-[13px] text-gray-500">
@@ -791,13 +1129,27 @@ export function EmployeesPage() {
                 onClose={() => { setShowForm(false); setSelectedEmployee(null); }}
                 employee={selectedEmployee}
                 departments={departments}
+                jobTitles={jobTitles}
                 onSubmit={selectedEmployee ? handleUpdateEmployee : handleCreateEmployee}
+                onCreateDepartment={async (data) => {
+                    await createDepartment(data as any);
+                    fetchDepartments();
+                }}
+                onCreateJobTitle={async (data) => {
+                    await createJobTitle(data as any);
+                    fetchJobTitles();
+                }}
+                users={users.map(u => ({ id: u.id, name: u.name, email: u.email, phone: u.phone, role: u.role }))}
+                onRefreshUsers={() => fetchUsers()}
             />
-            <EmployeeDetailDialog
-                open={showDetail}
-                onClose={() => { setShowDetail(false); setSelectedEmployee(null); }}
-                employee={selectedEmployee}
-                departments={departments}
+            {/* Order Detail Dialog */}
+            <OrderDetailDialog
+                order={selectedOrder}
+                open={showOrderDetail}
+                onClose={() => {
+                    setShowOrderDetail(false);
+                    setSelectedOrder(null);
+                }}
             />
 
             {/* Dialog Thêm mới phòng ban */}

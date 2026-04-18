@@ -19,6 +19,9 @@ export interface WorkSchedule {
     shift_id: string;
     schedule_date: string;
     repeat_weekly: boolean;
+    work_on_holidays: boolean;
+    repeat_days?: number[];
+    end_date?: string;
     notes?: string;
     created_by?: string;
     created_at: string;
@@ -42,6 +45,9 @@ export interface CreateScheduleData {
     shift_ids: string[];
     schedule_date: string;
     repeat_weekly?: boolean;
+    repeat_days?: number[];
+    end_date?: string;
+    work_on_holidays?: boolean;
     apply_to_users?: string[];
     created_by?: string;
 }
@@ -112,7 +118,7 @@ export function useWorkSchedules() {
         setSchedules(prev => prev.filter(s => s.id !== id));
     }, []);
 
-    const bulkDeleteSchedule = useCallback(async (data: { user_id?: string; schedule_date?: string; shift_id?: string }) => {
+    const bulkDeleteSchedule = useCallback(async (data: { user_id: string; schedule_date: string; type: 'single' | 'future' | 'all' }) => {
         await api.post('/work-schedules/bulk-delete', data);
     }, []);
 

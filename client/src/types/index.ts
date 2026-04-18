@@ -18,6 +18,34 @@ export interface User {
     employee_code?: string;
     base_salary?: number;
     hourly_rate?: number;
+    timekeeping_code?: string;
+    dob?: string;
+    gender?: string;
+    identity_card?: string;
+    job_title_id?: string;
+    join_date?: string;
+    payroll_branch_id?: string;
+    working_branch_id?: string;
+    kiotviet_account?: string;
+    facebook?: string;
+    address?: string;
+    mobile_device?: string;
+    notes?: string;
+}
+
+export interface Branch {
+    id: string;
+    name: string;
+    code: string;
+    address?: string;
+    status?: string;
+}
+
+export interface JobTitle {
+    id: string;
+    name: string;
+    code: string;
+    status?: string;
 }
 
 export interface Lead {
@@ -71,6 +99,7 @@ export interface Product {
     category: 'product' | 'service' | 'package' | 'voucher';
     unit: string;
     stock?: number;
+    commission_data?: Record<string, any>;
 }
 
 export interface Service {
@@ -83,6 +112,7 @@ export interface Service {
     image?: string;
     commission_rate?: number;
     applicable_product_types?: string[];
+    commission_data?: Record<string, any>;
 }
 
 export interface PackageItem {

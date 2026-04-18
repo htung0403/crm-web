@@ -175,7 +175,7 @@ export function useSalary() {
     }, [salaries, fetchSalaries]);
 
     const paySalary = useCallback(async (id: string, payment_method?: string) => {
-        const response = await salaryApi.pay(id, payment_method);
+        const response = await salaryApi.pay(id, { payment_method });
         const updated = response.data.data?.salary;
         setSalaries(prev => prev.map(s => s.id === id ? updated : s));
         return updated;

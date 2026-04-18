@@ -117,6 +117,8 @@ CREATE TABLE customers (
     assigned_to UUID REFERENCES users(id),
     lead_id UUID,
     
+    dob DATE, -- Ngày sinh khách hàng
+    
     last_contact TIMESTAMPTZ,
     notes TEXT,
     tags TEXT[],
@@ -182,7 +184,11 @@ CREATE TABLE leads (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     converted_at TIMESTAMPTZ,
-    last_contact TIMESTAMPTZ
+    last_contact TIMESTAMPTZ,
+    dob DATE, -- Ngày sinh lead
+    delivery_method VARCHAR(50), -- direct, ship
+    tracking_code VARCHAR(255),
+    shipping_fee DECIMAL(15, 2) DEFAULT 0
 );
 
 ALTER TABLE customers ADD CONSTRAINT fk_customers_lead FOREIGN KEY (lead_id) REFERENCES leads(id);
@@ -327,8 +333,13 @@ CREATE TABLE package_items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     package_id UUID REFERENCES packages(id) ON DELETE CASCADE,
     service_id UUID REFERENCES services(id),
+    product_id UUID REFERENCES products(id),
     quantity INTEGER DEFAULT 1,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT service_or_product CHECK (
+        (service_id IS NOT NULL AND product_id IS NULL) OR
+        (service_id IS NULL AND product_id IS NOT NULL)
+    )
 );
 
 -- VOUCHERS
@@ -373,12 +384,11 @@ CREATE TABLE orders (
     paid_amount DECIMAL(15, 2) DEFAULT 0,
     remaining_debt DECIMAL(15, 2) DEFAULT 0,
     
-    -- Status
-    status VARCHAR(50) DEFAULT 'pending', -- pending, confirmed, processing, completed, cancelled
+    -- Status (before_sale, in_progress, done, after_sale, cancelled)
+    status VARCHAR(50) DEFAULT 'before_sale',
     payment_status VARCHAR(20) DEFAULT 'unpaid', -- unpaid, partial, paid
-    confirmed_at TIMESTAMPTZ, -- when manager confirms order (status -> confirmed)
-    due_at TIMESTAMPTZ, -- deadline for delivery / KPI (SLA: còn X ngày / trễ X ngày)
-    after_sale_stage VARCHAR(50) NULL CHECK (after_sale_stage IS NULL OR after_sale_stage IN ('after1', 'after2', 'after3', 'after4')),
+    confirmed_at TIMESTAMPTZ, -- when order moves to in_progress
+    due_at TIMESTAMPTZ, -- deadline for delivery / KPI
     completion_photos JSONB DEFAULT '[]',
     debt_checked BOOLEAN DEFAULT false,
     debt_checked_at TIMESTAMPTZ,
@@ -687,7 +697,7 @@ CREATE TABLE transactions (
     type VARCHAR(20) NOT NULL CHECK (type IN ('income', 'expense')),
     category VARCHAR(100) NOT NULL,
     amount DECIMAL(15, 2) NOT NULL,
-    payment_method VARCHAR(20) DEFAULT 'cash' CHECK (payment_method IN ('cash', 'transfer', 'card')),
+    payment_method VARCHAR(20) DEFAULT 'cash' CHECK (payment_method IN ('cash', 'transfer', 'card', 'zalopay')),
     
     order_id UUID REFERENCES orders(id) ON DELETE SET NULL,
     order_code VARCHAR(50),
@@ -845,6 +855,61 @@ CREATE TABLE timesheets (
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(user_id, work_date)
 );
+
+-- =====================================================
+-- MULTIPLE TECHNICIANS (V2 & V1)
+-- =====================================================
+
+-- Bảng lưu nhiều kỹ thuật viên cho mỗi dịch vụ (V2)
+CREATE TABLE IF NOT EXISTS order_product_service_technicians (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    order_product_service_id UUID NOT NULL REFERENCES order_product_services(id) ON DELETE CASCADE,
+    technician_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    
+    commission DECIMAL(5,2) DEFAULT 0,
+    assigned_at TIMESTAMPTZ DEFAULT NOW(),
+    assigned_by UUID REFERENCES users(id),
+    
+    status VARCHAR(20) DEFAULT 'assigned' 
+        CHECK (status IN ('assigned', 'in_progress', 'completed', 'cancelled')),
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    
+    UNIQUE(order_product_service_id, technician_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_opst_service ON order_product_service_technicians(order_product_service_id);
+CREATE INDEX IF NOT EXISTS idx_opst_technician ON order_product_service_technicians(technician_id);
+CREATE INDEX IF NOT EXISTS idx_opst_status ON order_product_service_technicians(status);
+
+-- Bảng lưu nhiều kỹ thuật viên cho mỗi order_item (V1)
+CREATE TABLE IF NOT EXISTS order_item_technicians (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    order_item_id UUID NOT NULL REFERENCES order_items(id) ON DELETE CASCADE,
+    technician_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    
+    commission DECIMAL(5,2) DEFAULT 0,
+    assigned_at TIMESTAMPTZ DEFAULT NOW(),
+    assigned_by UUID REFERENCES users(id),
+    
+    status VARCHAR(20) DEFAULT 'assigned' 
+        CHECK (status IN ('assigned', 'in_progress', 'completed', 'cancelled')),
+    
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    
+    notes TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    
+    UNIQUE(order_item_id, technician_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_oit_item ON order_item_technicians(order_item_id);
+CREATE INDEX IF NOT EXISTS idx_oit_technician ON order_item_technicians(technician_id);
+
 
 -- =====================================================
 -- 7. TRIGGERS & INDEXES

@@ -25,7 +25,18 @@ async function getOrCreatePayrollBatch(month: number, year: number, createdBy?: 
         .eq('year', year)
         .single();
 
-    if (existing) return existing;
+    if (existing) {
+        if (existing.status === 'locked') {
+            const { data: reopened } = await supabaseAdmin
+                .from('payroll_batches')
+                .update({ status: 'pending' })
+                .eq('id', existing.id)
+                .select()
+                .single();
+            return reopened || existing;
+        }
+        return existing;
+    }
 
     // Create new batch
     const lastDay = new Date(year, month, 0).getDate();
@@ -91,7 +102,7 @@ router.get('/', authenticate, requireAccountant, async (req: AuthenticatedReques
 
         let query = supabaseAdmin
             .from('payroll_batches')
-            .select('*')
+            .select('*, creator:users!payroll_batches_created_by_fkey(id, name), approver:users!payroll_batches_approved_by_fkey(id, name)')
             .order('year', { ascending: false })
             .order('month', { ascending: false });
 
@@ -121,7 +132,7 @@ router.get('/:id', authenticate, requireAccountant, async (req: AuthenticatedReq
 
         const { data: batch, error } = await supabaseAdmin
             .from('payroll_batches')
-            .select('*')
+            .select('*, creator:users!payroll_batches_created_by_fkey(id, name), approver:users!payroll_batches_approved_by_fkey(id, name)')
             .eq('id', id)
             .single();
 
@@ -200,27 +211,111 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
                     }
                 } catch (e) { /* table may not exist */ }
 
+                // validOrders for commissions
+                let validOrderIds: string[] = [];
                 try {
-                    const { data: salesOrders } = await supabaseAdmin
+                    const { data: validOrders } = await supabaseAdmin
                         .from('orders')
                         .select('id')
-                        .eq('sales_id', user.id)
-                        .in('status', ['done', 'completed', 'delivered', 'after_sale'])
+                        .or('payment_status.eq.paid,status.in.(done,completed,delivered,after_sale)')
                         .gte('created_at', startDate)
                         .lte('created_at', endDate + 'T23:59:59');
-                    if (salesOrders && salesOrders.length > 0) {
-                        const { data: salesItems } = await supabaseAdmin
-                            .from('order_items')
-                            .select('commission_sale_amount, item_type')
-                            .in('order_id', salesOrders.map(o => o.id));
-                        if (salesItems) {
-                            for (const item of salesItems) {
-                                if (item.item_type === 'product') productCommission += (item.commission_sale_amount || 0);
-                                else serviceCommission += (item.commission_sale_amount || 0);
-                            }
-                        }
+                    if (validOrders && validOrders.length > 0) {
+                        validOrderIds = validOrders.map(o => o.id);
                     }
                 } catch (e) { /* ignore */ }
+
+                if (validOrderIds.length > 0) {
+                    // Legacy: Sales commissions from order_items
+                    try {
+                        const { data: salesOrders } = await supabaseAdmin
+                            .from('orders')
+                            .select('id')
+                            .eq('sales_id', user.id)
+                            .in('id', validOrderIds);
+                        
+                        if (salesOrders && salesOrders.length > 0) {
+                            const { data: salesItems } = await supabaseAdmin
+                                .from('order_items')
+                                .select('commission_sale_amount, item_type')
+                                .in('order_id', salesOrders.map(o => o.id));
+                            if (salesItems) {
+                                for (const item of salesItems) {
+                                    if (item.item_type === 'product') productCommission += (item.commission_sale_amount || 0);
+                                    else serviceCommission += (item.commission_sale_amount || 0);
+                                }
+                            }
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    // Legacy: Tech commissions from order_items
+                    try {
+                        const { data: techItems } = await supabaseAdmin
+                            .from('order_items')
+                            .select('commission_tech_amount')
+                            .eq('technician_id', user.id)
+                            .in('order_id', validOrderIds);
+                        if (techItems) {
+                            for (const item of techItems) {
+                                serviceCommission += (item.commission_tech_amount || 0);
+                            }
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    // V2: Sales commissions from order_item_sales
+                    try {
+                        const { data: saleItems } = await supabaseAdmin
+                             .from('order_item_sales')
+                             .select('commission, item:order_item_id ( total_price, order_id )')
+                             .eq('sale_id', user.id);
+                        if (saleItems) {
+                            for (const row of saleItems) {
+                                const orderId = (row as any).item?.order_id;
+                                if (orderId && validOrderIds.includes(orderId)) {
+                                    const price = (row as any).item?.total_price || 0;
+                                    const rate = row.commission || 0;
+                                    productCommission += Math.floor((price * rate) / 100);
+                                }
+                            }
+                        }
+                    } catch(e){}
+
+                    // V2: Sales commissions from order_product_service_sales
+                    try {
+                        const { data: saleServices } = await supabaseAdmin
+                             .from('order_product_service_sales')
+                             .select('commission, service:order_product_service_id ( unit_price, order_product:order_product_id ( order_id ) )')
+                             .eq('sale_id', user.id);
+                        if (saleServices) {
+                            for (const row of saleServices) {
+                                const orderId = (row as any).service?.order_product?.order_id;
+                                if (orderId && validOrderIds.includes(orderId)) {
+                                    const price = (row as any).service?.unit_price || 0;
+                                    const rate = row.commission || 0;
+                                    serviceCommission += Math.floor((price * rate) / 100);
+                                }
+                            }
+                        }
+                    } catch(e){}
+
+                    // V2: Tech commissions from order_product_service_technicians
+                    try {
+                        const { data: techServices } = await supabaseAdmin
+                             .from('order_product_service_technicians')
+                             .select('commission, service:order_product_service_id ( unit_price, order_product:order_product_id ( order_id ) )')
+                             .eq('technician_id', user.id);
+                        if (techServices) {
+                            for (const row of techServices) {
+                                const orderId = (row as any).service?.order_product?.order_id;
+                                if (orderId && validOrderIds.includes(orderId)) {
+                                    const price = (row as any).service?.unit_price || 0;
+                                    const rate = row.commission || 0;
+                                    serviceCommission += Math.floor((price * rate) / 100);
+                                }
+                            }
+                        }
+                    } catch(e){}
+                }
 
                 const totalCommission = serviceCommission + productCommission + referralCommission;
 
@@ -250,22 +345,24 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
                 const hourlyWage = Math.round(totalHours * hourlyRate);
                 const overtimePay = Math.round(overtimeHours * hourlyRate * 1.5);
 
-                // ── KPI ──
-                let kpiAchievement = 0, kpiBonus = 0;
+                // ── KPI (from kpi_monthly locked records) ──
+                let kpiAchievement = 0, kpiBonus = 0, kpiPenalty = 0, kpiFactor = 1.0;
                 try {
-                    const { data: kpis } = await supabaseAdmin
-                        .from('kpi')
-                        .select('achievement_rate')
-                        .eq('user_id', user.id)
-                        .eq('month', month)
-                        .eq('year', year);
-                    if (kpis && kpis.length > 0) {
-                        kpiAchievement = Math.round(kpis.reduce((sum: number, k: any) => sum + (k.achievement_rate || 0), 0) / kpis.length);
+                    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+                    const { data: kpiResult } = await supabaseAdmin
+                        .from('kpi_monthly')
+                        .select('total_score, rank, kpi_bonus_amount, kpi_penalty_amount, kpi_commission_factor')
+                        .eq('employee_id', user.id)
+                        .eq('month_key', monthKey)
+                        .eq('status', 'locked')
+                        .single();
+
+                    if (kpiResult) {
+                        kpiAchievement = Number(kpiResult.total_score) || 0;
+                        kpiBonus = Number(kpiResult.kpi_bonus_amount) || 0;
+                        kpiPenalty = Number(kpiResult.kpi_penalty_amount) || 0;
+                        kpiFactor = Number(kpiResult.kpi_commission_factor) || 1.0;
                     }
-                    if (kpiAchievement >= 120) kpiBonus = 3000000;
-                    else if (kpiAchievement >= 100) kpiBonus = 2000000;
-                    else if (kpiAchievement >= 90) kpiBonus = 1000000;
-                    else if (kpiAchievement >= 80) kpiBonus = 500000;
                 } catch (e) { /* ignore */ }
 
                 // ── Violations / Rewards ──
@@ -464,15 +561,23 @@ router.delete('/:id', authenticate, requireManager, async (req: AuthenticatedReq
     try {
         const { id } = req.params;
 
-        // Set status to locked (=cancelled) instead of hard delete
+        const { data: batch } = await supabaseAdmin.from('payroll_batches').select('status').eq('id', id).single();
+        if (batch?.status === 'paid') {
+            throw new ApiError('Không thể xóa bảng lương đã thanh toán', 400);
+        }
+
+        // Hard delete salary records first (in case there's no cascade constraint)
+        await supabaseAdmin.from('salary_records').delete().eq('payroll_batch_id', id);
+
+        // Delete the batch
         const { error } = await supabaseAdmin
             .from('payroll_batches')
-            .update({ status: 'locked' })
+            .delete()
             .eq('id', id);
 
-        if (error) throw new ApiError('Lỗi khi huỷ bảng lương', 500);
+        if (error) throw new ApiError('Lỗi khi xóa bảng lương', 500);
 
-        res.json({ status: 'success', message: 'Đã huỷ bảng lương' });
+        res.json({ status: 'success', message: 'Đã xóa bảng lương thành công' });
     } catch (error) {
         next(error);
     }

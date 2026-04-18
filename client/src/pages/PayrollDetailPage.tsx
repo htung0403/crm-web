@@ -11,6 +11,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { payrollBatchesApi } from '@/lib/api';
 import { type SalaryRecord } from '@/hooks/useSalary';
 import { formatCurrency } from '@/lib/utils';
+import { UpdateBaseSalaryDialog } from '@/components/salary/UpdateBaseSalaryDialog';
+import { BusinessCommissionDetailDialog } from '@/components/salary/BusinessCommissionDetailDialog';
+import { BonusDetailDialog } from '@/components/salary/BonusDetailDialog';
+import { DeductionDetailDialog } from '@/components/salary/DeductionDetailDialog';
+import { PersonalPaysheetDialog } from '@/components/salary/PersonalPaysheetDialog';
 
 // ========== STATUS CONFIG ==========
 const salaryStatusConfig = {
@@ -236,6 +241,14 @@ export function PayrollDetailPage() {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedIds, setSelectedIds] = useState<string[]>([]);
     const [drawerOpen, setDrawerOpen] = useState(false);
+    
+    // For Salary Edit Dialog
+    const [editRecord, setEditRecord] = useState<SalaryRecord | null>(null);
+    const [commissionRecord, setCommissionRecord] = useState<SalaryRecord | null>(null);
+    const [bonusRecord, setBonusRecord] = useState<SalaryRecord | null>(null);
+    const [deductionRecord, setDeductionRecord] = useState<SalaryRecord | null>(null);
+    const [selectedPaysheetRecord, setSelectedPaysheetRecord] = useState<{ record: SalaryRecord, plCode: string } | null>(null);
+    const [isPaysheetDialogOpen, setIsPaysheetDialogOpen] = useState(false);
 
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
@@ -464,19 +477,30 @@ export function PayrollDetailPage() {
                                         <td className="px-3 py-[10px] text-center text-[13px] text-gray-500">{stt}</td>
                                         <td className="px-3 py-[10px]">
                                             <div>
-                                                <p className="text-[13px] font-semibold text-blue-600 uppercase">
+                                                <button
+                                                    onClick={() => {
+                                                        setSelectedPaysheetRecord({ record, plCode: batch.code });
+                                                        setIsPaysheetDialogOpen(true);
+                                                    }}
+                                                    className="text-[13px] font-semibold text-blue-600 uppercase hover:text-blue-800 hover:underline transition-colors text-left"
+                                                >
                                                     {record.user?.name || 'N/A'}
-                                                </p>
+                                                </button>
                                                 <p className="text-[11px] text-gray-400">{empCode}</p>
                                             </div>
                                         </td>
                                         <td className="px-3 py-[10px]">
-                                            <Input
-                                                type="text"
-                                                defaultValue={formatCurrency(record.base_salary || 0).replace(' ₫', '')}
-                                                className="h-[30px] text-[13px] text-right border-gray-200 bg-white w-[110px] px-2"
-                                                readOnly
-                                            />
+                                            <div 
+                                                className="cursor-pointer group relative"
+                                                onClick={() => setEditRecord(record)}
+                                            >
+                                                <Input
+                                                    type="text"
+                                                    value={formatCurrency(record.base_salary || 0).replace(' ₫', '')}
+                                                    className="h-[30px] text-[13px] text-right border-gray-200 bg-white w-[110px] px-2 cursor-pointer group-hover:bg-gray-50 transition-colors pointer-events-none"
+                                                    readOnly
+                                                />
+                                            </div>
                                         </td>
                                         <td className="px-3 py-[10px]">
                                             <Input
@@ -487,12 +511,17 @@ export function PayrollDetailPage() {
                                             />
                                         </td>
                                         <td className="px-3 py-[10px]">
-                                            <Input
-                                                type="text"
-                                                defaultValue={formatCurrency(record.commission || 0).replace(' ₫', '')}
-                                                className="h-[30px] text-[13px] text-right border-gray-200 bg-white w-[90px] px-2"
-                                                readOnly
-                                            />
+                                            <div 
+                                                className="cursor-pointer group relative"
+                                                onClick={() => setCommissionRecord(record)}
+                                            >
+                                                <Input
+                                                    type="text"
+                                                    value={formatCurrency(record.commission || 0).replace(' ₫', '')}
+                                                    className="h-[30px] text-[13px] text-right border-gray-200 bg-white w-[90px] px-2 cursor-pointer group-hover:bg-gray-50 transition-colors pointer-events-none"
+                                                    readOnly
+                                                />
+                                            </div>
                                         </td>
                                         <td className="px-3 py-[10px] text-center">
                                             <span className={`text-[12px] font-bold ${
@@ -504,12 +533,17 @@ export function PayrollDetailPage() {
                                             </span>
                                         </td>
                                         <td className="px-3 py-[10px]">
-                                            <Input
-                                                type="text"
-                                                defaultValue={formatCurrency(record.bonus || 0).replace(' ₫', '')}
-                                                className="h-[30px] text-[13px] text-right border-gray-200 bg-white w-[80px] px-2"
-                                                readOnly
-                                            />
+                                            <div 
+                                                className="cursor-pointer group relative"
+                                                onClick={() => setBonusRecord(record)}
+                                            >
+                                                <Input
+                                                    type="text"
+                                                    value={formatCurrency(record.bonus || 0).replace(' ₫', '')}
+                                                    className="h-[30px] text-[13px] text-right border-gray-200 bg-white w-[80px] px-2 cursor-pointer group-hover:bg-gray-50 transition-colors pointer-events-none"
+                                                    readOnly
+                                                />
+                                            </div>
                                         </td>
                                         <td className="px-3 py-[10px]">
                                             <Input
@@ -520,12 +554,17 @@ export function PayrollDetailPage() {
                                             />
                                         </td>
                                         <td className="px-3 py-[10px]">
-                                            <Input
-                                                type="text"
-                                                defaultValue={formatCurrency((record.deduction || 0) - (record.advances || 0)).replace(' ₫', '')}
-                                                className="h-[30px] text-[13px] text-right border-gray-200 bg-white w-[90px] px-2"
-                                                readOnly
-                                            />
+                                            <div 
+                                                className="cursor-pointer group relative"
+                                                onClick={() => setDeductionRecord(record)}
+                                            >
+                                                <Input
+                                                    type="text"
+                                                    value={formatCurrency((record.deduction || 0) - (record.advances || 0)).replace(' ₫', '')}
+                                                    className="h-[30px] text-[13px] text-right border-gray-200 bg-white w-[90px] px-2 cursor-pointer group-hover:bg-gray-50 transition-colors pointer-events-none"
+                                                    readOnly
+                                                />
+                                            </div>
                                         </td>
                                         <td className="px-3 py-[10px] text-right text-[13px] font-semibold text-gray-800">
                                             {formatCurrency(gross)}
@@ -593,6 +632,46 @@ export function PayrollDetailPage() {
                 onClose={() => setDrawerOpen(false)}
                 batch={batch}
             />
+
+            <UpdateBaseSalaryDialog
+                open={!!editRecord}
+                onClose={() => setEditRecord(null)}
+                record={editRecord}
+                onSuccess={() => {
+                    fetchData(); // Reload table data after update
+                }}
+            />
+
+            {/* ===== COMMISSION DETAIL DIALOG ===== */}
+            <BusinessCommissionDetailDialog
+                open={!!commissionRecord}
+                onClose={() => setCommissionRecord(null)}
+                record={commissionRecord}
+            />
+
+            {/* ===== BONUS DETAIL DIALOG ===== */}
+            <BonusDetailDialog
+                open={!!bonusRecord}
+                onClose={() => setBonusRecord(null)}
+                record={bonusRecord}
+            />
+
+            <DeductionDetailDialog
+                open={!!deductionRecord}
+                onClose={() => setDeductionRecord(null)}
+                record={deductionRecord}
+            />
+
+            {/* ===== PERSONAL PAYSHEET DIALOG ===== */}
+            {selectedPaysheetRecord && (
+                <PersonalPaysheetDialog
+                    open={isPaysheetDialogOpen}
+                    onOpenChange={setIsPaysheetDialogOpen}
+                    record={selectedPaysheetRecord.record}
+                    plCode={selectedPaysheetRecord.plCode}
+                    onReload={fetchData}
+                />
+            )}
         </div>
     );
 }

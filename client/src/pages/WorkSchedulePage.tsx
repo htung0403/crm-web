@@ -1,18 +1,23 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
-    Search, ChevronLeft, ChevronRight, ChevronDown, Download, Upload,
-    Info, X, Plus, Loader2, Users
+    ChevronLeft, ChevronRight, Download, Upload,
+    Info, X, Plus, Loader2, Users, Trash2, Check, ChevronsUpDown
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn, formatNumber } from '@/lib/utils';
 import { useUsers } from '@/hooks/useUsers';
 import { useWorkSchedules, type Shift, type WorkSchedule } from '@/hooks/useWorkSchedules';
 import { toast } from 'sonner';
+import { AddScheduleDialog } from '@/components/work-schedule/AddScheduleDialog';
 
 // ── Constants ──────────────────────────────────────────────────
 const DAY_LABELS = ['Thứ hai', 'Thứ ba', 'Thứ tư', 'Thứ năm', 'Thứ sáu', 'Thứ bảy', 'Chủ nhật'];
@@ -80,205 +85,23 @@ interface EmployeeRow {
     schedulesByDate: Record<string, WorkSchedule[]>;
 }
 
-// ── Add Schedule Dialog ────────────────────────────────────────
-function AddScheduleDialog({
-    open, onClose, selectedUser, selectedDate, shifts, allUsers, onSave, onCreateShift,
-}: {
-    open: boolean;
-    onClose: () => void;
-    selectedUser: { id: string; name: string } | null;
-    selectedDate: Date | null;
-    shifts: Shift[];
-    allUsers: { id: string; name: string }[];
-    onSave: (data: { user_id: string; shift_ids: string[]; schedule_date: string; repeat_weekly: boolean; apply_to_users: string[] }) => Promise<void>;
-    onCreateShift: (data: { name: string; start_time: string; end_time: string; color: string }) => Promise<void>;
-}) {
-    const [selectedShiftIds, setSelectedShiftIds] = useState<string[]>([]);
-    const [repeatWeekly, setRepeatWeekly] = useState(false);
-    const [applyToOthers, setApplyToOthers] = useState(false);
-    const [selectedOtherUsers, setSelectedOtherUsers] = useState<string[]>([]);
-    const [saving, setSaving] = useState(false);
-    const [showNewShift, setShowNewShift] = useState(false);
-    const [newShiftName, setNewShiftName] = useState('');
-    const [newShiftStart, setNewShiftStart] = useState('09:00');
-    const [newShiftEnd, setNewShiftEnd] = useState('21:00');
 
-    useEffect(() => {
-        if (open) {
-            setSelectedShiftIds([]);
-            setRepeatWeekly(false);
-            setApplyToOthers(false);
-            setSelectedOtherUsers([]);
-            setShowNewShift(false);
-            setNewShiftName('');
-        }
-    }, [open]);
-
-    const toggleShift = (shiftId: string) => {
-        setSelectedShiftIds(prev =>
-            prev.includes(shiftId) ? prev.filter(id => id !== shiftId) : [...prev, shiftId]
-        );
-    };
-
-    const toggleOtherUser = (userId: string) => {
-        setSelectedOtherUsers(prev =>
-            prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
-        );
-    };
-
-    const handleSave = async () => {
-        if (!selectedUser || !selectedDate || selectedShiftIds.length === 0) {
-            toast.error('Vui lòng chọn ít nhất một ca làm việc');
-            return;
-        }
-        setSaving(true);
-        try {
-            await onSave({
-                user_id: selectedUser.id,
-                shift_ids: selectedShiftIds,
-                schedule_date: toDateStr(selectedDate),
-                repeat_weekly: repeatWeekly,
-                apply_to_users: applyToOthers ? selectedOtherUsers : [],
-            });
-            toast.success('Đã lưu lịch làm việc!');
-            onClose();
-        } catch (error: any) {
-            toast.error(error?.message || 'Lỗi khi lưu lịch làm việc');
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    const handleCreateShift = async () => {
-        if (!newShiftName.trim()) { toast.error('Vui lòng nhập tên ca'); return; }
-        try {
-            await onCreateShift({ name: newShiftName.trim().toUpperCase(), start_time: newShiftStart, end_time: newShiftEnd, color: 'blue' });
-            toast.success('Đã tạo ca mới!');
-            setShowNewShift(false);
-            setNewShiftName('');
-        } catch { toast.error('Lỗi khi tạo ca'); }
-    };
-
-    if (!selectedUser || !selectedDate) return null;
-    const otherUsers = allUsers.filter(u => u.id !== selectedUser.id);
-
-    return (
-        <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-[480px] p-0">
-                <div className="px-6 pt-6 pb-4">
-                    <DialogHeader>
-                        <DialogTitle className="text-[17px] font-bold text-gray-900">Thêm lịch làm việc</DialogTitle>
-                    </DialogHeader>
-                    <p className="text-[13px] text-gray-500 mt-1">
-                        {selectedUser.name}<span className="mx-2 text-gray-300">|</span>{formatVNDate(selectedDate)}
-                    </p>
-                </div>
-
-                <div className="px-6 pb-6 space-y-5">
-                    {/* Shift selection */}
-                    <div>
-                        <div className="flex items-center gap-2 mb-3">
-                            <span className="text-[13px] font-bold text-gray-700">Chọn ca làm việc</span>
-                            <button onClick={() => setShowNewShift(true)} className="h-5 w-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center hover:bg-blue-200 transition-colors">
-                                <Plus className="h-3 w-3" />
-                            </button>
-                        </div>
-
-                        {showNewShift && (
-                            <div className="mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
-                                <Input placeholder="Tên ca (VD: CA TỐI)" className="h-[34px] text-[13px]" value={newShiftName} onChange={e => setNewShiftName(e.target.value)} />
-                                <div className="flex gap-2">
-                                    <Input type="time" className="h-[34px] text-[13px] flex-1" value={newShiftStart} onChange={e => setNewShiftStart(e.target.value)} />
-                                    <span className="self-center text-gray-400 text-[13px]">-</span>
-                                    <Input type="time" className="h-[34px] text-[13px] flex-1" value={newShiftEnd} onChange={e => setNewShiftEnd(e.target.value)} />
-                                </div>
-                                <div className="flex gap-2 justify-end">
-                                    <Button variant="ghost" size="sm" onClick={() => setShowNewShift(false)} className="text-[12px] h-7">Hủy</Button>
-                                    <Button size="sm" onClick={handleCreateShift} className="text-[12px] h-7">Tạo ca</Button>
-                                </div>
-                            </div>
-                        )}
-
-                        <div className="border border-gray-200 rounded-lg p-4">
-                            <div className="grid grid-cols-2 gap-4">
-                                {shifts.map(shift => {
-                                    const checked = selectedShiftIds.includes(shift.id);
-                                    const colors = getShiftColor(shift.color);
-                                    return (
-                                        <label key={shift.id} className="flex items-start gap-3 cursor-pointer group" onClick={() => toggleShift(shift.id)}>
-                                            <div className={cn("mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors", checked ? "bg-blue-600 border-blue-600" : "border-gray-300 group-hover:border-gray-400")}>
-                                                {checked && (<svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>)}
-                                            </div>
-                                            <div>
-                                                <p className={cn("text-[13px] font-bold", colors.text)}>{shift.name}</p>
-                                                <p className="text-[11px] text-gray-400">{shift.start_time?.slice(0, 5)} - {shift.end_time?.slice(0, 5)}</p>
-                                            </div>
-                                        </label>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Repeat weekly */}
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <p className="text-[13px] font-bold text-gray-700">Lặp lại hàng tuần</p>
-                            <p className="text-[11px] text-gray-400 mt-0.5">Lịch làm việc sẽ được tự động lặp lại vào các ngày trong tuần</p>
-                        </div>
-                        <Switch checked={repeatWeekly} onCheckedChange={setRepeatWeekly} />
-                    </div>
-
-                    {/* Apply to others */}
-                    <div>
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-[13px] font-bold text-gray-700">Thêm lịch tương tự cho nhân viên khác</p>
-                                <p className="text-[11px] text-gray-400 mt-0.5">Lịch làm việc sẽ được áp dụng cho các nhân viên được chọn</p>
-                            </div>
-                            <Switch checked={applyToOthers} onCheckedChange={setApplyToOthers} />
-                        </div>
-                        {applyToOthers && (
-                            <div className="mt-3 max-h-[150px] overflow-y-auto border border-gray-200 rounded-lg p-2 space-y-1">
-                                {otherUsers.map(u => {
-                                    const isSelected = selectedOtherUsers.includes(u.id);
-                                    return (
-                                        <label key={u.id} className="flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-gray-50 cursor-pointer" onClick={() => toggleOtherUser(u.id)}>
-                                            <div className={cn("w-3.5 h-3.5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors", isSelected ? "bg-blue-600 border-blue-600" : "border-gray-300")}>
-                                                {isSelected && (<svg className="w-2 h-2 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>)}
-                                            </div>
-                                            <span className="text-[13px] text-gray-700">{u.name}</span>
-                                        </label>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </div>
-                </div>
-
-                <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50/50">
-                    <Button variant="outline" onClick={onClose} disabled={saving} className="h-[36px] px-5 text-[13px]">Bỏ qua</Button>
-                    <Button onClick={handleSave} disabled={saving || selectedShiftIds.length === 0} className="h-[36px] px-5 text-[13px]">
-                        {saving && <Loader2 className="h-4 w-4 animate-spin mr-2" />}Lưu
-                    </Button>
-                </div>
-            </DialogContent>
-        </Dialog>
-    );
-}
 
 // ── Main Component ─────────────────────────────────────────────
 export function WorkSchedulePage() {
+    const [searchParams, setSearchParams] = useSearchParams();
     const { users, loading: usersLoading, fetchUsers } = useUsers();
     const {
         shifts, schedules, loading: schedulesLoading,
-        fetchShifts, fetchSchedules, createSchedule, createShift, deleteSchedule
+        fetchShifts, fetchSchedules, createSchedule, createShift, deleteSchedule, bulkDeleteSchedule
     } = useWorkSchedules();
 
     const [currentMonday, setCurrentMonday] = useState(() => getMondayOfWeek(new Date()));
-    const [searchTerm, setSearchTerm] = useState('');
+    const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+    const [employeePopoverOpen, setEmployeePopoverOpen] = useState(false);
     const [viewMode, setViewMode] = useState<'employee' | 'shift'>('employee');
     const today = useMemo(() => new Date(), []);
+    const initialUserApplied = useRef(false);
 
     // Dialog state
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -290,6 +113,22 @@ export function WorkSchedulePage() {
     const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
     useEffect(() => { fetchUsers(); fetchShifts(); }, []);
+
+    // Pre-select user from URL search params (e.g. ?userId=xxx)
+    useEffect(() => {
+        if (initialUserApplied.current || users.length === 0) return;
+        const userIdParam = searchParams.get('userId');
+        if (userIdParam) {
+            const exists = users.find(u => u.id === userIdParam && (u.status || 'active') === 'active');
+            if (exists) {
+                setSelectedUserIds([userIdParam]);
+            }
+            // Clean up URL param after applying
+            searchParams.delete('userId');
+            setSearchParams(searchParams, { replace: true });
+        }
+        initialUserApplied.current = true;
+    }, [users, searchParams, setSearchParams]);
 
     const weekDates = useMemo(() => getWeekDates(currentMonday), [currentMonday]);
     const weekNum = getWeekNumber(currentMonday);
@@ -324,10 +163,24 @@ export function WorkSchedulePage() {
     }, [users, schedules]);
 
     const filteredRows = useMemo(() => {
-        if (!searchTerm.trim()) return employeeRows;
-        const q = searchTerm.toLowerCase();
-        return employeeRows.filter(r => r.name.toLowerCase().includes(q) || r.employeeCode.toLowerCase().includes(q));
-    }, [employeeRows, searchTerm]);
+        if (selectedUserIds.length === 0) return employeeRows;
+        return employeeRows.filter(r => selectedUserIds.includes(r.userId));
+    }, [employeeRows, selectedUserIds]);
+
+    const toggleUserSelection = useCallback((userId: string) => {
+        setSelectedUserIds(prev =>
+            prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]
+        );
+    }, []);
+
+    const selectAllUsers = useCallback(() => {
+        const activeUserIds = users.filter(u => (u.status || 'active') === 'active').map(u => u.id);
+        setSelectedUserIds(activeUserIds);
+    }, [users]);
+
+    const clearAllUsers = useCallback(() => {
+        setSelectedUserIds([]);
+    }, []);
 
     const calcEstimatedSalary = useCallback((row: EmployeeRow) => {
         const totalShifts = Object.values(row.schedulesByDate).reduce((sum, arr) => sum + arr.length, 0);
@@ -365,9 +218,24 @@ export function WorkSchedulePage() {
     const goToNextWeek = () => { const next = new Date(currentMonday); next.setDate(next.getDate() + 7); setCurrentMonday(next); };
     const goToCurrentWeek = () => setCurrentMonday(getMondayOfWeek(new Date()));
 
-    const handleCellClick = (userId: string, userName: string, date: Date) => {
+    // Existing state for editing
+    const [dialogShiftIds, setDialogShiftIds] = useState<string[]>([]);
+    const [dialogRepeatWeekly, setDialogRepeatWeekly] = useState(false);
+    const [dialogWorkOnHolidays, setDialogWorkOnHolidays] = useState(false);
+    const [dialogRepeatDays, setDialogRepeatDays] = useState<number[]>([]);
+    const [dialogEndDate, setDialogEndDate] = useState<string>('');
+ 
+    const handleCellClick = (userId: string, userName: string, date: Date, existingSchedules: WorkSchedule[]) => {
         setDialogUser({ id: userId, name: userName });
         setDialogDate(date);
+        setDialogShiftIds(existingSchedules.map(s => s.shift_id));
+        
+        const first = existingSchedules[0];
+        setDialogRepeatWeekly(first ? first.repeat_weekly : false);
+        setDialogWorkOnHolidays(first ? first.work_on_holidays : false);
+        setDialogRepeatDays(first?.repeat_days || []);
+        setDialogEndDate(first?.end_date || '');
+        
         setDialogOpen(true);
     };
 
@@ -375,6 +243,23 @@ export function WorkSchedulePage() {
         e.stopPropagation();
         setPendingDeleteId(scheduleId);
         setDeleteConfirmOpen(true);
+    };
+
+    const handleDeleteMultiple = async (type: 'single' | 'future' | 'all') => {
+        if (!dialogUser || !dialogDate) return;
+        
+        try {
+            await bulkDeleteSchedule({
+                user_id: dialogUser.id,
+                schedule_date: toDateStr(dialogDate),
+                type: type
+            });
+            toast.success('Đã xóa ca làm việc');
+            await fetchSchedules(toDateStr(weekDates[0]), toDateStr(weekDates[6]));
+            setDialogOpen(false);
+        } catch {
+            toast.error('Lỗi khi xóa ca');
+        }
     };
 
     const confirmDelete = async () => {
@@ -387,7 +272,7 @@ export function WorkSchedulePage() {
         finally { setDeleteConfirmOpen(false); setPendingDeleteId(null); }
     };
 
-    const handleSaveSchedule = async (data: { user_id: string; shift_ids: string[]; schedule_date: string; repeat_weekly: boolean; apply_to_users: string[] }) => {
+    const handleSaveSchedule = async (data: { user_id: string; shift_ids: string[]; schedule_date: string; repeat_weekly: boolean; repeat_days: number[]; end_date?: string; work_on_holidays: boolean; apply_to_users: string[] }) => {
         await createSchedule(data);
         await fetchSchedules(toDateStr(weekDates[0]), toDateStr(weekDates[6]));
     };
@@ -409,11 +294,79 @@ export function WorkSchedulePage() {
                 <div className="flex items-center gap-4 flex-wrap">
                     <h1 className="text-[15px] font-bold text-gray-900 whitespace-nowrap">Lịch làm việc</h1>
 
-                    <div className="relative">
-                        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-[14px] w-[14px] text-gray-400" />
-                        <Input className="pl-8 h-[34px] w-[200px] border-gray-200 text-[13px] placeholder:text-gray-400 bg-white rounded-lg shadow-sm focus-visible:ring-1 focus-visible:ring-blue-500" placeholder="Tìm kiếm nhân viên" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-                        <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400" />
-                    </div>
+                    <Popover open={employeePopoverOpen} onOpenChange={setEmployeePopoverOpen}>
+                        <PopoverTrigger asChild>
+                            <Button
+                                variant="outline"
+                                role="combobox"
+                                aria-expanded={employeePopoverOpen}
+                                className="h-[34px] min-w-[200px] max-w-[350px] border-gray-200 text-[13px] bg-white rounded-lg shadow-sm justify-between hover:bg-gray-50"
+                            >
+                                <span className="flex items-center gap-1.5 truncate">
+                                    <Users className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                                    {selectedUserIds.length === 0
+                                        ? <span className="text-gray-400">Chọn nhân viên...</span>
+                                        : <span className="text-gray-700">{selectedUserIds.length} nhân viên</span>
+                                    }
+                                </span>
+                                <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 text-gray-400" />
+                            </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[280px] p-0" align="start">
+                            <Command>
+                                <CommandInput placeholder="Tìm nhân viên..." />
+                                <div className="flex items-center justify-between px-2 py-1.5 border-b border-gray-100">
+                                    <button onClick={selectAllUsers} className="text-[12px] text-blue-600 hover:text-blue-700 font-medium">Chọn tất cả</button>
+                                    <button onClick={clearAllUsers} className="text-[12px] text-gray-400 hover:text-gray-600 font-medium">Bỏ chọn tất cả</button>
+                                </div>
+                                <CommandList>
+                                    <CommandEmpty>Không tìm thấy nhân viên.</CommandEmpty>
+                                    <CommandGroup>
+                                        {users.filter(u => (u.status || 'active') === 'active').map(user => {
+                                            const isSelected = selectedUserIds.includes(user.id);
+                                            return (
+                                                <CommandItem
+                                                    key={user.id}
+                                                    value={user.name}
+                                                    onSelect={() => toggleUserSelection(user.id)}
+                                                    className="cursor-pointer"
+                                                >
+                                                    <div className={cn(
+                                                        "mr-2 flex h-4 w-4 items-center justify-center rounded-sm border border-primary",
+                                                        isSelected ? "bg-primary text-white" : "opacity-50"
+                                                    )}>
+                                                        {isSelected && <Check className="h-3 w-3" />}
+                                                    </div>
+                                                    <span className="text-[13px]">{user.name}</span>
+                                                </CommandItem>
+                                            );
+                                        })}
+                                    </CommandGroup>
+                                </CommandList>
+                            </Command>
+                        </PopoverContent>
+                    </Popover>
+
+                    {selectedUserIds.length > 0 && (
+                        <div className="flex items-center gap-1 flex-wrap">
+                            {selectedUserIds.slice(0, 3).map(id => {
+                                const user = users.find(u => u.id === id);
+                                return user ? (
+                                    <Badge key={id} variant="secondary" className="h-[26px] text-[11px] font-medium gap-1 px-2 bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100">
+                                        {user.name}
+                                        <button onClick={() => toggleUserSelection(id)} className="ml-0.5 hover:text-blue-900">
+                                            <X className="h-3 w-3" />
+                                        </button>
+                                    </Badge>
+                                ) : null;
+                            })}
+                            {selectedUserIds.length > 3 && (
+                                <Badge variant="secondary" className="h-[26px] text-[11px] font-medium px-2 bg-gray-100 text-gray-600">
+                                    +{selectedUserIds.length - 3}
+                                </Badge>
+                            )}
+                        </div>
+                    )}
 
                     <div className="flex items-center gap-1.5">
                         <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:bg-gray-100" onClick={goToPrevWeek}><ChevronLeft className="h-4 w-4" /></Button>
@@ -500,23 +453,28 @@ export function WorkSchedulePage() {
                                                 const cellSchedules = row.schedulesByDate[key] || [];
                                                 const isToday = isSameDay(d, today);
                                                 return (
-                                                    <td key={i} className={cn("px-1.5 py-3 text-center border-r border-gray-50 cursor-pointer hover:bg-blue-50/50 transition-colors", isToday && "bg-blue-50/30")} onClick={() => handleCellClick(row.userId, row.name, d)}>
+                                                    <td key={i} className={cn("px-1.5 py-3 text-center border-r border-gray-50 align-top cursor-pointer group/cell transition-colors", isToday && "bg-blue-50/30", !isToday && "hover:bg-blue-50/50")} onClick={() => handleCellClick(row.userId, row.name, d, [])}>
                                                         {cellSchedules.length > 0 ? (
-                                                            <div className="flex flex-col gap-1 items-center">
+                                                            <div className="flex flex-col gap-1 items-center min-h-[40px]">
                                                                 {cellSchedules.map(ws => {
                                                                     const colors = getShiftColor(ws.shift?.color || 'blue');
                                                                     return (
-                                                                        <span key={ws.id} className={cn("relative inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-bold border whitespace-nowrap transition-all group/badge", colors.bg, colors.border, colors.text)}>
-                                                                            {ws.shift?.name || 'CA'}
-                                                                            <button onClick={(e) => handleDeleteSchedule(e, ws.id)} className="opacity-0 group-hover/badge:opacity-100 -mr-1 ml-0.5 h-4 w-4 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-all shrink-0" title="Xóa ca này">
+                                                                        <div key={ws.id} onClick={(e) => { e.stopPropagation(); handleCellClick(row.userId, row.name, d, [ws]); }} className={cn("relative flex items-center justify-center w-full px-2 py-1.5 rounded-md text-[11px] font-bold border transition-all cursor-pointer hover:shadow-sm group/badge", colors.bg, colors.border, colors.text)}>
+                                                                            <span className="truncate">{ws.shift?.name || 'CA'}</span>
+                                                                            <button onClick={(e) => handleDeleteSchedule(e, ws.id)} className="absolute -right-1.5 -top-1.5 opacity-0 group-hover/badge:opacity-100 h-4 w-4 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-all shrink-0 z-10 shadow-sm" title="Xóa ca này">
                                                                                 <X className="h-2.5 w-2.5" />
                                                                             </button>
-                                                                        </span>
+                                                                        </div>
                                                                     );
                                                                 })}
+                                                                <button onClick={(e) => { e.stopPropagation(); handleCellClick(row.userId, row.name, d, []); }} className="flex items-center justify-center gap-1 w-full py-1 mt-1 rounded text-[11px] font-medium text-blue-600 hover:bg-blue-50 transition-colors opacity-0 group-hover/cell:opacity-100">
+                                                                    <Plus className="h-3 w-3" /> Thêm lịch
+                                                                </button>
                                                             </div>
                                                         ) : (
-                                                            <span className="text-gray-200 text-lg leading-none">+</span>
+                                                            <div className="flex items-center justify-center h-full min-h-[40px]">
+                                                                <span className="text-gray-200 text-lg leading-none">+</span>
+                                                            </div>
                                                         )}
                                                     </td>
                                                 );
@@ -582,7 +540,13 @@ export function WorkSchedulePage() {
                 selectedDate={dialogDate}
                 shifts={shifts}
                 allUsers={users.filter(u => (u.status || 'active') === 'active').map(u => ({ id: u.id, name: u.name }))}
+                initialSelectedShiftIds={dialogShiftIds}
+                initialRepeatWeekly={dialogRepeatWeekly}
+                initialWorkOnHolidays={dialogWorkOnHolidays}
+                initialRepeatDays={dialogRepeatDays}
+                initialEndDate={dialogEndDate}
                 onSave={handleSaveSchedule}
+                onDelete={handleDeleteMultiple}
                 onCreateShift={handleCreateShift}
             />
 
