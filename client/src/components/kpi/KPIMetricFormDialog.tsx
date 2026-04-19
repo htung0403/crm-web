@@ -6,19 +6,44 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { Check, ChevronsUpDown } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import {
+    Command,
+    CommandEmpty,
+    CommandGroup,
+    CommandInput,
+    CommandItem,
+    CommandList,
+} from "@/components/ui/command";
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from "@/components/ui/popover";
 import { useKPI, type KPIPolicyMetric } from '@/hooks/useKPI';
 
-interface Props {
-    open: boolean;
-    onClose: () => void;
-    onSuccess: () => void;
-    policyId: string;
-    metric?: KPIPolicyMetric | null;
-}
+const SOURCE_KEYS = [
+    { value: 'order_revenue_by_sale', label: 'Doanh thu (Sale)' },
+    { value: 'closed_leads_ratio', label: 'Tỷ lệ chốt Lead' },
+    { value: 'return_customer_count', label: 'Số khách hàng quay lại' },
+    { value: 'lead_reclaimed_count', label: 'Số Lead bị thu hồi' },
+    { value: 'sla_missed_count', label: 'Số lần trễ SLA' },
+    { value: 'completed_jobs_count', label: 'Số công việc hoàn thành' },
+    { value: 'on_time_completion_rate', label: 'Tỷ lệ hoàn thành đúng hạn' },
+    { value: 'before_sale_task_completed_on_time_rate', label: 'Tỷ lệ chăm sóc Lead đúng hạn' },
+    { value: 'after_sale_task_completed_on_time_rate', label: 'Tỷ lệ chăm sóc sau bán đúng hạn' },
+    { value: 'status_update_rate', label: 'Tỷ lệ cập nhật trạng thái' },
+    { value: 'late_jobs_count', label: 'Số công việc trễ hạn' },
+    { value: 'rework_count', label: 'Số lần phải làm lại' },
+    { value: 'bad_feedback_count', label: 'Số phản hồi xấu' },
+    { value: 'employee_violation_logs', label: 'Tổng lỗi vi phạm' },
+];
 
 export function KPIMetricFormDialog({ open, onClose, onSuccess, policyId, metric }: Props) {
     const { addMetric, updateMetric } = useKPI();
     const isEditing = !!metric;
+    const [openSourceKey, setOpenSourceKey] = useState(false);
 
     const [form, setForm] = useState({
         metric_code: metric?.metric_code || '',
@@ -334,11 +359,60 @@ export function KPIMetricFormDialog({ open, onClose, onSuccess, policyId, metric
                         </div>
                         <div>
                             <Label>Source key</Label>
-                            <Input
-                                value={form.source_key}
-                                onChange={e => setForm(f => ({ ...f, source_key: e.target.value }))}
-                                placeholder="VD: order_revenue_by_sale"
-                            />
+                            <Popover open={openSourceKey} onOpenChange={setOpenSourceKey}>
+                                <PopoverTrigger asChild>
+                                    <Button
+                                        variant="outline"
+                                        role="combobox"
+                                        aria-expanded={openSourceKey}
+                                        className="w-full justify-between font-normal"
+                                    >
+                                        {form.source_key
+                                            ? SOURCE_KEYS.find((key) => key.value === form.source_key)?.label || form.source_key
+                                            : "Chọn hoặc nhập key..."}
+                                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-[400px] p-0" align="start">
+                                    <Command>
+                                        <CommandInput 
+                                            placeholder="Tìm kiếm hoặc nhập key mới..." 
+                                            onValueChange={(v) => {
+                                                // Allow typing custom key if not in list
+                                                if (v && !SOURCE_KEYS.some(k => k.value === v)) {
+                                                    setForm(f => ({ ...f, source_key: v }));
+                                                }
+                                            }}
+                                        />
+                                        <CommandList>
+                                            <CommandEmpty>Không tìm thấy key nào. Nhấn Enter để dùng key này.</CommandEmpty>
+                                            <CommandGroup>
+                                                {SOURCE_KEYS.map((key) => (
+                                                    <CommandItem
+                                                        key={key.value}
+                                                        value={key.value}
+                                                        onSelect={(currentValue) => {
+                                                            setForm(f => ({ ...f, source_key: currentValue }));
+                                                            setOpenSourceKey(false);
+                                                        }}
+                                                    >
+                                                        <Check
+                                                            className={cn(
+                                                                "mr-2 h-4 w-4",
+                                                                form.source_key === key.value ? "opacity-100" : "opacity-0"
+                                                            )}
+                                                        />
+                                                        <div className="flex flex-col">
+                                                            <span>{key.label}</span>
+                                                            <span className="text-xs text-muted-foreground">{key.value}</span>
+                                                        </div>
+                                                    </CommandItem>
+                                                ))}
+                                            </CommandGroup>
+                                        </CommandList>
+                                    </Command>
+                                </PopoverContent>
+                            </Popover>
                         </div>
                     </div>
 
