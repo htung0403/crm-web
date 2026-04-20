@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,6 +22,14 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover";
 import { useKPI, type KPIPolicyMetric } from '@/hooks/useKPI';
+
+interface Props {
+    open: boolean;
+    onClose: () => void;
+    onSuccess: () => void;
+    policyId: string;
+    metric?: KPIPolicyMetric | null;
+}
 
 const SOURCE_KEYS = [
     { value: 'order_revenue_by_sale', label: 'Doanh thu (Sale)' },
@@ -72,7 +80,7 @@ export function KPIMetricFormDialog({ open, onClose, onSuccess, policyId, metric
     const [saving, setSaving] = useState(false);
 
     // Reset when metric changes
-    useState(() => {
+    useEffect(() => {
         if (metric) {
             setForm({
                 metric_code: metric.metric_code,
@@ -92,8 +100,32 @@ export function KPIMetricFormDialog({ open, onClose, onSuccess, policyId, metric
                 per_event_points: metric.scoring_rules?.points_per_event ?? -1,
                 per_event_max: metric.scoring_rules?.max_deduct ?? -5,
             });
+        } else {
+            setForm({
+                metric_code: '',
+                metric_name: '',
+                metric_group: 'output',
+                description: '',
+                weight: 10,
+                score_type: 'threshold',
+                target_type: 'percentage',
+                target_value: 0,
+                source_type: 'manual',
+                source_key: '',
+                manual_input_allowed: false,
+                manager_review_required: false,
+                sort_order: 0,
+                scoring_tiers: [
+                    { min: 100, max: null, score: 10 },
+                    { min: 80, max: 99, score: 8 },
+                    { min: 60, max: 79, score: 5 },
+                    { min: 0, max: 59, score: 2 },
+                ],
+                per_event_points: -1,
+                per_event_max: -5,
+            });
         }
-    });
+    }, [metric, open]);
 
     const buildScoringRules = () => {
         switch (form.score_type) {
@@ -345,74 +377,80 @@ export function KPIMetricFormDialog({ open, onClose, onSuccess, policyId, metric
                     )}
 
                     {/* Data source */}
-                    <div className="grid grid-cols-2 gap-3">
-                        <div>
-                            <Label>Nguồn dữ liệu</Label>
-                            <Select value={form.source_type} onValueChange={v => setForm(f => ({ ...f, source_type: v as "auto" | "manual" | "hybrid" }))}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="auto">Tự động (auto)</SelectItem>
-                                    <SelectItem value="hybrid">Kết hợp (hybrid)</SelectItem>
-                                    <SelectItem value="manual">Thủ công (manual)</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
-                            <Label>Source key</Label>
-                            <Popover open={openSourceKey} onOpenChange={setOpenSourceKey}>
-                                <PopoverTrigger asChild>
-                                    <Button
-                                        variant="outline"
-                                        role="combobox"
-                                        aria-expanded={openSourceKey}
-                                        className="w-full justify-between font-normal"
-                                    >
-                                        {form.source_key
-                                            ? SOURCE_KEYS.find((key) => key.value === form.source_key)?.label || form.source_key
-                                            : "Chọn hoặc nhập key..."}
-                                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                    </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-[400px] p-0" align="start">
-                                    <Command>
-                                        <CommandInput 
-                                            placeholder="Tìm kiếm hoặc nhập key mới..." 
-                                            onValueChange={(v) => {
-                                                // Allow typing custom key if not in list
-                                                if (v && !SOURCE_KEYS.some(k => k.value === v)) {
-                                                    setForm(f => ({ ...f, source_key: v }));
-                                                }
-                                            }}
-                                        />
-                                        <CommandList>
-                                            <CommandEmpty>Không tìm thấy key nào. Nhấn Enter để dùng key này.</CommandEmpty>
-                                            <CommandGroup>
-                                                {SOURCE_KEYS.map((key) => (
-                                                    <CommandItem
-                                                        key={key.value}
-                                                        value={key.value}
-                                                        onSelect={(currentValue) => {
-                                                            setForm(f => ({ ...f, source_key: currentValue }));
-                                                            setOpenSourceKey(false);
-                                                        }}
-                                                    >
-                                                        <Check
-                                                            className={cn(
-                                                                "mr-2 h-4 w-4",
-                                                                form.source_key === key.value ? "opacity-100" : "opacity-0"
-                                                            )}
-                                                        />
-                                                        <div className="flex flex-col">
-                                                            <span>{key.label}</span>
-                                                            <span className="text-xs text-muted-foreground">{key.value}</span>
-                                                        </div>
-                                                    </CommandItem>
-                                                ))}
-                                            </CommandGroup>
-                                        </CommandList>
-                                    </Command>
-                                </PopoverContent>
-                            </Popover>
+                    <div className={cn(
+                        "p-3 rounded-lg border space-y-3",
+                        form.source_type === 'manual' ? "bg-muted/30" : "bg-primary/5 border-primary/20"
+                    )}>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div>
+                                <Label className="font-semibold">Nguồn dữ liệu</Label>
+                                <Select value={form.source_type} onValueChange={v => setForm(f => ({ ...f, source_type: v as "auto" | "manual" | "hybrid" }))}>
+                                    <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="auto">Tự động (auto)</SelectItem>
+                                        <SelectItem value="hybrid">Kết hợp (hybrid)</SelectItem>
+                                        <SelectItem value="manual">Thủ công (manual)</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            {(form.source_type === 'auto' || form.source_type === 'hybrid') && (
+                                <div>
+                                    <Label className="font-semibold text-primary">Source key *</Label>
+                                    <Popover open={openSourceKey} onOpenChange={setOpenSourceKey}>
+                                        <PopoverTrigger asChild>
+                                            <Button
+                                                variant="outline"
+                                                role="combobox"
+                                                aria-expanded={openSourceKey}
+                                                className="w-full justify-between font-normal bg-background border-primary/30"
+                                            >
+                                                {form.source_key
+                                                    ? SOURCE_KEYS.find((key) => key.value === form.source_key)?.label || form.source_key
+                                                    : "Chọn hoặc nhập key..."}
+                                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                            </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-[400px] p-0" align="start">
+                                            <Command>
+                                                <CommandInput 
+                                                    placeholder="Tìm kiếm hoặc nhập key mới..." 
+                                                    onValueChange={(v) => {
+                                                        if (v && !SOURCE_KEYS.some(k => k.value === v)) {
+                                                            setForm(f => ({ ...f, source_key: v }));
+                                                        }
+                                                    }}
+                                                />
+                                                <CommandList>
+                                                    <CommandEmpty>Không tìm thấy key nào. Nhấn Enter để dùng key này.</CommandEmpty>
+                                                    <CommandGroup>
+                                                        {SOURCE_KEYS.map((key) => (
+                                                            <CommandItem
+                                                                key={key.value}
+                                                                value={key.value}
+                                                                onSelect={(currentValue) => {
+                                                                    setForm(f => ({ ...f, source_key: currentValue }));
+                                                                    setOpenSourceKey(false);
+                                                                }}
+                                                            >
+                                                                <Check
+                                                                    className={cn(
+                                                                        "mr-2 h-4 w-4",
+                                                                        form.source_key === key.value ? "opacity-100" : "opacity-0"
+                                                                    )}
+                                                                />
+                                                                <div className="flex flex-col">
+                                                                    <span>{key.label}</span>
+                                                                    <span className="text-xs text-muted-foreground">{key.value}</span>
+                                                                </div>
+                                                            </CommandItem>
+                                                        ))}
+                                                    </CommandGroup>
+                                                </CommandList>
+                                            </Command>
+                                        </PopoverContent>
+                                    </Popover>
+                                </div>
+                            )}
                         </div>
                     </div>
 
