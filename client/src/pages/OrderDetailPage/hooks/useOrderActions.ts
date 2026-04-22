@@ -46,7 +46,7 @@ export function useOrderActions(
 
     const updateOrderItemStatus = useCallback(async (itemId: string, status: string, reason?: string, photos?: string[]) => {
         try {
-            await orderItemsApi.updateStatus(itemId, status, reason, photos);
+            await orderItemsApi.updateStatus(itemId, status, reason, undefined, photos);
             await reloadOrder();
         } catch (error) {
             toast.error('Lỗi khi cập nhật trạng thái hạng mục');

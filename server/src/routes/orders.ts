@@ -1927,12 +1927,14 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
             delivery_received_at,
         } = req.body;
 
+        let currentData: any = null;
         if (care_warranty_flow !== undefined || care_warranty_stage !== undefined || after_sale_stage !== undefined) {
             const { data: current } = await supabaseAdmin
                 .from('orders')
-                .select('care_warranty_flow, care_warranty_stage, after_sale_stage')
-                .eq('id', id)
-                .single();
+            .select('care_warranty_flow, care_warranty_stage, after_sale_stage, debt_start_at')
+            .eq('id', id)
+            .single();
+            currentData = current;
             if (care_warranty_flow !== undefined || care_warranty_stage !== undefined) {
                 oldCareFlow = (current as any)?.care_warranty_flow ?? null;
                 oldCareStage = (current as any)?.care_warranty_stage ?? null;
@@ -1989,6 +1991,11 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
         }
         if (after_sale_stage !== undefined) {
             updatePayload.after_sale_stage = after_sale_stage || null;
+
+            // Set debt_start_at when entering kiểm nợ stage (only if not already set)
+            if (after_sale_stage === 'after1_debt' && !currentData?.debt_start_at) {
+                updatePayload.debt_start_at = new Date().toISOString();
+            }
         }
 
         const { data: order, error } = await supabaseAdmin
