@@ -220,8 +220,8 @@ export const orderProductsApi = {
         api.get<ApiResponse<any>>(`/order-products/${id}`),
 
     // Update product status
-    updateStatus: (id: string, status: string) =>
-        api.patch<ApiResponse<any>>(`/order-products/${id}/status`, { status }),
+    updateStatus: (id: string, status: string, reason?: string, warranty_code?: string) =>
+        api.patch<ApiResponse<any>>(`/order-products/${id}/status`, { status, ...(reason !== undefined && { reason }), ...(warranty_code !== undefined && { warranty_code }) }),
 
     // Assign technician to a service
     assignService: (serviceId: string, technician_id: string) =>
@@ -381,7 +381,7 @@ export const requestsApi = {
         api.patch<ApiResponse<any>>(`/requests/accessories/${id}`, data),
     updatePartner: (id: string, data: { status?: string; notes?: string; metadata?: Record<string, any> }) =>
         api.patch<ApiResponse<any>>(`/requests/partners/${id}`, data),
-    updateExtension: (id: string, data: { status?: string; customer_result?: string; new_due_at?: string; valid_reason?: boolean }) =>
+    updateExtension: (id: string, data: { status?: string; customer_result?: string; new_due_at?: string; valid_reason?: boolean; kpi_impact?: boolean }) =>
         api.patch<ApiResponse<any>>(`/requests/extensions/${id}`, data),
 };
 
