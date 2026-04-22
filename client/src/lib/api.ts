@@ -292,6 +292,9 @@ export const orderProductsApi = {
         care_warranty_flow?: string | null;
         care_warranty_stage?: string | null;
     }) => api.patch<ApiResponse<any>>(`/order-products/${id}/after-sale-data`, data),
+
+    resetServices: (id: string) =>
+        api.patch<ApiResponse<any>>(`/order-products/${id}/reset-services`, {}),
 };
 
 // Order Items API

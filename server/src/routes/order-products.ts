@@ -123,6 +123,43 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
     }
 });
 
+// Reset all services of an order_product to step1 (for warranty re-entry)
+router.patch('/:id/reset-services', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        
+        // Fetch all service IDs for this product
+        const { data: services, error: fetchError } = await supabaseAdmin
+            .from('order_product_services')
+            .select('id')
+            .eq('order_product_id', id);
+        
+        if (fetchError) throw new ApiError('Không thể lấy danh sách services', 500);
+        
+        if (!services || services.length === 0) {
+            return res.json({ status: 'success', data: [], message: 'Không có services nào' });
+        }
+        
+        const serviceIds = services.map(s => s.id);
+        
+        const { data: updated, error: updateError } = await supabaseAdmin
+            .from('order_product_services')
+            .update({ status: 'step1', updated_at: new Date().toISOString() })
+            .in('id', serviceIds)
+            .select();
+        
+        if (updateError) throw new ApiError('Không thể reset services', 500);
+        
+        res.json({
+            status: 'success',
+            data: updated,
+            message: `Đã reset ${updated?.length || 0} services về step1`
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 // =====================================================
 // ORDER PRODUCT SERVICES ROUTES
 // =====================================================
