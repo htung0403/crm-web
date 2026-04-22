@@ -39,6 +39,9 @@ interface OrderProduct {
     condition_before?: string;
     images?: string[];
     status: string;
+    warranty_code?: string | null;
+    care_warranty_flow?: string | null;
+    care_warranty_stage?: string | null;
     order?: {
         id: string;
         order_code: string;

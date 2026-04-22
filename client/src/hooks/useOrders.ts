@@ -46,6 +46,7 @@ export interface OrderItem {
     sales_step_data?: any;
     care_warranty_flow?: string | null;
     care_warranty_stage?: string | null;
+    warranty_code?: string | null;
     delivery_payment_method?: string | null;
 }
 
@@ -101,6 +102,7 @@ export interface Order {
     feedback_requested_at?: string | null;
     care_warranty_flow?: string | null;
     care_warranty_stage?: string | null;
+    warranty_code?: string | null;
     delivery_payment_method?: string | null;
     notes?: string;
     customer_items?: any[];
