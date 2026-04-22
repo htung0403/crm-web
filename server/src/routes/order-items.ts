@@ -328,7 +328,7 @@ router.patch('/:id/assign-sale', authenticate, async (req: AuthenticatedRequest,
 router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { status, reason, photos } = req.body;
+        const { status, reason, photos, warranty_code } = req.body;
         const userId = req.user?.id;
 
         const validStatuses = [
@@ -374,11 +374,12 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
         // products (order_products) have 'delivered', handled separately later
         const targetStatus = (status === 'after_sale' || status === 'delivered') ? 'completed' : status;
 
-        const updateData: any = {
+        const updateItemData: any = {
             status: targetStatus
         };
+        if (warranty_code !== undefined) updateItemData.warranty_code = warranty_code;
 
-        const updateDataWithTimes: any = { ...updateData };
+        const updateDataWithTimes: any = { ...updateItemData };
         if (status === 'completed' || status === 'after_sale' || status === 'delivered') {
             updateDataWithTimes.completed_at = new Date().toISOString();
         } else if (status === 'in_progress') {
@@ -417,7 +418,7 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
         // Try V2 product (Doesn't have started_at/completed_at, and uses 'processing' instead of 'in_progress' and 'delivered' for 'after_sale')
         if (!item) {
             let productStatus = status;
-            const updateProductData: any = { ...updateData };
+            const updateProductData: any = { ...updateItemData };
             
             if (status === 'in_progress') productStatus = 'processing';
             else if (status === 'after_sale' || status === 'delivered') {
@@ -1874,6 +1875,26 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
                 to_stage: stage,
                 created_by: userId
             });
+        }
+
+        // Set debt_start_at on parent order when item transitions to after1_debt (only if not already set)
+        if (stage === 'after1_debt' && item.order_id) {
+            try {
+                const { data: parentOrder } = await supabaseAdmin
+                    .from('orders')
+                    .select('debt_start_at')
+                    .eq('id', item.order_id)
+                    .single();
+
+                if (!parentOrder?.debt_start_at) {
+                    await supabaseAdmin
+                        .from('orders')
+                        .update({ debt_start_at: new Date().toISOString() })
+                        .eq('id', item.order_id);
+                }
+            } catch (debtErr) {
+                console.error('Error setting debt_start_at on parent order:', debtErr);
+            }
         }
 
         res.json({
