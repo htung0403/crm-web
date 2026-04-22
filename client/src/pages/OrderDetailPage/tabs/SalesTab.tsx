@@ -68,6 +68,7 @@ const SalesCard = memo(({
     onTabChange?: (tab: string) => void;
 }) => {
     const leadItem = group.product || group.services[0];
+    const isWarranty = leadItem?.care_warranty_flow === 'warranty' || !!leadItem?.warranty_code;
     const draggableId = group.product?.id ?? group.services.map((s: OrderItem) => s.id).join('-');
 
     const productImage =
@@ -136,7 +137,14 @@ const SalesCard = memo(({
                         </div>
                     )}
                     <div className="flex justify-between items-start mb-2">
-                        <span className="text-xs font-semibold text-gray-400">#{order.order_code}</span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-xs font-semibold text-gray-400">#{order.order_code}</span>
+                            {isWarranty && (
+                                <Badge className="bg-orange-100 text-orange-700 border-orange-300 text-[10px] px-1 h-4 hover:bg-orange-100">
+                                    BH
+                                </Badge>
+                            )}
+                        </div>
                         <span className="text-xs font-bold text-muted-foreground text-[10px]">
                             #{leadItem?.item_code?.slice(-4) || 'Item'}
                         </span>
