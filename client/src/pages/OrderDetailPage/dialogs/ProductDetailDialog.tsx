@@ -26,7 +26,7 @@ import { ProductChat } from '@/components/orders/workflow/ProductChat';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import { cn, formatCurrency, formatDateTime, formatDate } from '@/lib/utils';
 import { SALES_STATUS_LABELS, getCareWarrantyStageLabel, getAfterSaleStageLabel } from '../constants';
-import { orderItemsApi } from '@/lib/api';
+import { orderItemsApi, orderProductsApi } from '@/lib/api';
 import { toast } from 'sonner';
 import { ImageUpload } from '@/components/products/ImageUpload';
 import { useUsers } from '@/hooks/useUsers';
@@ -1655,13 +1655,21 @@ export function ProductDetailDialog({
                                                     setSaving(true);
                                                     try {
                                                         const isCustomerItem = !!product;
-                                                        const api = isCustomerItem ? (await import('@/lib/api')).orderProductsApi : (await import('@/lib/api')).orderItemsApi;
+                                                        const apiModule = isCustomerItem ? orderProductsApi : orderItemsApi;
                                                         
-                                                        // Update item status to 'step1'
-                                                        await api.updateStatus(entityId, 'step1', 'Bảo hành lại');
+                                                        const now = new Date();
+                                                        const seq = `${now.getFullYear().toString().slice(-2)}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}`;
+                                                        const warrantyCode = `HDBH${order?.order_code || ''}.${entityId.slice(-4)}.${seq}`;
+
+                                                        await apiModule.updateStatus(entityId, 'step1', 'Bảo hành lại', warrantyCode);
                                                         
-                                                        const code = `HDBH${order?.order_code || ''}.${entityId.slice(-4)}`;
-                                                        toast.success(`Đã tạo HD Bảo hành: ${code} và chuyển về Nhận đồ & Chụp ảnh`);
+                                                        await apiModule.updateAfterSaleData(entityId, { care_warranty_stage: 'war3' });
+
+                                                        if (isCustomerItem) {
+                                                            await orderProductsApi.resetServices(entityId);
+                                                        }
+                                                        
+                                                        toast.success(`Đã tạo HD Bảo hành: ${warrantyCode} và chuyển về Nhận đồ & Chụp ảnh`);
                                                         onOpenChange(false);
                                                         if (setActiveTab) setActiveTab('sales');
                                                         onReloadOrder();
