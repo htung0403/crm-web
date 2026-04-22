@@ -77,7 +77,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { status } = req.body;
+        const { status, reason, warranty_code } = req.body;
 
         const validStatuses = [
             'pending', 'processing', 'completed', 'delivered', 'cancelled',
@@ -91,6 +91,10 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
             status,
             updated_at: new Date().toISOString()
         };
+
+        if (warranty_code !== undefined) {
+            updateData.warranty_code = warranty_code;
+        }
 
         if (status === 'completed') {
             updateData.completed_at = new Date().toISOString();
@@ -536,6 +540,26 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
                 to_stage: stage,
                 created_by: userId
             });
+        }
+
+        // Set debt_start_at on parent order when product transitions to after1_debt (only if not already set)
+        if (stage === 'after1_debt' && product.order_id) {
+            try {
+                const { data: parentOrder } = await supabaseAdmin
+                    .from('orders')
+                    .select('debt_start_at')
+                    .eq('id', product.order_id)
+                    .single();
+
+                if (!parentOrder?.debt_start_at) {
+                    await supabaseAdmin
+                        .from('orders')
+                        .update({ debt_start_at: new Date().toISOString() })
+                        .eq('id', product.order_id);
+                }
+            } catch (debtErr) {
+                console.error('Error setting debt_start_at on parent order:', debtErr);
+            }
         }
 
         res.json({
