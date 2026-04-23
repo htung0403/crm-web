@@ -957,7 +957,7 @@ export function RequestsPage() {
         }
     };
 
-    const handleUpdateExtension = async (requestId: string, status: string, newDueAt?: string, validReason?: boolean, customerResult?: string) => {
+    const handleUpdateExtension = async (requestId: string, status: string, newDueAt?: string, validReason?: boolean, customerResult?: string, kpiImpact?: boolean) => {
         setUpdatingId(requestId);
         try {
             await requestsApi.updateExtension(requestId, {
@@ -965,6 +965,7 @@ export function RequestsPage() {
                 ...(newDueAt && { new_due_at: newDueAt }),
                 ...(typeof validReason === 'boolean' && { valid_reason: validReason }),
                 ...(customerResult !== undefined && { customer_result: customerResult }),
+                ...(typeof kpiImpact === 'boolean' && { kpi_impact: kpiImpact }),
             });
             toast.success('Đã cập nhật yêu cầu gia hạn');
             loadAll();
@@ -1306,6 +1307,21 @@ export function RequestsPage() {
             extensionNewDueAt || undefined,
             finalValidReason,
             extensionCustomerResult
+        );
+    };
+
+    const handleSubmitExtensionWithKpi = async (kpiImpactValue?: boolean) => {
+        if (!extensionRow?.id) return;
+        const isRejected = extensionStatus === 'rejected';
+        const finalValidReason = isRejected ? extensionValidReason : true;
+
+        await handleUpdateExtension(
+            extensionRow.id,
+            extensionStatus,
+            extensionNewDueAt || undefined,
+            finalValidReason,
+            extensionCustomerResult,
+            kpiImpactValue
         );
     };
 
@@ -1959,16 +1975,43 @@ export function RequestsPage() {
                             </div>
                         </div>
                     )}
-                    <DialogFooter className="p-6 bg-slate-50/50 border-t flex items-center justify-between gap-3">
-                        <Button variant="ghost" onClick={() => setShowExtensionDialog(false)} className="rounded-xl px-6">Hủy</Button>
-                        <Button
-                            onClick={handleSubmitExtension}
-                            disabled={!!updatingId}
-                            className={`rounded-xl px-10 font-bold shadow-lg ${extensionStatus === 'rejected' ? 'bg-red-600 hover:bg-red-700 shadow-red-200 text-white' : 'shadow-primary/20 bg-primary text-primary-foreground'}`}
-                        >
-                            {updatingId ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
-                            Xác nhận xử lý
-                        </Button>
+                    <DialogFooter className="p-6 bg-slate-50/50 border-t flex flex-col gap-3">
+                        {extensionStatus === 'rejected' ? (
+                            <div className="flex items-center justify-between gap-3">
+                                <Button variant="ghost" onClick={() => setShowExtensionDialog(false)} className="rounded-xl px-6">Hủy</Button>
+                                <Button
+                                    onClick={handleSubmitExtension}
+                                    disabled={!!updatingId}
+                                    className="rounded-xl px-10 font-bold shadow-lg bg-red-600 hover:bg-red-700 shadow-red-200 text-white"
+                                >
+                                    {updatingId ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
+                                    Từ chối
+                                </Button>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="flex gap-2 w-full">
+                                    <Button
+                                        onClick={() => handleSubmitExtensionWithKpi(false)}
+                                        disabled={!!updatingId}
+                                        className="flex-1 rounded-xl font-bold shadow-lg bg-green-600 hover:bg-green-700 text-white"
+                                    >
+                                        {updatingId ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
+                                        Duyệt không tính KPI
+                                    </Button>
+                                    <Button
+                                        onClick={() => handleSubmitExtensionWithKpi(true)}
+                                        disabled={!!updatingId}
+                                        variant="outline"
+                                        className="flex-1 rounded-xl font-bold border-orange-300 text-orange-700 hover:bg-orange-50"
+                                    >
+                                        {updatingId ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <AlertCircle className="w-4 h-4 mr-2" />}
+                                        Duyệt tính vào KPI
+                                    </Button>
+                                </div>
+                                <Button variant="ghost" onClick={() => setShowExtensionDialog(false)} className="rounded-xl px-6 w-full">Hủy</Button>
+                            </>
+                        )}
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

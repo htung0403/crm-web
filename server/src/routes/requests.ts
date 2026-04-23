@@ -246,7 +246,7 @@ router.get('/extensions', async (req: AuthenticatedRequest, res: Response, next:
 router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { status, customer_result, new_due_at, valid_reason } = req.body;
+        const { status, customer_result, new_due_at, valid_reason, kpi_impact } = req.body;
         const userId = req.user?.id;
 
         const { data, error } = await supabaseAdmin
@@ -256,6 +256,7 @@ router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, 
                 customer_result: customer_result !== undefined ? customer_result : undefined,
                 new_due_at: new_due_at || undefined,
                 valid_reason: typeof valid_reason === 'boolean' ? valid_reason : undefined,
+                kpi_impact: typeof kpi_impact === 'boolean' ? kpi_impact : undefined,
                 updated_by: userId,
                 updated_at: new Date().toISOString()
             })
@@ -265,6 +266,17 @@ router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, 
 
         if (error) {
             throw new ApiError('Không thể cập nhật yêu cầu gia hạn: ' + error.message, 500);
+        }
+
+        // When extension approved, propagate new_due_at to orders.due_at
+        if (data && new_due_at && status && !['rejected', 'declined'].includes(status)) {
+            const orderId = data.order_id;
+            if (orderId) {
+                await supabaseAdmin
+                    .from('orders')
+                    .update({ due_at: new_due_at })
+                    .eq('id', orderId);
+            }
         }
 
         // 🔔 WH5: Fire webhook — Gia hạn (status change)

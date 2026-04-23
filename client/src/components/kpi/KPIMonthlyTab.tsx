@@ -237,7 +237,7 @@ export function KPIMonthlyTab() {
                                     <th className="p-3 text-center text-sm font-medium text-muted-foreground">Xếp loại</th>
                                     <th className="p-3 text-right text-sm font-medium text-muted-foreground">Thưởng</th>
                                     <th className="p-3 text-right text-sm font-medium text-muted-foreground">Phạt</th>
-                                    <th className="p-3 text-center text-sm font-medium text-muted-foreground">Factor</th>
+                                    <th className="p-3 text-center text-sm font-medium text-muted-foreground">HH (%)</th>
                                     <th className="p-3 text-center text-sm font-medium text-muted-foreground">Trạng thái</th>
                                     <th className="p-3 text-center text-sm font-medium text-muted-foreground">Thao tác</th>
                                 </tr>
@@ -291,7 +291,7 @@ export function KPIMonthlyTab() {
                                                 {Number(record.kpi_penalty_amount) > 0 ? formatCurrency(record.kpi_penalty_amount) : '-'}
                                             </td>
                                             <td className="p-3 text-center font-medium text-sm">
-                                                x{Number(record.kpi_commission_factor).toFixed(2)}
+                                                {Number(record.kpi_commission_factor)}%
                                             </td>
                                             <td className="p-3 text-center">
                                                 <Badge variant={statusColors[record.status] as any}>

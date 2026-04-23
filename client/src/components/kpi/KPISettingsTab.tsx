@@ -86,7 +86,7 @@ export function KPISettingsTab() {
                                     <th className="p-3 text-center text-sm font-medium text-muted-foreground">Điểm max</th>
                                     <th className="p-3 text-center text-sm font-medium text-muted-foreground">Thưởng (VNĐ)</th>
                                     <th className="p-3 text-center text-sm font-medium text-muted-foreground">Phạt (VNĐ)</th>
-                                    <th className="p-3 text-center text-sm font-medium text-muted-foreground">Hệ số HH</th>
+                                    <th className="p-3 text-center text-sm font-medium text-muted-foreground">Hệ số HH (%)</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -125,20 +125,24 @@ export function KPISettingsTab() {
                                             </td>
                                             <td className="p-3">
                                                 <Input
-                                                    type="number"
+                                                    type="text"
                                                     className="h-8 text-sm text-center w-28 mx-auto"
-                                                    value={getValue(config, 'bonus_amount') as number}
-                                                    onChange={e => handleChange(config.id, 'bonus_amount', Number(e.target.value))}
-                                                    step="50000"
+                                                    value={(getValue(config, 'bonus_amount') as number || 0).toLocaleString('vi-VN')}
+                                                    onChange={e => {
+                                                        const num = parseInt(e.target.value.replace(/\D/g, '') || '0', 10);
+                                                        handleChange(config.id, 'bonus_amount', num);
+                                                    }}
                                                 />
                                             </td>
                                             <td className="p-3">
                                                 <Input
-                                                    type="number"
+                                                    type="text"
                                                     className="h-8 text-sm text-center w-28 mx-auto"
-                                                    value={getValue(config, 'penalty_amount') as number}
-                                                    onChange={e => handleChange(config.id, 'penalty_amount', Number(e.target.value))}
-                                                    step="50000"
+                                                    value={(getValue(config, 'penalty_amount') as number || 0).toLocaleString('vi-VN')}
+                                                    onChange={e => {
+                                                        const num = parseInt(e.target.value.replace(/\D/g, '') || '0', 10);
+                                                        handleChange(config.id, 'penalty_amount', num);
+                                                    }}
                                                 />
                                             </td>
                                             <td className="p-3">
@@ -147,9 +151,9 @@ export function KPISettingsTab() {
                                                     className="h-8 text-sm text-center w-20 mx-auto"
                                                     value={getValue(config, 'commission_factor') as number}
                                                     onChange={e => handleChange(config.id, 'commission_factor', Number(e.target.value))}
-                                                    step="0.05"
+                                                    step="5"
                                                     min="0"
-                                                    max="2"
+                                                    max="500"
                                                 />
                                             </td>
                                         </tr>
@@ -170,7 +174,7 @@ export function KPISettingsTab() {
                     <p><strong>Điểm min / max:</strong> Khoảng điểm để xếp vào loại này. VD: A+ là 95-100 điểm.</p>
                     <p><strong>Thưởng:</strong> Số tiền thưởng KPI khi đạt xếp loại này.</p>
                     <p><strong>Phạt:</strong> Số tiền phạt KPI khi rơi vào xếp loại này (thường là loại D).</p>
-                    <p><strong>Hệ số HH:</strong> Hệ số nhân với hoa hồng. VD: 1.10 = hoa hồng x110%, 0.50 = hoa hồng x50%.</p>
+                    <p><strong>Hệ số HH (%):</strong> Tổng phần trăm hoa hồng được hưởng. VD: 150 = nhận 150% hoa hồng, 80 = nhận 80% hoa hồng.</p>
                     <p>Sau khi KPI tháng được khóa, các giá trị này sẽ được áp dụng để tính thưởng/phạt/hoa hồng cho nhân sự.</p>
                 </CardContent>
             </Card>

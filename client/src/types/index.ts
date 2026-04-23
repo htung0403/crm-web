@@ -89,6 +89,7 @@ export interface Order {
     care_warranty_flow?: string | null;
     /** war1-war3 (Bảo hành), care6/care12/care-custom (Chăm sóc) */
     care_warranty_stage?: string | null;
+    warranty_code?: string | null;
 }
 
 export interface Product {

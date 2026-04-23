@@ -604,6 +604,9 @@ CREATE TABLE IF NOT EXISTS order_item_status_log (
     entity_id UUID NOT NULL,
     from_status VARCHAR(50),
     to_status VARCHAR(50) NOT NULL,
+    reason TEXT,
+    notes TEXT,
+    photos JSONB DEFAULT '[]',
     created_by UUID REFERENCES users(id),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );

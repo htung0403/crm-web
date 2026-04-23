@@ -77,7 +77,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { status } = req.body;
+        const { status, reason, warranty_code } = req.body;
 
         const validStatuses = [
             'pending', 'processing', 'completed', 'delivered', 'cancelled',
@@ -91,6 +91,10 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
             status,
             updated_at: new Date().toISOString()
         };
+
+        if (warranty_code !== undefined) {
+            updateData.warranty_code = warranty_code;
+        }
 
         if (status === 'completed') {
             updateData.completed_at = new Date().toISOString();
@@ -113,6 +117,43 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
             status: 'success',
             data: product,
             message: 'Đã cập nhật trạng thái sản phẩm'
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Reset all services of an order_product to step1 (for warranty re-entry)
+router.patch('/:id/reset-services', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        
+        // Fetch all service IDs for this product
+        const { data: services, error: fetchError } = await supabaseAdmin
+            .from('order_product_services')
+            .select('id')
+            .eq('order_product_id', id);
+        
+        if (fetchError) throw new ApiError('Không thể lấy danh sách services', 500);
+        
+        if (!services || services.length === 0) {
+            return res.json({ status: 'success', data: [], message: 'Không có services nào' });
+        }
+        
+        const serviceIds = services.map(s => s.id);
+        
+        const { data: updated, error: updateError } = await supabaseAdmin
+            .from('order_product_services')
+            .update({ status: 'step1', updated_at: new Date().toISOString() })
+            .in('id', serviceIds)
+            .select();
+        
+        if (updateError) throw new ApiError('Không thể reset services', 500);
+        
+        res.json({
+            status: 'success',
+            data: updated,
+            message: `Đã reset ${updated?.length || 0} services về step1`
         });
     } catch (error) {
         next(error);
@@ -536,6 +577,26 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
                 to_stage: stage,
                 created_by: userId
             });
+        }
+
+        // Set debt_start_at on parent order when product transitions to after1_debt (only if not already set)
+        if (stage === 'after1_debt' && product.order_id) {
+            try {
+                const { data: parentOrder } = await supabaseAdmin
+                    .from('orders')
+                    .select('debt_start_at')
+                    .eq('id', product.order_id)
+                    .single();
+
+                if (!parentOrder?.debt_start_at) {
+                    await supabaseAdmin
+                        .from('orders')
+                        .update({ debt_start_at: new Date().toISOString() })
+                        .eq('id', product.order_id);
+                }
+            } catch (debtErr) {
+                console.error('Error setting debt_start_at on parent order:', debtErr);
+            }
         }
 
         res.json({

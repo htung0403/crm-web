@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireSale } from '../middleware/auth.js';
+import { autoLogKpiViolation } from '../utils/kpiViolationLogger.js';
 
 const router = Router();
 
@@ -134,14 +135,15 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         const { id } = req.params;
         const { name, phone, email, source, company, address, notes, status, assigned_to, pipeline_stage, dob, delivery_method, tracking_code, shipping_fee } = req.body;
 
-        // Get current lead to check for status change
+        // Get current lead to check for status change and assigned_to change
         const { data: currentLead } = await supabaseAdmin
             .from('leads')
-            .select('status, pipeline_stage')
+            .select('status, pipeline_stage, assigned_to')
             .eq('id', id)
             .single();
 
         const oldStatus = currentLead?.status || currentLead?.pipeline_stage;
+        const oldAssignedTo = currentLead?.assigned_to;
         const newStatus = status || pipeline_stage;
 
         const updateData: Record<string, any> = {
@@ -203,6 +205,23 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                 old_status: oldStatus,
                 new_status: newStatus,
                 created_by: req.user?.id,
+            });
+        }
+
+        if (
+            assigned_to !== undefined &&
+            oldAssignedTo &&
+            assigned_to !== oldAssignedTo
+        ) {
+            await autoLogKpiViolation({
+                employeeId: oldAssignedTo,
+                relatedLeadId: id,
+                ruleCode: 'lead_reclaimed',
+                ruleName: assigned_to 
+                    ? 'Thu hồi Lead (Manager chuyển giao)'
+                    : 'Thu hồi Lead (Manager gỡ phân công)',
+                deductPoint: 0,
+                note: `Lead được chuyển từ sale cũ bởi ${(req as any).user?.name || (req as any).user?.id || 'unknown'}`
             });
         }
 

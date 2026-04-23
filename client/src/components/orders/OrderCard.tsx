@@ -41,6 +41,11 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
         order?.order_code ||
         'N/A';
 
+    const isWarranty =
+        productGroup.product?.care_warranty_flow === 'warranty' ||
+        !!productGroup.product?.warranty_code ||
+        productGroup.services?.some(s => s.care_warranty_flow === 'warranty');
+
     const technicianNames = (() => {
         const names = new Set<string>();
         for (const s of effectiveServices) {
@@ -122,9 +127,16 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
                             )}
                         </Avatar>
                         <div className="min-w-0 flex-1">
-                            <span className="font-mono text-[10px] text-muted-foreground block truncate">
-                                {productCode}
-                            </span>
+                            <div className="flex items-center gap-1.5">
+                                <span className="font-mono text-[10px] text-muted-foreground block truncate">
+                                    {productCode}
+                                </span>
+                                {isWarranty && (
+                                    <Badge className="bg-orange-100 text-orange-700 border-orange-300 hover:bg-orange-100 text-[9px] px-1 py-0 h-3.5 shrink-0">
+                                        BH
+                                    </Badge>
+                                )}
+                            </div>
                             <div className="text-[10px] text-primary font-medium mt-0.5 truncate" title={order.customer?.name}>
                                 {order.customer?.name || 'N/A'}
                             </div>

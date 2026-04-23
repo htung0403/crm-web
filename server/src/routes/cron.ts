@@ -1,6 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { checkAllSLA } from '../utils/slaManager.js';
 import { ApiError } from '../middleware/errorHandler.js';
+import { supabaseAdmin } from '../config/supabase.js';
+import { autoLogKpiViolation } from '../utils/kpiViolationLogger.js';
 
 const router = Router();
 
@@ -147,6 +149,81 @@ router.get('/auto-payroll', verifyCronSecret, async (req: Request, res: Response
             status: 'success',
             message: `Tự động tạo bảng lương tháng ${month}/${year}: ${batch.code}`,
             data: { batch },
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+/**
+ * GET /api/cron/check-debt-overdue
+ * Detect orders at kiểm nợ stage with overdue debt (>10 days).
+ * Auto-creates KPI violation logs for responsible sales.
+ * Should be called daily via external cron.
+ */
+router.get('/check-debt-overdue', verifyCronSecret, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        console.log('[Cron] Debt Overdue Check Triggered');
+        
+        const now = new Date();
+        const tenDaysAgo = new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000);
+        
+        // Find orders where:
+        // - debt_start_at is set and older than 10 days
+        // - remaining_debt > 0
+        // - sales_id is set (someone is responsible)
+        // - order is not cancelled
+        const { data: overdueOrders, error } = await supabaseAdmin
+            .from('orders')
+            .select('id, order_code, sales_id, debt_start_at, remaining_debt, total_amount')
+            .not('debt_start_at', 'is', null)
+            .not('sales_id', 'is', null)
+            .gt('remaining_debt', 0)
+            .lt('debt_start_at', tenDaysAgo.toISOString())
+            .neq('status', 'cancelled');
+        
+        if (error) {
+            console.error('[Cron] Error fetching overdue orders:', error);
+            throw error;
+        }
+        
+        let violationsCreated = 0;
+        const details: any[] = [];
+        
+        for (const order of (overdueOrders || [])) {
+            const overdueDays = Math.floor(
+                (now.getTime() - new Date(order.debt_start_at).getTime()) / (24 * 60 * 60 * 1000)
+            );
+            
+            await autoLogKpiViolation({
+                employeeId: order.sales_id,
+                relatedOrderId: order.id,
+                ruleCode: 'debt_overdue',
+                ruleName: `Nợ quá hạn (${overdueDays} ngày) - ${order.order_code}`,
+                deductPoint: 0,
+                note: `Đơn ${order.order_code}: còn nợ ${order.remaining_debt?.toLocaleString('vi-VN')}đ, đã ${overdueDays} ngày kể từ kiểm nợ`
+            });
+            
+            violationsCreated++;
+            details.push({
+                order_code: order.order_code,
+                sales_id: order.sales_id,
+                remaining_debt: order.remaining_debt,
+                overdue_days: overdueDays
+            });
+        }
+        
+        console.log(`[Cron] Debt check complete: ${violationsCreated} violations logged`);
+        
+        res.json({
+            status: 'success',
+            message: `Checked debt overdue: ${(overdueOrders || []).length} overdue orders found`,
+            data: {
+                overdue_count: (overdueOrders || []).length,
+                violations_created: violationsCreated,
+                details
+            },
+            timestamp: now.toISOString()
         });
     } catch (err) {
         next(err);

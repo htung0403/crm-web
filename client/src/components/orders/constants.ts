@@ -149,6 +149,9 @@ export interface OrderItem {
     technicians?: TechnicianAssignment[]; // Multiple technicians with commission
     department?: string; // Department of the service
     package_services?: PackageServiceAssignment[]; // Services in package for technician assignment
+    warranty_code?: string | null;
+    care_warranty_flow?: string | null;
+    care_warranty_stage?: string | null;
 }
 
 export interface CreateOrderData {

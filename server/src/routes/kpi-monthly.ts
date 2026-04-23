@@ -119,33 +119,77 @@ async function fetchAutoMetricValue(
                 return { value: total, ref: { order_count: (orders || []).length, total } };
             }
 
-            case 'closed_leads_ratio': {
-                const { data: allLeads } = await supabaseAdmin
+            case 'won_leads_ratio':
+            case 'closed_leads_ratio': { // backward compat alias
+                // Denominator: qualified leads assigned to this sale in period
+                // Qualified = pipeline_stage beyond initial contact (>= hen_gui_anh)
+                const qualifiedStages = ['hen_gui_anh', 'dam_phan_gia', 'hen_qua_ship', 'chot_don', 'fail'];
+                
+                const { data: qualifiedLeads } = await supabaseAdmin
                     .from('leads')
-                    .select('id, status')
+                    .select('id')
                     .eq('assigned_to', employeeId)
+                    .in('pipeline_stage', qualifiedStages)
                     .gte('created_at', startDate)
                     .lte('created_at', endDate);
-
-                const total = (allLeads || []).length;
-                const closed = (allLeads || []).filter(l => l.status === 'closed' || l.status === 'converted').length;
-                const ratio = total > 0 ? (closed / total) * 100 : 0;
-                return { value: ratio, ref: { total_leads: total, closed_leads: closed } };
+                
+                const qualifiedCount = (qualifiedLeads || []).length;
+                
+                // Numerator: leads that resulted in an order from this sale
+                let wonCount = 0;
+                
+                if (qualifiedCount > 0) {
+                    const qualifiedIds = (qualifiedLeads || []).map((l: any) => l.id);
+                    
+                    // Get leads that have been converted (have customer_id)
+                    const { data: convertedLeads } = await supabaseAdmin
+                        .from('leads')
+                        .select('id, customer_id')
+                        .in('id', qualifiedIds)
+                        .not('customer_id', 'is', null);
+                    
+                    if (convertedLeads && convertedLeads.length > 0) {
+                        const customerIds = convertedLeads.map((l: any) => l.customer_id).filter(Boolean);
+                        
+                        // Check which customers have orders from THIS sale in the period
+                        const { data: wonOrders } = await supabaseAdmin
+                            .from('orders')
+                            .select('customer_id')
+                            .eq('sales_id', employeeId)
+                            .in('customer_id', customerIds)
+                            .in('status', ['before_sale', 'in_progress', 'done', 'after_sale'])
+                            .gte('created_at', startDate)
+                            .lte('created_at', endDate);
+                        
+                        // Count unique leads that got orders (not unique orders)
+                        const wonCustomerIds = new Set((wonOrders || []).map((o: any) => o.customer_id));
+                        wonCount = convertedLeads.filter((l: any) => wonCustomerIds.has(l.customer_id)).length;
+                    }
+                }
+                
+                const ratio = qualifiedCount > 0 ? (wonCount / qualifiedCount) * 100 : 0;
+                return {
+                    value: ratio,
+                    ref: {
+                        qualified_leads: qualifiedCount,
+                        won_leads: wonCount,
+                        qualified_stages: qualifiedStages
+                    }
+                };
             }
 
             case 'return_customer_count': {
-                // Count customers who have more than 1 order from this sale in the period
-                const { data: orders } = await supabaseAdmin
+                const { data: periodOrders } = await supabaseAdmin
                     .from('orders')
                     .select('customer_id')
                     .eq('sales_id', employeeId)
-                    .in('status', ['done', 'after_sale'])
+                    .in('status', ['done', 'after_sale', 'in_progress', 'before_sale'])
                     .gte('created_at', startDate)
                     .lte('created_at', endDate);
 
-                const customerIds = (orders || []).map(o => o.customer_id).filter(Boolean);
-                // Check which customers had previous orders before this month
+                const customerIds = (periodOrders || []).map((o: any) => o.customer_id).filter(Boolean);
                 let returnCount = 0;
+
                 if (customerIds.length > 0) {
                     const uniqueCustomers = [...new Set(customerIds)];
                     for (const cid of uniqueCustomers) {
@@ -159,7 +203,14 @@ async function fetchAutoMetricValue(
                         if ((count || 0) > 0) returnCount++;
                     }
                 }
-                return { value: returnCount, ref: { return_customers: returnCount } };
+
+                return {
+                    value: returnCount,
+                    ref: {
+                        return_customers: returnCount,
+                        total_customers_in_period: new Set(customerIds).size
+                    }
+                };
             }
 
             case 'lead_reclaimed_count': {
@@ -236,7 +287,7 @@ async function fetchAutoMetricValue(
 
             case 'on_time_completion_rate': {
                 // Compare completed_at vs order due_at for technician jobs
-                // V1: order_items completed by this technician
+                // Excludes orders with approved extension requests where kpi_impact = false
                 const { data: techOrders } = await supabaseAdmin
                     .from('order_product_service_technicians')
                     .select('id, completed_at, service:order_product_services(order_id, completed_at, status)')
@@ -253,14 +304,38 @@ async function fetchAutoMetricValue(
 
                 const dueMap = new Map((ordersWithDue || []).map(o => [o.id, o.due_at]));
 
+                // Fetch extensions approved with kpi_impact=false (exclude those orders from KPI)
+                const orderIdsInPeriod = (ordersWithDue || []).map(o => o.id);
+                let excludedOrderIds = new Set<string>();
+
+                if (orderIdsInPeriod.length > 0) {
+                    const { data: excludedExtensions } = await supabaseAdmin
+                        .from('order_extension_requests')
+                        .select('order_id')
+                        .in('order_id', orderIdsInPeriod)
+                        .eq('kpi_impact', false)
+                        .in('status', ['approved', 'manager_approved', 'notified_tech', 'done']);
+
+                    excludedOrderIds = new Set((excludedExtensions || []).map((e: any) => e.order_id));
+                }
+
+                // Calculate rate excluding KPI-exempt orders
                 let totalWithDeadline = 0;
                 let onTimeCount = 0;
+                let excludedCount = 0;
 
                 for (const t of (techOrders || [])) {
                     const svc = Array.isArray(t.service) ? t.service[0] : t.service;
                     if (!svc || !svc.order_id) continue;
                     const dueAt = dueMap.get(svc.order_id);
                     if (!dueAt) continue;
+
+                    // Skip jobs excluded from KPI by approved extension with kpi_impact=false
+                    if (excludedOrderIds.has(svc.order_id)) {
+                        excludedCount++;
+                        continue;
+                    }
+
                     totalWithDeadline++;
                     const completedAt = t.completed_at || svc.completed_at;
                     if (completedAt && new Date(completedAt) <= new Date(dueAt)) {
@@ -271,7 +346,11 @@ async function fetchAutoMetricValue(
                 const onTimeRate = totalWithDeadline > 0 ? (onTimeCount / totalWithDeadline) * 100 : 100;
                 return {
                     value: Math.round(onTimeRate * 100) / 100,
-                    ref: { on_time: onTimeCount, total_with_deadline: totalWithDeadline }
+                    ref: {
+                        on_time: onTimeCount,
+                        total_with_deadline: totalWithDeadline,
+                        excluded_by_extension: excludedCount
+                    }
                 };
             }
 
@@ -420,6 +499,65 @@ async function fetchAutoMetricValue(
                 return { value: (violations || []).length, ref: { count: (violations || []).length } };
             }
 
+            case 'technical_process_violation_count': {
+                const { data: violations } = await supabaseAdmin
+                    .from('kpi_violation_logs')
+                    .select('id')
+                    .eq('employee_id', employeeId)
+                    .eq('month_key', monthKey)
+                    .eq('rule_code', 'technical_process')
+                    .eq('status', 'approved');
+
+                return { value: (violations || []).length, ref: { count: (violations || []).length } };
+            }
+
+            case 'critical_quality_error_count': {
+                const { data: violations } = await supabaseAdmin
+                    .from('kpi_violation_logs')
+                    .select('id')
+                    .eq('employee_id', employeeId)
+                    .eq('month_key', monthKey)
+                    .eq('rule_code', 'critical_quality_error')
+                    .eq('status', 'approved');
+
+                return { value: (violations || []).length, ref: { count: (violations || []).length } };
+            }
+
+            case 'cleaning_violation_count': {
+                const { data: violations } = await supabaseAdmin
+                    .from('kpi_violation_logs')
+                    .select('id')
+                    .eq('employee_id', employeeId)
+                    .eq('month_key', monthKey)
+                    .eq('rule_code', 'cleaning_violation')
+                    .eq('status', 'approved');
+
+                return { value: (violations || []).length, ref: { count: (violations || []).length } };
+            }
+
+            case 'conduct_deduction_sum': {
+                // Sum deduct_kpi_point for conduct violations (2-tier: conduct_light=2, conduct_severe=5)
+                const { data: violations } = await supabaseAdmin
+                    .from('kpi_violation_logs')
+                    .select('id, deduct_kpi_point')
+                    .eq('employee_id', employeeId)
+                    .eq('month_key', monthKey)
+                    .in('rule_code', ['conduct_light', 'conduct_severe'])
+                    .eq('status', 'approved');
+
+                const totalDeduction = (violations || []).reduce((sum: number, v: any) => sum + Math.abs(Number(v.deduct_kpi_point || 0)), 0);
+                return {
+                    value: totalDeduction,
+                    ref: {
+                        violations: (violations || []).map((v: any) => ({
+                            id: v.id,
+                            deduct_kpi_point: v.deduct_kpi_point
+                        })),
+                        total_deduction: totalDeduction
+                    }
+                };
+            }
+
             case 'bad_feedback_count': {
                 const { data: violations } = await supabaseAdmin
                     .from('kpi_violation_logs')
@@ -432,17 +570,57 @@ async function fetchAutoMetricValue(
                 return { value: (violations || []).length, ref: { count: (violations || []).length } };
             }
 
-            // Violation-based metrics (read from kpi_violation_logs)
             case 'employee_violation_logs': {
-                // Generic: count approved violations for this employee/month
-                const { data: violations } = await supabaseAdmin
+                // EXCLUDE violations already scored by their own dedicated metrics
+                const excludedRuleCodes = ['lead_reclaimed', 'sla_missed', 'debt_overdue'];
+                
+                let violationQuery = supabaseAdmin
                     .from('kpi_violation_logs')
                     .select('id')
                     .eq('employee_id', employeeId)
                     .eq('month_key', monthKey)
                     .eq('status', 'approved');
-
+                
+                for (const code of excludedRuleCodes) {
+                    violationQuery = violationQuery.neq('rule_code', code);
+                }
+                
+                const { data: violations } = await violationQuery;
                 return { value: (violations || []).length, ref: { count: (violations || []).length } };
+            }
+
+            case 'overdue_receivables_after_finish_photo_by_sale': {
+                // Count orders where debt_start_at is set, remaining_debt > 0,
+                // and more than 10 days have passed since debt_start_at
+                const tenDaysMs = 10 * 24 * 60 * 60 * 1000;
+                const now = new Date();
+                
+                const { data: overdueOrders } = await supabaseAdmin
+                    .from('orders')
+                    .select('id, order_code, debt_start_at, remaining_debt')
+                    .eq('sales_id', employeeId)
+                    .not('debt_start_at', 'is', null)
+                    .gt('remaining_debt', 0)
+                    .gte('debt_start_at', startDate)
+                    .lte('debt_start_at', endDate);
+                
+                const overdueList = (overdueOrders || []).filter((o: any) => {
+                    const debtStart = new Date(o.debt_start_at);
+                    return (now.getTime() - debtStart.getTime()) > tenDaysMs;
+                });
+                
+                return {
+                    value: overdueList.length,
+                    ref: {
+                        overdue_count: overdueList.length,
+                        overdue_orders: overdueList.map((o: any) => ({
+                            order_id: o.id,
+                            order_code: o.order_code,
+                            debt_start_at: o.debt_start_at,
+                            remaining_debt: o.remaining_debt
+                        }))
+                    }
+                };
             }
 
             default:
@@ -470,7 +648,7 @@ async function determineRank(totalScore: number): Promise<{
         .order('sort_order', { ascending: true });
 
     if (!configs || configs.length === 0) {
-        return { rank: 'N/A', bonus_amount: 0, penalty_amount: 0, commission_factor: 1.0 };
+        return { rank: 'N/A', bonus_amount: 0, penalty_amount: 0, commission_factor: 100.0 };
     }
 
     for (const config of configs) {
@@ -755,16 +933,6 @@ router.post('/monthly/generate', authenticate, requireManager, async (req: Authe
                     }
                 }
 
-                // Subtract violations penalty
-                const { data: violations } = await supabaseAdmin
-                    .from('kpi_violation_logs')
-                    .select('deduct_kpi_point')
-                    .eq('employee_id', emp.id)
-                    .eq('month_key', month_key)
-                    .eq('status', 'approved');
-                
-                const totalDeduct = (violations || []).reduce((sum: number, v: any) => sum + Number(v.deduct_kpi_point || 0), 0);
-                totalScore -= totalDeduct;
                 totalScore = Math.max(0, totalScore);
 
                 // Determine rank
@@ -883,16 +1051,6 @@ router.post('/monthly/:id/recalculate', authenticate, requireManager, async (req
         // Add manual adjustment from monthly level
         totalScore += Number(monthly.manual_adjustment_score || 0);
 
-        // Subtract violations penalty
-        const { data: violations } = await supabaseAdmin
-            .from('kpi_violation_logs')
-            .select('deduct_kpi_point')
-            .eq('employee_id', monthly.employee_id)
-            .eq('month_key', monthly.month_key)
-            .eq('status', 'approved');
-        
-        const totalDeduct = (violations || []).reduce((sum: number, v: any) => sum + Number(v.deduct_kpi_point || 0), 0);
-        totalScore -= totalDeduct;
         totalScore = Math.max(0, totalScore);
 
         // Determine rank

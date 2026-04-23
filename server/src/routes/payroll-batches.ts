@@ -317,7 +317,7 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
                     } catch(e){}
                 }
 
-                const totalCommission = serviceCommission + productCommission + referralCommission;
+                let totalCommission = serviceCommission + productCommission + referralCommission;
 
                 // ── Timesheets ──
                 let totalHours = 176, overtimeHours = 0;
@@ -346,7 +346,7 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
                 const overtimePay = Math.round(overtimeHours * hourlyRate * 1.5);
 
                 // ── KPI (from kpi_monthly locked records) ──
-                let kpiAchievement = 0, kpiBonus = 0, kpiPenalty = 0, kpiFactor = 1.0;
+                let kpiAchievement = 0, kpiBonus = 0, kpiPenalty = 0, kpiFactor = 100.0;
                 try {
                     const monthKey = `${year}-${String(month).padStart(2, '0')}`;
                     const { data: kpiResult } = await supabaseAdmin
@@ -361,7 +361,7 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
                         kpiAchievement = Number(kpiResult.total_score) || 0;
                         kpiBonus = Number(kpiResult.kpi_bonus_amount) || 0;
                         kpiPenalty = Number(kpiResult.kpi_penalty_amount) || 0;
-                        kpiFactor = Number(kpiResult.kpi_commission_factor) || 1.0;
+                        kpiFactor = Number(kpiResult.kpi_commission_factor) || 100.0;
                     }
                 } catch (e) { /* ignore */ }
 
@@ -396,6 +396,7 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
                 } catch (e) { /* ignore */ }
 
                 // ── Final calculation (aligned with salary.ts formula) ──
+                totalCommission = Math.floor(totalCommission * (kpiFactor / 100));
                 const totalBonus = kpiBonus + totalRewards;
                 const grossSalary = baseSalary + overtimePay + totalCommission + totalBonus;
                 const socialInsurance = Math.floor(baseSalary * 0.08);

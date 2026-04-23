@@ -46,7 +46,7 @@ router.post('/rank-configs', authenticate, requireManager, async (req: Authentic
                 max_score: max_score ?? 100,
                 bonus_amount: bonus_amount ?? 0,
                 penalty_amount: penalty_amount ?? 0,
-                commission_factor: commission_factor ?? 1.0,
+                commission_factor: commission_factor ?? 100.0,
                 sort_order: sort_order ?? 0,
                 is_active: true
             })

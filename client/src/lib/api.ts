@@ -220,8 +220,8 @@ export const orderProductsApi = {
         api.get<ApiResponse<any>>(`/order-products/${id}`),
 
     // Update product status
-    updateStatus: (id: string, status: string) =>
-        api.patch<ApiResponse<any>>(`/order-products/${id}/status`, { status }),
+    updateStatus: (id: string, status: string, reason?: string, warranty_code?: string) =>
+        api.patch<ApiResponse<any>>(`/order-products/${id}/status`, { status, ...(reason !== undefined && { reason }), ...(warranty_code !== undefined && { warranty_code }) }),
 
     // Assign technician to a service
     assignService: (serviceId: string, technician_id: string) =>
@@ -292,6 +292,9 @@ export const orderProductsApi = {
         care_warranty_flow?: string | null;
         care_warranty_stage?: string | null;
     }) => api.patch<ApiResponse<any>>(`/order-products/${id}/after-sale-data`, data),
+
+    resetServices: (id: string) =>
+        api.patch<ApiResponse<any>>(`/order-products/${id}/reset-services`, {}),
 };
 
 // Order Items API
@@ -315,8 +318,8 @@ export const orderItemsApi = {
     complete: (id: string, notes?: string) =>
         api.patch<ApiResponse<{ allItemsCompleted: boolean }>>(`/order-items/${id}/complete`, { notes }),
 
-    updateStatus: (id: string, status: string, reason?: string, photos?: string[]) =>
-        api.patch<ApiResponse<any>>(`/order-items/${id}/status`, { status, reason, photos }),
+    updateStatus: (id: string, status: string, reason?: string, warranty_code?: string, photos?: string[], notes?: string) =>
+        api.patch<ApiResponse<any>>(`/order-items/${id}/status`, { status, reason, warranty_code, photos, notes }),
 
     // Order Item Steps (Workflow Steps)
     getSteps: (orderItemId: string) =>
@@ -381,7 +384,7 @@ export const requestsApi = {
         api.patch<ApiResponse<any>>(`/requests/accessories/${id}`, data),
     updatePartner: (id: string, data: { status?: string; notes?: string; metadata?: Record<string, any> }) =>
         api.patch<ApiResponse<any>>(`/requests/partners/${id}`, data),
-    updateExtension: (id: string, data: { status?: string; customer_result?: string; new_due_at?: string; valid_reason?: boolean }) =>
+    updateExtension: (id: string, data: { status?: string; customer_result?: string; new_due_at?: string; valid_reason?: boolean; kpi_impact?: boolean }) =>
         api.patch<ApiResponse<any>>(`/requests/extensions/${id}`, data),
 };
 

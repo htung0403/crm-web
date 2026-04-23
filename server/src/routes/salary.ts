@@ -675,7 +675,7 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
         let kpiAchievement = 0;
         let kpiBonus = 0;
         let kpiPenalty = 0;
-        let kpiFactor = 1.0;
+        let kpiFactor = 100.0;
         try {
             const monthKey = `${year}-${String(month).padStart(2, '0')}`;
             const { data: kpiResult } = await supabaseAdmin
@@ -690,7 +690,7 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
                 kpiAchievement = Number(kpiResult.total_score) || 0;
                 kpiBonus = Number(kpiResult.kpi_bonus_amount) || 0;
                 kpiPenalty = Number(kpiResult.kpi_penalty_amount) || 0;
-                kpiFactor = Number(kpiResult.kpi_commission_factor) || 1.0;
+                kpiFactor = Number(kpiResult.kpi_commission_factor) || 100.0;
             }
         } catch (e) {
             console.log('[Salary] KPI monthly data not found');
@@ -790,7 +790,7 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
         }
 
         // Nhân hệ số KPI vào phần Hoa hồng trước khi cộng vào Lương Gross
-        totalCommission = Math.floor(totalCommission * kpiFactor);
+        totalCommission = Math.floor(totalCommission * (kpiFactor / 100));
         const grossSalary = baseSalary + overtimePay + totalCommission + totalBonus;
 
         // ── 8. Tính KHẤU TRỪ ─────────────────────────────────────
