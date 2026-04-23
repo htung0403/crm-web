@@ -192,8 +192,8 @@ export function KPIMonthlyDetail({ id, onBack }: Props) {
                 </Card>
                 <Card>
                     <CardContent className="p-3 text-center">
-                        <p className="text-xs text-muted-foreground">Hệ số HH</p>
-                        <p className="text-lg font-bold">x{Number(record?.kpi_commission_factor || 1).toFixed(2)}</p>
+                        <p className="text-xs text-muted-foreground">Hệ số HH (%)</p>
+                        <p className="text-lg font-bold">{Number(record?.kpi_commission_factor || 100)}%</p>
                     </CardContent>
                 </Card>
                 <Card>
