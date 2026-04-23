@@ -316,7 +316,8 @@ export function SalesTab({
                 (l: any) => l.from_status === log.from_status && 
                        l.to_status === log.to_status && 
                        l.created_by === log.created_by &&
-                       Math.abs(new Date(l.created_at).getTime() - new Date(log.created_at).getTime()) < 5000
+                       l.entity_id === log.entity_id &&
+                       Math.abs(new Date(l.created_at).getTime() - new Date(log.created_at).getTime()) < 2000
             );
             if (!existing) acc.push(log);
             return acc;

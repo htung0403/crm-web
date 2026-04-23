@@ -328,7 +328,7 @@ router.patch('/:id/assign-sale', authenticate, async (req: AuthenticatedRequest,
 router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { status, reason, photos, warranty_code } = req.body;
+        const { status, reason, photos, warranty_code, notes } = req.body;
         const userId = req.user?.id;
 
         const validStatuses = [
@@ -461,6 +461,7 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
                     from_status: oldStatus,
                     to_status: status,
                     reason: reason || null,
+                    notes: notes || null,
                     photos: Array.isArray(photos) ? photos : [],
                     created_by: userId ?? null
                 });

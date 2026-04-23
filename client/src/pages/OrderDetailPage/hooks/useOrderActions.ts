@@ -44,9 +44,9 @@ export function useOrderActions(
         }
     }, [reloadOrder]);
 
-    const updateOrderItemStatus = useCallback(async (itemId: string, status: string, reason?: string, photos?: string[]) => {
+    const updateOrderItemStatus = useCallback(async (itemId: string, status: string, reason?: string, photos?: string[], notes?: string) => {
         try {
-            await orderItemsApi.updateStatus(itemId, status, reason, undefined, photos);
+            await orderItemsApi.updateStatus(itemId, status, reason, undefined, photos, notes);
             await reloadOrder();
         } catch (error) {
             toast.error('Lỗi khi cập nhật trạng thái hạng mục');

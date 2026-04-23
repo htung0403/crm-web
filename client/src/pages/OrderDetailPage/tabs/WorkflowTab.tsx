@@ -46,6 +46,7 @@ const WorkflowCard = memo(({
     handleOpenAssignDialog,
     handleOpenSaleAssignDialog,
     onCardClick,
+    handleOpenBackwardMove,
     orderExtensionRequest
 }: WorkflowCardProps) => {
     const productName = group.product?.item_name ?? group.services[0]?.item_name ?? '—';
@@ -257,7 +258,7 @@ const WorkflowCard = memo(({
                                         type="button"
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            (group as any).handleOpenBackwardMove?.(group);
+                                            handleOpenBackwardMove(group);
                                         }}
                                         className="col-span-3 mt-1 inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7 bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100"
                                     >
@@ -347,8 +348,8 @@ const WorkflowColumn = ({
                                 handleOpenAssignDialog={handleOpenAssignDialog}
                                 handleOpenSaleAssignDialog={handleOpenSaleAssignDialog}
                                 onCardClick={onCardClick}
+                                handleOpenBackwardMove={handleOpenBackwardMove}
                                 orderExtensionRequest={orderExtensionRequest}
-                                {...({ group: { ...group, handleOpenBackwardMove } } as any)}
                             />
                         ))}
                         {provided.placeholder}
