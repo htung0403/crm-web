@@ -393,6 +393,7 @@ CREATE TABLE orders (
     debt_checked BOOLEAN DEFAULT false,
     debt_checked_at TIMESTAMPTZ,
     debt_checked_notes TEXT,
+    debt_payment_photos JSONB DEFAULT '[]',
     packaging_photos JSONB DEFAULT '[]',
     delivery_carrier VARCHAR(255),
     delivery_address TEXT,

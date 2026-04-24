@@ -224,6 +224,7 @@ export function ProductDetailDialog({
                 delivery_payment_method: (item as any)?.delivery_payment_method || order.delivery_payment_method || 'cash',
                 debt_collect_amount: order.remaining_debt ?? (order.total_amount - (order.paid_amount || 0)),
                 debt_payment_method: 'cash',
+                debt_payment_photos: parsePhotos((order as any).debt_payment_photos),
             } as any);
             
             setActiveImageIdx(0);
@@ -353,6 +354,17 @@ export function ProductDetailDialog({
                 const hasPhotos = formData.completion_photos && formData.completion_photos.length > 0;
                 if (!hasPhotos) {
                     toast.error("Vui lòng upload ảnh hoàn thiện/kiểm nợ làm bằng chứng");
+                    return;
+                }
+            }
+        }
+
+        // Validation: Require payment proof photos when collecting debt
+        if (isAftersale && (roomId.startsWith('after1_debt') || roomId === 'after4')) {
+            if ((formData as any).debt_collect_amount && (formData as any).debt_collect_amount > 0) {
+                const hasPaymentPhotos = (formData as any).debt_payment_photos && (formData as any).debt_payment_photos.length > 0;
+                if (!hasPaymentPhotos) {
+                    toast.error("Vui lòng chụp ảnh khách đã chuyển khoản hoặc chụp tiền mặt làm bằng chứng thu tiền");
                     return;
                 }
             }
@@ -1038,21 +1050,39 @@ export function ProductDetailDialog({
                                                     </div>
 
                                                     <div className="pt-3 mt-1 border-t-2 border-dashed border-purple-100 space-y-3">
-                                                        <div className="space-y-1.5">
-                                                            <Label className="text-[10px] font-black text-purple-900 uppercase">SỐ TIỀN THU (ĐIỀU CHỈNH):</Label>
-                                                            <div className="relative">
-                                                                <Input
-                                                                    type="text"
-                                                                    className="h-10 text-lg font-black text-red-600 bg-white border-red-200"
-                                                                    value={(formData as any).debt_collect_amount?.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".") || "0"}
-                                                                    onChange={(e) => {
-                                                                        const val = e.target.value.replace(/\./g, "");
-                                                                        if (/^\d*$/.test(val)) {
-                                                                            setFormData(prev => ({ ...prev, debt_collect_amount: val ? parseInt(val, 10) : 0 } as any));
-                                                                        }
-                                                                    }}
-                                                                />
-                                                                <span className="absolute right-3 top-1/2 -translate-y-1/2 font-bold text-gray-400">đ</span>
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <div className="space-y-1.5">
+                                                                <Label className="text-[10px] font-black text-purple-900 uppercase">SỐ TIỀN THU (ĐIỀU CHỈNH):</Label>
+                                                                <div className="relative">
+                                                                    <Input
+                                                                        type="text"
+                                                                        className="h-10 text-lg font-black text-red-600 bg-white border-red-200"
+                                                                        value={(formData as any).debt_collect_amount?.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".") || "0"}
+                                                                        onChange={(e) => {
+                                                                            const val = e.target.value.replace(/\./g, "");
+                                                                            if (/^\d*$/.test(val)) {
+                                                                                setFormData(prev => ({ ...prev, debt_collect_amount: val ? parseInt(val, 10) : 0 } as any));
+                                                                            }
+                                                                        }}
+                                                                    />
+                                                                    <span className="absolute right-3 top-1/2 -translate-y-1/2 font-bold text-gray-400">đ</span>
+                                                                </div>
+                                                            </div>
+                                                            <div className="space-y-1.5">
+                                                                <Label className="text-[10px] font-bold text-gray-500 uppercase">PT THANH TOÁN:</Label>
+                                                                <Select 
+                                                                    value={(formData as any).debt_payment_method || 'cash'}
+                                                                    onValueChange={(val) => setFormData(prev => ({ ...prev, debt_payment_method: val } as any))}
+                                                                >
+                                                                    <SelectTrigger className="bg-white h-10 border-purple-200">
+                                                                        <SelectValue />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value="cash">Tiền mặt</SelectItem>
+                                                                        <SelectItem value="transfer">Chuyển khoản</SelectItem>
+                                                                        <SelectItem value="zalopay">Zalo Pay</SelectItem>
+                                                                    </SelectContent>
+                                                                </Select>
                                                             </div>
                                                         </div>
 
@@ -1063,21 +1093,20 @@ export function ProductDetailDialog({
                                                             </span>
                                                         </div>
 
-                                                        <div className="space-y-1.5 pt-1">
-                                                            <Label className="text-[10px] font-bold text-gray-500 uppercase">PT THANH TOÁN:</Label>
-                                                            <Select 
-                                                                value={(formData as any).debt_payment_method || 'cash'}
-                                                                onValueChange={(val) => setFormData(prev => ({ ...prev, debt_payment_method: val } as any))}
-                                                            >
-                                                                <SelectTrigger className="bg-white h-9 border-purple-200">
-                                                                    <SelectValue />
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    <SelectItem value="cash">Tiền mặt</SelectItem>
-                                                                    <SelectItem value="transfer">Chuyển khoản</SelectItem>
-                                                                    <SelectItem value="zalopay">Zalo Pay</SelectItem>
-                                                                </SelectContent>
-                                                            </Select>
+                                                        <div className="space-y-1.5 pt-2">
+                                                            <Label className="text-[10px] font-black text-purple-900 uppercase flex items-center gap-1.5">
+                                                                <Camera className="h-3.5 w-3.5 text-purple-500" />
+                                                                ẢNH THU TIỀN <span className="text-rose-500">*</span>
+                                                            </Label>
+                                                            <p className="text-[9px] text-purple-500 font-medium italic leading-tight">
+                                                                Chụp ảnh khách đã chuyển khoản hoặc chụp tiền mặt làm bằng chứng
+                                                            </p>
+                                                            <MultiMediaUpload
+                                                                value={(formData as any).debt_payment_photos || []}
+                                                                onChange={(urls) => setFormData(prev => ({ ...prev, debt_payment_photos: urls } as any))}
+                                                                bucket="orders"
+                                                                folder="debt-payment"
+                                                            />
                                                         </div>
                                                     </div>
                                                 </div>

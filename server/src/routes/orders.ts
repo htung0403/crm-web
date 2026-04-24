@@ -1906,6 +1906,7 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
             debt_checked,
             debt_checked_notes,
             debt_checked_by_name,
+            debt_payment_photos,
             aftersale_receiver_name,
             packaging_photos,
             delivery_carrier,
@@ -1952,6 +1953,7 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
         }
         if (debt_checked_notes !== undefined) updatePayload.debt_checked_notes = debt_checked_notes ?? null;
         if (debt_checked_by_name !== undefined) updatePayload.debt_checked_by_name = debt_checked_by_name ?? null;
+        if (debt_payment_photos !== undefined) updatePayload.debt_payment_photos = Array.isArray(debt_payment_photos) ? debt_payment_photos : [];
         if (aftersale_receiver_name !== undefined) updatePayload.aftersale_receiver_name = aftersale_receiver_name ?? null;
         if (packaging_photos !== undefined) updatePayload.packaging_photos = Array.isArray(packaging_photos) ? packaging_photos : [];
         if (delivery_carrier !== undefined) updatePayload.delivery_carrier = delivery_carrier ?? null;

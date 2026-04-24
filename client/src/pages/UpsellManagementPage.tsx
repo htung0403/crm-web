@@ -86,7 +86,7 @@ export function UpsellManagementPage() {
             setTotalAccessoriesCount(accRes.data?.data?.length || 0);
 
             const map: Record<string, string> = {};
-            (usersRes.data?.users || []).forEach((u: any) => { if (u.id) map[u.id] = u.name || u.id; });
+            ((usersRes.data as any)?.data?.users || []).forEach((u: any) => { if (u.id) map[u.id] = u.name || u.id; });
             setUsersMap(map);
         } catch (error: any) {
             toast.error(error.response?.data?.message || 'Không thể tải danh sách phê duyệt');

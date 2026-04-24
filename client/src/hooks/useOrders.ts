@@ -82,6 +82,7 @@ export interface Order {
     debt_checked_at?: string | null;
     debt_checked_notes?: string | null;
     debt_checked_by_name?: string | null;
+    debt_payment_photos?: string[];
     aftersale_receiver_name?: string | null;
     packaging_photos?: string[];
     delivery_carrier?: string | null;
