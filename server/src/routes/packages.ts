@@ -44,9 +44,14 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
             throw new ApiError('Lỗi khi lấy danh sách gói dịch vụ', 500);
         }
 
+        const mappedPackages = packages?.map(({ package_items, ...pkg }: any) => ({
+            ...pkg,
+            items: package_items,
+        })) || [];
+
         res.json({
             status: 'success',
-            data: { packages },
+            data: { packages: mappedPackages },
         });
     } catch (error) {
         next(error);
@@ -88,9 +93,12 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             throw new ApiError('Không tìm thấy gói dịch vụ', 404);
         }
 
+        const { package_items, ...pkgRest } = pkg as any;
+        const mappedPkg = { ...pkgRest, items: package_items };
+
         res.json({
             status: 'success',
-            data: { package: pkg },
+            data: { package: mappedPkg },
         });
     } catch (error) {
         next(error);
@@ -194,9 +202,10 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
             .eq('id', pkg.id)
             .single();
 
+        const { package_items: pkgItems, ...pkgRest } = (completePackage || {}) as any;
         res.status(201).json({
             status: 'success',
-            data: { package: completePackage },
+            data: { package: { ...pkgRest, items: pkgItems } },
         });
     } catch (error) {
         next(error);
@@ -276,9 +285,10 @@ router.put('/:id', authenticate, requireManager, async (req: AuthenticatedReques
             .eq('id', id)
             .single();
 
+        const { package_items: pkgItems, ...pkgRest } = (completePackage || {}) as any;
         res.json({
             status: 'success',
-            data: { package: completePackage },
+            data: { package: { ...pkgRest, items: pkgItems } },
         });
     } catch (error) {
         next(error);

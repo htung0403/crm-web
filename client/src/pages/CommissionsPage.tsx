@@ -22,6 +22,7 @@ import { toast } from 'sonner';
 import { useProducts } from '@/hooks/useProducts';
 import { useProductTypes } from '@/hooks/useProductTypes';
 import { useUsers } from '@/hooks/useUsers';
+import { usePackages } from '@/hooks/usePackages';
 import { commissionTablesApi, salaryConfigsApi, departmentsApi } from '@/lib/api';
 import { AddCommissionConditionDialog } from '@/components/commissions/AddCommissionConditionDialog';
 
@@ -57,6 +58,7 @@ export function CommissionsPage() {
     const { products, services, loading, fetchProducts, fetchServices, updateProduct, updateService } = useProducts();
     const { productTypes, fetchProductTypes } = useProductTypes();
     const { users, fetchUsers, updateUser } = useUsers();
+    const { packages, fetchPackages, updatePackage } = usePackages();
 
     // Inline editing state: { id, value } of the cell currently being edited
     const [editingCommission, setEditingCommission] = useState<{ id: string; value: string } | null>(null);
@@ -152,6 +154,7 @@ export function CommissionsPage() {
     useEffect(() => {
         fetchProducts();
         fetchServices();
+        fetchPackages();
         fetchProductTypes();
         fetchUsers();
         fetchCommissionTables();
@@ -204,9 +207,16 @@ export function CommissionsPage() {
                 });
             }
 
+            if (packages.length > 0) {
+                groups.push({
+                    id: 'packages',
+                    name: 'Gói dịch vụ',
+                });
+            }
+
             setProductGroups(groups);
         }
-    }, [services, productTypes]);
+    }, [services, productTypes, packages]);
 
     // Build a lookup: product_type_id or code → list of service IDs that apply to it
     const ptToServiceIds = useMemo(() => {
@@ -274,9 +284,26 @@ export function CommissionsPage() {
                     commission_tech: s.commission_tech,
                 };
             }),
+            ...packages.map(pkg => ({
+                id: pkg.id,
+                code: pkg.code,
+                name: pkg.name,
+                productTypeName: '',
+                unit: '',
+                price: pkg.price || 0,
+                cost: 0,
+                category: 'package',
+                itemType: 'package' as const,
+                commissionRate: 1,
+                serviceIds: [] as string[],
+                productTypeIds: [] as string[],
+                commission_data: (pkg as any).commission_data,
+                commission_sale: pkg.commission_sale,
+                commission_tech: pkg.commission_tech,
+            })),
         ];
         return items;
-    }, [products, services, ptToServiceIds, ptNameMap]);
+    }, [products, services, packages, ptToServiceIds, ptNameMap]);
 
     // 1. Base filtering (Search + Group)
     const baseFilteredItems = useMemo(() => {
@@ -306,6 +333,8 @@ export function CommissionsPage() {
             if (selectedGroup.includes(':svc:')) {
                 const svcId = selectedGroup.split(':svc:')[1];
                 items = items.filter(item => item.serviceIds.includes(svcId));
+            } else if (selectedGroup === 'packages') {
+                items = items.filter(item => item.itemType === 'package');
             } else if (selectedGroup.startsWith('pt:')) {
                 const ptRef = selectedGroup.replace('pt:', '');
                 if (ptRef === 'other') {
@@ -326,28 +355,7 @@ export function CommissionsPage() {
         return items;
     }, [allItems, searchTerm, searchCodeTerm, searchNameTerm, selectedGroup, productTypes]);
 
-    // 2. Table filtering for display
-    const displayItems = useMemo(() => {
-        let items = baseFilteredItems;
-
-        const checkedTableIds = new Set(commissionTables.filter(t => t.checked).map(t => t.id));
-        
-        // If some tables are checked, filter items that have data for at least one of them
-        if (checkedTableIds.size > 0) {
-            items = items.filter(item => {
-                const commissionData = item.commission_data || {};
-                return Array.from(checkedTableIds).some(id => {
-                    // Check for BOTH common and shared_table if either is selected
-                    if (id === 'common' || id === 'shared_table') {
-                        return commissionData['common'] !== undefined || commissionData['shared_table'] !== undefined;
-                    }
-                    return commissionData[id] !== undefined;
-                });
-            });
-        }
-
-        return items;
-    }, [baseFilteredItems, commissionTables]);
+    const displayItems = baseFilteredItems;
 
     // Pagination
     const totalPages = Math.ceil(displayItems.length / itemsPerPage);
@@ -463,6 +471,8 @@ export function CommissionsPage() {
 
                 if (item.itemType === 'product') {
                     await updateProduct(item.id, { commission_data: newCommissionData });
+                } else if (item.itemType === 'package') {
+                    await updatePackage(item.id, { commission_data: newCommissionData } as any);
                 } else {
                     await updateService(item.id, { commission_data: newCommissionData });
                 }
@@ -1060,6 +1070,8 @@ export function CommissionsPage() {
 
                                                                                             if (di.itemType === 'product') {
                                                                                                 await updateProduct(di.id, { commission_data: currentData });
+                                                                                            } else if (di.itemType === 'package') {
+                                                                                                await updatePackage(di.id, { commission_data: currentData } as any);
                                                                                             } else {
                                                                                                 await updateService(di.id, { commission_data: currentData });
                                                                                             }
@@ -1082,6 +1094,8 @@ export function CommissionsPage() {
 
                                                                                     if (item.itemType === 'product') {
                                                                                         await updateProduct(item.id, { commission_data: currentData });
+                                                                                    } else if (item.itemType === 'package') {
+                                                                                        await updatePackage(item.id, { commission_data: currentData } as any);
                                                                                     } else {
                                                                                         await updateService(item.id, { commission_data: currentData });
                                                                                     }

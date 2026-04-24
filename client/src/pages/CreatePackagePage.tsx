@@ -74,11 +74,11 @@ export function CreatePackagePage() {
                     commission_sale: pkg.commission_sale || 0,
                     commission_tech: pkg.commission_tech || 0,
                     image: pkg.image || null,
-                    items: pkg.items?.map(item => ({
-                        service_id: item.service_id,
-                        product_id: item.product_id,
-                        quantity: item.quantity
-                    })) || [],
+                    items: pkg.items?.map(item => 
+                        item.service_id
+                            ? { service_id: item.service_id, quantity: item.quantity }
+                            : { product_id: item.product_id || '', quantity: item.quantity }
+                    ) || [],
                 });
             }
             setLoading(false);
@@ -188,8 +188,8 @@ export function CreatePackagePage() {
         );
     }
 
-    const serviceItems = formData.items.filter(item => 'service_id' in item);
-    const productItems = formData.items.filter(item => 'product_id' in item);
+    const serviceItems = formData.items.filter(item => item.service_id && !item.product_id);
+    const productItems = formData.items.filter(item => item.product_id && !item.service_id);
 
     const availableServices = services.filter(s => !formData.items.some(item => item.service_id === s.id));
     const availableProducts = products.filter(p => !formData.items.some(item => item.product_id === p.id));
@@ -378,7 +378,7 @@ export function CreatePackagePage() {
                         <CardContent className="px-4 pb-4">
                             <div className="space-y-3">
                                 {formData.items.map((item, index) => {
-                                    if (!('service_id' in item)) return null;
+                                    if (!item.service_id || item.product_id) return null;
                                     return (
                                         <div key={index} className="flex items-center gap-3 p-3 bg-muted/20 rounded-xl border border-border/40 transition-all hover:bg-muted/40 group">
                                             <div className="flex-1 min-w-0">
@@ -496,7 +496,7 @@ export function CreatePackagePage() {
                         <CardContent className="px-4 pb-4">
                             <div className="space-y-3">
                                 {formData.items.map((item, index) => {
-                                    if (!('product_id' in item)) return null;
+                                    if (!item.product_id || item.service_id) return null;
                                     return (
                                         <div key={index} className="flex items-center gap-3 p-3 bg-muted/20 rounded-xl border border-border/40 transition-all hover:bg-muted/40 group">
                                             <div className="flex-1 min-w-0">
