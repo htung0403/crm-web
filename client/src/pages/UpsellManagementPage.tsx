@@ -37,7 +37,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { upsellTicketsApi, requestsApi, leaveRequestsApi, transactionsApi } from '@/lib/api';
+import { upsellTicketsApi, requestsApi, leaveRequestsApi, transactionsApi, usersApi } from '@/lib/api';
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -56,6 +56,7 @@ export function UpsellManagementPage() {
     const [leaveRequests, setLeaveRequests] = useState<any[]>([]);
     const [pendingVouchers, setPendingVouchers] = useState<any[]>([]);
     const [totalAccessoriesCount, setTotalAccessoriesCount] = useState(0);
+    const [usersMap, setUsersMap] = useState<Record<string, string>>({});
 
     // UI States
     const [selectedTicket, setSelectedTicket] = useState<any>(null);
@@ -66,13 +67,14 @@ export function UpsellManagementPage() {
     const loadData = async () => {
         setLoading(true);
         try {
-            const [upsellRes, accRes, partRes, extRes, leaveRes, voucherRes] = await Promise.all([
+            const [upsellRes, accRes, partRes, extRes, leaveRes, voucherRes, usersRes] = await Promise.all([
                 upsellTicketsApi.getAll(),
                 requestsApi.getAccessories(),
                 requestsApi.getPartners(),
                 requestsApi.getExtensions(),
                 leaveRequestsApi.getAll({ role: user?.role }),
-                transactionsApi.getAll({ status: 'pending' })
+                transactionsApi.getAll({ status: 'pending' }),
+                usersApi.getAll()
             ]);
 
             setUpsellTickets(upsellRes.data?.data?.filter((t: any) => t.status === 'pending') || []);
@@ -82,6 +84,10 @@ export function UpsellManagementPage() {
             setLeaveRequests(leaveRes.data?.filter((l: any) => l.status === 'pending') || []);
             setPendingVouchers(voucherRes.data?.data?.transactions || []);
             setTotalAccessoriesCount(accRes.data?.data?.length || 0);
+
+            const map: Record<string, string> = {};
+            (usersRes.data?.users || []).forEach((u: any) => { if (u.id) map[u.id] = u.name || u.id; });
+            setUsersMap(map);
         } catch (error: any) {
             toast.error(error.response?.data?.message || 'Không thể tải danh sách phê duyệt');
         } finally {
@@ -154,11 +160,15 @@ export function UpsellManagementPage() {
         }
     };
 
-    const handleApproveExtension = async (id: string, new_due_at?: string) => {
+    const handleApproveExtension = async (id: string, new_due_at?: string, kpiImpact?: boolean) => {
         setProcessing(true);
         try {
-            await requestsApi.updateExtension(id, { status: 'manager_approved', new_due_at });
-            toast.success('Đã duyệt yêu cầu gia hạn');
+            await requestsApi.updateExtension(id, {
+                status: 'manager_approved',
+                new_due_at,
+                kpi_impact: typeof kpiImpact === 'boolean' ? kpiImpact : false
+            });
+            toast.success(kpiImpact ? 'Đã duyệt gia hạn (trừ KPI)' : 'Đã duyệt gia hạn (không trừ KPI)');
             loadData();
         } catch (error: any) {
             toast.error(error.response?.data?.message || 'Lỗi khi duyệt');
@@ -455,7 +465,7 @@ export function UpsellManagementPage() {
                                                     <h3 className="font-bold text-base text-slate-800">{req.order_item?.item_name || 'Hạng mục gia hạn'}</h3>
                                                     <div className="flex items-center gap-3 text-xs text-slate-500">
                                                         <div className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {formatDateTime(req.created_at)}</div>
-                                                        <div className="flex items-center gap-1"><User className="h-3 w-3" /> KT: {req.requested_by_user?.name || req.technician?.name || req.requested_by || '—'}</div>
+                                                        <div className="flex items-center gap-1"><User className="h-3 w-3" /> KT: {req.requested_by_user?.name || usersMap[req.requested_by] || '—'}</div>
                                                     </div>
                                                 </div>
                                                 <div className="text-right">
@@ -474,8 +484,9 @@ export function UpsellManagementPage() {
                                                 </div>
                                             </div>
                                         </div>
-                                        <div className="bg-slate-50 md:w-40 border-l border-slate-100 p-4 flex flex-col justify-center gap-2">
-                                            <Button className="w-full bg-purple-600 hover:bg-purple-700 h-9 text-xs font-bold shadow-sm" onClick={() => handleApproveExtension(req.id, req.new_due_at)} disabled={processing}>Duyệt</Button>
+                                        <div className="bg-slate-50 md:w-52 border-l border-slate-100 p-4 flex flex-col justify-center gap-2">
+                                            <Button className="w-full bg-emerald-600 hover:bg-emerald-700 h-9 text-xs font-bold shadow-sm" onClick={() => handleApproveExtension(req.id, req.new_due_at, false)} disabled={processing}>Duyệt không trừ KPI</Button>
+                                            <Button className="w-full bg-purple-600 hover:bg-purple-700 h-9 text-xs font-bold shadow-sm" onClick={() => handleApproveExtension(req.id, req.new_due_at, true)} disabled={processing}>Duyệt trừ KPI</Button>
                                             <Button variant="outline" className="w-full text-red-600 border-red-200 h-9 text-xs font-bold" onClick={() => onRejectClick(req.id, 'extension')} disabled={processing}>Từ chối</Button>
                                         </div>
                                     </div>

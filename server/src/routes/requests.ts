@@ -227,6 +227,9 @@ router.get('/extensions', async (req: AuthenticatedRequest, res: Response, next:
                 customer_result,
                 new_due_at,
                 valid_reason,
+                kpi_impact,
+                approved_by,
+                approved_at,
                 created_at,
                 updated_at,
                 order:orders(id, order_code, order_products(id, images)),
@@ -235,6 +238,8 @@ router.get('/extensions', async (req: AuthenticatedRequest, res: Response, next:
                 order_product_service:order_product_services(id, item_name, order_product:order_products(id, name, product_code, images))
             `)
             .order('created_at', { ascending: false });
+
+        if (error) throw new ApiError('Không thể lấy danh sách yêu cầu gia hạn: ' + error.message, 500);
 
         res.json({ status: 'success', data: data || [] });
     } catch (e) {
@@ -249,17 +254,24 @@ router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, 
         const { status, customer_result, new_due_at, valid_reason, kpi_impact } = req.body;
         const userId = req.user?.id;
 
+        const updatePayload: Record<string, any> = {
+            status: status || undefined,
+            customer_result: customer_result !== undefined ? customer_result : undefined,
+            new_due_at: new_due_at || undefined,
+            valid_reason: typeof valid_reason === 'boolean' ? valid_reason : undefined,
+            kpi_impact: typeof kpi_impact === 'boolean' ? kpi_impact : undefined,
+            updated_at: new Date().toISOString()
+        };
+
+        // Set approved_by/approved_at when manager approves (both KPI paths)
+        if (status === 'manager_approved' && userId) {
+            updatePayload.approved_by = userId;
+            updatePayload.approved_at = new Date().toISOString();
+        }
+
         const { data, error } = await supabaseAdmin
             .from('order_extension_requests')
-            .update({
-                status: status || undefined,
-                customer_result: customer_result !== undefined ? customer_result : undefined,
-                new_due_at: new_due_at || undefined,
-                valid_reason: typeof valid_reason === 'boolean' ? valid_reason : undefined,
-                kpi_impact: typeof kpi_impact === 'boolean' ? kpi_impact : undefined,
-                updated_by: userId,
-                updated_at: new Date().toISOString()
-            })
+            .update(updatePayload)
             .eq('id', id)
             .select('*')
             .single();
@@ -285,6 +297,7 @@ router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, 
                 extension_id: id,
                 new_status: status,
                 customer_result: customer_result || null,
+                kpi_impact: typeof kpi_impact === 'boolean' ? kpi_impact : null,
             });
         }
 
