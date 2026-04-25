@@ -557,6 +557,354 @@ router.post('/auto-create', async (req, res, next) => {
     }
 });
 
+// POST /api/payroll-batches/:id/recalculate - Recalculate all salary records in a batch from source data
+router.post('/:id/recalculate', authenticate, requireAccountant, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+
+        const { data: batch, error: batchErr } = await supabaseAdmin
+            .from('payroll_batches')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (batchErr || !batch) throw new ApiError('Không tìm thấy bảng lương', 404);
+        if (batch.status === 'locked') throw new ApiError('Bảng lương đã khóa, không thể tính lại', 400);
+
+        const { month, year } = batch;
+        const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+        const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+
+        // Get all employees currently in this batch
+        const { data: existingRecords } = await supabaseAdmin
+            .from('salary_records')
+            .select('user_id')
+            .eq('payroll_batch_id', id);
+
+        const userIds = existingRecords?.map(r => r.user_id) || [];
+
+        if (userIds.length === 0) {
+            return res.json({ status: 'success', data: { batch }, message: 'Không có nhân viên trong bảng lương' });
+        }
+
+        // Reset advances back to 'approved' so they can be picked up again
+        try {
+            await supabaseAdmin
+                .from('salary_advances')
+                .update({ status: 'approved', deducted_at: null, salary_record_id: null })
+                .eq('month', month)
+                .eq('year', year)
+                .eq('status', 'deducted');
+        } catch (e) { /* ignore */ }
+
+        for (const userId of userIds) {
+            try {
+                const { data: userData } = await supabaseAdmin
+                    .from('users')
+                    .select('id, name, base_salary, hourly_rate, role')
+                    .eq('id', userId)
+                    .single();
+
+                if (!userData) continue;
+
+                const baseSalary = userData.base_salary || 15000000;
+                const hourlyRate = userData.hourly_rate || Math.floor(baseSalary / 176);
+
+                // ── Commission breakdown ──
+                let serviceCommission = 0, productCommission = 0, referralCommission = 0;
+                try {
+                    const { data: commissions } = await supabaseAdmin
+                        .from('commissions')
+                        .select('amount, commission_type')
+                        .eq('user_id', userId)
+                        .in('status', ['pending', 'approved'])
+                        .gte('created_at', startDate)
+                        .lte('created_at', endDate + 'T23:59:59');
+                    if (commissions) {
+                        for (const c of commissions) {
+                            if (c.commission_type === 'referral') referralCommission += (c.amount || 0);
+                            else serviceCommission += (c.amount || 0);
+                        }
+                    }
+                } catch (e) { /* table may not exist */ }
+
+                let validOrderIds: string[] = [];
+                try {
+                    const { data: validOrders } = await supabaseAdmin
+                        .from('orders')
+                        .select('id')
+                        .or('payment_status.eq.paid,status.in.(done,completed,delivered,after_sale)')
+                        .gte('created_at', startDate)
+                        .lte('created_at', endDate + 'T23:59:59');
+                    if (validOrders && validOrders.length > 0) {
+                        validOrderIds = validOrders.map(o => o.id);
+                    }
+                } catch (e) { /* ignore */ }
+
+                if (validOrderIds.length > 0) {
+                    try {
+                        const { data: salesOrders } = await supabaseAdmin
+                            .from('orders').select('id').eq('sales_id', userId).in('id', validOrderIds);
+                        if (salesOrders && salesOrders.length > 0) {
+                            const { data: salesItems } = await supabaseAdmin
+                                .from('order_items').select('commission_sale_amount, item_type').in('order_id', salesOrders.map(o => o.id));
+                            if (salesItems) {
+                                for (const item of salesItems) {
+                                    if (item.item_type === 'product') productCommission += (item.commission_sale_amount || 0);
+                                    else serviceCommission += (item.commission_sale_amount || 0);
+                                }
+                            }
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    try {
+                        const { data: techItems } = await supabaseAdmin
+                            .from('order_items').select('commission_tech_amount').eq('technician_id', userId).in('order_id', validOrderIds);
+                        if (techItems) {
+                            for (const item of techItems) serviceCommission += (item.commission_tech_amount || 0);
+                        }
+                    } catch (e) { /* ignore */ }
+
+                    try {
+                        const { data: saleItems } = await supabaseAdmin
+                            .from('order_item_sales')
+                            .select('commission, item:order_item_id ( total_price, order_id )')
+                            .eq('sale_id', userId);
+                        if (saleItems) {
+                            for (const row of saleItems) {
+                                const orderId = (row as any).item?.order_id;
+                                if (orderId && validOrderIds.includes(orderId)) {
+                                    productCommission += Math.floor(((row as any).item?.total_price || 0) * (row.commission || 0) / 100);
+                                }
+                            }
+                        }
+                    } catch (e) { }
+
+                    try {
+                        const { data: saleServices } = await supabaseAdmin
+                            .from('order_product_service_sales')
+                            .select('commission, service:order_product_service_id ( unit_price, order_product:order_product_id ( order_id ) )')
+                            .eq('sale_id', userId);
+                        if (saleServices) {
+                            for (const row of saleServices) {
+                                const orderId = (row as any).service?.order_product?.order_id;
+                                if (orderId && validOrderIds.includes(orderId)) {
+                                    serviceCommission += Math.floor(((row as any).service?.unit_price || 0) * (row.commission || 0) / 100);
+                                }
+                            }
+                        }
+                    } catch (e) { }
+
+                    try {
+                        const { data: techServices } = await supabaseAdmin
+                            .from('order_product_service_technicians')
+                            .select('commission, service:order_product_service_id ( unit_price, order_product:order_product_id ( order_id ) )')
+                            .eq('technician_id', userId);
+                        if (techServices) {
+                            for (const row of techServices) {
+                                const orderId = (row as any).service?.order_product?.order_id;
+                                if (orderId && validOrderIds.includes(orderId)) {
+                                    serviceCommission += Math.floor(((row as any).service?.unit_price || 0) * (row.commission || 0) / 100);
+                                }
+                            }
+                        }
+                    } catch (e) { }
+                }
+
+                let totalCommission = serviceCommission + productCommission + referralCommission;
+
+                // ── Timesheets ──
+                let totalHours = 176, overtimeHours = 0;
+                try {
+                    const { data: timesheets } = await supabaseAdmin
+                        .from('timesheets')
+                        .select('check_in, check_out, status, schedule_date')
+                        .eq('user_id', userId)
+                        .gte('schedule_date', startDate)
+                        .lte('schedule_date', endDate);
+                    if (timesheets && timesheets.length > 0) {
+                        let workedHours = 0;
+                        for (const t of timesheets) {
+                            if (t.check_in && t.check_out && t.status !== 'day_off') {
+                                const hours = (new Date(t.check_out).getTime() - new Date(t.check_in).getTime()) / (1000 * 60 * 60);
+                                workedHours += Math.min(hours, 12);
+                            }
+                        }
+                        totalHours = Math.round(workedHours * 100) / 100;
+                        const standardDays = timesheets.filter(t => t.status !== 'day_off').length;
+                        overtimeHours = Math.max(0, Math.round((totalHours - standardDays * 8) * 100) / 100);
+                    }
+                } catch (e) { /* ignore */ }
+
+                const hourlyWage = Math.round(totalHours * hourlyRate);
+                const overtimePay = Math.round(overtimeHours * hourlyRate * 1.5);
+
+                // ── KPI ──
+                let kpiAchievement = 0, kpiBonus = 0, kpiPenalty = 0, kpiFactor = 100.0;
+                try {
+                    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+                    const { data: kpiResult } = await supabaseAdmin
+                        .from('kpi_monthly')
+                        .select('total_score, rank, kpi_bonus_amount, kpi_penalty_amount, kpi_commission_factor')
+                        .eq('employee_id', userId)
+                        .eq('month_key', monthKey)
+                        .eq('status', 'locked')
+                        .single();
+                    if (kpiResult) {
+                        kpiAchievement = Number(kpiResult.total_score) || 0;
+                        kpiBonus = Number(kpiResult.kpi_bonus_amount) || 0;
+                        kpiPenalty = Number(kpiResult.kpi_penalty_amount) || 0;
+                        kpiFactor = Number(kpiResult.kpi_commission_factor) || 100.0;
+                    }
+                } catch (e) { /* ignore */ }
+
+                // ── Violations / Rewards ──
+                let totalRewards = 0, totalViolationAmount = 0;
+                try {
+                    const { data: vrRecords } = await supabaseAdmin
+                        .from('violations_rewards')
+                        .select('type, amount')
+                        .eq('user_id', userId)
+                        .eq('month', month)
+                        .eq('year', year);
+                    if (vrRecords) {
+                        for (const r of vrRecords) {
+                            if (r.type === 'reward') totalRewards += Number(r.amount);
+                            else totalViolationAmount += Number(r.amount);
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+
+                // ── Advances ──
+                let totalAdvances = 0;
+                try {
+                    const { data: advances } = await supabaseAdmin
+                        .from('salary_advances')
+                        .select('amount')
+                        .eq('user_id', userId)
+                        .eq('month', month)
+                        .eq('year', year)
+                        .eq('status', 'approved');
+                    if (advances) totalAdvances = advances.reduce((sum: number, a: any) => sum + Number(a.amount), 0);
+                } catch (e) { /* ignore */ }
+
+                // ── Preserve manual bonus/deduction details ──
+                let bonusDetails: any = null;
+                let deductionDetails: any = null;
+                let manualBonus = 0;
+                let manualDeduction = 0;
+                try {
+                    const { data: existingRec } = await supabaseAdmin
+                        .from('salary_records')
+                        .select('bonus_details, deduction_details')
+                        .eq('user_id', userId)
+                        .eq('payroll_batch_id', id)
+                        .single();
+                    if (existingRec?.bonus_details) {
+                        bonusDetails = existingRec.bonus_details;
+                        const dSum = (bonusDetails.byDay || []).reduce((s: number, b: any) => s + (b.amount || 0) * (b.count || 1), 0);
+                        const oSum = (bonusDetails.other || []).reduce((s: number, b: any) => s + (b.amount || 0) * (b.count || 1), 0);
+                        manualBonus = dSum + oSum;
+                    }
+                    if (existingRec?.deduction_details) {
+                        deductionDetails = existingRec.deduction_details;
+                        const dSum = (deductionDetails.byDay || []).reduce((s: number, d: any) => s + (d.amount || 0) * (d.count || 1), 0);
+                        const oSum = (deductionDetails.other || []).reduce((s: number, d: any) => s + (d.amount || 0) * (d.count || 1), 0);
+                        manualDeduction = dSum + oSum;
+                    }
+                } catch (e) { /* ignore */ }
+
+                // ── Final calculation ──
+                totalCommission = Math.floor(totalCommission * (kpiFactor / 100));
+                const totalBonus = kpiBonus + totalRewards + manualBonus;
+                const grossSalary = baseSalary + overtimePay + totalCommission + totalBonus;
+                const socialInsurance = Math.floor(baseSalary * 0.08);
+                const healthInsurance = Math.floor(baseSalary * 0.015);
+                const taxableIncome = grossSalary - 11000000;
+                const personalTax = taxableIncome > 0 ? Math.floor(taxableIncome * 0.05) : 0;
+                const totalDeduction = socialInsurance + healthInsurance + personalTax + totalAdvances + totalViolationAmount + kpiPenalty + manualDeduction;
+                const netSalary = grossSalary - totalDeduction;
+
+                const salaryData = {
+                    base_salary: baseSalary,
+                    hourly_rate: hourlyRate,
+                    hourly_wage: hourlyWage,
+                    overtime_pay: overtimePay,
+                    total_hours: totalHours,
+                    overtime_hours: overtimeHours,
+                    service_commission: serviceCommission,
+                    product_commission: productCommission,
+                    referral_commission: referralCommission,
+                    commission: totalCommission,
+                    kpi_achievement: kpiAchievement,
+                    bonus: totalBonus,
+                    bonus_details: bonusDetails,
+                    social_insurance: socialInsurance,
+                    health_insurance: healthInsurance,
+                    personal_tax: personalTax,
+                    advances: totalAdvances,
+                    deduction: totalDeduction,
+                    deduction_details: deductionDetails,
+                    gross_salary: grossSalary,
+                    net_salary: netSalary,
+                    updated_at: new Date().toISOString(),
+                };
+
+                await supabaseAdmin
+                    .from('salary_records')
+                    .update(salaryData)
+                    .eq('user_id', userId)
+                    .eq('payroll_batch_id', id);
+
+                // Mark advances as deducted
+                if (totalAdvances > 0) {
+                    try {
+                        await supabaseAdmin
+                            .from('salary_advances')
+                            .update({ status: 'deducted', deducted_at: new Date().toISOString() })
+                            .eq('user_id', userId)
+                            .eq('month', month)
+                            .eq('year', year)
+                            .eq('status', 'approved');
+                    } catch (e) { /* ignore */ }
+                }
+            } catch (e) {
+                console.error(`[PayrollBatch] Recalculate error for user ${userId}:`, e);
+            }
+        }
+
+        // Recalculate batch totals
+        await recalculateBatchTotals(id);
+
+        // Update batch updated_at timestamp
+        await supabaseAdmin
+            .from('payroll_batches')
+            .update({ updated_at: new Date().toISOString() })
+            .eq('id', id);
+
+        // Return updated batch + records
+        const { data: updatedBatch } = await supabaseAdmin
+            .from('payroll_batches')
+            .select('*, creator:users!payroll_batches_created_by_fkey(id, name), approver:users!payroll_batches_approved_by_fkey(id, name)')
+            .eq('id', id)
+            .single();
+
+        const { data: updatedRecords } = await supabaseAdmin
+            .from('salary_records')
+            .select('*, user:users!salary_records_user_id_fkey(id, name, email, avatar, department, role, employee_code)')
+            .eq('payroll_batch_id', id)
+            .order('created_at', { ascending: false });
+
+        res.json({
+            status: 'success',
+            data: { batch: updatedBatch, records: updatedRecords || [] },
+            message: `Đã tính lại lương cho ${userIds.length} nhân viên`,
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 // DELETE /api/payroll-batches/:id - Cancel/delete a batch
 router.delete('/:id', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {

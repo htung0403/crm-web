@@ -457,14 +457,10 @@ export function WorkflowTab({
         { id: 'fail', title: 'Thất bại' }
     ], []);
 
-    // Hiển thị sản phẩm ở tab Quy trình khi đã chốt đơn (step5) hoặc đang thực hiện kỹ thuật
-    // Ẩn các sản phẩm đang ở quy trình Sales/Bảo hành (step1-4)
     const filteredGroups = useMemo(() => {
         return workflowKanbanGroups.filter(g => {
             const leadItem = g.product || g.services?.[0];
-            const status = leadItem?.status;
-            // Chỉ hiện nếu đã chốt đơn (step5) hoặc đang trong tiến trình kỹ thuật (in_progress, processing, completed)
-            return status === 'step5' || status === 'processing' || status === 'in_progress' || status === 'completed';
+            return (leadItem as any)?.current_phase === 'workflow';
         });
     }, [workflowKanbanGroups]);
 

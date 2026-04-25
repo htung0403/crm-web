@@ -349,8 +349,7 @@ export function SalesTab({
 
     const hasSalesItem = workflowKanbanGroups?.some(g => {
         const leadItem = g.product || g.services?.[0];
-        const status = leadItem?.status || 'step1';
-        return ['pending', 'step1', 'step2', 'step3', 'step4', 'step5'].includes(status);
+        return (leadItem as any)?.current_phase === 'sales';
     });
 
     if (order?.status !== 'before_sale' && 
@@ -471,12 +470,8 @@ export function SalesTab({
                                         const columnGroups = workflowKanbanGroups?.filter(group => {
                                             const leadItem = group.product || group.services[0];
                                             if (!leadItem) return false;
-
-                                            // Status filtering logic
-                                            const status = leadItem.status || 'step1';
-                                            if (status === 'pending' && column.id === 'step1') return true;
-
-                                            // Search filtering logic
+                                            const itemAny = leadItem as any;
+                                            if (itemAny.current_phase !== 'sales') return false;
                                             if (searchTerm) {
                                                 const term = searchTerm.toLowerCase();
                                                 const matchesSearch =
@@ -489,10 +484,8 @@ export function SalesTab({
                                                     order.sales_user?.name?.toLowerCase().includes(term);
                                                 if (!matchesSearch) return false;
                                             }
-
-                                            // Column mapping logic
-                                            if (status === 'step5') return false;
-                                            return status === column.id;
+                                            const phaseStage = itemAny.phase_stage || 'step1';
+                                            return phaseStage === column.id;
                                         }) || [];
 
                                         return (
@@ -734,7 +727,7 @@ export function SalesTab({
                                     {(order.status === 'before_sale' || (order.status as string).startsWith('step')) && (
                                         <Button
                                             className="w-full h-12 font-bold shadow-lg shadow-green-200 bg-green-600 hover:bg-green-700"
-                                            disabled={!order.items?.every(i => (i.status || 'step1') === 'step5')}
+                                            disabled={!order.items?.every(i => (i as any).current_phase !== 'sales')}
                                             onClick={async () => {
                                                 try {
                                                     await updateOrderStatus(order.id, 'in_progress');

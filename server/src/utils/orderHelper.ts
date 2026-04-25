@@ -194,6 +194,28 @@ export async function checkAndCompleteOrder(orderId: string): Promise<string> {
                 return currentStatus;
             }
 
+            // Guard: only set phase_stage='done' for items still in workflow phase
+            // Items in care/warranty/after_sale must not be touched
+            try {
+                const afterSaleUpdate = { current_phase: 'after_sale', phase_stage: 'after1' };
+                const { data: prods } = await supabaseAdmin
+                    .from('order_products')
+                    .select('id')
+                    .eq('order_id', orderId)
+                    .eq('current_phase', 'workflow');
+                const prodIds = (prods || []).map(p => p.id);
+                await Promise.all([
+                    supabaseAdmin.from('order_items').update(afterSaleUpdate).eq('order_id', orderId).eq('current_phase', 'workflow'),
+                    supabaseAdmin.from('order_products').update(afterSaleUpdate).eq('order_id', orderId).eq('current_phase', 'workflow'),
+                    ...(prodIds.length > 0
+                        ? [supabaseAdmin.from('order_product_services').update(afterSaleUpdate).in('order_product_id', prodIds).eq('current_phase', 'workflow')]
+                        : []
+                    ),
+                ]);
+            } catch (phaseErr) {
+                console.error('checkAndCompleteOrder: Failed to move workflow items to after_sale', phaseErr);
+            }
+
             // Record commissions for Sales and Technicians
             await recordCommissions(orderId);
 

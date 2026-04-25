@@ -104,7 +104,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                     customer:customers(id, name, phone, email),
                     sales_user:users!orders_sales_id_fkey(id, name),
                     items:order_items(
-                        id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type,
+                        id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, current_phase, phase_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, warranty_code,
                         product:products(id, image, code),
                         service:services(id, image, code),
                         technician:users!order_product_services_technician_id_fkey(id, name),
@@ -125,9 +125,9 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                 const { data: v2Products } = await supabaseAdmin
                     .from('order_products')
                     .select(`
-                        id, order_id, product_code, name, type, images, status, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, due_at, surcharges, surcharge_amount,
+                        id, order_id, product_code, name, type, images, status, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, current_phase, phase_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, due_at, surcharges, surcharge_amount, warranty_code,
                         services:order_product_services(
-                            id, item_name, item_type, unit_price, technician_id,
+                            id, item_name, item_type, unit_price, technician_id, current_phase, phase_stage,
                             service:services(id, image, code),
                             technician:users(id, name),
                             order_item_steps(id, started_at, estimated_duration, status, step_order)
@@ -179,6 +179,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                                 after_sale_stage: product.after_sale_stage || null,
                                 care_warranty_flow: product.care_warranty_flow || null,
                                 care_warranty_stage: product.care_warranty_stage || null,
+                                warranty_code: product.warranty_code || null,
                                 completion_photos: product.completion_photos || [],
                                 packaging_photos: product.packaging_photos || [],
                                 delivery_code: product.delivery_code || null,
@@ -216,12 +217,12 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                                         after_sale_stage: product.after_sale_stage || null,
                                         care_warranty_flow: product.care_warranty_flow || null,
                                         care_warranty_stage: product.care_warranty_stage || null,
+                                        warranty_code: product.warranty_code || null,
                                         completion_photos: product.completion_photos || [],
                                         packaging_photos: product.packaging_photos || [],
                                         delivery_code: product.delivery_code || null,
                                         delivery_carrier: product.delivery_carrier || null,
                                         delivery_type: product.delivery_type || null,
-                                        order_item_steps: s.order_item_steps || [],
                                     });
                                 }
                             }
@@ -252,7 +253,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
         customer:customers(id, name, phone, email),
         sales_user:users!orders_sales_id_fkey(id, name),
         items:order_items(
-            id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type,
+            id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, current_phase, phase_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, warranty_code,
             product:products(id, image, code),
             service:services(id, image, code),
             technician:users!order_items_technician_id_fkey(id, name),
@@ -279,9 +280,9 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
             const { data: v2Products } = await supabaseAdmin
                 .from('order_products')
                 .select(`
-                    id, order_id, product_code, name, type, images, status, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, due_at, surcharges, surcharge_amount,
+                    id, order_id, product_code, name, type, images, status, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, current_phase, phase_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, due_at, surcharges, surcharge_amount, warranty_code,
                     services:order_product_services(
-                        id, item_name, item_type, unit_price, technician_id,
+                        id, item_name, item_type, unit_price, technician_id, current_phase, phase_stage,
                         service:services(id, image, code),
                         technician:users(id, name),
                         order_item_steps(id, started_at, estimated_duration, status, step_order)
@@ -333,16 +334,17 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                             sales_step_data: product.sales_step_data || null,
                             after_sale_stage: product.after_sale_stage || null,
                             care_warranty_flow: product.care_warranty_flow || null,
-                            care_warranty_stage: product.care_warranty_stage || null,
-                            completion_photos: product.completion_photos || [],
-                            packaging_photos: product.packaging_photos || [],
-                            delivery_code: product.delivery_code || null,
-                            delivery_carrier: product.delivery_carrier || null,
-                            delivery_type: product.delivery_type || null,
-                            due_at: product.due_at || null,
-                            surcharges: product.surcharges || [],
-                            surcharge_amount: product.surcharge_amount || 0,
-                        });
+                                care_warranty_stage: product.care_warranty_stage || null,
+                                warranty_code: product.warranty_code || null,
+                                completion_photos: product.completion_photos || [],
+                                packaging_photos: product.packaging_photos || [],
+                                delivery_code: product.delivery_code || null,
+                                delivery_carrier: product.delivery_carrier || null,
+                                delivery_type: product.delivery_type || null,
+                                due_at: product.due_at || null,
+                                surcharges: product.surcharges || [],
+                                surcharge_amount: product.surcharge_amount || 0,
+                            });
                         if (product.services?.length) {
                             for (const s of product.services as any[]) {
                                 const svc = s.service;
@@ -371,6 +373,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                                     after_sale_stage: product.after_sale_stage || null,
                                     care_warranty_flow: product.care_warranty_flow || null,
                                     care_warranty_stage: product.care_warranty_stage || null,
+                                    warranty_code: product.warranty_code || null,
                                     completion_photos: product.completion_photos || [],
                                     packaging_photos: product.packaging_photos || [],
                                     delivery_code: product.delivery_code || null,
@@ -519,6 +522,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                     after_sale_stage: product.after_sale_stage || null,
                     care_warranty_flow: product.care_warranty_flow || null,
                     care_warranty_stage: product.care_warranty_stage || null,
+                    warranty_code: product.warranty_code || null,
                     completion_photos: product.completion_photos || [],
                     packaging_photos: product.packaging_photos || [],
                     product_type: product.type || null,
@@ -535,7 +539,9 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                     delivery_type: product.delivery_type || null,
                     surcharges: product.surcharges || [],
                     surcharge_amount: product.surcharge_amount || 0,
-                    due_at: product.due_at || null
+                    due_at: product.due_at || null,
+                    current_phase: product.current_phase || null,
+                    phase_stage: product.phase_stage || null
                 });
 
                 if (product.services && product.services.length > 0) {
@@ -573,6 +579,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                             after_sale_stage: product.after_sale_stage || null,
                             care_warranty_flow: product.care_warranty_flow || null,
                             care_warranty_stage: product.care_warranty_stage || null,
+                            warranty_code: product.warranty_code || null,
                             completion_photos: product.completion_photos || [],
                             packaging_photos: product.packaging_photos || [],
                             delivery_code: product.delivery_code || null,
@@ -581,7 +588,9 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                             product: {
                                 id: product.id,
                                 image: product.images?.[0] || null
-                            }
+                            },
+                            current_phase: s.current_phase || product.current_phase || null,
+                            phase_stage: s.phase_stage || product.phase_stage || null
                         });
                     }
                 }
@@ -845,7 +854,9 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                         due_at: item.due_at || null,
                         status: 'pending',
                         surcharges: item.surcharges || [],
-                        surcharge_amount: Number(item.surcharge_amount) || 0
+                        surcharge_amount: Number(item.surcharge_amount) || 0,
+                        current_phase: 'sales',
+                        phase_stage: 'step1'
                     })
                     .select()
                     .single();
@@ -877,7 +888,9 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                             assigned_at: hasTechs ? new Date().toISOString() : null,
                             _technicians: svc.technicians || [], // temp metadata
                             _sales: svc.sales || [], // temp metadata
-                            _original_index: sIdx // for debugging
+                            _original_index: sIdx, // for debugging
+                            current_phase: hasTechs ? 'workflow' : 'sales',
+                            phase_stage: hasTechs ? 'room_active' : 'step1'
                         };
                     });
 
@@ -1004,7 +1017,9 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                     item_code: `IT${baseTime}${idxValue.toString().padStart(2, '0')}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`,
                     status: 'pending',
                     surcharges: itemValue.surcharges || [],
-                    surcharge_amount: Number(itemValue.surcharge_amount) || 0
+                    surcharge_amount: Number(itemValue.surcharge_amount) || 0,
+                    current_phase: 'sales',
+                    phase_stage: 'step1'
                 });
 
                 // Decrement stock for catalog product
@@ -1806,7 +1821,9 @@ router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequ
                 total_price: (Number(a.quantity) || 1) * (Number(a.unit_price) || 0),
                 item_code: a.item_code || `IT${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`,
                 surcharges: a.surcharges || [],
-                surcharge_amount: Number(a.surcharge_amount) || 0
+                surcharge_amount: Number(a.surcharge_amount) || 0,
+                current_phase: 'sales',
+                phase_stage: 'step1'
             }));
             const { data: createdItems, error: itemsError } = await supabaseAdmin.from('order_items').insert(saleItemsPayload).select();
 
@@ -2009,6 +2026,43 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
 
         if (error) {
             throw new ApiError('Lỗi khi cập nhật đơn hàng', 500);
+        }
+
+        if (care_warranty_flow !== undefined || care_warranty_stage !== undefined || after_sale_stage !== undefined) {
+            const newFlow = care_warranty_flow !== undefined ? care_warranty_flow : oldCareFlow ?? null;
+            const newStage = care_warranty_stage !== undefined ? care_warranty_stage : oldCareStage ?? null;
+            const newAfterSale = after_sale_stage;
+
+            let itemPhase: string | null = null;
+            let itemPhaseStage: string | null = null;
+
+            if (newFlow === 'warranty') {
+                itemPhase = 'warranty';
+                itemPhaseStage = newStage || 'war1';
+            } else if (newFlow === 'care') {
+                itemPhase = 'care';
+                itemPhaseStage = newStage || 'care6';
+            } else if (newAfterSale !== undefined && newAfterSale !== null) {
+                itemPhase = 'after_sale';
+                itemPhaseStage = newAfterSale;
+            }
+
+            if (itemPhase) {
+                console.log('[OrderPatch] Propagating phase to items:', id, itemPhase, itemPhaseStage);
+                const phaseUpdate = { current_phase: itemPhase, phase_stage: itemPhaseStage };
+                const { data: prods } = await supabaseAdmin.from('order_products').select('id').eq('order_id', id);
+                const prodIds = (prods || []).map((p: { id: string }) => p.id);
+                const propagations: PromiseLike<unknown>[] = [
+                    supabaseAdmin.from('order_items').update(phaseUpdate).eq('order_id', id),
+                    supabaseAdmin.from('order_products').update(phaseUpdate).eq('order_id', id),
+                ];
+                if (prodIds.length > 0) {
+                    propagations.push(
+                        supabaseAdmin.from('order_product_services').update(phaseUpdate).in('order_product_id', prodIds)
+                    );
+                }
+                await Promise.all(propagations);
+            }
         }
 
         const newCareFlow = care_warranty_flow !== undefined ? (care_warranty_flow || null) : oldCareFlow ?? null;

@@ -94,12 +94,26 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
 
         if (warranty_code !== undefined) {
             updateData.warranty_code = warranty_code;
+            updateData.care_warranty_flow = 'warranty';
         }
 
-        if (status === 'completed') {
+        if (['step1', 'step2', 'step3', 'step4'].includes(status)) {
+            updateData.current_phase = 'sales';
+            updateData.phase_stage = status;
+        } else if (status === 'step5') {
+            updateData.current_phase = 'workflow';
+            updateData.phase_stage = 'waiting';
+        } else if (['processing'].includes(status)) {
+            updateData.current_phase = 'workflow';
+            updateData.phase_stage = 'room_active';
+        } else if (status === 'completed') {
             updateData.completed_at = new Date().toISOString();
+            updateData.current_phase = 'workflow';
+            updateData.phase_stage = 'done';
         } else if (status === 'delivered') {
             updateData.delivered_at = new Date().toISOString();
+            updateData.current_phase = 'after_sale';
+            updateData.phase_stage = 'after1';
         }
 
         const { data: product, error } = await supabaseAdmin
@@ -110,7 +124,8 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
             .single();
 
         if (error) {
-            throw new ApiError('Không thể cập nhật trạng thái', 500);
+            console.error('order_products status update failed:', error.message, error.details);
+            throw new ApiError(`Không thể cập nhật trạng thái: ${error.message}`, 500);
         }
 
         res.json({
@@ -144,11 +159,23 @@ router.patch('/:id/reset-services', authenticate, async (req: AuthenticatedReque
         
         const { data: updated, error: updateError } = await supabaseAdmin
             .from('order_product_services')
-            .update({ status: 'step1', updated_at: new Date().toISOString() })
+            .update({ status: 'step1', current_phase: 'sales', phase_stage: 'step1', completed_at: null })
             .in('id', serviceIds)
             .select();
         
-        if (updateError) throw new ApiError('Không thể reset services', 500);
+        if (updateError) {
+            console.error('reset-services update failed:', updateError.message, updateError.details, updateError.hint);
+            throw new ApiError(`Không thể reset services: ${updateError.message}`, 500);
+        }
+
+        const { error: stepsError } = await supabaseAdmin
+            .from('order_item_steps')
+            .update({ status: 'pending', completed_at: null, started_at: null, technician_id: null, updated_at: new Date().toISOString() })
+            .in('order_product_service_id', serviceIds);
+        
+        if (stepsError) {
+            console.error('reset-steps failed:', stepsError.message, stepsError.details, stepsError.hint);
+        }
         
         res.json({
             status: 'success',
@@ -531,8 +558,27 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
         if (care_warranty_flow !== undefined) updatePayload.care_warranty_flow = care_warranty_flow;
         if (care_warranty_stage !== undefined) updatePayload.care_warranty_stage = care_warranty_stage;
 
-        // Get old stage first (for log)
-        const { data: currentItem } = await supabaseAdmin.from('order_products').select('after_sale_stage, order_id').eq('id', id).single();
+        const { data: currentItem } = await supabaseAdmin.from('order_products').select('after_sale_stage, order_id, current_phase').eq('id', id).single();
+
+        if (care_warranty_flow !== undefined) {
+            if (care_warranty_flow === 'warranty') {
+                updatePayload.current_phase = 'warranty';
+                updatePayload.phase_stage = care_warranty_stage || 'war1';
+            } else if (care_warranty_flow === 'care') {
+                updatePayload.current_phase = 'care';
+                updatePayload.phase_stage = care_warranty_stage || 'care6';
+            }
+        } else if (care_warranty_stage !== undefined && !care_warranty_flow) {
+            const curPhase = currentItem?.current_phase;
+            if (curPhase === 'care' || curPhase === 'warranty') {
+                updatePayload.phase_stage = care_warranty_stage;
+            }
+        }
+
+        if (stage !== undefined && care_warranty_flow === undefined) {
+            updatePayload.current_phase = 'after_sale';
+            updatePayload.phase_stage = stage;
+        }
         const oldStage = currentItem?.after_sale_stage || 'after1';
 
         const { data: product, error } = await supabaseAdmin

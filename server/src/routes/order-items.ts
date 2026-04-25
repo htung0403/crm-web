@@ -5,6 +5,28 @@ import { ApiError } from '../middleware/errorHandler.js';
 import { checkAndCompleteOrder } from '../utils/orderHelper.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
 
+function derivePhaseFromStatus(status: string): { current_phase: string; phase_stage: string } {
+    if (['step1', 'step2', 'step3', 'step4'].includes(status)) {
+        return { current_phase: 'sales', phase_stage: status };
+    }
+    if (status === 'step5') {
+        return { current_phase: 'workflow', phase_stage: 'waiting' };
+    }
+    if (['assigned', 'in_progress', 'processing'].includes(status)) {
+        return { current_phase: 'workflow', phase_stage: 'room_active' };
+    }
+    if (status === 'completed') {
+        return { current_phase: 'workflow', phase_stage: 'done' };
+    }
+    if (status === 'delivered') {
+        return { current_phase: 'after_sale', phase_stage: 'after1' };
+    }
+    if (status === 'after_sale') {
+        return { current_phase: 'after_sale', phase_stage: 'after1' };
+    }
+    return { current_phase: 'sales', phase_stage: 'step1' };
+}
+
 const router = Router();
 console.log('📦 Order Items Router Loaded');
 
@@ -377,7 +399,10 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
         const updateItemData: any = {
             status: targetStatus
         };
-        if (warranty_code !== undefined) updateItemData.warranty_code = warranty_code;
+        if (warranty_code !== undefined) {
+            updateItemData.warranty_code = warranty_code;
+            updateItemData.care_warranty_flow = 'warranty';
+        }
 
         const updateDataWithTimes: any = { ...updateItemData };
         if (status === 'completed' || status === 'after_sale' || status === 'delivered') {
@@ -444,6 +469,14 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
                 throw new ApiError('Không tìm thấy hạng mục sau khi thử tất cả các bảng', 404);
             }
         }
+
+        const { current_phase, phase_stage } = derivePhaseFromStatus(status);
+        const phaseTable = entityType === 'order_item' ? 'order_items'
+            : entityType === 'order_product_service' ? 'order_product_services'
+            : 'order_products';
+        await supabaseAdmin.from(phaseTable)
+            .update({ current_phase, phase_stage })
+            .eq('id', id);
 
         res.json({
             status: 'success',
@@ -1227,7 +1260,9 @@ router.patch('/steps/:stepId/complete', authenticate, async (req: AuthenticatedR
                     .from('order_product_services')
                     .update({
                         status: 'completed',
-                        completed_at: new Date().toISOString()
+                        completed_at: new Date().toISOString(),
+                        current_phase: 'workflow',
+                        phase_stage: 'done'
                     })
                     .eq('id', step.order_product_service_id);
             } else if (step.order_item_id) {
@@ -1235,7 +1270,9 @@ router.patch('/steps/:stepId/complete', authenticate, async (req: AuthenticatedR
                     .from('order_items')
                     .update({
                         status: 'completed',
-                        completed_at: new Date().toISOString()
+                        completed_at: new Date().toISOString(),
+                        current_phase: 'workflow',
+                        phase_stage: 'done'
                     })
                     .eq('id', step.order_item_id);
             }
@@ -1851,8 +1888,27 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
         if (care_warranty_flow !== undefined) updatePayload.care_warranty_flow = care_warranty_flow;
         if (care_warranty_stage !== undefined) updatePayload.care_warranty_stage = care_warranty_stage;
 
-        // Get old stage first (for log)
-        const { data: currentItem } = await supabaseAdmin.from('order_items').select('after_sale_stage, order_id').eq('id', id).single();
+        const { data: currentItem } = await supabaseAdmin.from('order_items').select('after_sale_stage, order_id, current_phase').eq('id', id).single();
+
+        if (care_warranty_flow !== undefined) {
+            if (care_warranty_flow === 'warranty') {
+                updatePayload.current_phase = 'warranty';
+                updatePayload.phase_stage = care_warranty_stage || 'war1';
+            } else if (care_warranty_flow === 'care') {
+                updatePayload.current_phase = 'care';
+                updatePayload.phase_stage = care_warranty_stage || 'care6';
+            }
+        } else if (care_warranty_stage !== undefined && !care_warranty_flow) {
+            const curPhase = currentItem?.current_phase;
+            if (curPhase === 'care' || curPhase === 'warranty') {
+                updatePayload.phase_stage = care_warranty_stage;
+            }
+        }
+
+        if (stage !== undefined && care_warranty_flow === undefined) {
+            updatePayload.current_phase = 'after_sale';
+            updatePayload.phase_stage = stage;
+        }
         const oldStage = currentItem?.after_sale_stage || 'after1';
 
         const { data: item, error } = await supabaseAdmin

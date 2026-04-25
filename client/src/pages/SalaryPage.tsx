@@ -69,6 +69,7 @@ interface PayrollBatch {
     scope: string;
     notes: string | null;
     created_at: string;
+    updated_at?: string;
     created_by: string | null;
     approved_by: string | null;
     approved_at: string | null;
@@ -750,6 +751,7 @@ function PaymentHistoryTable() {
 // ========== EXPANDED ROW DETAIL ==========
 function ExpandedRowDetail({ batch, onReload, onViewDetail }: { batch: PayrollBatch; onReload: () => void; onViewDetail: () => void }) {
     const [activeTab, setActiveTab] = useState<ExpandedTab>('info');
+    const [recalculating, setRecalculating] = useState(false);
 
     const tabs: { key: ExpandedTab; label: string }[] = [
         { key: 'info', label: 'Thông tin' },
@@ -880,14 +882,28 @@ function ExpandedRowDetail({ batch, onReload, onViewDetail }: { batch: PayrollBa
                                 Xóa bảng lương
                             </Button>
                             <span className="text-[12px] text-gray-400">
-                                Dữ liệu được cập nhật vào: {formatDateTime(batch.created_at)} ⓘ
+                                Dữ liệu được cập nhật vào: {formatDateTime(batch.updated_at || batch.created_at)} ⓘ
                             </span>
                             <Button
                                 variant="outline"
                                 className="text-[13px] text-gray-600 gap-1.5 h-[34px] px-3 border-gray-200"
-                                onClick={onReload}
+                                disabled={recalculating}
+                                onClick={async () => {
+                                    setRecalculating(true);
+                                    try {
+                                        await payrollBatchesApi.recalculate(batch.id);
+                                        onReload();
+                                    } catch (e: any) {
+                                        alert(e.response?.data?.message || 'Có lỗi khi tải lại dữ liệu');
+                                    } finally {
+                                        setRecalculating(false);
+                                    }
+                                }}
                             >
-                                <RefreshCw className="h-3.5 w-3.5" />
+                                {recalculating
+                                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    : <RefreshCw className="h-3.5 w-3.5" />
+                                }
                                 Tải lại dữ liệu
                             </Button>
                         </div>

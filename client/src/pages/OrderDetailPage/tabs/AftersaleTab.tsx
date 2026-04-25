@@ -1,7 +1,7 @@
-import React, { memo } from 'react';
+import React, { memo, useState, useEffect } from 'react';
 import {
     RefreshCcw, Camera, Upload, ThumbsUp, ThumbsDown, Bot, Copy, History, ShoppingBag,
-    Tag, FileText, Wrench, User as UserIcon, Package, Truck
+    Tag, FileText, Wrench, User as UserIcon, Package, Truck, Clock, AlertCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -32,18 +32,76 @@ interface AftersaleTabProps {
 }
 
 const AFTER_COLS = [
-    { id: 'after1', title: 'Ảnh hoàn thiện', color: 'text-purple-700' },
-    { id: 'after1_debt', title: 'Kiểm nợ', color: 'text-purple-700' },
-    { id: 'after2', title: 'Đóng gói & Giao hàng', color: 'text-purple-700' },
-    { id: 'after3', title: 'Nhắn HD Bảo Quản & Feedback', color: 'text-purple-700' },
-    { id: 'after4', title: 'Lưu Trữ', color: 'text-green-700' },
+    { id: 'after1', title: 'Ảnh hoàn thiện', color: 'text-purple-700', slaDurationMs: 60 * 60 * 1000 },           // 60 phút
+    { id: 'after1_debt', title: 'Kiểm nợ', color: 'text-purple-700', slaDurationMs: 10 * 24 * 60 * 60 * 1000 },   // 10 ngày
+    { id: 'after2', title: 'Đóng gói & Giao hàng', color: 'text-purple-700', slaDurationMs: 4 * 24 * 60 * 60 * 1000 }, // 4 ngày
+    { id: 'after3', title: 'Nhắn HD Bảo Quản & Feedback', color: 'text-purple-700', slaDurationMs: 5 * 24 * 60 * 60 * 1000 }, // 5 ngày
+    { id: 'after4', title: 'Lưu Trữ', color: 'text-green-700', slaDurationMs: null },
 ] as const;
+
+type AfterColId = typeof AFTER_COLS[number]['id'];
+
+function useSLACountdown(
+    stageId: AfterColId,
+    slaDurationMs: number | null,
+    aftersaleLogs: any[],
+    fallbackDate: string | undefined
+): { remainingMs: number | null; enteredAt: Date | null } {
+    const [now, setNow] = useState(() => Date.now());
+
+    const enteredAt = React.useMemo(() => {
+        if (!slaDurationMs) return null;
+        const matchingLog = aftersaleLogs
+            .filter((l: any) => l.to_stage === stageId)
+            .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+        if (matchingLog) return new Date(matchingLog.created_at);
+        if (fallbackDate) return new Date(fallbackDate);
+        return null;
+    }, [stageId, slaDurationMs, aftersaleLogs, fallbackDate]);
+
+    useEffect(() => {
+        if (!slaDurationMs || !enteredAt) return;
+        const interval = setInterval(() => setNow(Date.now()), stageId === 'after1' ? 1000 : 60000);
+        return () => clearInterval(interval);
+    }, [slaDurationMs, enteredAt, stageId]);
+
+    if (!slaDurationMs || !enteredAt) return { remainingMs: null, enteredAt: null };
+    return { remainingMs: enteredAt.getTime() + slaDurationMs - now, enteredAt };
+}
+
+function formatSLACountdown(remainingMs: number, stageId: AfterColId): { text: string; isLate: boolean } {
+    const isLate = remainingMs < 0;
+    const abs = Math.abs(remainingMs);
+
+    if (stageId === 'after1') {
+        const totalSecs = Math.floor(abs / 1000);
+        const h = Math.floor(totalSecs / 3600);
+        const m = Math.floor((totalSecs % 3600) / 60);
+        const s = totalSecs % 60;
+        const formatted = `${h > 0 ? h + 'g ' : ''}${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        return { text: isLate ? `Trễ ${formatted}` : `Còn ${formatted}`, isLate };
+    }
+
+    const totalMins = Math.floor(abs / 60000);
+    const days = Math.floor(totalMins / 1440);
+    const hours = Math.floor((totalMins % 1440) / 60);
+    const mins = totalMins % 60;
+
+    let parts = '';
+    if (days > 0) parts += `${days}n `;
+    if (hours > 0) parts += `${hours}g `;
+    if (days === 0 && mins > 0) parts += `${mins}ph`;
+    parts = parts.trim() || '0ph';
+
+    return { text: isLate ? `Trễ ${parts}` : `Còn ${parts}`, isLate };
+}
 
 const AftersaleCard = memo(({
     group,
     index,
     col,
     order,
+    aftersaleLogs,
     onProductCardClick,
     getSLADisplay
 }: {
@@ -51,6 +109,7 @@ const AftersaleCard = memo(({
     index: number;
     col: typeof AFTER_COLS[number];
     order: Order;
+    aftersaleLogs: any[];
     onProductCardClick: (group: any, roomId: string) => void;
     getSLADisplay: (dueAt: string | Date | null | undefined) => string;
 }) => {
@@ -59,7 +118,10 @@ const AftersaleCard = memo(({
     const productName = product?.item_name || 'Khách';
     const productItem = product as any;
     const productImage = product?.image || productItem?.product?.image || productItem?.service?.image;
-    const isLate = product?.due_at && new Date(product.due_at) < new Date();
+
+    const { remainingMs } = useSLACountdown(col.id, col.slaDurationMs, aftersaleLogs, order.updated_at);
+    const slaDisplay = remainingMs !== null ? formatSLACountdown(remainingMs, col.id) : null;
+    const isLate = slaDisplay?.isLate ?? (product?.due_at && new Date(product.due_at) < new Date());
 
     return (
         <Draggable key={draggableId} draggableId={draggableId} index={index}>
@@ -77,6 +139,21 @@ const AftersaleCard = memo(({
                 >
                     <div className="flex justify-between items-start mb-2">
                         <span className="text-xs font-semibold text-gray-400">#{order.order_code}</span>
+                        {slaDisplay && (
+                            <span className={cn(
+                                "flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full",
+                                slaDisplay.isLate
+                                    ? "bg-red-100 text-red-600"
+                                    : remainingMs! < (col.slaDurationMs! * 0.2)
+                                        ? "bg-orange-100 text-orange-600"
+                                        : "bg-green-100 text-green-700"
+                            )}>
+                                {slaDisplay.isLate
+                                    ? <AlertCircle className="h-2.5 w-2.5" />
+                                    : <Clock className="h-2.5 w-2.5" />}
+                                {slaDisplay.text}
+                            </span>
+                        )}
                     </div>
 
                     <div className="space-y-2 mb-3">
@@ -118,7 +195,6 @@ const AftersaleCard = memo(({
                         <Badge variant="secondary" className="text-[10px] font-bold text-purple-500 bg-purple-50 uppercase h-5">
                             {order.sales_user?.name || 'Sale'}
                         </Badge>
-                        <span className="font-semibold text-gray-400">{getSLADisplay(product?.due_at)}</span>
                     </div>
 
                     {col.id === 'after1' && (
@@ -269,8 +345,8 @@ export function AftersaleTab({
                             <div className="grid grid-cols-1 md:grid-cols-5 gap-4 overflow-x-auto pb-4">
                                 {AFTER_COLS.map((col) => {
                                     const colGroups = groups.filter(g => {
-                                        const itemStage = g.product?.after_sale_stage || (order as any).after_sale_stage || 'after1';
-                                        return itemStage === col.id && getGroupCurrentTechRoom(g) === 'done';
+                                        const item = (g.product || g.services?.[0]) as any;
+                                        return item?.current_phase === 'after_sale' && item?.phase_stage === col.id;
                                     });
                                     return (
                                         <div key={col.id} className="flex flex-col min-w-[220px]">
@@ -299,6 +375,7 @@ export function AftersaleTab({
                                                                 index={index}
                                                                 col={col}
                                                                 order={order}
+                                                                aftersaleLogs={aftersaleLogs}
                                                                 onProductCardClick={onProductCardClick}
                                                                 getSLADisplay={getSLADisplay}
                                                             />
@@ -319,7 +396,10 @@ export function AftersaleTab({
                         </DragDropContext>
 
                         {/* Nhắn HD & Feedback */}
-                        {order && ((order as any).after_sale_stage ?? 'after1') === 'after3' && (
+                        {order && groups.some(g => {
+                            const item = (g.product || g.services?.[0]) as any;
+                            return item?.current_phase === 'after_sale' && item?.phase_stage === 'after3';
+                        }) && (
                             <div className="mt-6 p-6 bg-purple-50 rounded-2xl border border-purple-100 space-y-6">
                                 <div>
                                     <h3 className="text-xs font-bold text-purple-800 uppercase mb-3 tracking-widest">Đã nhắn HD Bảo Quản & Xin feedback</h3>

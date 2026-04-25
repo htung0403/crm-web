@@ -48,6 +48,10 @@ export interface OrderItem {
     care_warranty_stage?: string | null;
     warranty_code?: string | null;
     delivery_payment_method?: string | null;
+    /** New phase ownership field — which pipeline tab this item belongs to */
+    current_phase?: string | null;
+    /** Stage within current_phase (e.g. step1, waiting, after1, war1, care6) */
+    phase_stage?: string | null;
 }
 
 export interface Order {

@@ -125,13 +125,10 @@ export function CareTab({
     if (!order) return null;
     
 
-    const currentFlow = (order as any).care_warranty_flow ?? null;
-    const currentStage = (order as any).care_warranty_stage ?? null;
-    const someProductInCareFlow = groups.some(g => {
+    const orderInCareFlow = groups.some(g => {
         const item = (g.product || g.services?.[0]) as any;
-        return item?.care_warranty_flow === 'care' || item?.care_warranty_flow === 'warranty';
+        return item?.current_phase === 'care' || item?.current_phase === 'warranty';
     });
-    const orderInCareFlow = (currentFlow && currentStage) || someProductInCareFlow;
 
     const handleCareDragEnd = (result: DropResult) => {
         if (!order || !result.destination || result.destination.droppableId === result.source.droppableId) return;
@@ -211,11 +208,8 @@ export function CareTab({
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     {CARE_WAR_COLS.filter((c) => c.flow === 'warranty').map((col) => {
                                         const colGroups = groups.filter(g => {
-                                            const itemWithFlow = (g.product as any)?.care_warranty_flow ? g.product : g.services?.find(s => (s as any).care_warranty_flow);
-                                            const item = (itemWithFlow || g.product || g.services?.[0]) as any;
-                                            const itemFlow = item?.care_warranty_flow || (order as any).care_warranty_flow;
-                                            const itemStage = item?.care_warranty_stage || (order as any).care_warranty_stage;
-                                            return itemFlow === 'warranty' && itemStage === col.id;
+                                            const item = (g.product || g.services?.[0]) as any;
+                                            return item?.current_phase === 'warranty' && item?.phase_stage === col.id;
                                         });
                                         const hasActive = colGroups.length > 0;
                                         return (
@@ -262,11 +256,8 @@ export function CareTab({
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     {CARE_WAR_COLS.filter((c) => c.flow === 'care').map((col) => {
                                         const colGroups = groups.filter(g => {
-                                            const itemWithFlow = (g.product as any)?.care_warranty_flow ? g.product : g.services?.find(s => (s as any).care_warranty_flow);
-                                            const item = (itemWithFlow || g.product || g.services?.[0]) as any;
-                                            const itemFlow = item?.care_warranty_flow || (order as any).care_warranty_flow;
-                                            const itemStage = item?.care_warranty_stage || (order as any).care_warranty_stage;
-                                            return itemFlow === 'care' && itemStage === col.id;
+                                            const item = (g.product || g.services?.[0]) as any;
+                                            return item?.current_phase === 'care' && item?.phase_stage === col.id;
                                         });
                                         const hasActive = colGroups.length > 0;
                                         return (

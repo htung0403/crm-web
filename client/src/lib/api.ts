@@ -673,6 +673,9 @@ export const payrollBatchesApi = {
 
     cancel: (id: string) =>
         api.delete<ApiResponse<null>>(`/payroll-batches/${id}`),
+
+    recalculate: (id: string) =>
+        api.post<ApiResponse<{ batch: any; records: any[] }>>(`/payroll-batches/${id}/recalculate`),
 };
 
 // Reports API
