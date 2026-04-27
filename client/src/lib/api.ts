@@ -539,8 +539,8 @@ export const kpiApi = {
         api.delete<ApiResponse<void>>(`/kpi/metrics/${id}`),
 
     // Rank configs
-    getRankConfigs: () =>
-        api.get<ApiResponse<{ configs: any[] }>>('/kpi/rank-configs'),
+    getRankConfigs: (params?: { employee_id?: string }) =>
+        api.get<ApiResponse<{ configs: any[]; employee_id?: string }>>('/kpi/rank-configs', { params }),
 
     createRankConfig: (data: any) =>
         api.post<ApiResponse<{ config: any }>>('/kpi/rank-configs', data),
@@ -550,6 +550,9 @@ export const kpiApi = {
 
     deleteRankConfig: (id: string) =>
         api.delete<ApiResponse<void>>(`/kpi/rank-configs/${id}`),
+
+    upsertEmployeeRankConfigs: (employeeId: string, configs: any[]) =>
+        api.post<ApiResponse<{ updated: number; errors: number; results: any[]; errors_detail: any[] }>>('/kpi/rank-configs/upsert-employee', { employee_id: employeeId, configs }),
 
     // Monthly KPI
     getMonthly: (params?: { month_key?: string; status?: string; employee_id?: string }) =>
@@ -612,6 +615,9 @@ export const kpiApi = {
 
     batchAssignPolicies: (data: { assignments: Array<{ employee_id: string; policy_id: string | null }> }) =>
         api.post<ApiResponse<{ updated: number; errors: number; results: any[]; errors_detail: any[] }>>('/kpi/employee-assignments', data),
+
+    removeAssignment: (id: string) =>
+        api.delete<ApiResponse<void>>(`/kpi/employee-assignments/${id}`),
 };
 
 // Salary API

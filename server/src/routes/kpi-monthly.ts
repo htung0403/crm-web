@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireManager } from '../middleware/auth.js';
+import { resolveTeamMembers, resolveStoreMembers, resolveStoreForManager } from '../utils/teamResolver.js';
 
 const router = Router();
 
@@ -623,6 +624,358 @@ async function fetchAutoMetricValue(
                 };
             }
 
+            // ── TEAMLEAD SALE source_keys ──────────────────────────
+
+            case 'team_order_revenue': {
+                const teamMembers = await resolveTeamMembers(employeeId);
+                if (teamMembers.length === 0) return { value: 0, ref: { team_size: 0 } };
+                let totalRevenue = 0;
+                const memberRevenues: any[] = [];
+                for (const member of teamMembers) {
+                    const { data: orders } = await supabaseAdmin
+                        .from('orders')
+                        .select('total_amount')
+                        .eq('sales_id', member.id)
+                        .in('status', ['done', 'after_sale'])
+                        .gte('created_at', startDate)
+                        .lte('created_at', endDate);
+                    const rev = (orders || []).reduce((s, o) => s + (Number(o.total_amount) || 0), 0);
+                    totalRevenue += rev;
+                    memberRevenues.push({ id: member.id, name: member.name, revenue: rev });
+                }
+                return { value: totalRevenue, ref: { team_size: teamMembers.length, members: memberRevenues, total: totalRevenue } };
+            }
+
+            case 'team_closed_leads_ratio': {
+                const teamMembers = await resolveTeamMembers(employeeId);
+                if (teamMembers.length === 0) return { value: 0, ref: { team_size: 0 } };
+                let totalQualified = 0;
+                let totalWon = 0;
+                const qualifiedStages = ['hen_gui_anh', 'dam_phan_gia', 'hen_qua_ship', 'chot_don', 'fail'];
+                for (const member of teamMembers) {
+                    const { data: qualified } = await supabaseAdmin
+                        .from('leads')
+                        .select('id')
+                        .eq('assigned_to', member.id)
+                        .in('pipeline_stage', qualifiedStages)
+                        .gte('created_at', startDate)
+                        .lte('created_at', endDate);
+                    totalQualified += (qualified || []).length;
+                    if ((qualified || []).length > 0) {
+                        const qIds = (qualified || []).map((l: any) => l.id);
+                        const { data: converted } = await supabaseAdmin
+                            .from('leads')
+                            .select('id')
+                            .in('id', qIds)
+                            .not('customer_id', 'is', null);
+                        totalWon += (converted || []).length;
+                    }
+                }
+                const ratio = totalQualified > 0 ? Math.round((totalWon / totalQualified) * 100) : 0;
+                return { value: ratio, ref: { qualified: totalQualified, won: totalWon, team_size: teamMembers.length } };
+            }
+
+            case 'team_return_customer_count': {
+                const teamMembers = await resolveTeamMembers(employeeId);
+                if (teamMembers.length === 0) return { value: 0, ref: { team_size: 0 } };
+                let totalReturn = 0;
+                for (const member of teamMembers) {
+                    const memberResult = await fetchAutoMetricValue('return_customer_count', member.id, monthKey);
+                    totalReturn += memberResult.value;
+                }
+                return { value: totalReturn, ref: { team_size: teamMembers.length } };
+            }
+
+            case 'team_member_kpi_attainment_rate': {
+                const teamMembers = await resolveTeamMembers(employeeId);
+                if (teamMembers.length === 0) return { value: 0, ref: { team_size: 0 } };
+                const memberIds = teamMembers.map(m => m.id);
+                const { data: primaryAssignments } = await supabaseAdmin
+                    .from('employee_kpi_assignments')
+                    .select('employee_id, policy_id')
+                    .in('employee_id', memberIds)
+                    .eq('assignment_type', 'primary')
+                    .eq('is_active', true);
+                const primaryPolicyMap = new Map((primaryAssignments || []).map((a: any) => [a.employee_id, a.policy_id]));
+                const { data: kpiRecords } = await supabaseAdmin
+                    .from('kpi_monthly')
+                    .select('employee_id, rank')
+                    .in('employee_id', memberIds)
+                    .eq('month_key', monthKey)
+                    .in('status', ['pending', 'locked']);
+                const primaryKpis = (kpiRecords || []).filter((r: any) => primaryPolicyMap.has(r.employee_id));
+                const passedCount = primaryKpis.filter((r: any) => ['A+', 'A', 'B'].includes(r.rank)).length;
+                const rate = teamMembers.length > 0 ? Math.round((passedCount / teamMembers.length) * 100) : 0;
+                return { value: rate, ref: { passed: passedCount, total: teamMembers.length } };
+            }
+
+            case 'team_before_sale_task_completed_on_time_rate': {
+                const teamMembers = await resolveTeamMembers(employeeId);
+                if (teamMembers.length === 0) return { value: 0, ref: { team_size: 0 } };
+                let totalRate = 0;
+                for (const member of teamMembers) {
+                    const memberResult = await fetchAutoMetricValue('before_sale_task_completed_on_time_rate', member.id, monthKey);
+                    totalRate += memberResult.value;
+                }
+                const avgRate = teamMembers.length > 0 ? Math.round(totalRate / teamMembers.length) : 0;
+                return { value: avgRate, ref: { team_size: teamMembers.length } };
+            }
+
+            case 'team_after_sale_task_completed_on_time_rate': {
+                const teamMembers = await resolveTeamMembers(employeeId);
+                if (teamMembers.length === 0) return { value: 0, ref: { team_size: 0 } };
+                let totalRate = 0;
+                for (const member of teamMembers) {
+                    const memberResult = await fetchAutoMetricValue('after_sale_task_completed_on_time_rate', member.id, monthKey);
+                    totalRate += memberResult.value;
+                }
+                const avgRate = teamMembers.length > 0 ? Math.round(totalRate / teamMembers.length) : 0;
+                return { value: avgRate, ref: { team_size: teamMembers.length } };
+            }
+
+            case 'team_lead_reclaimed_count': {
+                const teamMembers = await resolveTeamMembers(employeeId);
+                if (teamMembers.length === 0) return { value: 0, ref: { team_size: 0 } };
+                let total = 0;
+                for (const member of teamMembers) {
+                    const memberResult = await fetchAutoMetricValue('lead_reclaimed_count', member.id, monthKey);
+                    total += memberResult.value;
+                }
+                return { value: total, ref: { team_size: teamMembers.length } };
+            }
+
+            case 'shift_coverage_violation_count': {
+                const { data: violations } = await supabaseAdmin
+                    .from('kpi_violation_logs')
+                    .select('id')
+                    .eq('employee_id', employeeId)
+                    .eq('rule_code', 'shift_coverage')
+                    .gte('occurred_at', startDate)
+                    .lte('occurred_at', endDate);
+                return { value: (violations || []).length, ref: { note: 'shift coverage violations' } };
+            }
+
+            case 'team_sale_operation_error_count': {
+                const teamMembers = await resolveTeamMembers(employeeId);
+                if (teamMembers.length === 0) return { value: 0, ref: { team_size: 0 } };
+                const memberIds = teamMembers.map(m => m.id);
+                const { data: errors } = await supabaseAdmin
+                    .from('kpi_violation_logs')
+                    .select('id')
+                    .in('employee_id', memberIds)
+                    .eq('rule_code', 'sale_operation_error')
+                    .gte('occurred_at', startDate)
+                    .lte('occurred_at', endDate);
+                return { value: (errors || []).length, ref: { team_size: teamMembers.length } };
+            }
+
+            // ── LEAD KỸ THUẬT source_keys ───────────────────────────
+
+            case 'team_on_time_completion_rate': {
+                const teamMembers = await resolveTeamMembers(employeeId);
+                if (teamMembers.length === 0) return { value: 0, ref: { team_size: 0 } };
+                let totalRate = 0;
+                for (const member of teamMembers) {
+                    const memberResult = await fetchAutoMetricValue('on_time_completion_rate', member.id, monthKey);
+                    totalRate += memberResult.value;
+                }
+                const avgRate = teamMembers.length > 0 ? Math.round(totalRate / teamMembers.length) : 0;
+                return { value: avgRate, ref: { team_size: teamMembers.length } };
+            }
+
+            case 'team_completed_jobs_vs_plan': {
+                return { value: 0, ref: { source_type: 'manual' } };
+            }
+
+            case 'team_late_jobs_count': {
+                const teamMembers = await resolveTeamMembers(employeeId);
+                if (teamMembers.length === 0) return { value: 0, ref: { team_size: 0 } };
+                let total = 0;
+                for (const member of teamMembers) {
+                    const memberResult = await fetchAutoMetricValue('late_jobs_count', member.id, monthKey);
+                    total += memberResult.value;
+                }
+                return { value: total, ref: { team_size: teamMembers.length } };
+            }
+
+            case 'team_rework_count': {
+                const teamMembers = await resolveTeamMembers(employeeId);
+                if (teamMembers.length === 0) return { value: 0, ref: { team_size: 0 } };
+                let total = 0;
+                for (const member of teamMembers) {
+                    const memberResult = await fetchAutoMetricValue('rework_count', member.id, monthKey);
+                    total += memberResult.value;
+                }
+                return { value: total, ref: { team_size: teamMembers.length } };
+            }
+
+            case 'team_bad_feedback_count': {
+                const teamMembers = await resolveTeamMembers(employeeId);
+                if (teamMembers.length === 0) return { value: 0, ref: { team_size: 0 } };
+                let total = 0;
+                for (const member of teamMembers) {
+                    const memberResult = await fetchAutoMetricValue('bad_feedback_count', member.id, monthKey);
+                    total += memberResult.value;
+                }
+                return { value: total, ref: { team_size: teamMembers.length } };
+            }
+
+            case 'team_critical_quality_error_count': {
+                const teamMembers = await resolveTeamMembers(employeeId);
+                if (teamMembers.length === 0) return { value: 0, ref: { team_size: 0 } };
+                let total = 0;
+                for (const member of teamMembers) {
+                    const memberResult = await fetchAutoMetricValue('critical_quality_error_count', member.id, monthKey);
+                    total += memberResult.value;
+                }
+                return { value: total, ref: { team_size: teamMembers.length } };
+            }
+
+            // ── QUẢN LÝ CỬA HÀNG store_keys ───────────────────────
+
+            case 'store_total_revenue': {
+                const storeId = await resolveStoreForManager(employeeId);
+                if (!storeId) return { value: 0, ref: { note: 'no store' } };
+                const storeMembers = await resolveStoreMembers(storeId);
+                let total = 0;
+                for (const member of storeMembers) {
+                    const memberResult = await fetchAutoMetricValue('order_revenue_by_sale', member.id, monthKey);
+                    total += memberResult.value;
+                }
+                return { value: total, ref: { store_id: storeId, member_count: storeMembers.length } };
+            }
+
+            case 'store_closed_leads_ratio': {
+                const storeId = await resolveStoreForManager(employeeId);
+                if (!storeId) return { value: 0, ref: { note: 'no store' } };
+                const storeMembers = await resolveStoreMembers(storeId);
+                if (storeMembers.length === 0) return { value: 0, ref: { store_member_count: 0 } };
+                let totalQualified = 0;
+                let totalWon = 0;
+                const qualifiedStages = ['hen_gui_anh', 'dam_phan_gia', 'hen_qua_ship', 'chot_don', 'fail'];
+                for (const member of storeMembers) {
+                    const { data: qualified } = await supabaseAdmin
+                        .from('leads')
+                        .select('id')
+                        .eq('assigned_to', member.id)
+                        .in('pipeline_stage', qualifiedStages)
+                        .gte('created_at', startDate)
+                        .lte('created_at', endDate);
+                    totalQualified += (qualified || []).length;
+                    if ((qualified || []).length > 0) {
+                        const qIds = (qualified || []).map((l: any) => l.id);
+                        const { data: converted } = await supabaseAdmin
+                            .from('leads').select('id').in('id', qIds).not('customer_id', 'is', null);
+                        totalWon += (converted || []).length;
+                    }
+                }
+                const ratio = totalQualified > 0 ? Math.round((totalWon / totalQualified) * 100) : 0;
+                return { value: ratio, ref: { qualified: totalQualified, won: totalWon } };
+            }
+
+            case 'store_return_customer_count': {
+                const storeId = await resolveStoreForManager(employeeId);
+                if (!storeId) return { value: 0, ref: { note: 'no store' } };
+                const storeMembers = await resolveStoreMembers(storeId);
+                let total = 0;
+                for (const member of storeMembers) {
+                    const memberResult = await fetchAutoMetricValue('return_customer_count', member.id, monthKey);
+                    total += memberResult.value;
+                }
+                return { value: total, ref: { store_member_count: storeMembers.length } };
+            }
+
+            case 'store_sla_compliance_rate': {
+                const storeId = await resolveStoreForManager(employeeId);
+                if (!storeId) return { value: 0, ref: { note: 'no store' } };
+                const storeMembers = await resolveStoreMembers(storeId);
+                if (storeMembers.length === 0) return { value: 0, ref: { store_member_count: 0 } };
+                let totalRate = 0;
+                for (const member of storeMembers) {
+                    const memberResult = await fetchAutoMetricValue('before_sale_task_completed_on_time_rate', member.id, monthKey);
+                    totalRate += memberResult.value;
+                }
+                const avgRate = Math.round(totalRate / storeMembers.length);
+                return { value: avgRate, ref: { store_member_count: storeMembers.length } };
+            }
+
+            case 'store_on_time_completion_rate': {
+                const storeId = await resolveStoreForManager(employeeId);
+                if (!storeId) return { value: 0, ref: { note: 'no store' } };
+                const storeMembers = await resolveStoreMembers(storeId);
+                if (storeMembers.length === 0) return { value: 0, ref: { store_member_count: 0 } };
+                let totalRate = 0;
+                for (const member of storeMembers) {
+                    const memberResult = await fetchAutoMetricValue('on_time_completion_rate', member.id, monthKey);
+                    totalRate += memberResult.value;
+                }
+                const avgRate = Math.round(totalRate / storeMembers.length);
+                return { value: avgRate, ref: { store_member_count: storeMembers.length } };
+            }
+
+            case 'store_rework_count': {
+                const storeId = await resolveStoreForManager(employeeId);
+                if (!storeId) return { value: 0, ref: { note: 'no store' } };
+                const storeMembers = await resolveStoreMembers(storeId);
+                let total = 0;
+                for (const member of storeMembers) {
+                    const memberResult = await fetchAutoMetricValue('rework_count', member.id, monthKey);
+                    total += memberResult.value;
+                }
+                return { value: total, ref: { store_member_count: storeMembers.length } };
+            }
+
+            case 'store_bad_feedback_count': {
+                const storeId = await resolveStoreForManager(employeeId);
+                if (!storeId) return { value: 0, ref: { note: 'no store' } };
+                const storeMembers = await resolveStoreMembers(storeId);
+                let total = 0;
+                for (const member of storeMembers) {
+                    const memberResult = await fetchAutoMetricValue('bad_feedback_count', member.id, monthKey);
+                    total += memberResult.value;
+                }
+                return { value: total, ref: { store_member_count: storeMembers.length } };
+            }
+
+            case 'store_member_kpi_attainment_rate': {
+                const storeId = await resolveStoreForManager(employeeId);
+                if (!storeId) return { value: 0, ref: { note: 'no store' } };
+                const storeMembers = await resolveStoreMembers(storeId);
+                if (storeMembers.length === 0) return { value: 0, ref: { store_member_count: 0 } };
+                const memberIds = storeMembers.map(m => m.id);
+                const { data: primaryAssignments } = await supabaseAdmin
+                    .from('employee_kpi_assignments')
+                    .select('employee_id, policy_id')
+                    .in('employee_id', memberIds)
+                    .eq('assignment_type', 'primary')
+                    .eq('is_active', true);
+                const primaryPolicyMap = new Map((primaryAssignments || []).map((a: any) => [a.employee_id, a.policy_id]));
+                const { data: kpiRecords } = await supabaseAdmin
+                    .from('kpi_monthly')
+                    .select('employee_id, rank')
+                    .in('employee_id', memberIds)
+                    .eq('month_key', monthKey)
+                    .in('status', ['pending', 'locked']);
+                const primaryKpis = (kpiRecords || []).filter((r: any) => primaryPolicyMap.has(r.employee_id));
+                const passedCount = primaryKpis.filter((r: any) => ['A+', 'A', 'B'].includes(r.rank)).length;
+                const rate = storeMembers.length > 0 ? Math.round((passedCount / storeMembers.length) * 100) : 0;
+                return { value: rate, ref: { passed: passedCount, total: storeMembers.length } };
+            }
+
+            // ── MANUAL source_keys (manager fills in actual_value) ──
+
+            case 'teamlead_weekly_report_submission':
+            case 'teamlead_training_completion_score':
+            case 'marketing_coordination_score':
+            case 'team_conduct_cooperation_score':
+            case 'technical_assignment_management_score':
+            case 'technical_issue_handling_score':
+            case 'team_technical_process_compliance_score':
+            case 'technical_training_completion_score':
+            case 'store_coordination_score':
+            case 'store_training_score':
+                return { value: 0, ref: { source_type: 'manual' } };
+
             default:
                 return { value: 0, ref: { note: `Unknown source_key: ${sourceKey}` } };
         }
@@ -809,31 +1162,54 @@ router.post('/monthly/generate', authenticate, requireManager, async (req: Authe
             throw new ApiError('month_key phải có định dạng YYYY-MM', 400);
         }
 
-        // Get all active employees with kpi_policy_id
-        const { data: employees, error: empError } = await supabaseAdmin
-            .from('users')
-            .select('id, name, role, kpi_policy_id')
-            .eq('status', 'active')
-            .not('kpi_policy_id', 'is', null);
+        // Get all active assignments with employee + policy info
+        const { data: allAssignments, error: assignError } = await supabaseAdmin
+            .from('employee_kpi_assignments')
+            .select(`
+                id,
+                employee_id,
+                policy_id,
+                assignment_type,
+                compensation_bucket,
+                effective_from,
+                effective_to,
+                employee:users!employee_kpi_assignments_employee_id_fkey(id, name, role, status),
+                policy:kpi_policies!employee_kpi_assignments_policy_id_fkey(id, code, name)
+            `)
+            .eq('is_active', true);
 
-        if (empError) throw new ApiError('Lỗi khi lấy danh sách nhân sự: ' + empError.message, 500);
+        if (assignError) throw new ApiError('Lỗi khi lấy danh sách gán KPI: ' + assignError.message, 500);
 
-        if (!employees || employees.length === 0) {
+        // Filter: only assignments active for this month and employee is active
+        const [yearNum, monthNum] = month_key.split('-').map(Number);
+        const monthStart = new Date(yearNum, monthNum - 1, 1);
+        const monthEnd = new Date(yearNum, monthNum, 0);
+
+        const activeAssignments = (allAssignments || []).filter((a: any) => {
+            if (a.employee?.status !== 'active') return false;
+            const effFrom = new Date(a.effective_from);
+            const effTo = a.effective_to ? new Date(a.effective_to) : null;
+            return effFrom <= monthEnd && (!effTo || effTo >= monthStart);
+        });
+
+        if (activeAssignments.length === 0) {
             throw new ApiError('Không có nhân sự nào được gán chính sách KPI. Vui lòng gán chính sách KPI cho nhân sự trước.', 400);
         }
 
         const results: any[] = [];
         const errors: any[] = [];
 
-        for (const emp of employees) {
+        for (const assignment of activeAssignments) {
+            const emp = assignment.employee as any;
             try {
                 // Check if already exists
-                const { data: existing } = await supabaseAdmin
+                const { data: existingList } = await supabaseAdmin
                     .from('kpi_monthly')
                     .select('id, status')
                     .eq('employee_id', emp.id)
                     .eq('month_key', month_key)
-                    .single();
+                    .eq('policy_id', assignment.policy_id);
+                const existing = existingList?.[0] || null;
 
                 if (existing) {
                     if (existing.status === 'locked') {
@@ -849,7 +1225,7 @@ router.post('/monthly/generate', authenticate, requireManager, async (req: Authe
                 const { data: metrics } = await supabaseAdmin
                     .from('kpi_policy_metrics')
                     .select('*')
-                    .eq('policy_id', emp.kpi_policy_id)
+                    .eq('policy_id', assignment.policy_id)
                     .eq('is_active', true)
                     .order('sort_order', { ascending: true });
 
@@ -864,7 +1240,7 @@ router.post('/monthly/generate', authenticate, requireManager, async (req: Authe
                     .insert({
                         employee_id: emp.id,
                         month_key,
-                        policy_id: emp.kpi_policy_id,
+                        policy_id: assignment.policy_id,
                         status: 'draft'
                     })
                     .select()
@@ -1222,22 +1598,52 @@ router.post('/monthly/:id/push-to-payroll', authenticate, requireManager, async 
         const year = Number(yearStr);
         const month = Number(monthStr);
 
-        // Update salary_records if exists
-        const { data: salaryRecord } = await supabaseAdmin
+        // Look up assignment type for this policy
+        const { data: assignment } = await supabaseAdmin
+            .from('employee_kpi_assignments')
+            .select('assignment_type, compensation_bucket, policy:kpi_policies(code)')
+            .eq('employee_id', monthly.employee_id)
+            .eq('policy_id', monthly.policy_id)
+            .eq('is_active', true)
+            .maybeSingle();
+
+        const salaryRecordList = await supabaseAdmin
             .from('salary_records')
-            .select('id')
+            .select('id, kpi_secondary_details')
             .eq('user_id', monthly.employee_id)
             .eq('month', month)
-            .eq('year', year)
-            .single();
+            .eq('year', year);
+        const salaryRecord = salaryRecordList.data?.[0] || null;
 
         if (salaryRecord) {
+            const updateData: any = { updated_at: new Date().toISOString() };
+
+            if (!assignment || assignment.assignment_type === 'primary') {
+                updateData.kpi_achievement = monthly.total_score;
+                updateData.kpi_primary_score = monthly.total_score;
+                updateData.kpi_primary_rank = monthly.rank;
+                updateData.kpi_primary_bonus = monthly.kpi_bonus_amount;
+                updateData.kpi_primary_penalty = monthly.kpi_penalty_amount;
+                updateData.kpi_primary_commission_factor = monthly.kpi_commission_factor;
+            } else {
+                // Secondary: update the JSONB array
+                const existing = salaryRecord.kpi_secondary_details || [];
+                const filtered = (existing as any[]).filter((d: any) => d.policy_id !== monthly.policy_id);
+                filtered.push({
+                    policy_id: monthly.policy_id,
+                    policy_code: (assignment as any)?.policy?.code ?? '',
+                    score: monthly.total_score,
+                    rank: monthly.rank,
+                    bonus: monthly.kpi_bonus_amount,
+                    penalty: monthly.kpi_penalty_amount,
+                    commission_factor: monthly.kpi_commission_factor,
+                });
+                updateData.kpi_secondary_details = filtered;
+            }
+
             await supabaseAdmin
                 .from('salary_records')
-                .update({
-                    kpi_achievement: monthly.total_score,
-                    updated_at: new Date().toISOString()
-                })
+                .update(updateData)
                 .eq('id', salaryRecord.id);
         }
 
@@ -1245,6 +1651,7 @@ router.post('/monthly/:id/push-to-payroll', authenticate, requireManager, async 
             status: 'success',
             data: {
                 pushed: true,
+                assignment_type: assignment?.assignment_type || 'primary',
                 kpi_score_final: monthly.total_score,
                 kpi_rank_final: monthly.rank,
                 kpi_bonus_amount: monthly.kpi_bonus_amount,
@@ -1278,27 +1685,67 @@ router.post('/monthly/batch-push', authenticate, requireManager, async (req: Aut
         const year = Number(yearStr);
         const month = Number(monthStr);
 
+        const employeeIds = [...new Set(lockedRecords.map((r: any) => r.employee_id))];
+        const { data: allAssignments } = await supabaseAdmin
+            .from('employee_kpi_assignments')
+            .select('employee_id, policy_id, assignment_type, compensation_bucket, policy:kpi_policies(code)')
+            .in('employee_id', employeeIds)
+            .eq('is_active', true);
+
+        const assignmentLookup = new Map<string, any>();
+        for (const a of (allAssignments || [])) {
+            assignmentLookup.set(`${a.employee_id}:${a.policy_id}`, a);
+        }
+
+        const { data: salaryRecords } = await supabaseAdmin
+            .from('salary_records')
+            .select('id, user_id, kpi_secondary_details')
+            .in('user_id', employeeIds)
+            .eq('month', month)
+            .eq('year', year);
+
+        const salaryRecordMap = new Map<string, any>();
+        for (const sr of (salaryRecords || [])) {
+            salaryRecordMap.set(sr.user_id, sr);
+        }
+
         let updatedCount = 0;
 
         for (const record of lockedRecords) {
-            const { data: salaryRecord } = await supabaseAdmin
-                .from('salary_records')
-                .select('id')
-                .eq('user_id', record.employee_id)
-                .eq('month', month)
-                .eq('year', year)
-                .single();
+            const salaryRecord = salaryRecordMap.get(record.employee_id);
+            if (!salaryRecord) continue;
 
-            if (salaryRecord) {
-                await supabaseAdmin
-                    .from('salary_records')
-                    .update({
-                        kpi_achievement: record.total_score,
-                        updated_at: new Date().toISOString()
-                    })
-                    .eq('id', salaryRecord.id);
-                updatedCount++;
+            const assignment = assignmentLookup.get(`${record.employee_id}:${record.policy_id}`);
+            const updateData: any = { updated_at: new Date().toISOString() };
+
+            if (!assignment || assignment.assignment_type === 'primary') {
+                updateData.kpi_achievement = record.total_score;
+                updateData.kpi_primary_score = record.total_score;
+                updateData.kpi_primary_rank = record.rank;
+                updateData.kpi_primary_bonus = record.kpi_bonus_amount;
+                updateData.kpi_primary_penalty = record.kpi_penalty_amount;
+                updateData.kpi_primary_commission_factor = record.kpi_commission_factor;
+            } else {
+                const existing = salaryRecord.kpi_secondary_details || [];
+                const filtered = (existing as any[]).filter((d: any) => d.policy_id !== record.policy_id);
+                filtered.push({
+                    policy_id: record.policy_id,
+                    policy_code: (assignment as any)?.policy?.code ?? '',
+                    score: record.total_score,
+                    rank: record.rank,
+                    bonus: record.kpi_bonus_amount,
+                    penalty: record.kpi_penalty_amount,
+                    commission_factor: record.kpi_commission_factor,
+                });
+                updateData.kpi_secondary_details = filtered;
+                salaryRecord.kpi_secondary_details = filtered;
             }
+
+            await supabaseAdmin
+                .from('salary_records')
+                .update(updateData)
+                .eq('id', salaryRecord.id);
+            updatedCount++;
         }
 
         res.json({

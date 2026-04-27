@@ -23,7 +23,14 @@ export function LeadHenQuaShipDialog({ open, onClose, onSubmit, lead }: LeadHenQ
     useEffect(() => {
         if (lead && open) {
             setMethod(lead.delivery_method || 'direct');
-            setAppointmentTime(lead.appointment_time ? lead.appointment_time.slice(0, 10) : '');
+            if (lead.appointment_time) {
+                const dt = new Date(lead.appointment_time);
+                const pad = (n: number) => String(n).padStart(2, '0');
+                const local = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+                setAppointmentTime(local);
+            } else {
+                setAppointmentTime('');
+            }
             setTrackingCode(lead.tracking_code || '');
             setShippingFee(lead.shipping_fee?.toString() || '');
         }
@@ -31,6 +38,12 @@ export function LeadHenQuaShipDialog({ open, onClose, onSubmit, lead }: LeadHenQ
 
     const handleSubmit = async () => {
         if (!lead) return;
+
+        if (method === 'direct' && !appointmentTime) {
+            alert('Vui lòng nhập ngày và giờ hẹn');
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             const data: Partial<Lead> = {
@@ -40,7 +53,7 @@ export function LeadHenQuaShipDialog({ open, onClose, onSubmit, lead }: LeadHenQ
             };
 
             if (method === 'direct') {
-                data.appointment_time = appointmentTime ? new Date(appointmentTime).toISOString() : undefined;
+                data.appointment_time = new Date(appointmentTime).toISOString();
             } else {
                 data.tracking_code = trackingCode;
                 data.shipping_fee = parseFloat(shippingFee) || 0;
@@ -77,10 +90,10 @@ export function LeadHenQuaShipDialog({ open, onClose, onSubmit, lead }: LeadHenQ
 
                     {method === 'direct' ? (
                         <div className="grid gap-2 animate-in fade-in slide-in-from-top-1">
-                            <Label htmlFor="appointmentTime">Ngày khách hẹn qua</Label>
+                            <Label htmlFor="appointmentTime">Ngày & giờ khách hẹn qua</Label>
                             <Input
                                 id="appointmentTime"
-                                type="date"
+                                type="datetime-local"
                                 value={appointmentTime}
                                 onChange={(e) => setAppointmentTime(e.target.value)}
                             />

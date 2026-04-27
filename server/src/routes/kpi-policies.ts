@@ -118,10 +118,20 @@ router.get('/policies/:id', authenticate, requireManager, async (req: Authentica
 // POST /api/kpi/policies - Create new policy
 router.post('/policies', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { code, name, role, description, effective_from, effective_to } = req.body;
+        const { code, name, role, description, effective_from, effective_to, compensation_rules } = req.body;
 
         if (!code || !name || !role) {
             throw new ApiError('Thiếu thông tin bắt buộc (code, name, role)', 400);
+        }
+
+        if (compensation_rules !== undefined && compensation_rules !== null) {
+            const VALID_RULE_TYPES = ['team_revenue_percentage', 'fixed_bonus', 'manual'];
+            if (typeof compensation_rules !== 'object' || Array.isArray(compensation_rules)) {
+                throw new ApiError('compensation_rules phải là object JSON', 400);
+            }
+            if (compensation_rules.type && !VALID_RULE_TYPES.includes(compensation_rules.type)) {
+                throw new ApiError('compensation_rules.type không hợp lệ', 400);
+            }
         }
 
         // Check unique code
@@ -144,7 +154,8 @@ router.post('/policies', authenticate, requireManager, async (req: Authenticated
                 description: description || null,
                 effective_from: effective_from || new Date().toISOString().split('T')[0],
                 effective_to: effective_to || null,
-                is_active: true
+                is_active: true,
+                compensation_rules: compensation_rules || null
             })
             .select()
             .single();
@@ -164,7 +175,17 @@ router.post('/policies', authenticate, requireManager, async (req: Authenticated
 router.patch('/policies/:id', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { name, description, effective_from, effective_to, is_active } = req.body;
+        const { name, description, effective_from, effective_to, is_active, compensation_rules } = req.body;
+
+        if (compensation_rules !== undefined && compensation_rules !== null) {
+            const VALID_RULE_TYPES = ['team_revenue_percentage', 'fixed_bonus', 'manual'];
+            if (typeof compensation_rules !== 'object' || Array.isArray(compensation_rules)) {
+                throw new ApiError('compensation_rules phải là object JSON', 400);
+            }
+            if (compensation_rules.type && !VALID_RULE_TYPES.includes(compensation_rules.type)) {
+                throw new ApiError('compensation_rules.type không hợp lệ', 400);
+            }
+        }
 
         const updateData: any = {};
         if (name !== undefined) updateData.name = name;
@@ -172,6 +193,7 @@ router.patch('/policies/:id', authenticate, requireManager, async (req: Authenti
         if (effective_from !== undefined) updateData.effective_from = effective_from;
         if (effective_to !== undefined) updateData.effective_to = effective_to;
         if (is_active !== undefined) updateData.is_active = is_active;
+        if (compensation_rules !== undefined) updateData.compensation_rules = compensation_rules;
 
         if (Object.keys(updateData).length === 0) {
             throw new ApiError('Không có dữ liệu cập nhật', 400);

@@ -231,7 +231,6 @@ export async function checkSlaCron() {
             .select(`
                 id, name, assigned_to, appointment_time, sla_state, current_deadline_at, current_rule_index, appointment_reminded_at, pipeline_stage, assigned_to_user: users!leads_assigned_to_fkey(name, telegram_chat_id)
             `)
-            .eq('assign_state', 'assigned')
             .not('assigned_to', 'is', null)
             .not('pipeline_stage', 'in', '("chot_don", "huy", "fail")');
 
@@ -265,7 +264,7 @@ export async function checkSlaCron() {
                 }
 
                 // 2. Đúng giờ hẹn: Reset về mốc 3 phút (ACTIVE)
-                if (minUntilAppoint <= 0 && minUntilAppoint > -2) {
+                if (minUntilAppoint <= 0 && minUntilAppoint > -5) {
                     const deadline = calculateDeadline(now, SLA_CYCLES[0], true);
                     await supabaseAdmin.from('leads').update({
                         current_rule_index: 0,

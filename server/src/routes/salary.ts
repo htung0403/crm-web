@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireAccountant, requireManager } from '../middleware/auth.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
+import { resolveEmployeeKpiForPayroll } from '../utils/kpiPayrollResolver.js';
 
 const router = Router();
 
@@ -355,15 +356,14 @@ router.get('/user/:userId/bonuses', authenticate, async (req: AuthenticatedReque
         // 1. KPI Bonus (from kpi_monthly locked records)
         try {
             const monthKey = `${year}-${String(month).padStart(2, '0')}`;
-            const { data: kpiResult } = await supabaseAdmin
+            const { data: kpiResults } = await supabaseAdmin
                 .from('kpi_monthly')
                 .select('total_score, rank, kpi_bonus_amount, kpi_penalty_amount, kpi_commission_factor')
                 .eq('employee_id', userId)
                 .eq('month_key', monthKey)
-                .eq('status', 'locked')
-                .single();
+                .eq('status', 'locked');
 
-            if (kpiResult) {
+            for (const kpiResult of (kpiResults || [])) {
                 const kpiBonus = Number(kpiResult.kpi_bonus_amount) || 0;
                 const kpiPenalty = Number(kpiResult.kpi_penalty_amount) || 0;
                 const kpiScore = Number(kpiResult.total_score) || 0;
@@ -672,29 +672,16 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
         }
 
         // ── 4. Tính KPI BONUS từ kpi_monthly (locked records) ──────────────────────
-        let kpiAchievement = 0;
-        let kpiBonus = 0;
-        let kpiPenalty = 0;
-        let kpiFactor = 100.0;
-        try {
-            const monthKey = `${year}-${String(month).padStart(2, '0')}`;
-            const { data: kpiResult } = await supabaseAdmin
-                .from('kpi_monthly')
-                .select('total_score, rank, kpi_bonus_amount, kpi_penalty_amount, kpi_commission_factor')
-                .eq('employee_id', user_id)
-                .eq('month_key', monthKey)
-                .eq('status', 'locked')
-                .single();
-
-            if (kpiResult) {
-                kpiAchievement = Number(kpiResult.total_score) || 0;
-                kpiBonus = Number(kpiResult.kpi_bonus_amount) || 0;
-                kpiPenalty = Number(kpiResult.kpi_penalty_amount) || 0;
-                kpiFactor = Number(kpiResult.kpi_commission_factor) || 100.0;
-            }
-        } catch (e) {
-            console.log('[Salary] KPI monthly data not found');
-        }
+        const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+        const kpiPayroll = await resolveEmployeeKpiForPayroll(user_id, monthKey);
+        let kpiAchievement = kpiPayroll.primary.score;
+        let kpiBonus = kpiPayroll.primary.bonus;
+        let kpiPenalty = kpiPayroll.primary.penalty;
+        let kpiFactor = kpiPayroll.primary.commissionFactor;
+        const teamleadBonus = kpiPayroll.teamleadBonus;
+        const managementBonus = kpiPayroll.managementBonus;
+        const kpiPrimaryRank = kpiPayroll.primary.rank;
+        const kpiSecondaryDetails = kpiPayroll.secondaryDetails;
 
         // ── 5. Tính THƯỞNG / PHẠT từ violations_rewards ─────────
         let totalRewards = 0;
@@ -778,7 +765,7 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
         }
 
         // Add allowances into totalBonus so it's incorporated to grossSalary natively
-        const totalBonus = kpiBonus + totalRewards + manualBonus + totalAllowances;
+        const totalBonus = kpiBonus + totalRewards + manualBonus + totalAllowances + teamleadBonus + managementBonus;
 
         let bonusDetailsObj = manualBonus > 0 ? (existing?.bonus_details || {}) : {};
         if (totalAllowances > 0) {
@@ -841,6 +828,14 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
             commission: totalCommission,
             // KPI
             kpi_achievement: kpiAchievement,
+            kpi_primary_score: kpiAchievement,
+            kpi_primary_rank: kpiPrimaryRank,
+            kpi_primary_bonus: kpiPayroll.primary.bonus,
+            kpi_primary_penalty: kpiPayroll.primary.penalty,
+            kpi_primary_commission_factor: kpiPayroll.primary.commissionFactor,
+            kpi_secondary_details: kpiSecondaryDetails.length > 0 ? kpiSecondaryDetails : null,
+            teamlead_bonus: teamleadBonus,
+            management_bonus: managementBonus,
             // Bonus = KPI bonus + rewards + manual + allowances
             bonus: totalBonus,
             bonus_details: (manualBonus > 0 || totalAllowances > 0) ? bonusDetailsObj : null,
@@ -1026,19 +1021,14 @@ router.patch('/:id/update-bonus', authenticate, requireManager, async (req: Auth
 
         // KPI (from kpi_monthly locked records)
         let kpiBonus = 0;
+        let kpiTeamleadBonus = 0;
+        let kpiManagementBonus = 0;
         try {
             const monthKey = `${year}-${String(month).padStart(2, '0')}`;
-            const { data: kpiResult } = await supabaseAdmin
-                .from('kpi_monthly')
-                .select('kpi_bonus_amount, kpi_penalty_amount')
-                .eq('employee_id', user_id)
-                .eq('month_key', monthKey)
-                .eq('status', 'locked')
-                .single();
-
-            if (kpiResult) {
-                kpiBonus = Number(kpiResult.kpi_bonus_amount) || 0;
-            }
+            const kpiPayrollRec = await resolveEmployeeKpiForPayroll(user_id, monthKey);
+            kpiBonus = kpiPayrollRec.primary.bonus;
+            kpiTeamleadBonus = kpiPayrollRec.teamleadBonus;
+            kpiManagementBonus = kpiPayrollRec.managementBonus;
         } catch (e) { }
 
         // Rewards
@@ -1048,7 +1038,7 @@ router.patch('/:id/update-bonus', authenticate, requireManager, async (req: Auth
             if (vr) totalRewards = vr.reduce((s, r) => s + Number(r.amount), 0);
         } catch (e) { }
 
-        const newTotalBonus = kpiBonus + totalRewards + manualBonusTotal;
+        const newTotalBonus = kpiBonus + kpiTeamleadBonus + kpiManagementBonus + totalRewards + manualBonusTotal;
         const newGrossSalary = (record.base_salary || 0) + (record.overtime_pay || 0) + (record.commission || 0) + newTotalBonus;
 
         const taxableIncome = newGrossSalary - 11000000;

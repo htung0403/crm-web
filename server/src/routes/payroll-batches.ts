@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireAccountant, requireManager } from '../middleware/auth.js';
+import { resolveEmployeeKpiForPayroll } from '../utils/kpiPayrollResolver.js';
 
 const router = Router();
 
@@ -346,24 +347,14 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
                 const overtimePay = Math.round(overtimeHours * hourlyRate * 1.5);
 
                 // ── KPI (from kpi_monthly locked records) ──
-                let kpiAchievement = 0, kpiBonus = 0, kpiPenalty = 0, kpiFactor = 100.0;
-                try {
-                    const monthKey = `${year}-${String(month).padStart(2, '0')}`;
-                    const { data: kpiResult } = await supabaseAdmin
-                        .from('kpi_monthly')
-                        .select('total_score, rank, kpi_bonus_amount, kpi_penalty_amount, kpi_commission_factor')
-                        .eq('employee_id', user.id)
-                        .eq('month_key', monthKey)
-                        .eq('status', 'locked')
-                        .single();
-
-                    if (kpiResult) {
-                        kpiAchievement = Number(kpiResult.total_score) || 0;
-                        kpiBonus = Number(kpiResult.kpi_bonus_amount) || 0;
-                        kpiPenalty = Number(kpiResult.kpi_penalty_amount) || 0;
-                        kpiFactor = Number(kpiResult.kpi_commission_factor) || 100.0;
-                    }
-                } catch (e) { /* ignore */ }
+                const monthKey = `${year}-${String(month).padStart(2, '0')}`;
+                const kpiPayroll = await resolveEmployeeKpiForPayroll(user.id, monthKey);
+                let kpiAchievement = kpiPayroll.primary.score;
+                let kpiBonus = kpiPayroll.primary.bonus;
+                let kpiPenalty = kpiPayroll.primary.penalty;
+                let kpiFactor = kpiPayroll.primary.commissionFactor;
+                const kpiTeamleadBonus = kpiPayroll.teamleadBonus;
+                const kpiManagementBonus = kpiPayroll.managementBonus;
 
                 // ── Violations / Rewards ──
                 let totalRewards = 0, totalViolationAmount = 0;
@@ -397,13 +388,13 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
 
                 // ── Final calculation (aligned with salary.ts formula) ──
                 totalCommission = Math.floor(totalCommission * (kpiFactor / 100));
-                const totalBonus = kpiBonus + totalRewards;
+                const totalBonus = kpiBonus + totalRewards + kpiTeamleadBonus + kpiManagementBonus;
                 const grossSalary = baseSalary + overtimePay + totalCommission + totalBonus;
                 const socialInsurance = Math.floor(baseSalary * 0.08);
                 const healthInsurance = Math.floor(baseSalary * 0.015);
                 const taxableIncome = grossSalary - 11000000;
                 const personalTax = taxableIncome > 0 ? Math.floor(taxableIncome * 0.05) : 0;
-                const totalDeduction = socialInsurance + healthInsurance + personalTax + totalAdvances + totalViolationAmount;
+                const totalDeduction = socialInsurance + healthInsurance + personalTax + totalAdvances + totalViolationAmount + kpiPenalty;
                 const netSalary = grossSalary - totalDeduction;
 
                 const salaryData = {
@@ -421,6 +412,14 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
                     referral_commission: referralCommission,
                     commission: totalCommission,
                     kpi_achievement: kpiAchievement,
+                    kpi_primary_score: kpiAchievement,
+                    kpi_primary_rank: kpiPayroll.primary.rank,
+                    kpi_primary_bonus: kpiPayroll.primary.bonus,
+                    kpi_primary_penalty: kpiPayroll.primary.penalty,
+                    kpi_primary_commission_factor: kpiPayroll.primary.commissionFactor,
+                    kpi_secondary_details: kpiPayroll.secondaryDetails.length > 0 ? kpiPayroll.secondaryDetails : null,
+                    teamlead_bonus: kpiTeamleadBonus,
+                    management_bonus: kpiManagementBonus,
                     bonus: totalBonus,
                     social_insurance: socialInsurance,
                     health_insurance: healthInsurance,
@@ -741,21 +740,20 @@ router.post('/:id/recalculate', authenticate, requireAccountant, async (req: Aut
 
                 // ── KPI ──
                 let kpiAchievement = 0, kpiBonus = 0, kpiPenalty = 0, kpiFactor = 100.0;
+                let kpiPrimaryRank: string | null = null;
+                let kpiTeamleadBonus = 0, kpiManagementBonus = 0;
+                let kpiSecondaryDetails: any[] = [];
                 try {
                     const monthKey = `${year}-${String(month).padStart(2, '0')}`;
-                    const { data: kpiResult } = await supabaseAdmin
-                        .from('kpi_monthly')
-                        .select('total_score, rank, kpi_bonus_amount, kpi_penalty_amount, kpi_commission_factor')
-                        .eq('employee_id', userId)
-                        .eq('month_key', monthKey)
-                        .eq('status', 'locked')
-                        .single();
-                    if (kpiResult) {
-                        kpiAchievement = Number(kpiResult.total_score) || 0;
-                        kpiBonus = Number(kpiResult.kpi_bonus_amount) || 0;
-                        kpiPenalty = Number(kpiResult.kpi_penalty_amount) || 0;
-                        kpiFactor = Number(kpiResult.kpi_commission_factor) || 100.0;
-                    }
+                    const kpiPayrollRec = await resolveEmployeeKpiForPayroll(userId, monthKey);
+                    kpiAchievement = kpiPayrollRec.primary.score;
+                    kpiBonus = kpiPayrollRec.primary.bonus;
+                    kpiPenalty = kpiPayrollRec.primary.penalty;
+                    kpiFactor = kpiPayrollRec.primary.commissionFactor;
+                    kpiPrimaryRank = kpiPayrollRec.primary.rank;
+                    kpiTeamleadBonus = kpiPayrollRec.teamleadBonus;
+                    kpiManagementBonus = kpiPayrollRec.managementBonus;
+                    kpiSecondaryDetails = kpiPayrollRec.secondaryDetails;
                 } catch (e) { /* ignore */ }
 
                 // ── Violations / Rewards ──
@@ -837,6 +835,14 @@ router.post('/:id/recalculate', authenticate, requireAccountant, async (req: Aut
                     referral_commission: referralCommission,
                     commission: totalCommission,
                     kpi_achievement: kpiAchievement,
+                    kpi_primary_score: kpiAchievement,
+                    kpi_primary_rank: kpiPrimaryRank,
+                    kpi_primary_bonus: kpiBonus,
+                    kpi_primary_penalty: kpiPenalty,
+                    kpi_primary_commission_factor: kpiFactor,
+                    kpi_secondary_details: kpiSecondaryDetails.length > 0 ? kpiSecondaryDetails : null,
+                    teamlead_bonus: kpiTeamleadBonus,
+                    management_bonus: kpiManagementBonus,
                     bonus: totalBonus,
                     bonus_details: bonusDetails,
                     social_insurance: socialInsurance,

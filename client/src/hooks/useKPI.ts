@@ -54,6 +54,9 @@ export interface KPIRankConfig {
     commission_factor: number;
     sort_order: number;
     is_active: boolean;
+    employee_id?: string | null;
+    is_override?: boolean;
+    global_id?: string;
 }
 
 export interface KPIMonthlyRecord {
@@ -126,6 +129,31 @@ export interface KPIMonthlySummary {
     pending: number;
     locked: number;
     avg_score: number;
+}
+
+export interface KPIAssignment {
+    id: string;
+    employee_id: string;
+    policy_id: string;
+    assignment_type: 'primary' | 'secondary';
+    compensation_bucket: string;
+    effective_from: string;
+    effective_to?: string;
+    is_active: boolean;
+    policy?: { id: string; code: string; name: string; role: string };
+}
+
+export interface EmployeeWithAssignments {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    department?: string;
+    assignments: KPIAssignment[];
+    primary_policy?: { id: string; code: string; name: string };
+    // legacy compat
+    kpi_policy_id?: string;
+    kpi_policy?: { id: string; code: string; name: string };
 }
 
 // ============================================================
@@ -421,10 +449,11 @@ export function useKPI() {
 
     // ── RANK CONFIGS ──
 
-    const fetchRankConfigs = useCallback(async () => {
+    const fetchRankConfigs = useCallback(async (employeeId?: string) => {
         setLoading(true);
         try {
-            const response = await kpiApi.getRankConfigs();
+            const params = employeeId ? { employee_id: employeeId } : undefined;
+            const response = await kpiApi.getRankConfigs(params);
             const data = response.data?.data || response.data;
             setRankConfigs((data as any)?.configs || []);
         } catch (err: any) {
@@ -441,6 +470,17 @@ export function useKPI() {
             return (response.data?.data as any)?.config;
         } catch (err: any) {
             toast.error(err.response?.data?.message || 'Lỗi khi cập nhật');
+            throw err;
+        }
+    }, []);
+
+    const upsertEmployeeRankConfigs = useCallback(async (employeeId: string, configs: Array<Partial<KPIRankConfig> & { rank_code: string; reset_to_global?: boolean }>) => {
+        try {
+            const response = await kpiApi.upsertEmployeeRankConfigs(employeeId, configs);
+            toast.success('Đã lưu cấu hình xếp loại');
+            return (response.data?.data as any);
+        } catch (err: any) {
+            toast.error(err.response?.data?.message || 'Lỗi khi lưu cấu hình');
             throw err;
         }
     }, []);
@@ -472,7 +512,7 @@ export function useKPI() {
 
     // ── EMPLOYEE ASSIGNMENTS ──
 
-    const [employeeAssignments, setEmployeeAssignments] = useState<any[]>([]);
+    const [employeeAssignments, setEmployeeAssignments] = useState<EmployeeWithAssignments[]>([]);
     const [availablePolicies, setAvailablePolicies] = useState<any[]>([]);
 
     const fetchEmployeeAssignments = useCallback(async (params?: { role?: string; department?: string; status?: string }) => {
@@ -494,12 +534,22 @@ export function useKPI() {
         try {
             const response = await kpiApi.batchAssignPolicies({ assignments });
             const data = response.data?.data || response.data;
-            const updated = (data as any)?.updated || 0;
+            const updated = (data as any)?.created || 0;
             const errors = (data as any)?.errors || 0;
             toast.success(`Đã gán KPI cho ${updated} nhân sự${errors > 0 ? `, ${errors} lỗi` : ''}`);
             return data;
         } catch (err: any) {
             toast.error(err.response?.data?.message || 'Lỗi khi gán chính sách KPI');
+            throw err;
+        }
+    }, []);
+
+    const removeAssignment = useCallback(async (assignmentId: string) => {
+        try {
+            await kpiApi.removeAssignment(assignmentId);
+            toast.success('Đã xóa gán KPI phụ');
+        } catch (err: any) {
+            toast.error(err.response?.data?.message || 'Lỗi khi xóa gán KPI');
             throw err;
         }
     }, []);
@@ -529,7 +579,7 @@ export function useKPI() {
         fetchViolations, createViolation, approveViolation, rejectViolation,
 
         // Rank config actions
-        fetchRankConfigs, updateRankConfig,
+        fetchRankConfigs, updateRankConfig, upsertEmployeeRankConfigs,
 
         // Leaderboard
         fetchLeaderboard,
@@ -538,6 +588,6 @@ export function useKPI() {
         createAdjustment,
 
         // Employee assignments
-        fetchEmployeeAssignments, batchAssignPolicies,
+        fetchEmployeeAssignments, batchAssignPolicies, removeAssignment,
     };
 }
