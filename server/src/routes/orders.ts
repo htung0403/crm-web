@@ -104,7 +104,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                     customer:customers(id, name, phone, email),
                     sales_user:users!orders_sales_id_fkey(id, name),
                     items:order_items(
-                        id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, current_phase, phase_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, warranty_code,
+                        id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, current_phase, phase_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type,
                         product:products(id, image, code),
                         service:services(id, image, code),
                         technician:users!order_product_services_technician_id_fkey(id, name),
@@ -253,7 +253,7 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
         customer:customers(id, name, phone, email),
         sales_user:users!orders_sales_id_fkey(id, name),
         items:order_items(
-            id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, current_phase, phase_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type, warranty_code,
+            id, order_id, product_id, service_id, item_type, item_name, quantity, unit_price, total_price, item_code, technician_id, sales_step_data, after_sale_stage, care_warranty_flow, care_warranty_stage, current_phase, phase_stage, completion_photos, packaging_photos, delivery_code, delivery_carrier, delivery_type,
             product:products(id, image, code),
             service:services(id, image, code),
             technician:users!order_items_technician_id_fkey(id, name),
