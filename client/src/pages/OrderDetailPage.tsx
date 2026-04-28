@@ -1056,12 +1056,12 @@ export function OrderDetailPage() {
                     const updated = await reloadOrder();
                     if (updated?.id) {
                         fetchKanbanLogs(updated.id);
-                        // Synchronize overall order status – if all items are now finished, move order to 'done'
+                        // Synchronize overall order status – items now enter after_sale flow
                         const allDone = updated.items?.every((i: any) => 
                             i.status === 'completed' || i.status === 'cancelled' || i.status === 'aftersale_stored'
                         );
                         if (allDone && updated.status !== 'done' && updated.status !== 'after_sale') {
-                            await updateOrderStatus(updated.id, 'done');
+                            await updateOrderStatus(updated.id, 'after_sale');
                         }
                     }
                     setActiveTab('aftersale');
