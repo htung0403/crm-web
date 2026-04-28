@@ -628,6 +628,19 @@ export function CreateOrderPage() {
         }));
     };
 
+    // Update service price
+    const handleUpdateServicePrice = (productIndex: number, serviceIndex: number, price: number) => {
+        setProducts(prev => prev.map((p, i) => {
+            if (i !== productIndex) return p;
+            return {
+                ...p,
+                services: p.services.map((s, si) =>
+                    si === serviceIndex ? { ...s, price } : s
+                )
+            };
+        }));
+    };
+
     // Add sale to a service
     const handleAddSaleToService = (productIndex: number, serviceIndex: number, saleId: string, commission: number = 0) => {
         const sale = availableSales.find(s => s.id === saleId);
@@ -1404,6 +1417,7 @@ export function CreateOrderPage() {
                                                 <div className="flex items-center gap-4 flex-shrink-0">
                                                     <div className="flex items-center gap-2">
                                                         <Calendar className="h-4 w-4 text-primary shrink-0" />
+                                                        <span className="text-xs text-muted-foreground whitespace-nowrap">Hạn trả đồ</span>
                                                         <Input
                                                             type="date"
                                                             size={1}
@@ -1674,9 +1688,18 @@ export function CreateOrderPage() {
                                                                     <div key={si} className="bg-green-50 p-2 rounded-lg space-y-1">
                                                                         {/* Service info row */}
                                                                         <div className="flex items-center justify-between">
-                                                                            <div className="flex-1">
+                                                                            <div className="flex-1 min-w-0">
                                                                                 <p className="text-sm font-medium">{s.name}</p>
-                                                                                <p className="text-xs text-green-600">{formatCurrency(s.price)}</p>
+                                                                                <div className="flex items-center gap-1 mt-0.5">
+                                                                                    <Input
+                                                                                        type="text"
+                                                                                        value={formatInputCurrency(s.price)}
+                                                                                        onFocus={(e) => e.target.select()}
+                                                                                        onChange={(e) => handleUpdateServicePrice(index, si, parseInputCurrency(e.target.value))}
+                                                                                        className="h-6 w-28 text-xs text-green-600 font-semibold px-1.5 border-dashed focus:border-solid"
+                                                                                    />
+                                                                                    <span className="text-[10px] text-green-600">đ</span>
+                                                                                </div>
                                                                             </div>
                                                                             <Button
                                                                                 variant="ghost"

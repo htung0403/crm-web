@@ -78,8 +78,8 @@ export function UpsellManagementPage() {
             ]);
 
             setUpsellTickets(upsellRes.data?.data?.filter((t: any) => t.status === 'pending') || []);
-            setAccessoryRequests(accRes.data?.data?.filter((a: any) => a.status === 'requested' || a.status === 'need_buy') || []);
-            setPartnerRequests(partRes.data?.data?.filter((p: any) => p.status === 'requested' || p.status === 'ship_to_partner') || []);
+            setAccessoryRequests(accRes.data?.data?.filter((a: any) => a.status === 'requested') || []);
+            setPartnerRequests(partRes.data?.data?.filter((p: any) => p.status === 'requested') || []);
             setExtensionRequests(extRes.data?.data?.filter((e: any) => e.status === 'requested') || []);
             setLeaveRequests(leaveRes.data?.filter((l: any) => l.status === 'pending') || []);
             setPendingVouchers(voucherRes.data?.data?.transactions || []);
