@@ -106,8 +106,8 @@ export function SLACountdown({ lead, size = 'md', className }: SLACountdownProps
                 colorClass = 'bg-amber-500 text-white';
                 
                 // Alert threshold phase (bắt đầu nhấp nháy đỏ)
-                let warnThresholdSec = totalSec * 0.15;
-                if (currentMilestone === 3) warnThresholdSec = 90; // rule 1: 90s alert
+                let warnThresholdSec = 45 * 60; // 45 phút = 2700 giây cho tất cả mốc dài
+                if (currentMilestone <= 3) warnThresholdSec = 90; // 90 giây cho mốc 3 phút
 
                 if (remainingSec <= warnThresholdSec) {
                     colorClass = 'bg-red-500 text-white';
