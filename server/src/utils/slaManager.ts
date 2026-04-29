@@ -129,8 +129,6 @@ export async function on_customer_message(lead: any) {
  * Di chuyển SLA sang mốc tiếp theo
  */
 export async function move_to_next_rule(lead: any, saleId: string | null = null, fromCron: boolean = false) {
-    const fs = require('fs');
-    fs.appendFileSync('sla_debug.log', `[move_to_next_rule] CALLED for lead ${lead.id}\n`);
     const now = new Date();
     const nextIndex = (lead.current_rule_index || 0) + 1;
     console.log('[DEBUG SLA] nextIndex:', nextIndex);
@@ -162,12 +160,9 @@ export async function move_to_next_rule(lead: any, saleId: string | null = null,
         updates.last_message_time = now.toISOString();
     }
     
-    fs.appendFileSync('sla_debug.log', `[move_to_next_rule] Calling update to index: ${nextIndex}\n`);
     const { error } = await supabaseAdmin.from('leads').update(updates).eq('id', lead.id);
     if (error) {
-        fs.appendFileSync('sla_debug.log', `[move_to_next_rule] ERROR: ${error.message}\n`);
-    } else {
-        fs.appendFileSync('sla_debug.log', `[move_to_next_rule] SUCCESS update\n`);
+        console.error('[SLAManager] move_to_next_rule error:', error.message);
     }
 }
 
@@ -175,8 +170,6 @@ export async function move_to_next_rule(lead: any, saleId: string | null = null,
  * Xử lý khi Sale Nhắn (Rule 2 + Rule 4)
  */
 export async function on_sale_message(lead: any, saleId: string | null, saleName: string) {
-    const fs = require('fs');
-    fs.appendFileSync('sla_debug.log', `[on_sale_message] lead ${lead.id}\n`);
     // Check Giành khách (Rule 4)
     // Fix: Chỉ trigger giành khách nếu thực sự resolve được saleId và nó KHÁC với assigned_to
     if (lead.assigned_to && saleId && saleId !== lead.assigned_to) {
@@ -201,13 +194,10 @@ export async function on_sale_message(lead: any, saleId: string | null, saleName
     
     // Bug Fix: Phải dùng Virtual Time vì deadline có thể đã bị dịch sang sáng hôm sau
     const timeLeftMins = getVirtualTimeLeft(now, currDeadline, lead.created_at);
-    fs.appendFileSync('sla_debug.log', `[timeLeftMins: ${timeLeftMins}] created_at: ${lead.created_at}\n`);
     
     if (is_valid_followup(lead.current_rule_index || 0, timeLeftMins)) {
-        fs.appendFileSync('sla_debug.log', `[VALID FOLLOWUP] moving to next rule\n`);
         await move_to_next_rule(lead, saleId);
     } else {
-        fs.appendFileSync('sla_debug.log', `[INVALID FOLLOWUP]\n`);
         // Sai khung -> Không hợp lệ -> Trôi tiếp chờ cron
         const { error } = await supabaseAdmin.from('leads').update({
             last_actor: 'sale',
