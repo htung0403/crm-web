@@ -344,7 +344,7 @@ export function LeadsPage() {
     return (
         <>
             <Toaster position="top-right" richColors />
-            <div className="space-y-5 animate-fade-in max-w-screen-2xl mx-auto" style={{ contain: 'inline-size' }}>
+            <div className="space-y-5 animate-fade-in -mx-4 md:-mx-6 lg:-mx-8 px-4" style={{ contain: 'inline-size' }}>
                 {/* Page Header + Stats + Filters Container - Contained width */}
                 <div className="space-y-5">
                     {/* Page Header */}
