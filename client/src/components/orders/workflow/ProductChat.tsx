@@ -46,7 +46,23 @@ interface ProductChatProps {
     highlightMessageId?: string;
 }
 
+/**
+ * Normalize step-specific roomId to workflow section for shared chat.
+ * - step1-step5 → sales (all Sales steps share one chat)
+ * - after1-after4 → aftersale (all Aftersale steps share one chat)
+ * - war* / care* → care (all Care/Warranty steps share one chat)
+ */
+function getChatRoomId(roomId: string): string {
+    if (roomId.startsWith('step')) return 'sales';
+    if (roomId.startsWith('after')) return 'aftersale';
+    if (roomId.startsWith('war') || roomId.startsWith('care')) return 'care';
+    return roomId;
+}
+
 export function ProductChat({ orderId, entityId, entityType, roomId, currentUserId, highlightMessageId }: ProductChatProps) {
+    // Use normalized chatRoomId for message operations (fetch/send/subscribe)
+    // Keep original roomId for display purposes
+    const chatRoomId = getChatRoomId(roomId);
     const [messages, setMessages] = useState<Message[]>([]);
     const [newMessage, setNewMessage] = useState('');
     const [loading, setLoading] = useState(true);
@@ -70,7 +86,7 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
     const fetchMessages = async (showLoading = false) => {
         if (showLoading) setLoading(true);
         try {
-            const response = await productChatsApi.getMessages(entityId, roomId);
+            const response = await productChatsApi.getMessages(entityId, chatRoomId);
             if (response.data?.data) {
                 setMessages(response.data.data);
             }
@@ -98,9 +114,9 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
         fetchUsers();
 
         // Subscribe to real-time updates for this product and room
-        console.log('Subscribing to realtime for:', entityId, roomId);
+        console.log('Subscribing to realtime for:', entityId, chatRoomId);
         const channel = supabase
-            .channel(`product_chat:${entityId}:${roomId}`)
+            .channel(`product_chat:${entityId}:${chatRoomId}`)
             .on(
                 'postgres_changes',
                 {
@@ -112,8 +128,8 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
                 (payload) => {
                     console.log('Realtime message received:', payload);
                     const newMsg = payload.new as any;
-                    // Only process if it belongs to the current room
-                    if (newMsg.room_id === roomId) {
+                    // Only process if it belongs to the current chat room (normalized section)
+                    if (newMsg.room_id === chatRoomId) {
                         // Refresh the messages to get joined sender info
                         fetchMessages();
                     }
@@ -133,7 +149,7 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
             supabase.removeChannel(channel);
             clearInterval(interval);
         };
-    }, [entityId, roomId]);
+    }, [entityId, chatRoomId]);
 
     useEffect(() => {
         if (scrollRef.current) {
@@ -244,22 +260,22 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
 
         setSending(true);
         try {
-            console.log('Sending message with payload:', {
-                entity_id: entityId,
-                entity_type: entityType,
-                room_id: roomId,
-                content: newMessage.trim(),
-                mentions: mentionIds
-            });
-            const response = await productChatsApi.sendMessage({
-                order_id: orderId,
-                entity_id: entityId,
-                entity_type: entityType,
-                room_id: roomId,
-                content: newMessage.trim(),
-                image_url: selectedImage || undefined,
-                mentions: mentionIds.length > 0 ? mentionIds : undefined
-            });
+        console.log('Sending message with payload:', {
+            entity_id: entityId,
+            entity_type: entityType,
+            room_id: chatRoomId,
+            content: newMessage.trim(),
+            mentions: mentionIds
+        });
+        const response = await productChatsApi.sendMessage({
+            order_id: orderId,
+            entity_id: entityId,
+            entity_type: entityType,
+            room_id: chatRoomId,
+            content: newMessage.trim(),
+            image_url: selectedImage || undefined,
+            mentions: mentionIds.length > 0 ? mentionIds : undefined
+        });
             if (response.data?.data) {
                 setMessages([...messages, response.data.data]);
                 setNewMessage('');

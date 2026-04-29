@@ -61,20 +61,23 @@ const WorkflowCard = memo(({
     const stepDeadline = leadItem ? getStepDeadlineDisplay(leadItem.id) : { label: 'N/A', dueAt: null };
     const itemLate = stepDeadline.dueAt ? stepDeadline.dueAt < new Date() : false;
     const currentStep = leadItem ? getItemCurrentStep(leadItem.id) : null;
+    const isSlaPaused = stepDeadline.label === 'Đang chờ duyệt';
 
     return (
-        <Draggable key={cardKey} draggableId={cardKey} index={index} isDragDisabled={roomId === 'done' || roomId === 'fail'}>
+        <Draggable key={cardKey} draggableId={cardKey} index={index} isDragDisabled={roomId === 'done' || roomId === 'fail' || isSlaPaused}>
             {(provided, snapshot) => (
                 <div
                     ref={provided.innerRef}
                     {...provided.draggableProps}
                     {...provided.dragHandleProps}
                     className={cn(
-                        "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all cursor-grab active:cursor-grabbing",
+                        "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all",
+                        isSlaPaused ? "cursor-not-allowed opacity-75" : "cursor-grab active:cursor-grabbing",
                         snapshot.isDragging ? "shadow-lg ring-2 ring-primary/20 scale-105" : "",
                         itemLate && roomId !== 'done' ? (
                             (extensionRequest?.status === 'pending' || extensionRequest?.status === 'requested') ? "border-amber-400 bg-amber-50/50 border-dashed" : "border-red-500 bg-red-50/30"
                         ) :
+                            isSlaPaused ? "border-purple-400 bg-purple-50/50" :
                             roomId === 'done' ? "border-green-500" :
                                 roomId === 'fail' ? "border-red-400" : "border-blue-400"
                     )}
@@ -176,9 +179,14 @@ const WorkflowCard = memo(({
                             <div className="mt-2 flex items-center justify-between text-[11px]">
                                 <span className="text-gray-500">Hết hạn bước:</span>
                                 <div className="flex items-center gap-1">
-                                    <span className={cn("font-semibold", itemLate ? "text-red-600" : stepDeadline.dueAt ? "text-emerald-600" : "text-gray-400")}>
+                                    <span className={cn("font-semibold", 
+                                        isSlaPaused ? "text-purple-600" :
+                                        itemLate ? "text-red-600" : stepDeadline.dueAt ? "text-emerald-600" : "text-gray-400")}>
                                         {stepDeadline.label}
                                     </span>
+                                    {isSlaPaused && (
+                                        <Clock className="h-3 w-3 text-purple-500 animate-pulse" />
+                                    )}
                                     {extensionRequest?.status === 'manager_approved' && (
                                         <History className="h-3 w-3 text-emerald-500" />
                                     )}

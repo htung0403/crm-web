@@ -72,8 +72,21 @@ export function useWorkflowKanban(
         } : null;
     }, [allWorkflowSteps]);
 
-    // Hạn hoàn thành bước dịch vụ: từ started_at + estimated_duration (ngày) của bước hiện tại
+    const isItemWaitingForAccessoryOrPartner = useCallback((itemId: string): boolean => {
+        const item = order?.items?.find(i => i.id === itemId);
+        if (!item) return false;
+
+        const accessoryStatus = (item as any)?.accessory?.status;
+        const partnerStatus = (item as any)?.partner?.status;
+
+        return accessoryStatus === 'requested' || partnerStatus === 'requested';
+    }, [order?.items]);
+
     const getStepDeadlineDisplay = useCallback((itemId: string): StepDeadlineInfo => {
+        if (isItemWaitingForAccessoryOrPartner(itemId)) {
+            return { label: 'Đang chờ duyệt', dueAt: null };
+        }
+
         const steps = allWorkflowSteps.filter((s: any) => s.item_id === itemId || s.order_item_id === itemId || s.order_product_service_id === itemId);
 
         const inProgress = steps.find((s: any) => s.status === 'in_progress');
@@ -148,7 +161,7 @@ export function useWorkflowKanban(
         }
 
         return { label, dueAt };
-    }, [allWorkflowSteps, order?.confirmed_at, order?.created_at, salesLogs, workflowKanbanGroups]);
+    }, [allWorkflowSteps, order?.confirmed_at, order?.created_at, salesLogs, workflowKanbanGroups, isItemWaitingForAccessoryOrPartner]);
 
     // Compute current tech room: ưu tiên department của bước (Bộ phận: Dán đế → Phòng Dán đế), fallback step_order
     const getItemCurrentTechRoom = useCallback((itemId: string): TechRoom => {
