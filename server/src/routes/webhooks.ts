@@ -976,7 +976,7 @@ async function handleLeadUpdate(data: any) {
         
         // Cập nhật State Machine SLA rời theo đúng kiến trúc sau khi Update lõi Lead xog
         if (effectiveLastActor === 'lead') {
-            await on_customer_message({ id: leadId });
+            await on_customer_message(currentLead);
         } else if (effectiveLastActor === 'sale') {
             const saleName = owner_sale || assigned_to;
             const resolvedId = await resolveUserByName(saleName);

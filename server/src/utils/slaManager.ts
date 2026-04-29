@@ -92,6 +92,23 @@ export function is_valid_followup(ruleIndex: number, timeLeftMinutes: number): b
  * Xử lý khi Khách Nhắn (Rule 1)
  */
 export async function on_customer_message(lead: any) {
+    // Guard: Don't override terminal states
+    const terminalStates = ['RECLAIMED', 'STOPPED'];
+    if (terminalStates.includes(lead.sla_state)) {
+        console.log(`[SLA] Skipping customer message for lead ${lead.id} in state ${lead.sla_state}`);
+        // Still update message timestamp for visibility
+        if (lead.id) {
+            await supabaseAdmin.from('leads').update({
+                t_last_inbound: new Date().toISOString(),
+                last_message_time: new Date().toISOString(),
+                last_actor: 'lead',
+            }).eq('id', lead.id);
+        }
+        return;
+    }
+    
+    // FINISHED: Allow reactivation (customer returning is valid business case)
+    // Continue with existing logic for non-terminal states...
     const now = new Date();
     const nextRule = SLA_CYCLES[0];
     const deadline = calculateDeadline(now, nextRule, lead.created_at);
