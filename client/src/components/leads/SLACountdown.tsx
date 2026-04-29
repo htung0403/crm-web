@@ -11,6 +11,7 @@ interface SLACountdownProps {
         current_deadline_at?: string;
         current_rule_index?: number;
         sla_state?: string;
+        created_at?: string;
     };
     size?: 'sm' | 'md' | 'lg';
     className?: string;
@@ -52,11 +53,16 @@ export function SLACountdown({ lead, size = 'md', className }: SLACountdownProps
         const currentMilestone = SLA_CYCLES[ruleIndex] || 3;
         const isSpeedRule = ruleIndex === 0;
 
-        const getVirtualSecsLeft = (nowTime: Date, deadTime: Date, isRule0: boolean) => {
+        // Customer age: < 24h = new customer (no night pause)
+        const isNew = lead.created_at 
+            ? (now.getTime() - new Date(lead.created_at).getTime()) < 24 * 60 * 60 * 1000 
+            : true;
+
+        const getVirtualSecsLeft = (nowTime: Date, deadTime: Date, isCustomerNew: boolean) => {
             if (nowTime.getTime() >= deadTime.getTime()) {
                 return Math.floor((deadTime.getTime() - nowTime.getTime()) / 1000);
             }
-            if (isRule0) {
+            if (isCustomerNew) {
                 return Math.floor((deadTime.getTime() - nowTime.getTime()) / 1000);
             }
 
@@ -88,7 +94,7 @@ export function SLACountdown({ lead, size = 'md', className }: SLACountdownProps
             return Math.floor((tEnd - tStart - totalPausedMs) / 1000);
         };
 
-        const remainingSec = getVirtualSecsLeft(now, deadline, isSpeedRule);
+        const remainingSec = getVirtualSecsLeft(now, deadline, isNew);
         const totalSec = currentMilestone * 60;
         
         let label = isSpeedRule ? 'Sale cần rep' : 'Đợi khách';
