@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { leadsApi } from '@/lib/api';
 
 export interface Lead {
@@ -209,12 +209,26 @@ export function useLeads(): UseLeadsReturn {
         }
     }, []);
 
+    const lastParamsRef = useRef<{status?: string; source?: string; search?: string; page?: number; limit?: number}>({});
+    
+    const fetchLeadsWithParams = useCallback(async (params?: {status?: string; source?: string; search?: string; page?: number; limit?: number}) => {
+        lastParamsRef.current = params || {};
+        await fetchLeads(params);
+    }, [fetchLeads]);
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            fetchLeads(lastParamsRef.current);
+        }, 5000);
+        return () => clearInterval(interval);
+    }, [fetchLeads]);
+
     return {
         leads,
         loading,
         error,
         pagination,
-        fetchLeads,
+        fetchLeads: fetchLeadsWithParams,
         createLead,
         updateLead,
         deleteLead,
