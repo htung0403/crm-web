@@ -282,7 +282,7 @@ export async function checkSlaCron() {
                 }
 
                 // 2. Đúng giờ hẹn: Reset về mốc 3 phút (ACTIVE)
-                if (minUntilAppoint <= 0 && minUntilAppoint > -5) {
+                if (lead.sla_state === 'PAUSED_APPOINTMENT' && minUntilAppoint <= 0 && minUntilAppoint > -60) {
                     const deadline = calculateDeadline(now, SLA_CYCLES[0], lead.created_at);
                     await supabaseAdmin.from('leads').update({
                         current_rule_index: 0,
