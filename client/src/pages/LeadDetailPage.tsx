@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
     ArrowLeft, Phone, MessageCircle, Copy, Check, ArrowRightLeft,
@@ -95,32 +95,32 @@ export function LeadDetailPage() {
     const textAreaRef = useRef<HTMLTextAreaElement>(null);
 
     // Fetch lead data
-    useEffect(() => {
-        const fetchLead = async () => {
-            if (!id) return;
+    const fetchLead = useCallback(async () => {
+        if (!id) return;
 
-            setLoading(true);
-            setError(null);
+        setLoading(true);
+        setError(null);
 
-            try {
-                const response = await leadsApi.getById(id);
-                const leadData = response.data?.data?.lead || response.data?.data;
-                if (leadData && leadData.id) {
-                    setLead(leadData as Lead);
-                    setSelectedStatus(leadData.pipeline_stage || leadData.status);
-                } else {
-                    setError('Không tìm thấy thông tin lead');
-                }
-            } catch (err: any) {
-                console.error('Error fetching lead:', err);
-                setError(err.response?.data?.message || 'Lỗi khi tải thông tin lead');
-            } finally {
-                setLoading(false);
+        try {
+            const response = await leadsApi.getById(id);
+            const leadData = response.data?.data?.lead || response.data?.data;
+            if (leadData && leadData.id) {
+                setLead(leadData as Lead);
+                setSelectedStatus(leadData.pipeline_stage || leadData.status);
+            } else {
+                setError('Không tìm thấy thông tin lead');
             }
-        };
-
-        fetchLead();
+        } catch (err: any) {
+            console.error('Error fetching lead:', err);
+            setError(err.response?.data?.message || 'Lỗi khi tải thông tin lead');
+        } finally {
+            setLoading(false);
+        }
     }, [id]);
+
+    useEffect(() => {
+        fetchLead();
+    }, [fetchLead]);
 
     // Initialize edit fields when lead data loads
     useEffect(() => {
@@ -300,8 +300,8 @@ export function LeadDetailPage() {
         setIsSaving(true);
         try {
             await updateLead(lead.id, { status: newStatus, pipeline_stage: newStatus });
+            await fetchLead();
             setSelectedStatus(newStatus);
-            setLead(prev => prev ? { ...prev, status: newStatus, pipeline_stage: newStatus } : null);
             toast.success('Đã cập nhật trạng thái');
 
             // Refresh activities to show status change
@@ -361,7 +361,7 @@ export function LeadDetailPage() {
             }
 
             await updateLead(lead.id, { avatar_url: url || undefined });
-            setLead(prev => prev ? { ...prev, avatar_url: url || undefined } : null);
+            await fetchLead();
             toast.success('Đã cập nhật ảnh đại diện');
         } catch (err) {
             toast.error('Lỗi khi cập nhật ảnh đại diện');
@@ -570,8 +570,7 @@ export function LeadDetailPage() {
 
             await updateLead(lead.id, updateData);
 
-            // Update local state
-            setLead(prev => prev ? { ...prev, ...updateData } : null);
+            await fetchLead();
             setIsEditingInfo(false);
             setIsEditingContact(false);
             toast.success('Đã cập nhật thông tin');
