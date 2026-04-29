@@ -148,9 +148,9 @@ export async function move_to_next_rule(lead: any, saleId: string | null = null,
         updated_at: now.toISOString()
     };
     
-    // if (!fromCron) {
-    //     updates.last_valid_followup_at = now.toISOString();
-    // }
+    if (!fromCron) {
+        updates.last_valid_followup_at = now.toISOString();
+    }
     
     if (saleId) {
         updates.last_actor = 'sale';
@@ -247,7 +247,7 @@ export async function checkSlaCron() {
         const { data: leads, error } = await supabaseAdmin
             .from('leads')
             .select(`
-                id, name, assigned_to, appointment_time, sla_state, current_deadline_at, current_rule_index, appointment_reminded_at, pipeline_stage, created_at, assigned_to_user: users!leads_assigned_to_fkey(name, telegram_chat_id)
+                id, name, assigned_to, appointment_time, sla_state, current_deadline_at, current_rule_index, appointment_reminded_at, pipeline_stage, created_at, last_actor, assigned_to_user: users!leads_assigned_to_fkey(name, telegram_chat_id)
             `)
             .not('assigned_to', 'is', null)
             .not('pipeline_stage', 'in', '("chot_don", "huy", "fail")');
@@ -270,11 +270,10 @@ export async function checkSlaCron() {
                     fireWebhook('APPOINTMENT_REMIND', {
                         lead_id: lead.id,
                         lead_name: lead.name,
-                        sale_id: lead.assigned_to,
+                        sale_name: saleName,
                         tele_id_sale: teleIdSale,
-                        link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
                         appointment_time: lead.appointment_time,
-                        minutes_left: Math.round(minUntilAppoint)
+                        link_lead: `${FRONTEND_URL}/leads/${lead.id}`
                     });
                     await supabaseAdmin.from('leads').update({
                         appointment_reminded_at: now.toISOString()
@@ -307,6 +306,10 @@ export async function checkSlaCron() {
                 const ruleIndex = lead.current_rule_index || 0;
                 const currentMilestone = SLA_CYCLES[ruleIndex] || 3;
 
+                if (ruleIndex > 0 && lead.last_actor !== 'sale') {
+                    continue;
+                }
+
                 // Cảnh báo sớm
                 let warnThreshold = 45; // 45 phút cho tất cả mốc dài
                 if (currentMilestone <= 3) warnThreshold = 1.5; // 90 giây cho mốc 3 phút
@@ -325,12 +328,10 @@ export async function checkSlaCron() {
                         fireWebhook('SLA_WARNING', {
                             lead_id: lead.id,
                             lead_name: lead.name,
-                            sale_id: lead.assigned_to,
                             sale_name: saleName,
                             tele_id_sale: teleIdSale,
-                            link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
-                            rule: `Cycle ${currentMilestone}M`,
-                            time_left_min: Math.round(timeLeft)
+                            deadline_at: lead.current_deadline_at,
+                            link_lead: `${FRONTEND_URL}/leads/${lead.id}`
                         });
                         await supabaseAdmin.from('sla_fired_alerts').insert({
                             lead_id: lead.id,
@@ -347,7 +348,6 @@ export async function checkSlaCron() {
                         fireWebhook('SLA_RECLAIM', {
                             lead_id: lead.id,
                             lead_name: lead.name,
-                            sale_id: lead.assigned_to,
                             old_sale_name: saleName,
                             old_tele_id_sale: teleIdSale,
                             link_lead: `${FRONTEND_URL}/leads/${lead.id}`
@@ -376,9 +376,8 @@ export async function checkSlaCron() {
                             lead_name: lead.name,
                             sale_name: saleName,
                             tele_id_sale: teleIdSale,
-                            link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
-                            rule: `Quá hạn Cycle ${currentMilestone}M`,
-                            time_left_min: 0
+                            deadline_at: lead.current_deadline_at,
+                            link_lead: `${FRONTEND_URL}/leads/${lead.id}`
                         });
                         await move_to_next_rule(lead, null, true);
                         
