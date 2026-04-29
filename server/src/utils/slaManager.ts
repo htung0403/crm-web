@@ -291,8 +291,8 @@ export async function checkSlaCron() {
 
                 // Cảnh báo sớm
                 const warnKey = `WARN_${lead.id}_R${ruleIndex}`;
-                let warnThreshold = currentMilestone * 0.15;
-                if (currentMilestone === 3) warnThreshold = 1.5; // 90s cho mốc 3p
+                let warnThreshold = 45; // 45 phút cho tất cả mốc dài
+                if (currentMilestone <= 3) warnThreshold = 1.5; // 90 giây cho mốc 3 phút
 
                 if (timeLeft <= warnThreshold && timeLeft > 0 && !firedAlerts.has(warnKey)) {
                     fireWebhook('SLA_WARNING', {
