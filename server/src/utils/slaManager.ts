@@ -8,9 +8,20 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 const firedAlerts = new Set<string>();
 
 /**
+ * Khách Mới (< 24h): Tính SLA xuyên đêm.
+ * Khách Cũ (> 24h): Tạm dừng bộ đếm từ 00:00 - 06:30.
+ */
+export function isCustomerNew(customerCreatedAt: Date | string): boolean {
+    const created = new Date(customerCreatedAt);
+    const now = new Date();
+    const hoursSinceCreation = (now.getTime() - created.getTime()) / (1000 * 60 * 60);
+    return hoursSinceCreation < 24;
+}
+
+/**
  * Tính toán mốc Deadline mới dựa trên cơ chế Pause khi xuyên màn đêm 00:00 -> 06:30
  */
-export function calculateDeadline(now: Date, ruleMinutes: number, isRule0: boolean): Date {
+export function calculateDeadline(now: Date, ruleMinutes: number, customerCreatedAt: Date | string): Date {
     let current = new Date(now.getTime());
     let remaining = ruleMinutes;
     
@@ -19,8 +30,7 @@ export function calculateDeadline(now: Date, ruleMinutes: number, isRule0: boole
         current = new Date(current.getTime() + 60000); // Tiến thêm 1 phút
         iters++;
         
-        // Ngoại trừ Rule 0 (3 phút) chạy xuyên đêm, các Rule khác Pause ban đêm
-        if (!isRule0) {
+        if (!isCustomerNew(customerCreatedAt)) {
             const utcHours = current.getUTCHours();
             const vnHours = (utcHours + 7) % 24; // UTC+7
             const vnMin = current.getUTCMinutes();
@@ -40,7 +50,7 @@ export function calculateDeadline(now: Date, ruleMinutes: number, isRule0: boole
  * Tính số phút "hiệu lực" còn lại bằng cách nháp ngược logic Shift, 
  * loại trừ khung giờ nghỉ đêm.
  */
-export function getVirtualTimeLeft(now: Date, deadline: Date, isRule0: boolean): number {
+export function getVirtualTimeLeft(now: Date, deadline: Date, customerCreatedAt: Date | string): number {
     if (now.getTime() >= deadline.getTime()) return 0;
     
     let current = new Date(now.getTime());
@@ -52,7 +62,7 @@ export function getVirtualTimeLeft(now: Date, deadline: Date, isRule0: boolean):
         iters++;
         
         let isPaused = false;
-        if (!isRule0) {
+        if (!isCustomerNew(customerCreatedAt)) {
             const utcHours = current.getUTCHours();
             const vnHours = (utcHours + 7) % 24;
             const vnMin = current.getUTCMinutes();
@@ -84,7 +94,7 @@ export function is_valid_followup(ruleIndex: number, timeLeftMinutes: number): b
 export async function on_customer_message(lead: any) {
     const now = new Date();
     const nextRule = SLA_CYCLES[0];
-    const deadline = calculateDeadline(now, nextRule, true); // Rule 3 phút chạy xuyên đêm
+    const deadline = calculateDeadline(now, nextRule, lead.created_at);
     
     await supabaseAdmin.from('leads').update({
         last_actor: 'lead',
@@ -117,7 +127,7 @@ export async function move_to_next_rule(lead: any, saleId: string | null = null,
     }
     
     const nextRule = SLA_CYCLES[nextIndex];
-    const deadline = calculateDeadline(now, nextRule, nextIndex === 0);
+    const deadline = calculateDeadline(now, nextRule, lead.created_at);
     
     const updates: any = {
         current_rule_index: nextIndex,
@@ -173,9 +183,8 @@ export async function on_sale_message(lead: any, saleId: string | null, saleName
     console.log('[DEBUG SLA] currDeadline:', currDeadline);
     
     // Bug Fix: Phải dùng Virtual Time vì deadline có thể đã bị dịch sang sáng hôm sau
-    const isRule0 = (lead.current_rule_index || 0) === 0;
-    const timeLeftMins = getVirtualTimeLeft(now, currDeadline, isRule0);
-    fs.appendFileSync('sla_debug.log', `[timeLeftMins: ${timeLeftMins}] isRule0: ${isRule0}\n`);
+    const timeLeftMins = getVirtualTimeLeft(now, currDeadline, lead.created_at);
+    fs.appendFileSync('sla_debug.log', `[timeLeftMins: ${timeLeftMins}] created_at: ${lead.created_at}\n`);
     
     if (is_valid_followup(lead.current_rule_index || 0, timeLeftMins)) {
         fs.appendFileSync('sla_debug.log', `[VALID FOLLOWUP] moving to next rule\n`);
@@ -195,7 +204,7 @@ export async function on_sale_message(lead: any, saleId: string | null, saleName
 
 export async function on_lead_assigned(leadId: string, saleId: string) {
     const now = new Date();
-    const deadline = calculateDeadline(now, SLA_CYCLES[0], true);
+    const deadline = calculateDeadline(now, SLA_CYCLES[0], now.toISOString());
     await supabaseAdmin.from('leads').update({
         current_rule_index: 0,
         current_deadline_at: deadline.toISOString(),
@@ -229,7 +238,7 @@ export async function checkSlaCron() {
         const { data: leads, error } = await supabaseAdmin
             .from('leads')
             .select(`
-                id, name, assigned_to, appointment_time, sla_state, current_deadline_at, current_rule_index, appointment_reminded_at, pipeline_stage, assigned_to_user: users!leads_assigned_to_fkey(name, telegram_chat_id)
+                id, name, assigned_to, appointment_time, sla_state, current_deadline_at, current_rule_index, appointment_reminded_at, pipeline_stage, created_at, assigned_to_user: users!leads_assigned_to_fkey(name, telegram_chat_id)
             `)
             .not('assigned_to', 'is', null)
             .not('pipeline_stage', 'in', '("chot_don", "huy", "fail")');
@@ -265,7 +274,7 @@ export async function checkSlaCron() {
 
                 // 2. Đúng giờ hẹn: Reset về mốc 3 phút (ACTIVE)
                 if (minUntilAppoint <= 0 && minUntilAppoint > -5) {
-                    const deadline = calculateDeadline(now, SLA_CYCLES[0], true);
+                    const deadline = calculateDeadline(now, SLA_CYCLES[0], lead.created_at);
                     await supabaseAdmin.from('leads').update({
                         current_rule_index: 0,
                         current_deadline_at: deadline.toISOString(),
