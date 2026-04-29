@@ -5,8 +5,6 @@ import { autoLogKpiViolation } from './kpiViolationLogger.js';
 export const SLA_CYCLES = [3, 60, 180, 300, 420, 1440, 2880, 3120, 4020, 5160, 6600];
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
-const firedAlerts = new Set<string>();
-
 /**
  * Khách Mới (< 24h): Tính SLA xuyên đêm.
  * Khách Cũ (> 24h): Tạm dừng bộ đếm từ 00:00 - 06:30.
@@ -240,7 +238,11 @@ export async function trigger_intrusion(lead: any, intruder_id: string, intruder
 export async function checkSlaCron() {
     try {
         const now = new Date();
-        
+
+        await supabaseAdmin.from('sla_fired_alerts')
+            .delete()
+            .lt('created_at', new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString());
+
         // Fetch leads đang vận hành SLA (không ở trạng thái chốt/hủy)
         const { data: leads, error } = await supabaseAdmin
             .from('leads')
@@ -306,22 +308,36 @@ export async function checkSlaCron() {
                 const currentMilestone = SLA_CYCLES[ruleIndex] || 3;
 
                 // Cảnh báo sớm
-                const warnKey = `WARN_${lead.id}_R${ruleIndex}`;
                 let warnThreshold = 45; // 45 phút cho tất cả mốc dài
                 if (currentMilestone <= 3) warnThreshold = 1.5; // 90 giây cho mốc 3 phút
 
-                if (timeLeft <= warnThreshold && timeLeft > 0 && !firedAlerts.has(warnKey)) {
-                    fireWebhook('SLA_WARNING', {
-                        lead_id: lead.id,
-                        lead_name: lead.name,
-                        sale_id: lead.assigned_to,
-                        sale_name: saleName,
-                        tele_id_sale: teleIdSale,
-                        link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
-                        rule: `Cycle ${currentMilestone}M`,
-                        time_left_min: Math.round(timeLeft)
-                    });
-                    firedAlerts.add(warnKey);
+                if (timeLeft <= warnThreshold && timeLeft > 0) {
+                    const { data: existing } = await supabaseAdmin
+                        .from('sla_fired_alerts')
+                        .select('id')
+                        .eq('lead_id', lead.id)
+                        .eq('rule_index', ruleIndex)
+                        .eq('alert_type', 'WARN')
+                        .gte('created_at', new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString())
+                        .maybeSingle();
+
+                    if (!existing) {
+                        fireWebhook('SLA_WARNING', {
+                            lead_id: lead.id,
+                            lead_name: lead.name,
+                            sale_id: lead.assigned_to,
+                            sale_name: saleName,
+                            tele_id_sale: teleIdSale,
+                            link_lead: `${FRONTEND_URL}/leads/${lead.id}`,
+                            rule: `Cycle ${currentMilestone}M`,
+                            time_left_min: Math.round(timeLeft)
+                        });
+                        await supabaseAdmin.from('sla_fired_alerts').insert({
+                            lead_id: lead.id,
+                            rule_index: ruleIndex,
+                            alert_type: 'WARN'
+                        });
+                    }
                 }
 
                 // Thủng SLA
@@ -376,11 +392,6 @@ export async function checkSlaCron() {
         console.error('[SLAManager] Cron check failed', err);
     }
 }
-
-// Memory cleanup for alerts cache once a day
-setInterval(() => {
-    firedAlerts.clear();
-}, 24 * 60 * 60 * 1000);
 
 // Export them with original name too for backward compatibility in index.ts if needed
 export { checkSlaCron as checkAllSLA };
