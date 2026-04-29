@@ -63,19 +63,19 @@ const menuItems: MenuItem[] = [
     },
     {
         id: 'orders',
-        label: 'Quản lý đơn hàng',
+        label: 'Đơn hàng',
         icon: <ClipboardList className="h-5 w-5" />,
-        roles: ['admin', 'manager', 'sale', 'technician'],
-        children: [
-            { id: 'orders', label: 'Tất cả đơn hàng', roles: ['admin', 'manager', 'sale', 'technician'] },
-            { id: 'orders/upsell-tickets', label: 'Mục phê duyệt', roles: ['admin', 'manager'] }
-        ]
+        roles: ['admin', 'manager', 'sale', 'technician']
     },
     {
         id: 'requests',
         label: 'Yêu cầu',
         icon: <ClipboardCheck className="h-5 w-5" />,
-        roles: ['admin', 'manager'] // Admin/Manager: Mua phụ kiện, Gửi Đối Tác, Xin gia hạn
+        roles: ['admin', 'manager'], // Admin/Manager: Mua phụ kiện, Gửi Đối Tác, Xin gia hạn
+        children: [
+            { id: 'requests', label: 'Tất cả yêu cầu', roles: ['admin', 'manager'] },
+            { id: 'orders/upsell-tickets', label: 'Mục phê duyệt', roles: ['admin', 'manager'] }
+        ]
     },
     {
         id: 'invoices',
