@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
-import { on_customer_message, on_sale_message, on_lead_assigned } from '../utils/slaManager.js';
+import { on_customer_message, on_sale_message, on_lead_assigned, getVirtualTimeLeft, SLA_CYCLES } from '../utils/slaManager.js';
 
 const router = Router();
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -120,51 +120,38 @@ router.get('/leads/sla', verifyWebhookSecret, async (req: Request, res: Response
         const { data, error } = await supabaseAdmin
             .from('leads')
             .select(`
-                id,
-                name,
-                phone,
-                fb_thread_id,
-                pancake_conversation_id,
-                t_last_inbound,
-                t_last_outbound,
-                pipeline_stage,
-                assigned_to,
-                assigned_to_user: users!leads_assigned_to_fkey(name),
-                appointment_time,
-                round_index
+                id, name, phone, fb_thread_id, pancake_conversation_id,
+                t_last_inbound, t_last_outbound, current_deadline_at, 
+                current_rule_index, sla_state, created_at, assigned_to,
+                assigned_to_user: users!leads_assigned_to_fkey(name, telegram_chat_id)
             `)
-            .eq('assign_state', 'assigned')
+            .eq('sla_state', 'ACTIVE')
             .not('assigned_to', 'is', null);
 
         if (error) {
             throw new ApiError('Lỗi truy vấn Leads SLA: ' + error.message, 500);
         }
 
-        // 2. Logic tính toán SLA (Mặc định 3 phút)
-        const SLA_MINUTES = 3;
-        const WARN_MINUTES = 2;
         const now = new Date();
 
-        // Format data và tính toán hành động
+        // Format data và tính toán hành động using getVirtualTimeLeft
         const leads = data.map((lead: any) => {
-            const lastIn = lead.t_last_inbound ? new Date(lead.t_last_inbound) : null;
-            const lastOut = lead.t_last_outbound ? new Date(lead.t_last_outbound) : null;
+            const deadline = lead.current_deadline_at ? new Date(lead.current_deadline_at) : now;
+            const createdAt = lead.created_at ? new Date(lead.created_at) : now;
+            const ruleIndex = lead.current_rule_index || 0;
+            const slaMinutes = SLA_CYCLES[ruleIndex] || 3;
+            const warnMinutes = Math.floor(slaMinutes * 0.7); // Warn at 70% of SLA
 
-            let waitMinutes = 0;
+            // Use getVirtualTimeLeft to account for night pause
+            const timeLeftMins = getVirtualTimeLeft(now, deadline, createdAt);
+            const timeUsed = slaMinutes - timeLeftMins;
+
             let action_type = 'NONE';
 
-            // Chỉ tính nếu khách có nhắn (inbound)
-            if (lastIn) {
-                // Khách nhắn sau khi Sale trả lời cuối (hoặc chưa từng trả lời)
-                if (!lastOut || lastIn > lastOut) {
-                    waitMinutes = Math.floor((now.getTime() - lastIn.getTime()) / 60000);
-
-                    if (waitMinutes >= SLA_MINUTES) {
-                        action_type = 'RECLAIM';
-                    } else if (waitMinutes >= WARN_MINUTES) {
-                        action_type = 'SLA_WARN';
-                    }
-                }
+            if (timeLeftMins <= 0) {
+                action_type = 'RECLAIM';
+            } else if (timeLeftMins <= warnMinutes) {
+                action_type = 'WARN';
             }
 
             return {
@@ -177,12 +164,12 @@ router.get('/leads/sla', verifyWebhookSecret, async (req: Request, res: Response
                 assigned_to_name: lead.assigned_to_user?.name || 'Hệ thống',
                 t_last_inbound: lead.t_last_inbound,
                 t_last_outbound: lead.t_last_outbound,
-                pipeline_stage: lead.pipeline_stage,
-                appointment_time: lead.appointment_time,
-                round_index: lead.round_index,
-                sla_label: action_type === 'RECLAIM' ? `${SLA_MINUTES} phút (Thu hồi)` : `${WARN_MINUTES} phút (Cảnh báo)`,
                 current_deadline_at: lead.current_deadline_at,
-                sla_state: lead.sla_state
+                current_rule_index: ruleIndex,
+                sla_state: lead.sla_state,
+                time_left_mins: timeLeftMins,
+                action_type: action_type,
+                sla_label: action_type === 'RECLAIM' ? `${slaMinutes} phút (Thu hồi)` : action_type === 'WARN' ? `${warnMinutes} phút (Cảnh báo)` : 'OK'
             };
         }).filter((l: any) => l.action_type !== 'NONE');
 
