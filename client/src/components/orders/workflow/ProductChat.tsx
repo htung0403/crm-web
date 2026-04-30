@@ -47,16 +47,12 @@ interface ProductChatProps {
 }
 
 /**
- * Normalize step-specific roomId to workflow section for shared chat.
- * - step1-step5 → sales (all Sales steps share one chat)
- * - after1-after4 → aftersale (all Aftersale steps share one chat)
- * - war* / care* → care (all Care/Warranty steps share one chat)
+ * All steps share a single unified chat room per product.
+ * This ensures chat history is synchronized across all steps
+ * (sales, workflow, aftersale, care/warranty).
  */
-function getChatRoomId(roomId: string): string {
-    if (roomId.startsWith('step')) return 'sales';
-    if (roomId.startsWith('after')) return 'aftersale';
-    if (roomId.startsWith('war') || roomId.startsWith('care')) return 'care';
-    return roomId;
+function getChatRoomId(_roomId: string): string {
+    return 'unified';
 }
 
 export function ProductChat({ orderId, entityId, entityType, roomId, currentUserId, highlightMessageId }: ProductChatProps) {
@@ -345,7 +341,7 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
                 <div className="p-3 border-b bg-white rounded-t-lg">
                     <h4 className="text-sm font-semibold flex items-center gap-2">
                         <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                        Thảo luận nội bộ - {roomId.replace('_', ' ').toUpperCase()}
+                        Trao đổi chung - Tất cả bước
                     </h4>
                 </div>
 
@@ -353,7 +349,7 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
                     <div className="space-y-4">
                         {messages.length === 0 ? (
                             <div className="text-center py-8 text-muted-foreground text-sm italic">
-                                Chưa có trao đổi nào tại bộ phận này.
+                                Chưa có trao đổi nào cho sản phẩm này.
                             </div>
                         ) : (
                             messages.map((msg) => {
