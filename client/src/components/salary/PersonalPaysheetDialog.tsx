@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { formatCurrency } from '@/lib/utils';
 import { Download, Printer, DollarSign, X, FileDown, FileText, FileSpreadsheet, Loader2 } from 'lucide-react';
 import { useDepartments } from '@/hooks/useDepartments';
@@ -535,6 +536,50 @@ export function PersonalPaysheetDialog({ open, onOpenChange, record, plCode, onR
                                         />
                                     </div>
                                 </div>
+                                {(record.kpi_primary_bonus || record.teamlead_bonus || record.management_bonus) && (
+                                    <div className="mt-3 pt-3 border-t border-gray-100">
+                                        <div className="text-[11px] font-semibold text-gray-500 mb-2 uppercase">Chi tiết KPI</div>
+                                        {record.kpi_primary_score && (
+                                            <div className="flex items-center mb-1">
+                                                <div className="w-[120px] text-[12px] text-gray-600">KPI Chính:</div>
+                                                <div className="flex-1 flex items-center justify-end gap-2">
+                                                    <span className="text-[12px] text-gray-500">{record.kpi_primary_score}đ - {record.kpi_primary_rank}</span>
+                                                    <span className="text-[12px] text-green-600 font-medium">+{formatCurrency(record.kpi_primary_bonus || 0)}</span>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {record.kpi_secondary_details && record.kpi_secondary_details.length > 0 && (
+                                            <div className="flex items-center mb-1">
+                                                <div className="w-[120px] text-[12px] text-gray-600">KPI Phụ:</div>
+                                                <div className="flex-1 flex flex-col items-end gap-1">
+                                                    {record.kpi_secondary_details.map((kpi: any, idx: number) => (
+                                                        <div key={idx} className="flex items-center gap-2 text-right">
+                                                            <Badge variant="secondary" className="text-[10px] h-4 px-1">{kpi.policy_code}</Badge>
+                                                            <span className="text-[12px] text-gray-500">{kpi.score}đ - {kpi.rank}</span>
+                                                            <span className="text-[12px] text-green-600 font-medium">+{formatCurrency(kpi.bonus || 0)}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                        {record.teamlead_bonus > 0 && (
+                                            <div className="flex items-center mb-1">
+                                                <div className="w-[120px] text-[12px] text-gray-600">Thưởng Team Lead:</div>
+                                                <div className="flex-1 text-right">
+                                                    <span className="text-[12px] text-green-600 font-medium">+{formatCurrency(record.teamlead_bonus)}</span>
+                                                </div>
+                                            </div>
+                                        )}
+                                        {record.management_bonus > 0 && (
+                                            <div className="flex items-center mb-1">
+                                                <div className="w-[120px] text-[12px] text-gray-600">Thưởng Quản lý:</div>
+                                                <div className="flex-1 text-right">
+                                                    <span className="text-[12px] text-green-600 font-medium">+{formatCurrency(record.management_bonus)}</span>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
                                 <div className="flex items-center pt-2">
                                     <div className="w-[120px] text-[13px] font-semibold text-gray-800">Tổng thu nhập:</div>
                                     <div className="flex-1 text-right text-[13px] font-semibold text-gray-800 pr-3">

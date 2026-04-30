@@ -13,6 +13,24 @@ type PendingChange =
     | { type: 'add_secondary'; employee_id: string; policy_id: string; compensation_bucket: string }
     | { type: 'remove_secondary'; assignment_id: string; employee_id: string };
 
+const BUCKET_MAP: Record<string, string> = {
+    'KPI_TEAMLEAD_SALE': 'teamlead_sale',
+    'KPI_TEAMLEAD_TECH': 'teamlead_tech',
+    'KPI_LEAD_KYTHUAT': 'teamlead_tech',
+    'KPI_MANAGER_STORE': 'manager_store',
+    'KPI_QUANLY_CUAHANG': 'manager_store',
+    'KPI_SALE_FULLTIME': 'sale_personal',
+    'KPI_SALE_PARTTIME': 'sale_personal',
+    'KPI_KYTHUAT_CHINH': 'technician_personal',
+    'KPI_KYTHUAT_PARTTIME': 'technician_personal',
+    'KPI_MARKETING': 'marketing_personal',
+    'KPI_ACCOUNTANT': 'accountant_personal',
+};
+
+function deriveCompensationBucket(policyCode: string): string {
+    return BUCKET_MAP[policyCode] || 'secondary';
+}
+
 export function KPIAssignmentsTab() {
     const {
         employeeAssignments,
@@ -43,9 +61,12 @@ export function KPIAssignmentsTab() {
 
     const handleAddSecondary = (employeeId: string) => {
         if (!selectedSecondaryPolicy) return;
+        // Get policy code to derive correct compensation bucket
+        const policy = availablePolicies.find((p: any) => p.id === selectedSecondaryPolicy);
+        const compensationBucket = policy ? deriveCompensationBucket(policy.code) : 'secondary';
         setPendingChanges(prev => [
             ...prev,
-            { type: 'add_secondary', employee_id: employeeId, policy_id: selectedSecondaryPolicy, compensation_bucket: 'secondary' },
+            { type: 'add_secondary', employee_id: employeeId, policy_id: selectedSecondaryPolicy, compensation_bucket: compensationBucket },
         ]);
         setAddingSecondaryFor(null);
         setSelectedSecondaryPolicy('');
@@ -200,7 +221,7 @@ export function KPIAssignmentsTab() {
                                     <th className="text-left p-3 font-medium">Nhân viên</th>
                                     <th className="text-left p-3 font-medium">Phòng ban / Role</th>
                                     <th className="text-left p-3 font-medium w-[240px]">KPI Chính</th>
-                                    <th className="text-left p-3 font-medium">KPI Phụ</th>
+                                    <th className="text-left p-3 font-medium w-[400px]">KPI Phụ</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y">
@@ -223,7 +244,7 @@ export function KPIAssignmentsTab() {
                                         const secondaryAssignments = getSecondaryAssignments(emp);
                                         const assignedSecondaryIds = new Set(secondaryAssignments.map(a => a.policy_id));
                                         const availableSecondaryPolicies = availablePolicies.filter((p: any) =>
-                                            (p.role === 'all' || p.role === emp.role) &&
+                                            (p.role === 'all' || p.role === emp.role || p.role === 'manager') &&
                                             p.id !== currentPrimaryId &&
                                             !assignedSecondaryIds.has(p.id),
                                         );
@@ -267,7 +288,7 @@ export function KPIAssignmentsTab() {
                                                         </SelectContent>
                                                     </Select>
                                                 </td>
-                                                <td className="p-3">
+                                                <td className="p-3 min-w-[400px]">
                                                     <div className="flex flex-wrap gap-1 mb-2">
                                                         {secondaryAssignments.map(sa => (
                                                             <span
@@ -296,7 +317,7 @@ export function KPIAssignmentsTab() {
                                                     </div>
 
                                                     {addingSecondaryFor === emp.id ? (
-                                                        <div className="flex items-center gap-2">
+                                                        <div className="flex flex-wrap items-center gap-2 w-full justify-start">
                                                             <Select
                                                                 value={selectedSecondaryPolicy}
                                                                 onValueChange={setSelectedSecondaryPolicy}

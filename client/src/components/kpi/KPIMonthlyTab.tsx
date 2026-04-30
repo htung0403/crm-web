@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Calendar, Lock, Unlock, RefreshCw, Send, Loader2, Eye, ChevronDown } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,6 +9,13 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { useKPI, type KPIMonthlyRecord } from '@/hooks/useKPI';
 import { KPIMonthlyDetail } from './KPIMonthlyDetail';
 import { formatCurrency } from '@/lib/utils';
+import { api } from '@/lib/api';
+
+interface KpiAssignment {
+    policy_id: string;
+    assignment_type: 'primary' | 'secondary';
+    compensation_bucket: string;
+}
 
 const statusLabels: Record<string, string> = {
     draft: 'Nháp',
@@ -56,12 +63,34 @@ export function KPIMonthlyTab() {
     const [statusFilter, setStatusFilter] = useState('all');
     const [viewingId, setViewingId] = useState<string | null>(null);
     const [actionLoading, setActionLoading] = useState<string | null>(null);
+    const [assignments, setAssignments] = useState<Map<string, KpiAssignment>>(new Map());
 
     const monthOptions = getMonthOptions();
 
+    // Fetch employee KPI assignments for primary/secondary distinction
+    const fetchAssignments = useCallback(async () => {
+        try {
+            const { data } = await api.get('/kpi/employee-assignments');
+            const assignmentMap = new Map<string, KpiAssignment>();
+            (data.employees || []).forEach((emp: any) => {
+                (emp.assignments || []).forEach((a: any) => {
+                    assignmentMap.set(`${emp.id}-${a.policy_id}`, {
+                        policy_id: a.policy_id,
+                        assignment_type: a.assignment_type,
+                        compensation_bucket: a.compensation_bucket,
+                    });
+                });
+            });
+            setAssignments(assignmentMap);
+        } catch (error) {
+            console.error('Failed to fetch KPI assignments:', error);
+        }
+    }, []);
+
     useEffect(() => {
         fetchMonthly({ month_key: monthKey, status: statusFilter !== 'all' ? statusFilter : undefined });
-    }, [fetchMonthly, monthKey, statusFilter]);
+        fetchAssignments();
+    }, [fetchMonthly, monthKey, statusFilter, fetchAssignments]);
 
     const reload = () => fetchMonthly({ month_key: monthKey, status: statusFilter !== 'all' ? statusFilter : undefined });
 
@@ -250,20 +279,35 @@ export function KPIMonthlyTab() {
                                         Chưa có KPI tháng này. Nhấn "Tạo kỳ KPI" để bắt đầu.
                                     </td></tr>
                                 ) : (
-                                    monthlyRecords.map(record => (
-                                        <tr key={record.id} className="border-b hover:bg-muted/30 transition-colors">
-                                            <td className="p-3">
-                                                <div className="flex items-center gap-2">
-                                                    <Avatar className="h-8 w-8">
-                                                        <AvatarImage src={record.employee?.avatar} />
-                                                        <AvatarFallback>{record.employee?.name?.charAt(0) || '?'}</AvatarFallback>
-                                                    </Avatar>
-                                                    <div>
-                                                        <p className="font-medium text-sm">{record.employee?.name}</p>
-                                                        <p className="text-xs text-muted-foreground">{record.policy?.code}</p>
+                                    monthlyRecords.map(record => {
+                                        const assignmentKey = `${record.employee_id}-${record.policy_id}`;
+                                        const assignment = assignments.get(assignmentKey);
+                                        const isSecondary = assignment?.assignment_type === 'secondary';
+                                        
+                                        return (
+                                            <tr key={record.id} className="border-b hover:bg-muted/30 transition-colors">
+                                                <td className="p-3">
+                                                    <div className="flex items-center gap-2">
+                                                        <Avatar className="h-8 w-8">
+                                                            <AvatarImage src={record.employee?.avatar} />
+                                                            <AvatarFallback>{record.employee?.name?.charAt(0) || '?'}</AvatarFallback>
+                                                        </Avatar>
+                                                        <div>
+                                                            <div className="flex items-center gap-2">
+                                                                <p className="font-medium text-sm">{record.employee?.name}</p>
+                                                                {isSecondary && (
+                                                                    <Badge variant="secondary" className="text-[10px] px-1 py-0 h-4">
+                                                                        KPI Phụ
+                                                                    </Badge>
+                                                                )}
+                                                            </div>
+                                                            <p className="text-xs text-muted-foreground">{record.policy?.code}</p>
+                                                            {isSecondary && assignment?.compensation_bucket && (
+                                                                <p className="text-[10px] text-muted-foreground">{assignment.compensation_bucket}</p>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            </td>
+                                                </td>
                                             <td className="p-3 text-center">
                                                 <Badge variant="outline" className="text-xs">
                                                     {record.employee?.role}
@@ -319,9 +363,10 @@ export function KPIMonthlyTab() {
                                                         </Button>
                                                     )}
                                                 </div>
-                                            </td>
-                                        </tr>
-                                    ))
+                                                </td>
+                                            </tr>
+                                        );
+                                    })
                                 )}
                             </tbody>
                         </table>

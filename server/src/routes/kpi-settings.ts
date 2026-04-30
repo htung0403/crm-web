@@ -252,12 +252,12 @@ router.get('/employee-assignments', authenticate, requireManager, async (req: Au
 
         let query = supabaseAdmin
             .from('users')
-            .select('id, name, email, role, department, status')
+            .select('id, name, email, role, department_id, status, departments(name)')
             .eq('status', status as string)
             .order('name', { ascending: true });
 
         if (role && role !== 'all') query = query.eq('role', role as string);
-        if (department && department !== 'all') query = query.eq('department', department as string);
+        if (department && department !== 'all') query = query.eq('department_id', department as string);
 
         const { data: employees, error } = await query;
         if (error) throw new ApiError('Lỗi khi lấy danh sách nhân sự: ' + error.message, 500);
@@ -279,6 +279,7 @@ router.get('/employee-assignments', authenticate, requireManager, async (req: Au
         // Merge employees with their assignments
         const employeesWithAssignments = (employees || []).map((emp: any) => ({
             ...emp,
+            department: emp.departments?.name || null, // Return department name instead of ID
             assignments: assignmentMap.get(emp.id) || [],
             primary_policy: (assignmentMap.get(emp.id) || []).find((a: any) => a.assignment_type === 'primary')?.policy || null
         }));

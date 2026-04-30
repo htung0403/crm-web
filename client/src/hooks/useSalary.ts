@@ -30,6 +30,23 @@ export interface SalaryRecord {
 
     // KPI
     kpi_achievement?: number;
+    kpi_primary_score?: number;
+    kpi_primary_rank?: string;
+    kpi_primary_bonus?: number;
+    kpi_primary_penalty?: number;
+    kpi_primary_commission_factor?: number;
+    kpi_secondary_details?: Array<{
+        policy_id: string;
+        policy_code: string;
+        policy_name: string;
+        score: number;
+        rank: string;
+        bonus: number;
+        penalty: number;
+        bucket: string;
+    }> | null;
+    teamlead_bonus?: number;
+    management_bonus?: number;
     bonus: number;
 
     // Deductions

@@ -148,7 +148,7 @@ export interface EmployeeWithAssignments {
     name: string;
     email: string;
     role: string;
-    department?: string;
+    department?: string | null; // Department name (joined from departments table)
     assignments: KPIAssignment[];
     primary_policy?: { id: string; code: string; name: string };
     // legacy compat

@@ -1096,7 +1096,7 @@ router.get('/monthly/:id', authenticate, async (req: AuthenticatedRequest, res, 
     try {
         const { id } = req.params;
 
-        const { data: record, error } = await supabaseAdmin
+        const { data: records, error } = await supabaseAdmin
             .from('kpi_monthly')
             .select(`
                 *,
@@ -1104,9 +1104,9 @@ router.get('/monthly/:id', authenticate, async (req: AuthenticatedRequest, res, 
                 policy:kpi_policies(id, code, name),
                 reviewer:users!kpi_monthly_reviewed_by_fkey(id, name)
             `)
-            .eq('id', id)
-            .single();
+            .eq('id', id);
 
+        const record = records?.[0];
         if (error || !record) throw new ApiError('Không tìm thấy KPI tháng', 404);
 
         // Get items
@@ -1235,7 +1235,7 @@ router.post('/monthly/generate', authenticate, requireManager, async (req: Authe
                 }
 
                 // Create monthly record
-                const { data: monthly, error: monthlyError } = await supabaseAdmin
+                const { data: monthlyList, error: monthlyError } = await supabaseAdmin
                     .from('kpi_monthly')
                     .insert({
                         employee_id: emp.id,
@@ -1243,9 +1243,9 @@ router.post('/monthly/generate', authenticate, requireManager, async (req: Authe
                         policy_id: assignment.policy_id,
                         status: 'draft'
                     })
-                    .select()
-                    .single();
+                    .select();
 
+                const monthly = monthlyList?.[0];
                 if (monthlyError) {
                     errors.push({ employee: emp.name, error: monthlyError.message });
                     continue;
@@ -1358,12 +1358,12 @@ router.post('/monthly/:id/recalculate', authenticate, requireManager, async (req
         const { id } = req.params;
 
         // Get the monthly record
-        const { data: monthly, error } = await supabaseAdmin
+        const { data: monthlyList, error } = await supabaseAdmin
             .from('kpi_monthly')
             .select('*')
-            .eq('id', id)
-            .single();
+            .eq('id', id);
 
+        const monthly = monthlyList?.[0];
         if (error || !monthly) throw new ApiError('Không tìm thấy KPI tháng', 404);
         if (monthly.status === 'locked') throw new ApiError('KPI đã khóa, không thể tính lại', 400);
 
@@ -1433,7 +1433,7 @@ router.post('/monthly/:id/recalculate', authenticate, requireManager, async (req
         const rankResult = await determineRank(totalScore);
 
         // Update monthly
-        const { data: updated } = await supabaseAdmin
+        const { data: updatedList } = await supabaseAdmin
             .from('kpi_monthly')
             .update({
                 total_score: totalScore,
@@ -1443,9 +1443,9 @@ router.post('/monthly/:id/recalculate', authenticate, requireManager, async (req
                 kpi_commission_factor: rankResult.commission_factor
             })
             .eq('id', id)
-            .select()
-            .single();
+            .select();
 
+        const updated = updatedList?.[0];
         res.json({
             status: 'success',
             data: { record: updated }
