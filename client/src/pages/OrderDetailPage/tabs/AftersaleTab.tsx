@@ -103,7 +103,8 @@ const AftersaleCard = memo(({
     order,
     aftersaleLogs,
     onProductCardClick,
-    getSLADisplay
+    getSLADisplay,
+    onFeedbackAction
 }: {
     group: WorkflowKanbanGroup;
     index: number;
@@ -112,6 +113,7 @@ const AftersaleCard = memo(({
     aftersaleLogs: any[];
     onProductCardClick: (group: any, roomId: string) => void;
     getSLADisplay: (dueAt: string | Date | null | undefined) => string;
+    onFeedbackAction?: (group: WorkflowKanbanGroup, flow: 'care' | 'warranty') => void;
 }) => {
     const product = group.product;
     const draggableId = product?.id || `group-${index}`;
@@ -227,6 +229,26 @@ const AftersaleCard = memo(({
                             <Upload className="h-3.5 w-3.5 mr-1.5" /> Đóng gói & Giao hàng
                         </Button>
                     )}
+                    {col.id === 'after3' && onFeedbackAction && (
+                        <div className="mt-2 flex gap-2 w-full">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="flex-1 h-8 text-[11px] font-bold border-green-200 hover:bg-green-50 text-green-700 px-1"
+                                onClick={(e) => { e.stopPropagation(); onFeedbackAction(group, 'care'); }}
+                            >
+                                <ThumbsUp className="h-3.5 w-3.5 mr-1" /> Khen (Lưu trữ)
+                            </Button>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                className="flex-1 h-8 text-[11px] font-bold border-red-200 hover:bg-red-50 text-red-700 px-1"
+                                onClick={(e) => { e.stopPropagation(); onFeedbackAction(group, 'warranty'); }}
+                            >
+                                <ThumbsDown className="h-3.5 w-3.5 mr-1" /> Chê (Bảo hành)
+                            </Button>
+                        </div>
+                    )}
                 </div>
             )}
         </Draggable>
@@ -249,6 +271,32 @@ export function AftersaleTab({
     onProductCardClick
 }: AftersaleTabProps) {
     if (!order) return null;
+
+    const handleFeedbackAction = (group: WorkflowKanbanGroup, flow: 'care' | 'warranty') => {
+        if (!order || !group.product) return;
+        const itemId = group.product.id;
+        const isCustomerItem = !!group.product.is_customer_item;
+        
+        const payload = { 
+            stage: 'after4', 
+            care_warranty_flow: flow, 
+            care_warranty_stage: flow === 'care' ? 'care6' : 'war1' 
+        };
+
+        const apiPromise = isCustomerItem
+            ? orderProductsApi.updateAfterSaleData(itemId, payload)
+            : orderItemsApi.updateAfterSaleData(itemId, payload);
+
+        toast.success(`Đã chuyển sản phẩm sang ${flow === 'care' ? 'Lưu trữ' : 'Bảo hành'}`);
+
+        apiPromise.then(() => {
+            reloadOrder();
+            fetchKanbanLogs(order.id);
+        }).catch((e: any) => {
+            reloadOrder();
+            toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
+        });
+    };
 
     const handleAfterSaleDragEnd = (result: DropResult) => {
         if (!order || !result.destination || result.destination.droppableId === result.source.droppableId) return;
@@ -378,6 +426,7 @@ export function AftersaleTab({
                                                                 aftersaleLogs={aftersaleLogs}
                                                                 onProductCardClick={onProductCardClick}
                                                                 getSLADisplay={getSLADisplay}
+                                                                onFeedbackAction={handleFeedbackAction}
                                                             />
                                                         ))}
                                                         {provided.placeholder}
@@ -440,46 +489,6 @@ export function AftersaleTab({
                                         </label>
                                     </div>
                                 </div>
-                                <div>
-                                    <h3 className="text-xs font-bold text-purple-800 uppercase mb-4 tracking-widest">Xử lý Feedback khách hàng</h3>
-                                    <div className="flex flex-wrap gap-4">
-                                        <Button
-                                            onClick={() => {
-                                                const payload = { after_sale_stage: 'after4', care_warranty_flow: 'care', care_warranty_stage: 'care6' };
-                                                updateOrderAfterSale(payload);
-                                                toast.success('Đã chuyển sang Lưu trữ (Khách khen)');
-                                                ordersApi.patch(order.id, payload).then(() => {
-                                                    fetchKanbanLogs(order.id);
-                                                    setActiveTab('care');
-                                                }).catch((e: any) => {
-                                                    reloadOrder();
-                                                    toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
-                                                });
-                                            }}
-                                            className="flex-1 min-w-[180px] bg-green-600 hover:bg-green-700 h-12 text-white font-bold rounded-xl"
-                                        >
-                                            <ThumbsUp className="mr-2 h-5 w-5" /> Khách khen (→ Lưu trữ)
-                                        </Button>
-                                        <Button
-                                            onClick={() => {
-                                                const payload = { after_sale_stage: 'after4', care_warranty_flow: 'warranty', care_warranty_stage: 'war1' };
-                                                updateOrderAfterSale(payload);
-                                                toast.success('Đã ghi nhận – chuyển quy trình bảo hành');
-                                                ordersApi.patch(order.id, payload).then(() => {
-                                                    fetchKanbanLogs(order.id);
-                                                    setActiveTab('care');
-                                                }).catch((e: any) => {
-                                                    reloadOrder();
-                                                    toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
-                                                });
-                                            }}
-                                            variant="destructive"
-                                            className="flex-1 min-w-[180px] h-12 font-bold rounded-xl"
-                                        >
-                                            <ThumbsDown className="mr-2 h-5 w-5" /> Khách chê (→ Bảo hành)
-                                        </Button>
-                                    </div>
-                                </div>
                             </div>
                         )}
 
@@ -519,16 +528,40 @@ export function AftersaleTab({
                             {aftersaleLogs.length === 0 ? (
                                 <p className="text-xs text-muted-foreground italic py-2">Chưa có lịch sử.</p>
                             ) : (
-                                <ul className="space-y-2 max-h-48 overflow-y-auto">
-                                    {aftersaleLogs.map((log: any) => (
-                                        <li key={log.id} className="text-xs flex items-center gap-2 py-1.5 border-b border-dashed last:border-0">
-                                            <span className="text-muted-foreground shrink-0">{formatDateTime(log.created_at)}</span>
-                                            <span className="font-medium">{log.created_by_user?.name ?? 'Hệ thống'}</span>
-                                            <span className="text-muted-foreground">
-                                                {log.from_stage ? `${getAfterSaleStageLabel(log.from_stage)} → ` : ''}{getAfterSaleStageLabel(log.to_stage)}
-                                            </span>
-                                        </li>
-                                    ))}
+                                <ul className="space-y-2 max-h-64 overflow-y-auto">
+                                    {aftersaleLogs.map((log: any) => {
+                                        // aftersale logs are order-level; try to find a matching group,
+                                        // fallback to first group in any phase since items may have moved on
+                                        const aftersaleGroups = groups.filter(g => {
+                                            const item = (g.product || g.services?.[0]) as any;
+                                            return item?.current_phase === 'after_sale';
+                                        });
+                                        const matchedGroup =
+                                            aftersaleGroups.find(g => {
+                                                const item = (g.product || g.services?.[0]) as any;
+                                                return item?.phase_stage === log.to_stage;
+                                            }) || aftersaleGroups[0] || groups[0] || null;
+                                        return (
+                                            <li key={log.id} className="text-xs flex items-center gap-2 py-1.5 border-b border-dashed last:border-0 flex-wrap">
+                                                <span className="text-muted-foreground shrink-0">{formatDateTime(log.created_at)}</span>
+                                                <span className="font-medium">{log.created_by_user?.name ?? 'Hệ thống'}</span>
+                                                <span className="text-muted-foreground flex-1">
+                                                    {log.from_stage ? `${getAfterSaleStageLabel(log.from_stage)} → ` : ''}{getAfterSaleStageLabel(log.to_stage)}
+                                                </span>
+                                                {matchedGroup && log.to_stage && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-6 px-2 text-[10px] font-bold text-purple-600 hover:text-purple-700 hover:bg-purple-50 gap-1 shrink-0"
+                                                        onClick={() => onProductCardClick(matchedGroup, log.to_stage)}
+                                                    >
+                                                        <FileText className="h-3 w-3" />
+                                                        Xem chi tiết
+                                                    </Button>
+                                                )}
+                                            </li>
+                                        );
+                                    })}
                                 </ul>
                             )}
                         </div>

@@ -1005,6 +1005,18 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
 
         if (error) throw new ApiError('Lỗi tạo yêu cầu gia hạn: ' + error.message, 500);
 
+        // Pause SLA: Set sla_paused_at cho tất cả steps liên quan
+        const stepFilter = order_item_id 
+            ? { order_item_id }
+            : { order_product_service_id };
+
+        await supabaseAdmin
+            .from('order_item_steps')
+            .update({ sla_paused_at: new Date().toISOString() })
+            .match(stepFilter)
+            .is('sla_paused_at', null)
+            .in('status', ['pending', 'assigned', 'in_progress']);
+
         // 🔔 WH4: Fire webhook — Kỹ thuật xin gia hạn
         const { data: orderForWh } = await supabaseAdmin.from('orders').select('order_code').eq('id', orderId).single();
         const { data: techUser } = await supabaseAdmin.from('users').select('name').eq('id', req.user!.id).single();
@@ -2021,6 +2033,18 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
         if (error) {
             throw new ApiError('Lỗi tạo yêu cầu gia hạn: ' + error.message, 500);
         }
+
+        // Pause SLA: Set sla_paused_at cho tất cả steps liên quan
+        const stepFilter = !isV2 
+            ? { order_item_id: id }
+            : { order_product_service_id: id };
+
+        await supabaseAdmin
+            .from('order_item_steps')
+            .update({ sla_paused_at: new Date().toISOString() })
+            .match(stepFilter)
+            .is('sla_paused_at', null)
+            .in('status', ['pending', 'assigned', 'in_progress']);
 
         // 🔔 WH4: Fire webhook — Kỹ thuật xin gia hạn (endpoint #2)
         const { data: orderForWh2 } = await supabaseAdmin.from('orders').select('order_code').eq('id', orderId).single();

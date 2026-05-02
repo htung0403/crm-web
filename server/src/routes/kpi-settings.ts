@@ -252,7 +252,7 @@ router.get('/employee-assignments', authenticate, requireManager, async (req: Au
 
         let query = supabaseAdmin
             .from('users')
-            .select('id, name, email, role, department_id, status, departments(name)')
+            .select('id, name, email, role, department, department_id, status, departments!department_id(name)')
             .eq('status', status as string)
             .order('name', { ascending: true });
 
@@ -261,6 +261,10 @@ router.get('/employee-assignments', authenticate, requireManager, async (req: Au
 
         const { data: employees, error } = await query;
         if (error) throw new ApiError('Lỗi khi lấy danh sách nhân sự: ' + error.message, 500);
+
+        // Fetch all departments for name resolution fallback (in case legacy 'department' field contains UUID)
+        const { data: deptList } = await supabaseAdmin.from('departments').select('id, name');
+        const deptMap = new Map((deptList || []).map(d => [d.id, d.name]));
 
         // Get all active assignments with policy info
         const { data: assignments } = await supabaseAdmin
@@ -279,7 +283,7 @@ router.get('/employee-assignments', authenticate, requireManager, async (req: Au
         // Merge employees with their assignments
         const employeesWithAssignments = (employees || []).map((emp: any) => ({
             ...emp,
-            department: emp.departments?.name || null, // Return department name instead of ID
+            department: emp.departments?.name || (emp.department ? (deptMap.get(emp.department) || emp.department) : null), // Return department name from join, map lookup, or legacy field
             assignments: assignmentMap.get(emp.id) || [],
             primary_policy: (assignmentMap.get(emp.id) || []).find((a: any) => a.assignment_type === 'primary')?.policy || null
         }));
@@ -484,7 +488,7 @@ router.get('/leaderboard', authenticate, async (req: AuthenticatedRequest, res, 
             .from('kpi_monthly')
             .select(`
                 *,
-                employee:users(id, name, email, avatar, role, department),
+                employee:users!employee_id(id, name, email, avatar, role, department),
                 policy:kpi_policies(code, name)
             `)
             .eq('month_key', currentMonthKey)

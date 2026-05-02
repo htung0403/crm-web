@@ -143,6 +143,18 @@ export function useWorkflowKanban(
 
         const base = new Date(baseAt);
         const dueAt = new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
+        
+        if (step?.sla_total_paused_minutes) {
+            dueAt.setMinutes(dueAt.getMinutes() + step.sla_total_paused_minutes);
+        }
+
+        if (step?.sla_paused_at) {
+            const pausedAt = new Date(step.sla_paused_at);
+            const currentPausedMinutes = Math.max(0, Math.round((Date.now() - pausedAt.getTime()) / 60000));
+            dueAt.setMinutes(dueAt.getMinutes() + currentPausedMinutes);
+            return { label: '⏸ Đang tạm dừng', dueAt };
+        }
+
         const now = Date.now();
         const diffMs = dueAt.getTime() - now;
         const isLate = diffMs < 0;

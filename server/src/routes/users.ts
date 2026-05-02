@@ -59,7 +59,7 @@ router.get('/', authenticate, requireManager, async (req: AuthenticatedRequest, 
 
         let query = supabaseAdmin
             .from('users')
-            .select('id, email, name, role, phone, avatar, department, status, created_at, last_login, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes')
+            .select('id, email, name, role, phone, avatar, department, department_id, departments!department_id(name), status, created_at, last_login, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes')
             .order('created_at', { ascending: false });
 
         if (role) query = query.eq('role', role);
@@ -73,9 +73,15 @@ router.get('/', authenticate, requireManager, async (req: AuthenticatedRequest, 
             throw new ApiError('Lỗi khi lấy danh sách người dùng', 500);
         }
 
+        // Fetch all departments for name resolution fallback
+        const { data: deptList } = await supabaseAdmin.from('departments').select('id, name');
+        const deptMap = new Map((deptList || []).map(d => [d.id, d.name]));
+
         // Map snake_case to camelCase
-        const mappedUsers = (users || []).map(user => ({
+        const mappedUsers = (users || []).map((user: any) => ({
             ...user,
+            department: user.departments?.name || (user.department ? (deptMap.get(user.department) || user.department) : null),
+            departmentId: user.department_id,
             bankAccount: user.bank_account,
             bankName: user.bank_name,
             telegramChatId: user.telegram_chat_id,
@@ -260,7 +266,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
     try {
         const { id } = req.params;
         const { 
-            name, phone, avatar, department, status, role, salary, commission, bankAccount, bankName, telegramChatId,
+            name, phone, avatar, department, departmentId, status, role, salary, commission, bankAccount, bankName, telegramChatId,
             dob, gender, identityCard, jobTitleId, joinDate, payrollBranchId, workingBranchId, kiotvietAccount, facebook, address, mobileDevice, notes,
             kpiPolicyId
         } = req.body;
@@ -293,6 +299,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         // Chỉ manager mới được cập nhật role, status, department, salary, etc.
         if (isManager) {
             if (department !== undefined) updateData.department = department || null;
+            if (departmentId !== undefined) updateData.department_id = departmentId || null;
             if (status) updateData.status = status;
             if (role) updateData.role = role;
             if (salary !== undefined) updateData.salary = salary;
@@ -313,7 +320,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             .from('users')
             .update(updateData)
             .eq('id', id)
-            .select('id, email, name, role, phone, avatar, department, status, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes, kpi_policy_id')
+            .select('id, email, name, role, phone, avatar, department, department_id, departments!department_id(name), status, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes, kpi_policy_id')
             .single();
 
         if (error) {
@@ -324,6 +331,8 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         // Map snake_case to camelCase for response
         const mappedUser = {
             ...user,
+            department: (user as any).departments?.name || (user as any).department || null,
+            departmentId: (user as any).department_id,
             bankAccount: user.bank_account,
             bankName: user.bank_name,
             telegramChatId: user.telegram_chat_id,

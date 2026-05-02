@@ -291,6 +291,40 @@ router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, 
             }
         }
 
+        // Resume SLA khi extension được xử lý xong
+        if (data && status && (status === 'notified_tech' || status === 'rejected')) {
+            const itemId = data.order_item_id || data.order_product_service_id;
+            if (itemId) {
+                const stepFilter = data.order_item_id 
+                    ? { order_item_id: itemId }
+                    : { order_product_service_id: itemId };
+                
+                // Fetch steps đang pause
+                const { data: pausedSteps } = await supabaseAdmin
+                    .from('order_item_steps')
+                    .select('id, sla_paused_at, sla_total_paused_minutes')
+                    .match(stepFilter)
+                    .not('sla_paused_at', 'is', null);
+                
+                if (pausedSteps && pausedSteps.length > 0) {
+                    const now = new Date();
+                    for (const step of pausedSteps) {
+                        if (!step.sla_paused_at) continue;
+                        const pausedAt = new Date(step.sla_paused_at);
+                        const pausedMinutes = Math.round((now.getTime() - pausedAt.getTime()) / 60000);
+                        
+                        await supabaseAdmin
+                            .from('order_item_steps')
+                            .update({
+                                sla_paused_at: null,
+                                sla_total_paused_minutes: (step.sla_total_paused_minutes || 0) + Math.max(0, pausedMinutes)
+                            })
+                            .eq('id', step.id);
+                    }
+                }
+            }
+        }
+
         // 🔔 WH5: Fire webhook — Gia hạn (status change)
         if (status) {
             fireWebhook('extension.status_changed', {

@@ -363,7 +363,7 @@ export async function checkSlaCron() {
                             lead_id: lead.id,
                             activity_type: 'owner_unassigned',
                             content: 'Lead đã bị Thu Hồi do Sale bỏ lỡ mốc SLA 3 phút (State Machine)',
-                            user_name: 'Hệ thống'
+                            created_by_name: 'Hệ thống'
                         });
                         if (logErr) console.error('[SLAManager] log error', logErr);
 

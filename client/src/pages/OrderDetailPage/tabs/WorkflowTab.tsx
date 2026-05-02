@@ -61,7 +61,7 @@ const WorkflowCard = memo(({
     const stepDeadline = leadItem ? getStepDeadlineDisplay(leadItem.id) : { label: 'N/A', dueAt: null };
     const itemLate = stepDeadline.dueAt ? stepDeadline.dueAt < new Date() : false;
     const currentStep = leadItem ? getItemCurrentStep(leadItem.id) : null;
-    const isSlaPaused = stepDeadline.label === 'Đang chờ duyệt';
+    const isSlaPaused = stepDeadline.label === 'Đang chờ duyệt' || stepDeadline.label === '⏸ Đang tạm dừng';
 
     return (
         <Draggable key={cardKey} draggableId={cardKey} index={index} isDragDisabled={roomId === 'done' || roomId === 'fail' || isSlaPaused}>
@@ -440,9 +440,13 @@ export function WorkflowTab({
     };
 
     const displayLogs = useMemo(() => {
+        const STEPS_AFTER_STEP4 = ['step5', 'in_progress', 'done'];
         const logs = [
             ...workflowLogs.filter((l: any) => l.action === 'assigned' || l.action === 'failed'),
-            ...salesLogs.filter((l: any) => l.to_status === 'step4').map((l: any) => {
+            ...salesLogs.filter((l: any) =>
+                l.to_status === 'step4' &&
+                STEPS_AFTER_STEP4.includes(l.from_status)
+            ).map((l: any) => {
                 const item = order?.items?.find((i: any) => i.id === l.entity_id);
                 return {
                     ...l,

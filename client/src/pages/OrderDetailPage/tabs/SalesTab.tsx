@@ -352,9 +352,7 @@ export function SalesTab({
         return (leadItem as any)?.current_phase === 'sales';
     });
 
-    if (order?.status !== 'before_sale' && 
-        !['step1', 'step2', 'step3', 'step4', 'step5', 'in_progress', 'done'].includes(order.status) && 
-        !hasSalesItem) return null;
+
 
     return (
         <>
@@ -638,7 +636,7 @@ export function SalesTab({
                                                                     Xem lý do
                                                                 </Button>
                                                             )}
-                                                            {['step1', 'step2', 'step3', 'step4', 'step5'].includes(log.from_status) && (
+                                                            {['step1', 'step2', 'step3', 'step4', 'step5'].includes(log.to_status) && (
                                                                 <Button
                                                                     variant="ghost"
                                                                     size="sm"
@@ -648,7 +646,7 @@ export function SalesTab({
                                                                             g.product?.id === log.entity_id || g.services.some(s => s.id === log.entity_id)
                                                                         );
                                                                         if (targetGroup) {
-                                                                            onProductCardClick?.(targetGroup, log.from_status);
+                                                                            onProductCardClick?.(targetGroup, log.to_status);
                                                                         } else {
                                                                             toast.error('Không tìm thấy thông tin sản phẩm tương ứng.');
                                                                         }

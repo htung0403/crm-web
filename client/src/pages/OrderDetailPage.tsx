@@ -468,8 +468,6 @@ export function OrderDetailPage() {
                 await orderItemsApi.createExtensionRequest(extensionItem.id, extensionData);
 
                 toast.success('Đã gửi yêu cầu gia hạn.');
-                // Chuyển sang bên yêu cầu
-                navigate('/requests', { state: { defaultTab: 'extensions' } });
             }
             await reloadOrder();
             setShowExtensionDialog(false);

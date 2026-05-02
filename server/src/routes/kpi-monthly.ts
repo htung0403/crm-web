@@ -1045,7 +1045,7 @@ router.get('/monthly', authenticate, requireManager, async (req: AuthenticatedRe
             .from('kpi_monthly')
             .select(`
                 *,
-                employee:users!kpi_monthly_employee_id_fkey(id, name, email, avatar, role, department),
+                employee:users!kpi_monthly_employee_id_fkey(id, name, email, avatar, role, department, department_id, departments!department_id(name)),
                 policy:kpi_policies(id, code, name),
                 reviewer:users!kpi_monthly_reviewed_by_fkey(id, name)
             `, { count: 'exact' })
@@ -1100,7 +1100,7 @@ router.get('/monthly/:id', authenticate, async (req: AuthenticatedRequest, res, 
             .from('kpi_monthly')
             .select(`
                 *,
-                employee:users!kpi_monthly_employee_id_fkey(id, name, email, avatar, role, department),
+                employee:users!kpi_monthly_employee_id_fkey(id, name, email, avatar, role, department, department_id, departments!department_id(name)),
                 policy:kpi_policies(id, code, name),
                 reviewer:users!kpi_monthly_reviewed_by_fkey(id, name)
             `)
@@ -1108,6 +1108,10 @@ router.get('/monthly/:id', authenticate, async (req: AuthenticatedRequest, res, 
 
         const record = records?.[0];
         if (error || !record) throw new ApiError('Không tìm thấy KPI tháng', 404);
+
+        if (record.employee) {
+            record.employee.department = record.employee.departments?.name || record.employee.department || null;
+        }
 
         // Get items
         const { data: items } = await supabaseAdmin

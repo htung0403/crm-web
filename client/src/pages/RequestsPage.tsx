@@ -35,7 +35,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { requestsApi, orderItemsApi, ordersApi, usersApi, transactionsApi } from '@/lib/api';
 import { uploadFile } from '@/lib/supabase';
-import { formatDateTime, formatCurrency } from '@/lib/utils';
+import { cn, formatDateTime, formatCurrency } from '@/lib/utils';
 import { ACCESSORY_LABELS, PARTNER_LABELS, EXTENSION_LABELS, REQUEST_SLA } from '@/components/orders/constants';
 
 const ACCESSORY_COLUMNS = Object.entries(ACCESSORY_LABELS)
@@ -1285,9 +1285,16 @@ export function RequestsPage() {
     };
 
 
+    const EXTENSION_NEXT_STATUS: Record<string, string> = {
+        manager_approved: 'sale_contacted',
+        sale_contacted: 'notified_tech',
+        notified_tech: 'notified_tech', // terminal
+    };
+
     const openExtensionDialog = (row: any) => {
         setExtensionRow(row);
-        setExtensionStatus(row.status);
+        // Default to next status, not current status
+        setExtensionStatus(EXTENSION_NEXT_STATUS[row.status] ?? row.status);
         setExtensionCustomerResult(row.customer_result ?? '');
         setExtensionNewDueAt(row.new_due_at ? row.new_due_at.slice(0, 16) : '');
         setExtensionValidReason(!!row.valid_reason);
@@ -1854,163 +1861,189 @@ export function RequestsPage() {
 
             {/* Dialog Xin gia hạn */}
             <Dialog open={showExtensionDialog} onOpenChange={setShowExtensionDialog}>
-                <DialogContent className="max-w-md p-0 overflow-hidden rounded-2xl border-none shadow-2xl">
-                    <DialogHeader className="p-6 pb-4 bg-slate-50/50 border-b">
-                        <DialogTitle className="text-xl font-bold flex items-center gap-2">
-                            <Clock className="w-6 h-6 text-primary" />
+                <DialogContent className="max-w-md p-0 overflow-hidden rounded-[28px] border-none shadow-2xl bg-white">
+                    <DialogHeader className="px-6 py-5 bg-white border-b border-slate-100">
+                        <DialogTitle className="text-xl font-bold flex items-center gap-3 text-slate-900">
+                            <div className="w-9 h-9 bg-primary/10 rounded-xl flex items-center justify-center">
+                                <Clock className="w-5 h-5 text-primary" />
+                            </div>
                             Xử lý gia hạn sản phẩm
                         </DialogTitle>
                     </DialogHeader>
-                    {extensionRow && (
-                        <div className="p-6 space-y-6">
-                            <div className="bg-slate-50 border rounded-xl p-4 space-y-3">
-                                <div className="flex gap-3">
-                                    <div className="h-12 w-12 shrink-0 bg-white rounded-lg border shadow-sm flex items-center justify-center overflow-hidden">
-                                        {((extensionRow.order_item?.product?.image) || (extensionRow.order_product?.images?.[0]) || (extensionRow.order_product_service?.order_product?.images?.[0])) ? (
-                                            <img
-                                                src={extensionRow.order_item?.product?.image || extensionRow.order_product?.images?.[0] || extensionRow.order_product_service?.order_product?.images?.[0]}
-                                                className="w-full h-full object-cover"
-                                            />
-                                        ) : (
-                                            <Clock className="w-6 h-6 text-slate-300" />
-                                        )}
-                                    </div>
-                                    <div className="min-w-0">
-                                        <div className="flex items-center gap-1.5 overflow-hidden">
-                                            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight">Mã:</span>
-                                            <span className="text-xs font-mono font-bold text-primary truncate">
-                                                {extensionRow.order_item?.item_code || extensionRow.order_product?.product_code || extensionRow.order_product_service?.order_product?.product_code || (extensionRow.order?.order_code ?? extensionRow.order_id)}
-                                            </span>
+
+                    <div className="max-h-[60vh] overflow-y-auto px-6 py-6 space-y-6">
+                        {extensionRow && (
+                            <>
+                                {/* Product Info Card */}
+                                <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4">
+                                    <div className="flex gap-4">
+                                        <div className="h-16 w-16 shrink-0 bg-white rounded-xl border border-slate-200 flex items-center justify-center overflow-hidden">
+                                            {((extensionRow.order_item?.product?.image) || (extensionRow.order_product?.images?.[0]) || (extensionRow.order_product_service?.order_product?.images?.[0])) ? (
+                                                <img
+                                                    src={extensionRow.order_item?.product?.image || extensionRow.order_product?.images?.[0] || extensionRow.order_product_service?.order_product?.images?.[0]}
+                                                    className="w-full h-full object-cover"
+                                                />
+                                            ) : (
+                                                <Package className="w-8 h-8 text-slate-300" />
+                                            )}
                                         </div>
-                                        <p className="text-sm font-bold text-slate-700 truncate mt-0.5">
-                                            {extensionRow.order_item?.item_name || extensionRow.order_product?.name || extensionRow.order_product_service?.item_name || '—'}
+                                        <div className="min-w-0 flex-1 flex flex-col justify-center">
+                                            <Badge variant="secondary" className="w-fit mb-1 text-[10px] font-bold px-2 bg-white text-slate-500 border-slate-100 uppercase">
+                                                Mã: {extensionRow.order_item?.item_code || extensionRow.order_product?.product_code || extensionRow.order_product_service?.order_product?.product_code || (extensionRow.order?.order_code ?? extensionRow.order_id)}
+                                            </Badge>
+                                            <p className="text-sm font-bold text-slate-800 line-clamp-1">
+                                                {extensionRow.order_item?.item_name || extensionRow.order_product?.name || extensionRow.order_product_service?.item_name || '—'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    {extensionRow.reason && (
+                                        <div className="mt-3 pt-3 border-t border-slate-200/60">
+                                            <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Lý do kỹ thuật</p>
+                                            <p className="text-xs text-slate-600 italic leading-relaxed">
+                                                "{extensionRow.reason}"
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Status Box */}
+                                <div className={cn(
+                                    "rounded-2xl p-4 flex gap-4 items-center border",
+                                    extensionStatus === 'rejected' ? "bg-red-50 border-red-100" : "bg-blue-50 border-blue-100"
+                                )}>
+                                    <div className={cn(
+                                        "h-10 w-10 shrink-0 rounded-xl flex items-center justify-center shadow-sm",
+                                        extensionStatus === 'rejected' ? "bg-white text-red-600" : "bg-white text-blue-600"
+                                    )}>
+                                        {extensionStatus === 'rejected' ? <AlertCircle className="w-5 h-5" /> : <RefreshCw className="w-5 h-5 animate-spin" />}
+                                    </div>
+                                    <div>
+                                        <p className={cn(
+                                            "text-[10px] font-bold uppercase tracking-wider mb-0.5",
+                                            extensionStatus === 'rejected' ? "text-red-500" : "text-blue-500"
+                                        )}>Trạng thái mới</p>
+                                        <p className={cn(
+                                            "text-sm font-bold",
+                                            extensionStatus === 'rejected' ? "text-red-900" : "text-blue-900"
+                                        )}>
+                                            {extensionStatus === 'rejected' ? 'Từ chối yêu cầu' :
+                                                extensionStatus === 'manager_approved' ? 'QL đã duyệt' :
+                                                    EXTENSION_LABELS[extensionStatus] || extensionStatus}
                                         </p>
                                     </div>
                                 </div>
-                                {extensionRow.reason && (
-                                    <div className="pt-2 border-t text-left">
-                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Lý do kỹ thuật</p>
-                                        <p className="text-sm text-slate-600 mt-0.5 leading-relaxed italic">"{extensionRow.reason}"</p>
-                                    </div>
-                                )}
-                            </div>
 
-                            <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex gap-3">
-                                <div className="h-10 w-10 shrink-0 bg-white rounded-lg border shadow-sm flex items-center justify-center">
-                                    <AlertCircle className="w-5 h-5 text-blue-600" />
-                                </div>
-                                <div className="flex-1">
-                                    <p className="text-xs font-semibold text-blue-800 uppercase tracking-wider">Hành động tiếp theo</p>
-                                    <p className="text-sm font-bold text-blue-900 mt-0.5">
-                                        {extensionStatus === 'rejected' ? 'Từ chối yêu cầu' :
-                                            extensionStatus === 'manager_approved' ? 'QL đã duyệt' :
-                                                EXTENSION_LABELS[extensionStatus] || extensionStatus}
-                                    </p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-4">
-                                <div className="space-y-1.5">
-                                    <Label className="text-xs font-bold text-slate-500">Trạng thái mới</Label>
-                                    <Select value={extensionStatus} onValueChange={setExtensionStatus}>
-                                        <SelectTrigger className="h-11 rounded-xl">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="sale_contacted">Sale đã liên hệ</SelectItem>
-                                            <SelectItem value="manager_approved">QL đã duyệt</SelectItem>
-                                            <SelectItem value="notified_tech">Đã báo KT</SelectItem>
-                                            <SelectItem value="rejected">Từ chối</SelectItem>
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-
-                                {extensionStatus === 'rejected' ? (
-                                    <div className="space-y-1.5 animate-in fade-in slide-in-from-top-2">
-                                        <Label className="text-xs font-bold text-slate-500">Lý do từ chối (KPI impact)</Label>
-                                        <Select value={extensionCancelReason} onValueChange={(val) => {
-                                            setExtensionCancelReason(val);
-                                            setExtensionValidReason(val === '1' || val === '2');
-                                        }}>
-                                            <SelectTrigger className="h-11 rounded-xl">
+                                {/* Form Fields */}
+                                <div className="space-y-4">
+                                    <div className="space-y-1.5">
+                                        <Label className="text-xs font-bold text-slate-500 ml-1">Cập nhật tiến trình</Label>
+                                        <Select value={extensionStatus} onValueChange={setExtensionStatus}>
+                                            <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white text-sm">
                                                 <SelectValue />
                                             </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="1">Máy hỏng / Mất điện (Không dính KPI)</SelectItem>
-                                                <SelectItem value="2">Thiếu linh kiện / Hết vật tư (Không dính KPI)</SelectItem>
-                                                <SelectItem value="3">Quên chưa làm (Bị tính KPI)</SelectItem>
+                                            <SelectContent className="rounded-xl">
+                                                <SelectItem value="sale_contacted">Sale đã liên hệ</SelectItem>
+                                                <SelectItem value="manager_approved">QL đã duyệt</SelectItem>
+                                                <SelectItem value="notified_tech">Đã báo KT</SelectItem>
+                                                <SelectItem value="rejected" className="text-red-600 font-bold">Từ chối gia hạn</SelectItem>
                                             </SelectContent>
                                         </Select>
-                                        <p className="text-[10px] text-muted-foreground px-1 py-1">
-                                            {extensionCancelReason === '3' ?
-                                                '⚠️ Lưu ý: Lý do này sẽ gây trễ KPI cho nhân viên.' :
-                                                '✅ Lý do hợp lệ: Không gây trễ KPI.'}
-                                        </p>
                                     </div>
-                                ) : (
-                                    <>
-                                        <div className="space-y-1.5">
-                                            <Label className="text-xs font-bold text-slate-500">Gia hạn đến ngày</Label>
-                                            <div className="relative">
-                                                <Input
-                                                    type="datetime-local"
-                                                    value={extensionNewDueAt}
-                                                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setExtensionNewDueAt(e.target.value)}
-                                                    className="h-11 rounded-xl pl-10"
-                                                />
-                                                <Calendar className="absolute left-3.5 top-3.5 w-4 h-4 text-slate-400" />
+
+                                    {extensionStatus === 'rejected' ? (
+                                        <div className="space-y-4">
+                                            <div className="space-y-1.5">
+                                                <Label className="text-xs font-bold text-slate-500 ml-1">Lý do từ chối</Label>
+                                                <Select value={extensionCancelReason} onValueChange={(val) => {
+                                                    setExtensionCancelReason(val);
+                                                    setExtensionValidReason(val === '1' || val === '2');
+                                                }}>
+                                                    <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-white text-sm">
+                                                        <SelectValue />
+                                                    </SelectTrigger>
+                                                    <SelectContent className="rounded-xl">
+                                                        <SelectItem value="1">Máy hỏng / Mất điện (Không KPI)</SelectItem>
+                                                        <SelectItem value="2">Thiếu linh kiện (Không KPI)</SelectItem>
+                                                        <SelectItem value="3" className="font-bold text-orange-700">Quên chưa làm (Bị tính KPI)</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div className={cn(
+                                                "p-3 rounded-xl border text-xs font-medium leading-relaxed",
+                                                extensionCancelReason === '3' ? "bg-orange-50 border-orange-100 text-orange-800" : "bg-emerald-50 border-emerald-100 text-emerald-800"
+                                            )}>
+                                                {extensionCancelReason === '3' ?
+                                                    '⚠️ Lưu ý: Lý do này sẽ tính lỗi trễ KPI cho nhân viên.' :
+                                                    '✅ Lý do hợp lệ: Sẽ không tính trễ KPI cho nhân viên.'}
                                             </div>
                                         </div>
-                                        <div className="space-y-1.5">
-                                            <Label className="text-xs font-bold text-slate-500">Kết quả báo khách</Label>
-                                            <Textarea
-                                                value={extensionCustomerResult}
-                                                onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setExtensionCustomerResult(e.target.value)}
-                                                placeholder="Khách đồng ý / hẹn lại sau..."
-                                                className="min-h-[100px] rounded-xl resize-none"
-                                            />
+                                    ) : (
+                                        <div className="space-y-4">
+                                            <div className="space-y-1.5">
+                                                <Label className="text-xs font-bold text-slate-500 ml-1">Gia hạn đến ngày</Label>
+                                                <div className="relative">
+                                                    <Input
+                                                        type="datetime-local"
+                                                        value={extensionNewDueAt}
+                                                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => setExtensionNewDueAt(e.target.value)}
+                                                        className="h-11 rounded-xl pl-10 border-slate-200"
+                                                    />
+                                                    <Calendar className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <Label className="text-xs font-bold text-slate-500 ml-1">Kết quả báo khách</Label>
+                                                <Textarea
+                                                    value={extensionCustomerResult}
+                                                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setExtensionCustomerResult(e.target.value)}
+                                                    placeholder="Khách đồng ý chờ thêm..."
+                                                    className="min-h-[100px] rounded-xl border-slate-200 text-sm bg-white"
+                                                />
+                                            </div>
                                         </div>
-                                    </>
-                                )}
-                            </div>
-                        </div>
-                    )}
-                    <DialogFooter className="p-6 bg-slate-50/50 border-t flex flex-col gap-3">
+                                    )}
+                                </div>
+                            </>
+                        )}
+                    </div>
+
+                    <DialogFooter className="px-6 py-6 bg-slate-50 border-t border-slate-100 flex flex-col gap-3">
                         {extensionStatus === 'rejected' ? (
-                            <div className="flex items-center justify-between gap-3">
-                                <Button variant="ghost" onClick={() => setShowExtensionDialog(false)} className="rounded-xl px-6">Hủy</Button>
+                            <div className="flex gap-3 w-full">
+                                <Button
+                                    variant="ghost"
+                                    onClick={() => setShowExtensionDialog(false)}
+                                    className="flex-1 h-12 rounded-2xl font-bold text-slate-500 hover:bg-white"
+                                >
+                                    Hủy
+                                </Button>
                                 <Button
                                     onClick={handleSubmitExtension}
                                     disabled={!!updatingId}
-                                    className="rounded-xl px-10 font-bold shadow-lg bg-red-600 hover:bg-red-700 shadow-red-200 text-white"
+                                    className="flex-[2] h-12 rounded-2xl font-bold bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-200"
                                 >
-                                    {updatingId ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
-                                    Từ chối
+                                    {updatingId ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <AlertCircle className="w-5 h-5 mr-2" />}
+                                    Xác nhận Từ chối
                                 </Button>
                             </div>
                         ) : (
-                            <>
-                                <div className="flex gap-2 w-full">
-                                    <Button
-                                        onClick={() => handleSubmitExtensionWithKpi(false)}
-                                        disabled={!!updatingId}
-                                        className="flex-1 rounded-xl font-bold shadow-lg bg-green-600 hover:bg-green-700 text-white"
-                                    >
-                                        {updatingId ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
-                                        Duyệt không tính KPI
-                                    </Button>
-                                    <Button
-                                        onClick={() => handleSubmitExtensionWithKpi(true)}
-                                        disabled={!!updatingId}
-                                        variant="outline"
-                                        className="flex-1 rounded-xl font-bold border-orange-300 text-orange-700 hover:bg-orange-50"
-                                    >
-                                        {updatingId ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <AlertCircle className="w-4 h-4 mr-2" />}
-                                        Duyệt tính vào KPI
-                                    </Button>
-                                </div>
-                                <Button variant="ghost" onClick={() => setShowExtensionDialog(false)} className="rounded-xl px-6 w-full">Hủy</Button>
-                            </>
+                            <div className="flex gap-3 w-full">
+                                <Button
+                                    variant="ghost"
+                                    onClick={() => setShowExtensionDialog(false)}
+                                    className="flex-1 h-12 rounded-2xl font-bold text-slate-500 hover:bg-white"
+                                >
+                                    Hủy
+                                </Button>
+                                <Button
+                                    onClick={handleSubmitExtension}
+                                    disabled={!!updatingId}
+                                    className="flex-[2] h-12 rounded-2xl font-bold bg-primary hover:bg-primary/90 text-white shadow-lg shadow-primary/20"
+                                >
+                                    {updatingId ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <CheckCircle2 className="w-5 h-5 mr-2" />}
+                                    Chuyển → {EXTENSION_LABELS[extensionStatus] || extensionStatus}
+                                </Button>
+                            </div>
                         )}
                     </DialogFooter>
                 </DialogContent>

@@ -55,6 +55,11 @@ function getChatRoomId(_roomId: string): string {
     return 'unified';
 }
 
+/** Strip Vietnamese diacritics so 'dung' matches 'Dũng', 'huong' matches 'Hương', etc. */
+function normalizeVn(str: string): string {
+    return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'd').toLowerCase();
+}
+
 export function ProductChat({ orderId, entityId, entityType, roomId, currentUserId, highlightMessageId }: ProductChatProps) {
     // Use normalized chatRoomId for message operations (fetch/send/subscribe)
     // Keep original roomId for display purposes
@@ -210,7 +215,7 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
             // Only show if it's the start of word or after space
             if (lastAt === 0 || textBeforeCursor[lastAt - 1] === ' ') {
                 const matches = allUsers.filter(u =>
-                    u.name.toLowerCase().includes(search.toLowerCase())
+                    normalizeVn(u.name).includes(normalizeVn(search))
                 );
 
                 if (matches.length > 0 || search === '') {
@@ -285,7 +290,7 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
         }
     };
 
-    const renderMessageContent = (content: string, mentions?: string[]) => {
+    const renderMessageContent = (content: string, isMe: boolean, mentions?: string[]) => {
         if (!content) return null;
 
         // Simple regex to find @Name
@@ -303,9 +308,15 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
                             newParts.push(sp);
                             if (i < splitParts.length - 1) {
                                 newParts.push(
-                                    <span key={`${user.id}-${i}`} className="font-bold text-blue-100 bg-blue-500/20 px-1 rounded">
-                                        {mentionStr}
-                                    </span>
+                                    isMe ? (
+                                        <span key={`${user.id}-${i}`} className="font-bold text-white bg-white/25 px-1.5 py-0.5 rounded-full text-xs">
+                                            {mentionStr}
+                                        </span>
+                                    ) : (
+                                        <span key={`${user.id}-${i}`} className="font-bold text-blue-600 bg-blue-100 px-1.5 py-0.5 rounded-full text-xs">
+                                            {mentionStr}
+                                        </span>
+                                    )
                                 );
                             }
                         });
@@ -387,7 +398,7 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
                                                         />
                                                     </div>
                                                 )}
-                                                {renderMessageContent(msg.content, msg.mentions)}
+                                                {renderMessageContent(msg.content, isMe, msg.mentions)}
                                             </div>
                                         </div>
                                     </div>
@@ -439,7 +450,7 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
                                     Nhắc tên đồng nghiệp
                                 </div>
                                 {allUsers
-                                    .filter(u => u.name.toLowerCase().includes(mentionSearch.toLowerCase()))
+                                    .filter(u => normalizeVn(u.name).includes(normalizeVn(mentionSearch)))
                                     .map(u => (
                                         <button
                                             key={u.id}
@@ -458,7 +469,7 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
                                         </button>
                                     ))
                                 }
-                                {allUsers.filter(u => u.name.toLowerCase().includes(mentionSearch.toLowerCase())).length === 0 && (
+                                {allUsers.filter(u => normalizeVn(u.name).includes(normalizeVn(mentionSearch))).length === 0 && (
                                     <div className="p-4 text-center text-xs text-gray-400">Không tìm thấy người dùng</div>
                                 )}
                             </div>

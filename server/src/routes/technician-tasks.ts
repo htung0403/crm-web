@@ -39,7 +39,7 @@ router.get('/', async (req: AuthenticatedRequest, res: Response, next: NextFunct
     *,
     order: orders(order_code, customer: customers(name, phone, address)),
         service: services(name, price, duration),
-            technician: users!technician_tasks_technician_id_fkey(name, phone, avatar, department, department_id),
+            technician: users!technician_tasks_technician_id_fkey(name, phone, avatar, department, department_id, departments!department_id(name)),
                 customer: customers(name, phone, address)
                     `)
             .order('created_at', { ascending: false });
@@ -68,7 +68,19 @@ router.get('/', async (req: AuthenticatedRequest, res: Response, next: NextFunct
 
         if (error) throw error;
 
-        res.json(data);
+        // Fetch all departments for name resolution fallback
+        const { data: deptList } = await supabaseAdmin.from('departments').select('id, name');
+        const deptMap = new Map((deptList || []).map(d => [d.id, d.name]));
+        
+        // Map technician department name
+        const mappedData = (data || []).map((task: any) => {
+            if (task.technician) {
+                task.technician.department = task.technician.departments?.name || (task.technician.department ? (deptMap.get(task.technician.department) || task.technician.department) : null);
+            }
+            return task;
+        });
+
+        res.json(mappedData);
     } catch (error) {
         next(error);
     }
@@ -790,13 +802,24 @@ router.get('/:id', async (req: AuthenticatedRequest, res: Response, next: NextFu
         *,
         order: orders(order_code, customer: customers(*)),
             service: services(*),
-                technician: users!technician_tasks_technician_id_fkey(name, phone, avatar, department),
+                technician: users!technician_tasks_technician_id_fkey(name, phone, avatar, department, departments!department_id(name)),
                     customer: customers(*)
                         `)
             .eq('id', id)
             .single();
 
         if (error) throw error;
+
+        if (data && data.technician) {
+            // Fetch department name if UUID is stored in legacy field
+            let deptName = data.technician.departments?.name || data.technician.department;
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if (deptName && uuidRegex.test(deptName)) {
+                const { data: dept } = await supabaseAdmin.from('departments').select('name').eq('id', deptName).single();
+                if (dept) deptName = dept.name;
+            }
+            data.technician.department = deptName || null;
+        }
 
         res.json(data);
     } catch (error) {

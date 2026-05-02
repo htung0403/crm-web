@@ -33,7 +33,8 @@ export const SALES_STEPS = [
 ];
 
 export const SALES_STATUS_LABELS: Record<string, string> = {
-    pending: 'Đơn nháp',
+    pending: '1. Nhận đồ & Chụp ảnh',
+    before_sale: '1. Nhận đồ & Chụp ảnh',
     step1: '1. Nhận đồ & Chụp ảnh',
     step2: '2. TAGS+FORM TÚI+SHOESTREE',
     step3: '3. Trao đổi KT',

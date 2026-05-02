@@ -95,11 +95,13 @@ export function getItemTypeColor(type: string): string {
     }
 }
 
-/** Hạn còn lại phòng: từ order_item_steps (started_at + estimated_duration ngày) */
+/** Hạn còn lại phòng: từ order_item_steps (started_at + estimated_duration ngày + sla_total_paused_minutes) */
 export function getRoomDeadlineDisplay(
-    items: Array<{ order_item_steps?: Array<{ started_at?: string; estimated_duration?: number; status: string }> }>
+    items: Array<{ order_item_steps?: Array<{ started_at?: string; estimated_duration?: number; status: string; sla_paused_at?: string | null; sla_total_paused_minutes?: number }> }>
 ): { label: string; color: string } {
     let earliestDueAt: Date | null = null;
+    let isPaused = false;
+
     for (const item of items || []) {
         const steps = item.order_item_steps || [];
         for (const step of steps) {
@@ -107,15 +109,36 @@ export function getRoomDeadlineDisplay(
             const days = Number(step.estimated_duration) || 0;
             const baseAt = step.started_at;
             if (!baseAt || days <= 0) continue;
+            
+            if (step.sla_paused_at) {
+                isPaused = true;
+            }
+
             const base = new Date(baseAt);
             const dueAt = new Date(base);
             dueAt.setDate(dueAt.getDate() + days);
+            
+            // Cộng thêm thời gian đã pause trước đó
+            if (step.sla_total_paused_minutes) {
+                dueAt.setMinutes(dueAt.getMinutes() + step.sla_total_paused_minutes);
+            }
+
+            // Cộng thêm thời gian đang pause hiện tại
+            if (step.sla_paused_at) {
+                const pausedAt = new Date(step.sla_paused_at);
+                const currentPausedMinutes = Math.max(0, Math.round((Date.now() - pausedAt.getTime()) / 60000));
+                dueAt.setMinutes(dueAt.getMinutes() + currentPausedMinutes);
+            }
+
             if (!earliestDueAt || dueAt.getTime() < earliestDueAt.getTime()) {
                 earliestDueAt = dueAt;
             }
         }
     }
+    
+    if (isPaused) return { label: '⏸ Đang tạm dừng', color: 'text-amber-600 font-medium animate-pulse' };
     if (!earliestDueAt) return { label: 'N/A', color: 'text-muted-foreground' };
+    
     const diff = Math.ceil((earliestDueAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
     if (diff < 0) return { label: `Trễ ${Math.abs(diff)} ngày`, color: 'text-red-600' };
     return { label: `Còn ${diff} ngày`, color: diff <= 2 ? 'text-amber-600' : 'text-emerald-600' };
