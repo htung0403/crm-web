@@ -986,24 +986,14 @@ async function fetchAutoMetricValue(
 }
 
 // ============================================================
-// Determine rank from score
+// Find matching rank from configs
 // ============================================================
-async function determineRank(totalScore: number): Promise<{
+function findMatchingRank(configs: any[], totalScore: number): {
     rank: string;
     bonus_amount: number;
     penalty_amount: number;
     commission_factor: number;
-}> {
-    const { data: configs } = await supabaseAdmin
-        .from('kpi_rank_configs')
-        .select('*')
-        .eq('is_active', true)
-        .order('sort_order', { ascending: true });
-
-    if (!configs || configs.length === 0) {
-        return { rank: 'N/A', bonus_amount: 0, penalty_amount: 0, commission_factor: 100.0 };
-    }
-
+} {
     for (const config of configs) {
         if (totalScore >= config.min_score && totalScore <= config.max_score) {
             return {
@@ -1023,6 +1013,47 @@ async function determineRank(totalScore: number): Promise<{
         penalty_amount: Number(lowest.penalty_amount),
         commission_factor: Number(lowest.commission_factor)
     };
+}
+
+// ============================================================
+// Determine rank from score (policy-first with global fallback)
+// ============================================================
+async function determineRank(totalScore: number, policyId?: string): Promise<{
+    rank: string;
+    bonus_amount: number;
+    penalty_amount: number;
+    commission_factor: number;
+}> {
+    const defaultResult = { rank: 'N/A', bonus_amount: 0, penalty_amount: 0, commission_factor: 100.0 };
+
+    // If policyId provided, try policy-specific configs first
+    if (policyId) {
+        const { data: policyConfigs } = await supabaseAdmin
+            .from('kpi_rank_configs')
+            .select('*')
+            .eq('policy_id', policyId)
+            .eq('is_active', true)
+            .order('sort_order', { ascending: true });
+
+        if (policyConfigs && policyConfigs.length > 0) {
+            return findMatchingRank(policyConfigs, totalScore);
+        }
+    }
+
+    // Fallback to global configs
+    const { data: globalConfigs } = await supabaseAdmin
+        .from('kpi_rank_configs')
+        .select('*')
+        .is('policy_id', null)
+        .is('employee_id', null)
+        .eq('is_active', true)
+        .order('sort_order', { ascending: true });
+
+    if (!globalConfigs || globalConfigs.length === 0) {
+        return defaultResult;
+    }
+
+    return findMatchingRank(globalConfigs, totalScore);
 }
 
 // ============================================================
@@ -1316,7 +1347,7 @@ router.post('/monthly/generate', authenticate, requireManager, async (req: Authe
                 totalScore = Math.max(0, totalScore);
 
                 // Determine rank
-                const rankResult = await determineRank(totalScore);
+                const rankResult = await determineRank(totalScore, assignment.policy_id);
 
                 // Update monthly record with totals
                 await supabaseAdmin
@@ -1434,7 +1465,7 @@ router.post('/monthly/:id/recalculate', authenticate, requireManager, async (req
         totalScore = Math.max(0, totalScore);
 
         // Determine rank
-        const rankResult = await determineRank(totalScore);
+        const rankResult = await determineRank(totalScore, monthly.policy_id);
 
         // Update monthly
         const { data: updatedList } = await supabaseAdmin
@@ -1873,14 +1904,14 @@ router.post('/monthly/:id/adjustments', authenticate, requireManager, async (req
 
             const { data: monthlyRecord } = await supabaseAdmin
                 .from('kpi_monthly')
-                .select('manual_adjustment_score')
+                .select('manual_adjustment_score, policy_id')
                 .eq('id', id)
                 .single();
 
             const itemsTotal = (items || []).reduce((sum: number, i: any) => sum + Number(i.final_score || 0), 0);
             const totalScore = itemsTotal + Number(monthlyRecord?.manual_adjustment_score || 0);
 
-            const rankResult = await determineRank(totalScore);
+            const rankResult = await determineRank(totalScore, monthlyRecord?.policy_id);
 
             await supabaseAdmin
                 .from('kpi_monthly')

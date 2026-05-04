@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Save, Loader2, Search, RotateCcw, Users } from 'lucide-react';
+import { Save, Loader2, Target, RotateCcw } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { useKPI, type KPIRankConfig } from '@/hooks/useKPI';
-import { useEmployees } from '@/hooks/useEmployees';
 
 const rankColors: Record<string, string> = {
     'A+': 'bg-emerald-100 text-emerald-800',
@@ -15,25 +14,43 @@ const rankColors: Record<string, string> = {
     'D': 'bg-red-100 text-red-800',
 };
 
+const roleLabels: Record<string, string> = {
+    sale: 'Sale',
+    technician: 'Kỹ thuật',
+    manager: 'Quản lý',
+    accountant: 'Kế toán',
+    admin: 'Admin',
+};
+
 type EditingMap = Record<string, Partial<KPIRankConfig> & { _reset_to_global?: boolean }>;
 
 export function KPISettingsTab() {
-    const { rankConfigs, fetchRankConfigs, updateRankConfig, upsertEmployeeRankConfigs, loading } = useKPI();
-    const { employees, fetchEmployees, loading: empLoading } = useEmployees();
+    const { 
+        rankConfigs, 
+        fetchRankConfigs, 
+        updateRankConfig, 
+        upsertPolicyRankConfigs, 
+        availablePolicies,
+        fetchEmployeeAssignments,
+        loading 
+    } = useKPI();
 
-    const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('global');
-    const [searchTerm, setSearchTerm] = useState('');
+    const [selectedPolicyId, setSelectedPolicyId] = useState<string>('global');
     const [editingConfigs, setEditingConfigs] = useState<EditingMap>({});
     const [saving, setSaving] = useState(false);
 
     useEffect(() => {
-        fetchEmployees({ status: 'active' });
-    }, [fetchEmployees]);
+        fetchEmployeeAssignments();
+    }, [fetchEmployeeAssignments]);
 
     useEffect(() => {
         setEditingConfigs({});
-        fetchRankConfigs(selectedEmployeeId === 'global' ? undefined : selectedEmployeeId);
-    }, [selectedEmployeeId, fetchRankConfigs]);
+        if (selectedPolicyId === 'global') {
+            fetchRankConfigs();
+        } else {
+            fetchRankConfigs(undefined, selectedPolicyId);
+        }
+    }, [selectedPolicyId, fetchRankConfigs]);
 
     const handleChange = (rankCode: string, field: keyof KPIRankConfig, value: any) => {
         setEditingConfigs(prev => ({
@@ -58,7 +75,7 @@ export function KPISettingsTab() {
     const handleSaveAll = async () => {
         setSaving(true);
         try {
-            if (selectedEmployeeId === 'global') {
+            if (selectedPolicyId === 'global') {
                 for (const config of rankConfigs) {
                     const changes = editingConfigs[config.rank_code];
                     if (changes && Object.keys(changes).length > 0) {
@@ -74,24 +91,23 @@ export function KPISettingsTab() {
                         reset_to_global: changes._reset_to_global ?? false,
                     }));
                 if (upsertList.length > 0) {
-                    await upsertEmployeeRankConfigs(selectedEmployeeId, upsertList);
+                    await upsertPolicyRankConfigs(selectedPolicyId, upsertList);
                 }
             }
             setEditingConfigs({});
-            fetchRankConfigs(selectedEmployeeId === 'global' ? undefined : selectedEmployeeId);
+            if (selectedPolicyId === 'global') {
+                fetchRankConfigs();
+            } else {
+                fetchRankConfigs(undefined, selectedPolicyId);
+            }
         } finally {
             setSaving(false);
         }
     };
 
-    const filteredEmployees = employees.filter(e =>
-        e.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        e.email.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-
-    const selectedEmployee = employees.find(e => e.id === selectedEmployeeId);
+    const selectedPolicy = availablePolicies.find(p => p.id === selectedPolicyId);
     const hasChanges = Object.keys(editingConfigs).length > 0;
-    const isGlobal = selectedEmployeeId === 'global';
+    const isGlobal = selectedPolicyId === 'global';
 
     return (
         <div className="space-y-4">
@@ -99,7 +115,7 @@ export function KPISettingsTab() {
                 <div>
                     <h3 className="text-lg font-bold">Cấu hình xếp loại KPI</h3>
                     <p className="text-sm text-muted-foreground">
-                        Cấu hình mức xếp loại KPI theo từng nhân viên hoặc mặc định toàn cục
+                        Cấu hình mức xếp loại KPI theo từng chính sách hoặc mặc định toàn cục
                     </p>
                 </div>
                 {hasChanges && (
@@ -114,64 +130,43 @@ export function KPISettingsTab() {
                 <Card>
                     <CardHeader className="pb-3">
                         <CardTitle className="text-sm flex items-center gap-2">
-                            <Users className="h-4 w-4" />
-                            Chọn nhân viên
+                            <Target className="h-4 w-4" />
+                            Chọn chính sách KPI
                         </CardTitle>
                     </CardHeader>
                     <CardContent className="p-0">
-                        <div className="px-3 pb-2">
-                            <div className="relative">
-                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                                <Input
-                                    placeholder="Tìm nhân viên..."
-                                    value={searchTerm}
-                                    onChange={e => setSearchTerm(e.target.value)}
-                                    className="pl-8 h-8 text-xs"
-                                />
-                            </div>
-                        </div>
-
                         <div className="max-h-[480px] overflow-y-auto">
                             <button
                                 type="button"
-                                onClick={() => setSelectedEmployeeId('global')}
+                                onClick={() => setSelectedPolicyId('global')}
                                 className={`w-full text-left px-3 py-2.5 text-sm transition-colors border-b ${
                                     isGlobal ? 'bg-primary text-primary-foreground' : 'hover:bg-muted/50'
                                 }`}
                             >
                                 <div className="font-medium">Mặc định toàn cục</div>
                                 <div className={`text-xs ${isGlobal ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-                                    Áp dụng cho tất cả nhân viên chưa có override
+                                    Áp dụng cho tất cả chính sách chưa có config riêng
                                 </div>
                             </button>
 
-                            {empLoading ? (
-                                <div className="p-4 text-center text-muted-foreground text-xs">
-                                    <Loader2 className="h-4 w-4 animate-spin mx-auto mb-1" />
-                                    Đang tải...
-                                </div>
-                            ) : filteredEmployees.length === 0 ? (
-                                <div className="p-4 text-center text-muted-foreground text-xs">Không tìm thấy</div>
-                            ) : (
-                                filteredEmployees.map(emp => (
-                                    <button
-                                        key={emp.id}
-                                        type="button"
-                                        onClick={() => setSelectedEmployeeId(emp.id)}
-                                        className={`w-full text-left px-3 py-2.5 text-sm transition-colors border-b last:border-b-0 ${
-                                            selectedEmployeeId === emp.id
-                                                ? 'bg-primary text-primary-foreground'
-                                                : 'hover:bg-muted/50'
-                                        }`}
-                                    >
-                                        <div className="font-medium truncate">{emp.name}</div>
-                                        <div className={`text-xs ${selectedEmployeeId === emp.id ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
-                                            <span className="uppercase">{emp.role}</span>
-                                            {emp.department && <span> · {emp.department}</span>}
-                                        </div>
-                                    </button>
-                                ))
-                            )}
+                            {availablePolicies.map(policy => (
+                                <button
+                                    key={policy.id}
+                                    type="button"
+                                    onClick={() => setSelectedPolicyId(policy.id)}
+                                    className={`w-full text-left px-3 py-2.5 text-sm transition-colors border-b last:border-b-0 ${
+                                        selectedPolicyId === policy.id
+                                            ? 'bg-primary text-primary-foreground'
+                                            : 'hover:bg-muted/50'
+                                    }`}
+                                >
+                                    <div className="font-medium truncate">{policy.name}</div>
+                                    <div className={`text-xs ${selectedPolicyId === policy.id ? 'text-primary-foreground/70' : 'text-muted-foreground'}`}>
+                                        <code className="text-[10px] bg-muted/50 px-1 rounded">{policy.code}</code>
+                                        {policy.role && <span> · {roleLabels[policy.role] || policy.role}</span>}
+                                    </div>
+                                </button>
+                            ))}
                         </div>
                     </CardContent>
                 </Card>
@@ -180,7 +175,7 @@ export function KPISettingsTab() {
                     <Card>
                         <CardHeader className="pb-2">
                             <CardTitle className="text-sm">
-                                {isGlobal ? 'Cấu hình mặc định toàn cục' : `Cấu hình cho: ${selectedEmployee?.name ?? '...'}`}
+                                {isGlobal ? 'Cấu hình mặc định toàn cục' : `Cấu hình cho: ${selectedPolicy?.name ?? '...'}`}
                             </CardTitle>
                             {!isGlobal && (
                                 <CardDescription className="text-xs">
@@ -335,9 +330,9 @@ export function KPISettingsTab() {
                             <CardTitle className="text-sm">Hướng dẫn</CardTitle>
                         </CardHeader>
                         <CardContent className="text-xs text-muted-foreground space-y-1">
-                            <p><strong>Mặc định toàn cục:</strong> Áp dụng cho tất cả nhân viên chưa có cấu hình riêng.</p>
-                            <p><strong>Override per nhân viên:</strong> Chọn nhân viên → chỉnh sửa bất kỳ hàng nào → Lưu. Hàng đó sẽ được đánh dấu <strong className="text-amber-600">override</strong>.</p>
-                            <p><strong>Reset về mặc định:</strong> Nhấn icon <RotateCcw className="h-3 w-3 inline" /> để xóa override, nhân viên sẽ dùng lại giá trị toàn cục.</p>
+                            <p><strong>Mặc định toàn cục:</strong> Áp dụng cho tất cả chính sách chưa có cấu hình riêng.</p>
+                            <p><strong>Override per chính sách:</strong> Chọn chính sách → chỉnh sửa bất kỳ hàng nào → Lưu. Hàng đó sẽ được đánh dấu <strong className="text-amber-600">override</strong>.</p>
+                            <p><strong>Reset về mặc định:</strong> Nhấn icon <RotateCcw className="h-3 w-3 inline" /> để xóa override, chính sách sẽ dùng lại giá trị toàn cục.</p>
                             <p><strong>Hệ số HH (%):</strong> 150 = nhận 150% hoa hồng, 80 = nhận 80% hoa hồng.</p>
                         </CardContent>
                     </Card>

@@ -9,12 +9,48 @@ const router = Router();
 // KPI RANK CONFIGS
 // ============================================================
 
-// GET /api/kpi/rank-configs - Get rank configs (global or per-employee)
-// Query params: employee_id (optional) - if provided, returns merged: employee overrides + global fallback
+// GET /api/kpi/rank-configs - Get rank configs (global, per-policy, or per-employee)
+// Query params: employee_id (optional), policy_id (optional)
+// - employee_id: returns merged employee overrides + global fallback
+// - policy_id: returns merged policy-specific + global fallback
 router.get('/rank-configs', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { employee_id } = req.query;
+        const { employee_id, policy_id } = req.query;
 
+        // Handle policy_id query (new functionality)
+        if (policy_id && typeof policy_id === 'string') {
+            const { data: globalConfigs, error: globalError } = await supabaseAdmin
+                .from('kpi_rank_configs')
+                .select('*')
+                .is('policy_id', null)
+                .is('employee_id', null)
+                .order('sort_order', { ascending: true });
+
+            if (globalError) throw new ApiError('Lỗi khi lấy cấu hình global: ' + globalError.message, 500);
+
+            const { data: policyConfigs, error: policyError } = await supabaseAdmin
+                .from('kpi_rank_configs')
+                .select('*')
+                .eq('policy_id', policy_id)
+                .order('sort_order', { ascending: true });
+
+            if (policyError) throw new ApiError('Lỗi khi lấy cấu hình policy: ' + policyError.message, 500);
+
+            const overrideMap = new Map((policyConfigs || []).map((c: any) => [c.rank_code, c]));
+            const merged = (globalConfigs || []).map((global: any) => {
+                const override = overrideMap.get(global.rank_code);
+                return override
+                    ? { ...global, ...override, is_override: true, global_id: global.id }
+                    : { ...global, is_override: false };
+            });
+
+            return res.json({
+                status: 'success',
+                data: { configs: merged, policy_id }
+            });
+        }
+
+        // Handle employee_id query (existing functionality - backward compat)
         if (employee_id && typeof employee_id === 'string') {
             const { data: globalConfigs, error: globalError } = await supabaseAdmin
                 .from('kpi_rank_configs')
@@ -46,6 +82,7 @@ router.get('/rank-configs', authenticate, requireManager, async (req: Authentica
             });
         }
 
+        // Default: return global configs
         const { data: configs, error } = await supabaseAdmin
             .from('kpi_rank_configs')
             .select('*')
@@ -63,10 +100,10 @@ router.get('/rank-configs', authenticate, requireManager, async (req: Authentica
     }
 });
 
-// POST /api/kpi/rank-configs - Create rank config (global or per-employee)
+// POST /api/kpi/rank-configs - Create rank config (global, per-policy, or per-employee)
 router.post('/rank-configs', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { rank_code, rank_name, min_score, max_score, bonus_amount, penalty_amount, commission_factor, sort_order, employee_id } = req.body;
+        const { rank_code, rank_name, min_score, max_score, bonus_amount, penalty_amount, commission_factor, sort_order, employee_id, policy_id } = req.body;
 
         if (!rank_code || !rank_name) {
             throw new ApiError('Thiếu thông tin bắt buộc (rank_code, rank_name)', 400);
@@ -85,6 +122,7 @@ router.post('/rank-configs', authenticate, requireManager, async (req: Authentic
                 sort_order: sort_order ?? 0,
                 is_active: true,
                 employee_id: employee_id ?? null,
+                policy_id: policy_id ?? null,
             })
             .select()
             .single();
@@ -159,6 +197,91 @@ router.post('/rank-configs/upsert-employee', authenticate, requireManager, async
                     .from('kpi_rank_configs')
                     .insert({
                         employee_id,
+                        rank_code,
+                        rank_name: rank_name ?? rank_code,
+                        min_score: min_score ?? 0,
+                        max_score: max_score ?? 100,
+                        bonus_amount: bonus_amount ?? 0,
+                        penalty_amount: penalty_amount ?? 0,
+                        commission_factor: commission_factor ?? 100,
+                        sort_order: sort_order ?? 0,
+                        is_active: true,
+                    })
+                    .select()
+                    .single();
+
+                if (error) errors.push({ rank_code, error: error.message });
+                else results.push({ ...created, action: 'created' });
+            }
+        }
+
+        res.json({
+            status: 'success',
+            data: { updated: results.length, errors: errors.length, results, errors_detail: errors }
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// POST /api/kpi/rank-configs/upsert-policy - Upsert per-policy rank config overrides
+router.post('/rank-configs/upsert-policy', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { policy_id, configs } = req.body;
+
+        if (!policy_id) throw new ApiError('Thiếu policy_id', 400);
+        if (!Array.isArray(configs) || configs.length === 0) throw new ApiError('Thiếu danh sách cấu hình (configs)', 400);
+
+        const results: any[] = [];
+        const errors: any[] = [];
+
+        for (const cfg of configs) {
+            const { rank_code, rank_name, min_score, max_score, bonus_amount, penalty_amount, commission_factor, sort_order, reset_to_global } = cfg;
+
+            if (!rank_code) { errors.push({ rank_code, error: 'Thiếu rank_code' }); continue; }
+
+            if (reset_to_global) {
+                const { error } = await supabaseAdmin
+                    .from('kpi_rank_configs')
+                    .delete()
+                    .eq('policy_id', policy_id)
+                    .eq('rank_code', rank_code);
+                if (error) errors.push({ rank_code, error: error.message });
+                else results.push({ rank_code, action: 'deleted' });
+                continue;
+            }
+
+            const { data: existing } = await supabaseAdmin
+                .from('kpi_rank_configs')
+                .select('id')
+                .eq('policy_id', policy_id)
+                .eq('rank_code', rank_code)
+                .single();
+
+            if (existing) {
+                const updateData: any = {};
+                if (rank_name !== undefined) updateData.rank_name = rank_name;
+                if (min_score !== undefined) updateData.min_score = min_score;
+                if (max_score !== undefined) updateData.max_score = max_score;
+                if (bonus_amount !== undefined) updateData.bonus_amount = bonus_amount;
+                if (penalty_amount !== undefined) updateData.penalty_amount = penalty_amount;
+                if (commission_factor !== undefined) updateData.commission_factor = commission_factor;
+                if (sort_order !== undefined) updateData.sort_order = sort_order;
+
+                const { data: updated, error } = await supabaseAdmin
+                    .from('kpi_rank_configs')
+                    .update(updateData)
+                    .eq('id', existing.id)
+                    .select()
+                    .single();
+
+                if (error) errors.push({ rank_code, error: error.message });
+                else results.push({ ...updated, action: 'updated' });
+            } else {
+                const { data: created, error } = await supabaseAdmin
+                    .from('kpi_rank_configs')
+                    .insert({
+                        policy_id,
                         rank_code,
                         rank_name: rank_name ?? rank_code,
                         min_score: min_score ?? 0,

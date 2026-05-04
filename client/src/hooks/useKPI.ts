@@ -55,6 +55,7 @@ export interface KPIRankConfig {
     sort_order: number;
     is_active: boolean;
     employee_id?: string | null;
+    policy_id?: string | null;
     is_override?: boolean;
     global_id?: string;
 }
@@ -449,10 +450,15 @@ export function useKPI() {
 
     // ── RANK CONFIGS ──
 
-    const fetchRankConfigs = useCallback(async (employeeId?: string) => {
+    const fetchRankConfigs = useCallback(async (employeeId?: string, policyId?: string) => {
         setLoading(true);
         try {
-            const params = employeeId ? { employee_id: employeeId } : undefined;
+            let params: { employee_id?: string; policy_id?: string } | undefined;
+            if (policyId) {
+                params = { policy_id: policyId };
+            } else if (employeeId) {
+                params = { employee_id: employeeId };
+            }
             const response = await kpiApi.getRankConfigs(params);
             const data = response.data?.data || response.data;
             setRankConfigs((data as any)?.configs || []);
@@ -478,6 +484,17 @@ export function useKPI() {
         try {
             const response = await kpiApi.upsertEmployeeRankConfigs(employeeId, configs);
             toast.success('Đã lưu cấu hình xếp loại');
+            return (response.data?.data as any);
+        } catch (err: any) {
+            toast.error(err.response?.data?.message || 'Lỗi khi lưu cấu hình');
+            throw err;
+        }
+    }, []);
+
+    const upsertPolicyRankConfigs = useCallback(async (policyId: string, configs: Array<Partial<KPIRankConfig> & { rank_code: string; reset_to_global?: boolean }>) => {
+        try {
+            const response = await kpiApi.upsertPolicyRankConfigs(policyId, configs);
+            toast.success('Đã lưu cấu hình xếp loại theo chính sách');
             return (response.data?.data as any);
         } catch (err: any) {
             toast.error(err.response?.data?.message || 'Lỗi khi lưu cấu hình');

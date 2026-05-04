@@ -539,8 +539,8 @@ export const kpiApi = {
         api.delete<ApiResponse<void>>(`/kpi/metrics/${id}`),
 
     // Rank configs
-    getRankConfigs: (params?: { employee_id?: string }) =>
-        api.get<ApiResponse<{ configs: any[]; employee_id?: string }>>('/kpi/rank-configs', { params }),
+    getRankConfigs: (params?: { employee_id?: string; policy_id?: string }) =>
+        api.get<ApiResponse<{ configs: any[]; employee_id?: string; policy_id?: string }>>('/kpi/rank-configs', { params }),
 
     createRankConfig: (data: any) =>
         api.post<ApiResponse<{ config: any }>>('/kpi/rank-configs', data),
@@ -553,6 +553,9 @@ export const kpiApi = {
 
     upsertEmployeeRankConfigs: (employeeId: string, configs: any[]) =>
         api.post<ApiResponse<{ updated: number; errors: number; results: any[]; errors_detail: any[] }>>('/kpi/rank-configs/upsert-employee', { employee_id: employeeId, configs }),
+
+    upsertPolicyRankConfigs: (policyId: string, configs: any[]) =>
+        api.post<ApiResponse<{ updated: number; errors: number; results: any[]; errors_detail: any[] }>>('/kpi/rank-configs/upsert-policy', { policy_id: policyId, configs }),
 
     // Monthly KPI
     getMonthly: (params?: { month_key?: string; status?: string; employee_id?: string }) =>
