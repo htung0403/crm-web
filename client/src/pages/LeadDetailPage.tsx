@@ -26,7 +26,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { leadsApi } from '@/lib/api';
 import { uploadFile } from '@/lib/supabase';
-import { formatDateTime } from '@/lib/utils';
+import { formatDateTime, isOverdueVN } from '@/lib/utils';
 import type { Lead } from '@/hooks/useLeads';
 import { useLeads } from '@/hooks/useLeads';
 import { kanbanColumns, sourceLabels, getStatusLabel } from '@/components/leads/constants';
@@ -71,6 +71,7 @@ export function LeadDetailPage() {
     const [loadingActivities, setLoadingActivities] = useState(false);
     const [elapsedTime, setElapsedTime] = useState('');
     const [appointmentCountdown, setAppointmentCountdown] = useState('');
+    const [followupCountdown, setFollowupCountdown] = useState('');
 
     // Edit lead fields state
     const [editFbLink, setEditFbLink] = useState('');
@@ -201,6 +202,7 @@ export function LeadDetailPage() {
             return;
         }
 
+        let hasFetched = false;
         const calculateCountdown = () => {
             const appointDate = new Date(lead.appointment_time as string);
             const now = new Date();
@@ -208,6 +210,10 @@ export function LeadDetailPage() {
 
             if (diff <= 0) {
                 setAppointmentCountdown('');
+                if (!hasFetched) {
+                    hasFetched = true;
+                    setTimeout(() => fetchLead(), 2000);
+                }
                 return;
             }
 
@@ -222,7 +228,42 @@ export function LeadDetailPage() {
         const interval = setInterval(calculateCountdown, 1000);
 
         return () => clearInterval(interval);
-    }, [lead?.appointment_time]);
+    }, [lead?.appointment_time, fetchLead]);
+
+    // Timer for follow-up countdown
+    useEffect(() => {
+        if (!lead?.next_followup_time) {
+            setFollowupCountdown('');
+            return;
+        }
+
+        let hasFetched = false;
+        const calculateCountdown = () => {
+            const followupDate = new Date(lead.next_followup_time as string);
+            const now = new Date();
+            const diff = followupDate.getTime() - now.getTime();
+
+            if (diff <= 0) {
+                setFollowupCountdown('');
+                if (!hasFetched) {
+                    hasFetched = true;
+                    setTimeout(() => fetchLead(), 2000);
+                }
+                return;
+            }
+
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+            setFollowupCountdown(`${hours.toString().padStart(2, '0')}h:${minutes.toString().padStart(2, '0')}p:${seconds.toString().padStart(2, '0')}s`);
+        };
+
+        calculateCountdown();
+        const interval = setInterval(calculateCountdown, 1000);
+
+        return () => clearInterval(interval);
+    }, [lead?.next_followup_time, fetchLead]);
 
     if (loading) {
         return (
@@ -636,12 +677,15 @@ export function LeadDetailPage() {
                                 )}
                                 {lead.next_followup_time && (
                                     <div className={`flex items-center gap-1.5 px-2 py-0.5 sm:py-1 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap ${
-                                        new Date(lead.next_followup_time) < new Date()
+                                        isOverdueVN(lead.next_followup_time)
                                         ? 'bg-red-100 text-red-700 animate-pulse border border-red-200'
                                         : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
                                     }`}>
                                         <CalendarClock className="h-3.5 w-3.5" />
                                         <span>{formatDateTime(lead.next_followup_time)}</span>
+                                        {followupCountdown && (
+                                            <span className="text-[10px] opacity-75 ml-1">({followupCountdown})</span>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -937,13 +981,18 @@ export function LeadDetailPage() {
                                         />
                                     ) : (
                                         <div className={`flex-1 px-3 py-1.5 rounded-lg text-sm font-bold transition-all min-h-[36px] flex items-center ${
-                                            lead.next_followup_time 
-                                            ? (new Date(lead.next_followup_time) < new Date()
+                                            lead.next_followup_time
+                                            ? (isOverdueVN(lead.next_followup_time)
                                                 ? 'bg-red-50 text-red-700 animate-pulse'
                                                 : 'bg-emerald-50 text-emerald-700')
                                             : ''
                                         }`}>
                                             {lead.next_followup_time ? formatDateTime(lead.next_followup_time) : '-'}
+                                            {followupCountdown && (
+                                                <span className="text-xs text-orange-600 animate-pulse ml-2">
+                                                    Còn lại: {followupCountdown}
+                                                </span>
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -1286,6 +1335,11 @@ export function LeadDetailPage() {
                                     ) : (
                                         <div className="px-3 py-1.5 text-sm font-bold">
                                             {lead.next_followup_time ? formatDateTime(lead.next_followup_time) : '-'}
+                                            {followupCountdown && (
+                                                <span className="text-xs text-orange-600 animate-pulse ml-2">
+                                                    Còn lại: {followupCountdown}
+                                                </span>
+                                            )}
                                         </div>
                                     )}
                                 </div>

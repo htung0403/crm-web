@@ -596,7 +596,7 @@ export function useKPI() {
         fetchViolations, createViolation, approveViolation, rejectViolation,
 
         // Rank config actions
-        fetchRankConfigs, updateRankConfig, upsertEmployeeRankConfigs,
+        fetchRankConfigs, updateRankConfig, upsertEmployeeRankConfigs, upsertPolicyRankConfigs,
 
         // Leaderboard
         fetchLeaderboard,

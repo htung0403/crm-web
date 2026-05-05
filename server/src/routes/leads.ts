@@ -177,11 +177,18 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         if (tracking_code !== undefined) updateData.tracking_code = tracking_code;
         if (shipping_fee !== undefined) updateData.shipping_fee = shipping_fee;
 
-        // SLA Shield: Reset round_index if appointment_time is updated
+        // SLA Shield: Pause SLA if appointment_time is updated
         if (req.body.appointment_time !== undefined) {
             updateData.appointment_time = req.body.appointment_time;
-            updateData.round_index = 0;
             if (req.body.appointment_time) {
+                updateData.sla_state = 'PAUSED_APPOINTMENT';
+            }
+        }
+
+        // SLA Shield: Pause SLA if next_followup_time is updated
+        if (req.body.next_followup_time !== undefined) {
+            updateData.next_followup_time = req.body.next_followup_time;
+            if (req.body.next_followup_time) {
                 updateData.sla_state = 'PAUSED_APPOINTMENT';
             }
         }

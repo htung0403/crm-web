@@ -119,6 +119,7 @@ export async function on_customer_message(lead: any) {
         current_deadline_at: deadline.toISOString(),
         sla_state: 'ACTIVE',
         appointment_time: null, // Xoá sạch lịch hẹn vì có tương tác mới
+        next_followup_time: null, // Xoá hẹn chăm sóc vì có tương tác mới
         updated_at: now.toISOString()
     }).eq('id', lead.id);
 }
@@ -247,7 +248,7 @@ export async function checkSlaCron() {
         const { data: leads, error } = await supabaseAdmin
             .from('leads')
             .select(`
-                id, name, assigned_to, appointment_time, sla_state, current_deadline_at, current_rule_index, appointment_reminded_at, pipeline_stage, created_at, last_actor, assigned_to_user: users!leads_assigned_to_fkey(name, telegram_chat_id)
+                id, name, assigned_to, appointment_time, next_followup_time, sla_state, current_deadline_at, current_rule_index, appointment_reminded_at, next_followup_reminded_at, pipeline_stage, created_at, last_actor, assigned_to_user: users!leads_assigned_to_fkey(name, telegram_chat_id)
             `)
             .not('assigned_to', 'is', null)
             .not('pipeline_stage', 'in', '("chot_don", "huy", "fail")');
@@ -259,41 +260,53 @@ export async function checkSlaCron() {
             const saleName = saleUser?.name || 'Ẩn danh';
             const teleIdSale = saleUser?.telegram_chat_id || null;
 
-            // Xử lý Lịch Hẹn (Rule 5)
-            if (lead.sla_state === 'PAUSED_APPOINTMENT' && lead.appointment_time) {
-                const appointTime = new Date(lead.appointment_time);
-                const msUntilAppoint = appointTime.getTime() - now.getTime();
-                const minUntilAppoint = msUntilAppoint / 60000;
+            // Xử lý Lịch Hẹn (Rule 5) - cả appointment_time và next_followup_time
+            if (lead.sla_state === 'PAUSED_APPOINTMENT') {
+                const appointTime = lead.appointment_time ? new Date(lead.appointment_time) : null;
+                const followupTime = lead.next_followup_time ? new Date(lead.next_followup_time) : null;
 
-                // 1. Remind 10 min before
-                if (minUntilAppoint > 0 && minUntilAppoint <= 10 && !lead.appointment_reminded_at) {
-                    fireWebhook('APPOINTMENT_REMIND', {
-                        lead_id: lead.id,
-                        lead_name: lead.name,
-                        sale_name: saleName,
-                        tele_id_sale: teleIdSale,
-                        appointment_time: lead.appointment_time,
-                        link_lead: `${FRONTEND_URL}/leads/${lead.id}`
-                    });
-                    await supabaseAdmin.from('leads').update({
-                        appointment_reminded_at: now.toISOString()
-                    }).eq('id', lead.id);
-                }
+                // Ưu tiên appointment_time nếu cả 2 đều có
+                const targetTime = appointTime || followupTime;
+                const isAppointment = !!appointTime;
 
-                // 2. Đúng giờ hẹn: Reset về mốc 3 phút (ACTIVE)
-                if (lead.sla_state === 'PAUSED_APPOINTMENT' && minUntilAppoint <= 0 && minUntilAppoint > -60) {
-                    const deadline = calculateDeadline(now, SLA_CYCLES[0], lead.created_at);
-                    await supabaseAdmin.from('leads').update({
-                        current_rule_index: 0,
-                        current_deadline_at: deadline.toISOString(),
-                        last_message_time: now.toISOString(),
-                        t_last_inbound: now.toISOString(),
-                        last_actor: 'lead',
-                        sla_state: 'ACTIVE',
-                        updated_at: now.toISOString(),
-                        appointment_time: null, // Xoá hẹn sau khi kích nổ để tránh lặp
-                        appointment_reminded_at: null
-                    }).eq('id', lead.id);
+                if (targetTime) {
+                    const msUntil = targetTime.getTime() - now.getTime();
+                    const minUntil = msUntil / 60000;
+                    const remindedAt = isAppointment ? lead.appointment_reminded_at : lead.next_followup_reminded_at;
+
+                    // 1. Remind 10 min before
+                    if (minUntil > 0 && minUntil <= 10 && !remindedAt) {
+                        fireWebhook('APPOINTMENT_REMIND', {
+                            lead_id: lead.id,
+                            lead_name: lead.name,
+                            sale_name: saleName,
+                            tele_id_sale: teleIdSale,
+                            appointment_time: isAppointment ? lead.appointment_time : lead.next_followup_time,
+                            link_lead: `${FRONTEND_URL}/leads/${lead.id}`
+                        });
+                        const updateField = isAppointment
+                            ? { appointment_reminded_at: now.toISOString() }
+                            : { next_followup_reminded_at: now.toISOString() };
+                        await supabaseAdmin.from('leads').update(updateField).eq('id', lead.id);
+                    }
+
+                    // 2. Đúng giờ hẹn: Reset về mốc 3 phút (ACTIVE)
+                    if (minUntil <= 0 && minUntil > -60) {
+                        const deadline = calculateDeadline(now, SLA_CYCLES[0], lead.created_at);
+                        await supabaseAdmin.from('leads').update({
+                            current_rule_index: 0,
+                            current_deadline_at: deadline.toISOString(),
+                            last_message_time: now.toISOString(),
+                            t_last_inbound: now.toISOString(),
+                            last_actor: 'lead',
+                            sla_state: 'ACTIVE',
+                            updated_at: now.toISOString(),
+                            appointment_time: null,
+                            appointment_reminded_at: null,
+                            next_followup_time: null,
+                            next_followup_reminded_at: null
+                        }).eq('id', lead.id);
+                    }
                 }
                 continue;
             }

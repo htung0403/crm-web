@@ -32,8 +32,22 @@ export function formatDateTime(date: Date | string): string {
         month: '2-digit',
         year: 'numeric',
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
+        timeZone: 'Asia/Ho_Chi_Minh'
     }).format(d)
+}
+
+export function isOverdueVN(dateStr: string): boolean {
+    const now = new Date()
+    const vnNowStr = now.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' })
+    const vnNow = new Date(vnNowStr)
+    const target = new Date(dateStr)
+    return target < vnNow
+}
+
+export function getVNTimeString(): string {
+    const now = new Date()
+    return now.toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' })
 }
 
 export function formatTimeAgo(date: Date | string): string {

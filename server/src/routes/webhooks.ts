@@ -822,8 +822,8 @@ async function handleLeadUpdate(data: any) {
         }
     });
 
-    // Rule 5: Khi set lịch hẹn -> Pause SLA
-    if (updateData.appointment_time) {
+    // Rule 5: Khi set lịch hẹn hoặc hẹn chăm sóc -> Pause SLA
+    if (updateData.appointment_time || updateData.next_followup_time) {
         updateData.sla_state = 'PAUSED_APPOINTMENT';
     }
 
@@ -1260,8 +1260,8 @@ async function handleLeadSaleMemoryUpdate(data: any) {
     addIfValid('eta_note', eta_note);
     addIfValid('sale_note_summary', sale_note_summary);
 
-    // Rule 5: Khi set lịch hẹn -> Pause SLA
-    if (updateData.appointment_time) {
+    // Rule 5: Khi set lịch hẹn hoặc hẹn chăm sóc -> Pause SLA
+    if (updateData.appointment_time || updateData.next_followup_time) {
         updateData.sla_state = 'PAUSED_APPOINTMENT';
     }
 

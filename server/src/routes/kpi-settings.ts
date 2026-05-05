@@ -36,6 +36,8 @@ router.get('/rank-configs', authenticate, requireManager, async (req: Authentica
 
             if (policyError) throw new ApiError('Lỗi khi lấy cấu hình policy: ' + policyError.message, 500);
 
+            console.log('DEBUG policyConfigs from DB:', policyConfigs);
+
             const overrideMap = new Map((policyConfigs || []).map((c: any) => [c.rank_code, c]));
             const merged = (globalConfigs || []).map((global: any) => {
                 const override = overrideMap.get(global.rank_code);
@@ -43,6 +45,8 @@ router.get('/rank-configs', authenticate, requireManager, async (req: Authentica
                     ? { ...global, ...override, is_override: true, global_id: global.id }
                     : { ...global, is_override: false };
             });
+
+            console.log('DEBUG merged configs:', merged);
 
             return res.json({
                 status: 'success',
@@ -56,6 +60,7 @@ router.get('/rank-configs', authenticate, requireManager, async (req: Authentica
                 .from('kpi_rank_configs')
                 .select('*')
                 .is('employee_id', null)
+                .is('policy_id', null)
                 .order('sort_order', { ascending: true });
 
             if (globalError) throw new ApiError('Lỗi khi lấy cấu hình global: ' + globalError.message, 500);
@@ -82,11 +87,12 @@ router.get('/rank-configs', authenticate, requireManager, async (req: Authentica
             });
         }
 
-        // Default: return global configs
+// Default: return global configs only (exclude policy-specific overrides)
         const { data: configs, error } = await supabaseAdmin
             .from('kpi_rank_configs')
             .select('*')
             .is('employee_id', null)
+            .is('policy_id', null)
             .order('sort_order', { ascending: true });
 
         if (error) throw new ApiError('Lỗi khi lấy cấu hình xếp loại: ' + error.message, 500);
@@ -229,6 +235,8 @@ router.post('/rank-configs/upsert-policy', authenticate, requireManager, async (
     try {
         const { policy_id, configs } = req.body;
 
+        console.log('DEBUG upsert-policy body:', { policy_id, configs_count: configs?.length });
+
         if (!policy_id) throw new ApiError('Thiếu policy_id', 400);
         if (!Array.isArray(configs) || configs.length === 0) throw new ApiError('Thiếu danh sách cấu hình (configs)', 400);
 
@@ -237,6 +245,8 @@ router.post('/rank-configs/upsert-policy', authenticate, requireManager, async (
 
         for (const cfg of configs) {
             const { rank_code, rank_name, min_score, max_score, bonus_amount, penalty_amount, commission_factor, sort_order, reset_to_global } = cfg;
+
+            console.log('DEBUG processing config:', { rank_code, penalty_amount, reset_to_global });
 
             if (!rank_code) { errors.push({ rank_code, error: 'Thiếu rank_code' }); continue; }
 
@@ -258,6 +268,8 @@ router.post('/rank-configs/upsert-policy', authenticate, requireManager, async (
                 .eq('rank_code', rank_code)
                 .single();
 
+            console.log('DEBUG existing record:', { existing });
+
             if (existing) {
                 const updateData: any = {};
                 if (rank_name !== undefined) updateData.rank_name = rank_name;
@@ -268,6 +280,8 @@ router.post('/rank-configs/upsert-policy', authenticate, requireManager, async (
                 if (commission_factor !== undefined) updateData.commission_factor = commission_factor;
                 if (sort_order !== undefined) updateData.sort_order = sort_order;
 
+                console.log('DEBUG updating existing:', { id: existing.id, updateData });
+
                 const { data: updated, error } = await supabaseAdmin
                     .from('kpi_rank_configs')
                     .update(updateData)
@@ -275,25 +289,32 @@ router.post('/rank-configs/upsert-policy', authenticate, requireManager, async (
                     .select()
                     .single();
 
+                console.log('DEBUG update result:', { updated, error });
+
                 if (error) errors.push({ rank_code, error: error.message });
                 else results.push({ ...updated, action: 'updated' });
             } else {
+                const insertData = {
+                    policy_id,
+                    rank_code,
+                    rank_name: rank_name ?? rank_code,
+                    min_score: min_score ?? 0,
+                    max_score: max_score ?? 100,
+                    bonus_amount: bonus_amount ?? 0,
+                    penalty_amount: penalty_amount ?? 0,
+                    commission_factor: commission_factor ?? 100,
+                    sort_order: sort_order ?? 0,
+                    is_active: true,
+                };
+                console.log('DEBUG creating new:', insertData);
+
                 const { data: created, error } = await supabaseAdmin
                     .from('kpi_rank_configs')
-                    .insert({
-                        policy_id,
-                        rank_code,
-                        rank_name: rank_name ?? rank_code,
-                        min_score: min_score ?? 0,
-                        max_score: max_score ?? 100,
-                        bonus_amount: bonus_amount ?? 0,
-                        penalty_amount: penalty_amount ?? 0,
-                        commission_factor: commission_factor ?? 100,
-                        sort_order: sort_order ?? 0,
-                        is_active: true,
-                    })
+                    .insert(insertData)
                     .select()
                     .single();
+
+                console.log('DEBUG create result:', { created, error });
 
                 if (error) errors.push({ rank_code, error: error.message });
                 else results.push({ ...created, action: 'created' });

@@ -114,8 +114,8 @@ const menuItems: MenuItem[] = [
         children: [
             // { id: 'scan', label: 'Quét mã QR', roles: ['admin', 'manager', 'technician'] },
             // { id: 'workflow-board', label: 'Bảng quy trình 360', roles: ['admin', 'manager', 'sale', 'technician'] },
-            { id: 'tasks', label: 'Danh sách công việc', roles: ['admin', 'manager', 'technician'] },
-            { id: 'departments', label: 'Phòng ban', roles: ['admin', 'manager'] },
+            // { id: 'tasks', label: 'Danh sách công việc', roles: ['admin', 'manager', 'technician'] },
+            // { id: 'departments', label: 'Phòng ban', roles: ['admin', 'manager'] },
             { id: 'workflows', label: 'Quy trình', roles: ['admin', 'manager'] },
             // { id: 'accessories', label: 'Mua phụ kiện', roles: ['admin', 'manager', 'technician'] },
             // { id: 'extension', label: 'Xin gia hạn', roles: ['admin', 'manager', 'technician'] },
