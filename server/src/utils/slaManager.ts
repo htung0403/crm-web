@@ -276,7 +276,7 @@ export async function checkSlaCron() {
 
                     // 1. Remind 10 min before
                     if (minUntil > 0 && minUntil <= 10 && !remindedAt) {
-                        fireWebhook('APPOINTMENT_REMIND', {
+                        await fireWebhook('APPOINTMENT_REMIND', {
                             lead_id: lead.id,
                             lead_name: lead.name,
                             sale_name: saleName,
@@ -291,7 +291,7 @@ export async function checkSlaCron() {
                     }
 
                     // 2. Đúng giờ hẹn: Reset về mốc 3 phút (ACTIVE)
-                    if (minUntil <= 0 && minUntil > -60) {
+                    if (minUntil <= 0) {
                         const deadline = calculateDeadline(now, SLA_CYCLES[0], lead.created_at);
                         await supabaseAdmin.from('leads').update({
                             current_rule_index: 0,
