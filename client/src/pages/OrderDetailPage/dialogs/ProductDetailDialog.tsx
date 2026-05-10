@@ -1769,14 +1769,16 @@ export function ProductDetailDialog({
                                     )}
 
                                     {isAftersale && !roomId.startsWith('after4') && (
-                                        <Button
-                                            className="w-full h-12 rounded-xl font-bold shadow-lg shadow-primary/20"
-                                            onClick={handleSave}
-                                            disabled={saving}
-                                        >
-                                            {saving ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Save className="h-5 w-5 mr-2" />}
-                                            Cập nhật thông tin
-                                        </Button>
+                                        <div className="sticky bottom-0 -mx-4 -mb-4 mt-auto p-4 bg-white/95 backdrop-blur-sm border-t border-gray-200/50 shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)] z-50 order-last">
+                                            <Button
+                                                className="w-full h-12 rounded-xl font-bold shadow-lg shadow-primary/20"
+                                                onClick={handleSave}
+                                                disabled={saving}
+                                            >
+                                                {saving ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Save className="h-5 w-5 mr-2" />}
+                                                Cập nhật thông tin
+                                            </Button>
+                                        </div>
                                     )}
                                 </div>
                             ) : isCareFlow && order ? (
@@ -1859,59 +1861,6 @@ export function ProductDetailDialog({
                                             />
                                         </div>
 
-                                        {/* Tạo HD Bảo hành button — warranty only */}
-                                        {roomId.startsWith('war') && (
-                                            <Button
-                                                variant="outline"
-                                                className="w-full h-10 rounded-xl font-bold border-red-300 text-red-700 hover:bg-red-50 gap-2"
-                                                disabled={saving}
-                                                onClick={async () => {
-                                                    if (!entityId || !onReloadOrder) return;
-                                                    setSaving(true);
-                                                    try {
-                                                        const isCustomerItem = !!product;
-                                                        const apiModule = isCustomerItem ? orderProductsApi : orderItemsApi;
-                                                        
-                                                        const now = new Date();
-                                                        const seq = `${now.getFullYear().toString().slice(-2)}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}`;
-                                                        const warrantyCode = `HDBH${order?.order_code || ''}.${entityId.slice(-4)}.${seq}`;
-
-                                                        await apiModule.updateStatus(entityId, 'step1', 'Bảo hành lại', warrantyCode);
-                                                        
-                                                        await apiModule.updateAfterSaleData(entityId, { care_warranty_stage: 'war3' });
-
-                                                        if (isCustomerItem) {
-                                                            await orderProductsApi.resetServices(entityId);
-                                                        }
-                                                        
-                                                        toast.success(`Đã tạo HD Bảo hành: ${warrantyCode} và chuyển về Nhận đồ & Chụp ảnh`);
-                                                        onOpenChange(false);
-                                                        if (setActiveTab) setActiveTab('sales');
-                                                        onReloadOrder();
-                                                    } catch (error: any) {
-                                                        toast.error(error?.response?.data?.message || 'Lỗi khi tạo HD Bảo hành');
-                                                    } finally {
-                                                        setSaving(false);
-                                                    }
-                                                }}
-                                            >
-                                                <ClipboardList className="h-4 w-4" />
-                                                Tạo HD Bảo hành
-                                            </Button>
-                                        )}
-
-                                        {/* Save */}
-                                        <Button
-                                            className={cn(
-                                                "w-full h-11 rounded-xl font-bold transition-all",
-                                                roomId.startsWith('war') ? "bg-red-600 hover:bg-red-700" : "bg-teal-600 hover:bg-teal-700"
-                                            )}
-                                            onClick={handleSave}
-                                            disabled={saving}
-                                        >
-                                            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
-                                            Lưu ghi chú
-                                        </Button>
                                     </div>
 
                                     <div className="mt-auto bg-gray-100/50 p-4 rounded-xl space-y-3">
@@ -1960,6 +1909,61 @@ export function ProductDetailDialog({
                                             </ScrollArea>
                                         </div>
                                     </div>
+                                    <div className="sticky bottom-0 -mx-4 -mb-4 mt-auto p-4 bg-white/95 backdrop-blur-sm border-t border-gray-200/50 shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)] z-50 order-last space-y-3">
+                                        {/* Tạo HD Bảo hành button — warranty only */}
+                                        {roomId.startsWith('war') && (
+                                            <Button
+                                                variant="outline"
+                                                className="w-full h-10 rounded-xl font-bold border-red-300 text-red-700 hover:bg-red-50 gap-2 bg-white"
+                                                disabled={saving}
+                                                onClick={async () => {
+                                                    if (!entityId || !onReloadOrder) return;
+                                                    setSaving(true);
+                                                    try {
+                                                        const isCustomerItem = !!product;
+                                                        const apiModule = isCustomerItem ? orderProductsApi : orderItemsApi;
+                                                        
+                                                        const now = new Date();
+                                                        const seq = `${now.getFullYear().toString().slice(-2)}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}`;
+                                                        const warrantyCode = `HDBH${order?.order_code || ''}.${entityId.slice(-4)}.${seq}`;
+
+                                                        await apiModule.updateStatus(entityId, 'step1', 'Bảo hành lại', warrantyCode);
+                                                        
+                                                        await apiModule.updateAfterSaleData(entityId, { care_warranty_stage: 'war3' });
+
+                                                        if (isCustomerItem) {
+                                                            await orderProductsApi.resetServices(entityId);
+                                                        }
+                                                        
+                                                        toast.success(`Đã tạo HD Bảo hành: ${warrantyCode} và chuyển về Nhận đồ & Chụp ảnh`);
+                                                        onOpenChange(false);
+                                                        if (setActiveTab) setActiveTab('sales');
+                                                        onReloadOrder();
+                                                    } catch (error: any) {
+                                                        toast.error(error?.response?.data?.message || 'Lỗi khi tạo HD Bảo hành');
+                                                    } finally {
+                                                        setSaving(false);
+                                                    }
+                                                }}
+                                            >
+                                                <ClipboardList className="h-4 w-4" />
+                                                Tạo HD Bảo hành
+                                            </Button>
+                                        )}
+
+                                        {/* Save */}
+                                        <Button
+                                            className={cn(
+                                                "w-full h-11 rounded-xl font-bold transition-all text-white",
+                                                roomId.startsWith('war') ? "bg-red-600 hover:bg-red-700" : "bg-teal-600 hover:bg-teal-700"
+                                            )}
+                                            onClick={handleSave}
+                                            disabled={saving}
+                                        >
+                                            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                                            Lưu ghi chú
+                                        </Button>
+                                    </div>
                                 </div>
 
                             ) : isSalesStep ? (
@@ -1975,7 +1979,7 @@ export function ProductDetailDialog({
 
                                     {/* Step 1: Nhận đồ - Receiver Info */}
                                     {roomId === 'step1' && (
-                                        <div className="space-y-4">
+                                        <>
                                             <div className="bg-white p-5 rounded-2xl border border-blue-100 shadow-sm space-y-4">
                                                 <div className="flex items-center gap-2 text-blue-700 mb-1">
                                                     <UserIcon className="h-4 w-4" />
@@ -2052,42 +2056,44 @@ export function ProductDetailDialog({
                                                     </div>
                                                 </div>
                                             </div>
-                                            <Button
-                                                className="w-full h-11 rounded-xl font-bold shadow-lg shadow-blue-200 bg-blue-600 hover:bg-blue-700"
-                                                onClick={async () => {
-                                                    await handleSaveStepData();
-                                                    // Nếu có tiền ship thì tạo phiếu chi (expense)
-                                                    if (roomId === 'step1' && stepData.step1_shipping_fee > 0 && order) {
-                                                        const { transactionsApi } = await import('@/lib/api');
-                                                        try {
-                                                            await transactionsApi.create({
-                                                                type: 'expense',
-                                                                category: 'Phí ship nhận hàng',
-                                                                amount: stepData.step1_shipping_fee,
-                                                                notes: `Tiền ship nhận đồ cho đơn ${order.order_code || order.id}`,
-                                                                order_id: order.id,
-                                                                order_code: order.order_code,
-                                                                date: new Date().toISOString().split('T')[0],
-                                                                payment_method: stepData.step1_payment_method || 'cash'
-                                                            });
-                                                            toast.success('Đã tạo phiếu chi cho tiền ship');
-                                                        } catch (error) {
-                                                            console.error('Lỗi tạo phiếu chi:', error);
-                                                            toast.error('Lỗi khi tạo phiếu chi tự động');
+                                            <div className="sticky bottom-0 -mx-4 -mb-4 mt-auto p-4 bg-white/95 backdrop-blur-sm border-t border-gray-200/50 shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)] z-50 order-last">
+                                                <Button
+                                                    className="w-full h-11 rounded-xl font-bold shadow-lg shadow-blue-200 bg-blue-600 hover:bg-blue-700 text-white"
+                                                    onClick={async () => {
+                                                        await handleSaveStepData();
+                                                        // Nếu có tiền ship thì tạo phiếu chi (expense)
+                                                        if (roomId === 'step1' && stepData.step1_shipping_fee > 0 && order) {
+                                                            const { transactionsApi } = await import('@/lib/api');
+                                                            try {
+                                                                await transactionsApi.create({
+                                                                    type: 'expense',
+                                                                    category: 'Phí ship nhận hàng',
+                                                                    amount: stepData.step1_shipping_fee,
+                                                                    notes: `Tiền ship nhận đồ cho đơn ${order.order_code || order.id}`,
+                                                                    order_id: order.id,
+                                                                    order_code: order.order_code,
+                                                                    date: new Date().toISOString().split('T')[0],
+                                                                    payment_method: stepData.step1_payment_method || 'cash'
+                                                                });
+                                                                toast.success('Đã tạo phiếu chi cho tiền ship');
+                                                            } catch (error) {
+                                                                console.error('Lỗi tạo phiếu chi:', error);
+                                                                toast.error('Lỗi khi tạo phiếu chi tự động');
+                                                            }
                                                         }
-                                                    }
-                                                }}
-                                                disabled={savingStepData}
-                                            >
-                                                {savingStepData ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
-                                                Lưu thông tin nhận đồ
-                                            </Button>
-                                        </div>
+                                                    }}
+                                                    disabled={savingStepData}
+                                                >
+                                                    {savingStepData ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                                                    Lưu thông tin nhận đồ
+                                                </Button>
+                                            </div>
+                                        </>
                                     )}
 
                                     {/* Step 2: TAGS + FORM TÚI + SHOESTREE */}
                                     {roomId === 'step2' && (
-                                        <div className="space-y-4">
+                                        <>
                                             <div className="bg-white p-5 rounded-2xl border border-green-100 shadow-sm space-y-4">
                                                 <div className="flex items-center gap-2 text-green-700 mb-1">
                                                     <Tag className="h-4 w-4" />
@@ -2116,20 +2122,22 @@ export function ProductDetailDialog({
                                                     </div>
                                                 </div>
                                             </div>
-                                            <Button
-                                                className="w-full h-11 rounded-xl font-bold shadow-lg shadow-green-200 bg-green-600 hover:bg-green-700"
-                                                onClick={handleSaveStepData}
-                                                disabled={savingStepData}
-                                            >
-                                                {savingStepData ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
-                                                Lưu thông tin Step 2
-                                            </Button>
-                                        </div>
+                                            <div className="sticky bottom-0 -mx-4 -mb-4 mt-auto p-4 bg-white/95 backdrop-blur-sm border-t border-gray-200/50 shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)] z-50 order-last">
+                                                <Button
+                                                    className="w-full h-11 rounded-xl font-bold shadow-lg shadow-green-200 bg-green-600 hover:bg-green-700 text-white"
+                                                    onClick={handleSaveStepData}
+                                                    disabled={savingStepData}
+                                                >
+                                                    {savingStepData ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                                                    Lưu thông tin Step 2
+                                                </Button>
+                                            </div>
+                                        </>
                                     )}
 
                                     {/* Step 3: Trao đổi KT - Technician Exchange */}
                                     {roomId === 'step3' && (
-                                        <div className="space-y-4">
+                                        <>
                                             <div className="bg-white p-5 rounded-2xl border border-orange-100 shadow-sm space-y-4">
                                                 <div className="flex items-center gap-2 text-orange-700 mb-1">
                                                     <ClipboardList className="h-4 w-4" />
@@ -2224,8 +2232,10 @@ export function ProductDetailDialog({
                                                         />
                                                     </div>
                                                 </div>
+                                            </div>
+                                            <div className="sticky bottom-0 -mx-4 -mb-4 mt-auto p-4 bg-white/95 backdrop-blur-sm border-t border-gray-200/50 shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)] z-50 order-last">
                                                 <Button
-                                                    className="w-full h-11 rounded-xl font-bold shadow-lg shadow-orange-200 bg-orange-600 hover:bg-orange-700"
+                                                    className="w-full h-11 rounded-xl font-bold shadow-lg shadow-orange-200 bg-orange-600 hover:bg-orange-700 text-white"
                                                     onClick={handleSaveStepData}
                                                     disabled={savingStepData}
                                                 >
@@ -2233,7 +2243,7 @@ export function ProductDetailDialog({
                                                     Lưu thông tin trao đổi KT
                                                 </Button>
                                             </div>
-                                        </div>
+                                        </>
                                     )}
 
                                         <div className="flex-1 flex flex-col min-h-[250px] gap-4">
@@ -2305,10 +2315,10 @@ export function ProductDetailDialog({
 
                                     {/* Mark Failed Button - Only for Workflow stages */}
                                     {!isSalesStep && !isAftersale && !isCareFlow && (
-                                        <div className="pt-4 mt-auto">
+                                        <div className="sticky bottom-0 -mx-4 -mb-4 mt-auto p-4 bg-white/95 backdrop-blur-sm border-t border-gray-200/50 shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)] z-50 order-last">
                                             <Button
                                                 variant="outline"
-                                                className="w-full h-10 rounded-xl border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 font-bold gap-2 text-xs"
+                                                className="w-full h-10 rounded-xl border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 font-bold gap-2 text-xs bg-white"
                                                 onClick={() => {
                                                     toast.info("Vui lòng sử dụng nút 'Thất bại' bên ngoài Kanban để ghi nhận chi tiết.");
                                                 }}
