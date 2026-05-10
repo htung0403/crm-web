@@ -684,14 +684,22 @@ router.get('/:id/kanban-logs', authenticate, async (req: AuthenticatedRequest, r
         }
 
         if (tab === 'workflow') {
+            console.log('[Workflow Tab] Fetching logs for order:', orderId);
+            
             const { data: orderItems } = await supabaseAdmin.from('order_items').select('id').eq('order_id', orderId);
             const orderItemIds = orderItems?.map((r: { id: string }) => r.id) || [];
+            console.log('[Workflow] orderItemIds:', orderItemIds);
+            
             const { data: orderProducts } = await supabaseAdmin.from('order_products').select('id').eq('order_id', orderId);
             const opIds = orderProducts?.map((r: { id: string }) => r.id) || [];
+            console.log('[Workflow] opIds:', opIds);
+            
             const { data: services } = opIds.length
                 ? await supabaseAdmin.from('order_product_services').select('id').in('order_product_id', opIds)
                 : { data: [] };
             const serviceIds = (services as { id: string }[] | null)?.map((r) => r.id) || [];
+            console.log('[Workflow] serviceIds:', serviceIds);
+            
             const { data: stepsV1 } = orderItemIds.length
                 ? await supabaseAdmin.from('order_item_steps').select('id').in('order_item_id', orderItemIds)
                 : { data: [] };
@@ -703,17 +711,44 @@ router.get('/:id/kanban-logs', authenticate, async (req: AuthenticatedRequest, r
                 ...((stepsV2 as { id: string }[] | null) || [])
             ].map((s) => s.id);
             const ids = [...new Set(stepIds)];
-            if (ids.length === 0) {
-                return res.json({ status: 'success', data: { logs: [] } });
+            console.log('[Workflow] stepIds:', ids);
+            
+            let logs: any[] = [];
+
+            if (ids.length > 0) {
+                console.log('[Workflow] Querying by step IDs:', ids);
+                const result = await supabaseAdmin
+                    .from('order_workflow_step_log')
+                    .select('id, order_item_step_id, action, step_name, step_order, notes, photos, reason, deadline_days, technician_id, entity_id, created_by, created_at, created_by_user:users!order_workflow_step_log_created_by_fkey(id, name), assigned_tech:users!order_workflow_step_log_technician_id_fkey(id, name)')
+                    .in('order_item_step_id', ids)
+                    .order('created_at', { ascending: false })
+                    .limit(100);
+                console.log('[Workflow] Step logs result:', result.data?.length, 'error:', result.error);
+                logs = result.data || [];
+            } else {
+                console.log('[Workflow] No step IDs, skipping step log query');
             }
-            const { data: logs, error } = await supabaseAdmin
-                .from('order_workflow_step_log')
-                .select('id, order_item_step_id, action, step_name, step_order, notes, photos, reason, deadline_days, technician_id, created_by, created_at, created_by_user:users!order_workflow_step_log_created_by_fkey(id, name), assigned_tech:users!order_workflow_step_log_technician_id_fkey(id, name)')
-                .in('order_item_step_id', ids)
-                .order('created_at', { ascending: false })
-                .limit(100);
-            if (error) throw new ApiError('Lỗi khi lấy lịch sử Workflow', 500);
-            return res.json({ status: 'success', data: { logs: logs || [] } });
+
+            const allEntityIds = [...orderItemIds, ...serviceIds];
+            if (allEntityIds.length > 0) {
+                console.log('[Workflow] Querying by entity IDs:', allEntityIds);
+                const entityLogsResult = await supabaseAdmin
+                    .from('order_workflow_step_log')
+                    .select('id, order_item_step_id, action, step_name, step_order, notes, photos, reason, deadline_days, technician_id, entity_id, created_by, created_at, created_by_user:users!order_workflow_step_log_created_by_fkey(id, name), assigned_tech:users!order_workflow_step_log_technician_id_fkey(id, name)')
+                    .in('entity_id', allEntityIds)
+                    .order('created_at', { ascending: false })
+                    .limit(100);
+                console.log('[Workflow] Entity logs result:', entityLogsResult.data?.length, 'error:', entityLogsResult.error);
+                if (entityLogsResult.data && entityLogsResult.data.length > 0) {
+                    const existingIds = new Set(logs.map(l => l.id));
+                    const newLogs = entityLogsResult.data.filter(l => !existingIds.has(l.id));
+                    logs = [...logs, ...newLogs];
+                    logs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+                }
+            }
+
+            console.log('[Workflow] Final logs count:', logs.length);
+            return res.json({ status: 'success', data: { logs } });
         }
 
         if (tab === 'care') {

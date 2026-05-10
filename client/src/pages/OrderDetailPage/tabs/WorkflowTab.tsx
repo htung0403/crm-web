@@ -441,8 +441,11 @@ export function WorkflowTab({
 
     const displayLogs = useMemo(() => {
         const STEPS_AFTER_STEP4 = ['step5', 'in_progress', 'done'];
+        const REQUEST_ACTIONS = ['accessory_requested', 'partner_requested', 'extension_requested'];
         const logs = [
-            ...workflowLogs.filter((l: any) => l.action === 'assigned' || l.action === 'failed'),
+            ...workflowLogs.filter((l: any) => 
+                l.action === 'assigned' || l.action === 'failed' || REQUEST_ACTIONS.includes(l.action)
+            ),
             ...salesLogs.filter((l: any) =>
                 l.to_status === 'step4' &&
                 STEPS_AFTER_STEP4.includes(l.from_status)
@@ -572,6 +575,12 @@ export function WorkflowTab({
                                                                 <span className="text-orange-600 font-bold">
                                                                     {log.product_info}: {log.step_name}
                                                                 </span>
+                                                            ) : log.action === 'accessory_requested' ? (
+                                                                <span className="text-amber-600 font-medium">🛒 {log.step_name}: {log.notes}</span>
+                                                            ) : log.action === 'partner_requested' ? (
+                                                                <span className="text-purple-600 font-medium">📦 {log.step_name}: {log.notes}</span>
+                                                            ) : log.action === 'extension_requested' ? (
+                                                                <span className="text-blue-600 font-medium">⏰ {log.step_name}: {log.notes}</span>
                                                             ) : log.order_item_step_id ? (
                                                                 <span className={log.action === 'failed' ? "text-red-500" : "text-blue-700 font-medium"}>
                                                                     {log.action === 'failed' && <span className="mr-1 font-bold">THẤT BẠI:</span>}

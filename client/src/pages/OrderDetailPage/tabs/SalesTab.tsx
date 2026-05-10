@@ -36,6 +36,8 @@ interface SalesTabProps {
     onProductCardClick?: (group: { product: OrderItem | null; services: OrderItem[] }, roomId: string) => void;
     workflowKanbanGroups?: { product: OrderItem | null; services: OrderItem[] }[];
     onTabChange?: (tab: string) => void;
+    /** Mở dialog với pending move callback — sau khi user xác nhận, card tự chuyển và dialog tự đóng */
+    onOpenProductDialogWithMove?: (group: any, roomId: string, moveCallback: () => Promise<void>) => void;
 }
 
 const SalesCard = memo(({
@@ -51,7 +53,8 @@ const SalesCard = memo(({
     onTabChange,
     salesLogs,
     onBackwardMove,
-    onUpsell
+    onUpsell,
+    onOpenProductDialogWithMove,
 }: {
     group: { product: OrderItem | null; services: OrderItem[] };
     index: number;
@@ -66,6 +69,7 @@ const SalesCard = memo(({
     fetchKanbanLogs: (orderId: string) => Promise<void>;
     reloadOrder: () => Promise<void>;
     onTabChange?: (tab: string) => void;
+    onOpenProductDialogWithMove?: (group: any, roomId: string, moveCallback: () => Promise<void>) => void;
 }) => {
     const leadItem = group.product || group.services[0];
     const isWarranty = leadItem?.care_warranty_flow === 'warranty' || !!leadItem?.warranty_code;
@@ -205,8 +209,8 @@ const SalesCard = memo(({
                         {remainingTime && (
                             <div className={cn(
                                 "flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border",
-                                remainingTime.isOverdue 
-                                    ? "bg-red-50 text-red-600 border-red-200 animate-pulse" 
+                                remainingTime.isOverdue
+                                    ? "bg-red-50 text-red-600 border-red-200 animate-pulse"
                                     : "bg-blue-50 text-blue-600 border-blue-200"
                             )}>
                                 <Clock className="h-2.5 w-2.5" />
@@ -216,73 +220,99 @@ const SalesCard = memo(({
                         <div className="flex-1" />
                         <div className="flex items-center gap-1">
 
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 rounded-full"
-                            disabled={colIdx === 0}
-                            onClick={async (e) => {
-                                e.stopPropagation();
-                                const prevStepId = SALES_STEPS[colIdx - 1].id;
-                                if (onBackwardMove) {
-                                    onBackwardMove(group, prevStepId);
-                                }
-                            }}
-                        >
-                            <ArrowLeft className="h-4 w-4" />
-                        </Button>
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 rounded-full text-primary hover:bg-primary hover:text-white"
-                            disabled={colIdx === SALES_STEPS.length - 1}
-                            onClick={async (e) => {
-                                e.stopPropagation();
-                                const nextStepIdx = colIdx + 1;
-                                const nextStep = SALES_STEPS[nextStepIdx].id;
-                                const itemsToUpdate = [];
-                                const leadItem = group.product || group.services[0];
-                                if (leadItem) itemsToUpdate.push(leadItem);
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 rounded-full"
+                                disabled={colIdx === 0}
+                                onClick={async (e) => {
+                                    e.stopPropagation();
+                                    const prevStepId = SALES_STEPS[colIdx - 1].id;
+                                    if (onBackwardMove) {
+                                        onBackwardMove(group, prevStepId);
+                                    }
+                                }}
+                            >
+                                <ArrowLeft className="h-4 w-4" />
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 rounded-full text-primary hover:bg-primary hover:text-white"
+                                disabled={colIdx === SALES_STEPS.length - 1}
+                                onClick={async (e) => {
+                                    e.stopPropagation();
+                                    const nextStepIdx = colIdx + 1;
+                                    const nextStep = SALES_STEPS[nextStepIdx].id;
+                                    const itemsToUpdate: OrderItem[] = [];
+                                    const leadItem = group.product || group.services[0];
+                                    if (leadItem) itemsToUpdate.push(leadItem);
 
-                                // Step 1 validation
-                                if (column.id === 'step1') {
-                                    const firstItem = itemsToUpdate[0];
-                                    const stepData = firstItem?.sales_step_data || {};
-                                    if (!stepData.step1_receiver_name || !stepData.step1_evidence_photos?.length) {
-                                        toast.error('Vui lòng vào chi tiết cập nhật "NV Sale nhận" và "Ảnh bẳng chứng" ở bước 1 trước khi chuyển');
-                                        onProductCardClick?.(group, 'step1');
-                                        return;
+                                    // Step 1 validation
+                                    if (column.id === 'step1') {
+                                        const firstItem = itemsToUpdate[0];
+                                        const stepData = firstItem?.sales_step_data || {};
+                                        if (!stepData.step1_receiver_name || !stepData.step1_evidence_photos?.length) {
+                                            toast.error('Vui lòng vào chi tiết cập nhật "NV Sale nhận" và "Ảnh bằng chứng" ở bước 1 trước khi chuyển');
+                                            // Mở dialog kèm move callback
+                                            const moveAction = async () => {
+                                                for (const item of itemsToUpdate) {
+                                                    await updateOrderItemStatus(item.id, nextStep);
+                                                }
+                                                toast.success(`Đã chuyển nhóm sang: ${SALES_STEPS[nextStepIdx].label}`);
+                                                if (nextStep === 'step5') onTabChange?.('workflow');
+                                                if (order?.id) fetchKanbanLogs(order.id);
+                                            };
+                                            if (onOpenProductDialogWithMove) {
+                                                onOpenProductDialogWithMove(group, 'step1', moveAction);
+                                            } else {
+                                                onProductCardClick?.(group, 'step1');
+                                            }
+                                            return;
+                                        }
                                     }
-                                }
 
-                                // Step 2 validation: TAGS + FORM TÚI + SHOESTREE
-                                if (column.id === 'step2') {
-                                    const firstItem = itemsToUpdate[0];
-                                    const stepData = firstItem?.sales_step_data || {};
-                                    if (!stepData.step2_tags_photos?.length || !stepData.step2_form_photos?.length) {
-                                        toast.error('Vui lòng tải ảnh bằng chứng TAGS và FORM TÚI/SHOESTREE trước khi chuyển bước 2');
-                                        onProductCardClick?.(group, 'step2');
-                                        return;
+                                    // Step 2 validation: TAGS + FORM TÚI + SHOESTREE
+                                    if (column.id === 'step2') {
+                                        const firstItem = itemsToUpdate[0];
+                                        const stepData = firstItem?.sales_step_data || {};
+                                        if (!stepData.step2_tags_photos?.length || !stepData.step2_form_photos?.length) {
+                                            toast.error('Vui lòng tải ảnh bằng chứng TAGS và FORM TÚI/SHOESTREE trước khi chuyển bước 2');
+                                            // Mở dialog kèm move callback
+                                            const moveAction = async () => {
+                                                for (const item of itemsToUpdate) {
+                                                    await updateOrderItemStatus(item.id, nextStep);
+                                                }
+                                                toast.success(`Đã chuyển nhóm sang: ${SALES_STEPS[nextStepIdx].label}`);
+                                                if (nextStep === 'step5') onTabChange?.('workflow');
+                                                if (order?.id) fetchKanbanLogs(order.id);
+                                            };
+                                            if (onOpenProductDialogWithMove) {
+                                                onOpenProductDialogWithMove(group, 'step2', moveAction);
+                                            } else {
+                                                onProductCardClick?.(group, 'step2');
+                                            }
+                                            return;
+                                        }
                                     }
-                                }
 
-                                try {
-                                    for (const item of itemsToUpdate) {
-                                        await updateOrderItemStatus(item.id, nextStep);
+                                    try {
+                                        for (const item of itemsToUpdate) {
+                                            await updateOrderItemStatus(item.id, nextStep);
+                                        }
+                                        toast.success(`Đã chuyển nhóm sang: ${SALES_STEPS[nextStepIdx].label}`);
+                                        if (nextStep === 'step5') {
+                                            onTabChange?.('workflow');
+                                        }
+                                        if (order?.id) fetchKanbanLogs(order.id);
+                                    } catch {
+                                        reloadOrder();
+                                        toast.error('Lỗi khi cập nhật trạng thái');
                                     }
-                                    toast.success(`Đã chuyển nhóm sang: ${SALES_STEPS[nextStepIdx].label}`);
-                                    if (nextStep === 'step5') {
-                                        onTabChange?.('workflow');
-                                    }
-                                    if (order?.id) fetchKanbanLogs(order.id);
-                                } catch {
-                                    reloadOrder();
-                                    toast.error('Lỗi khi cập nhật trạng thái');
-                                }
-                            }}
-                        >
-                            <ArrowRight className="h-4 w-4" />
-                        </Button>
+                                }}
+                            >
+                                <ArrowRight className="h-4 w-4" />
+                            </Button>
                         </div>
                     </div>
                 </div>
@@ -302,7 +332,8 @@ export function SalesTab({
     fetchKanbanLogs,
     onProductCardClick,
     workflowKanbanGroups,
-    onTabChange
+    onTabChange,
+    onOpenProductDialogWithMove,
 }: SalesTabProps) {
     const [searchTerm, setSearchTerm] = useState('');
     const [pendingMove, setPendingMove] = useState<{ group: any; targetStepId: string } | null>(null);
@@ -313,11 +344,11 @@ export function SalesTab({
     const displayedLogs = React.useMemo(() => {
         return (salesLogs || []).reduce((acc: any[], log: any) => {
             const existing = acc.find(
-                (l: any) => l.from_status === log.from_status && 
-                       l.to_status === log.to_status && 
-                       l.created_by === log.created_by &&
-                       l.entity_id === log.entity_id &&
-                       Math.abs(new Date(l.created_at).getTime() - new Date(log.created_at).getTime()) < 2000
+                (l: any) => l.from_status === log.from_status &&
+                    l.to_status === log.to_status &&
+                    l.created_by === log.created_by &&
+                    l.entity_id === log.entity_id &&
+                    Math.abs(new Date(l.created_at).getTime() - new Date(log.created_at).getTime()) < 2000
             );
             if (!existing) acc.push(log);
             return acc;
@@ -327,7 +358,7 @@ export function SalesTab({
     const handleBackwardMoveConfirm = async (reason: string, photos: string[]) => {
         if (!pendingMove) return;
         const { group, targetStepId } = pendingMove;
-        const itemsToUpdate = [];
+        const itemsToUpdate: OrderItem[] = [];
         const leadItem = group.product || group.services[0];
         if (leadItem) itemsToUpdate.push(leadItem);
 
@@ -356,441 +387,466 @@ export function SalesTab({
 
     return (
         <>
-        <TabsContent value="sales">
-            <div className="space-y-6">
-                {/* Kanban Board Header */}
-                <Card>
-                    <CardHeader className="pb-3">
-                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                            <div className="flex-1">
-                                <CardTitle className="text-xl font-bold flex items-center gap-2">
-                                    <RotateCw className="h-5 w-5 text-primary" />
-                                    Quy trình Lên đơn (Sales Kanban)
-                                </CardTitle>
-                                <p className="text-sm text-muted-foreground mt-1">
-                                    Kiểm tra thông tin → Tư vấn thêm → Chốt gói. Kéo thả thẻ hạng mục vào cột để chuyển bước.
-                                </p>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-3">
-                                <div className="relative w-64 mr-2">
-                                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                                    <Input
-                                        placeholder="Tìm theo số HĐ, tên NV, SĐT..."
-                                        className="pl-9 h-9 text-xs bg-muted/30 border-none ring-offset-background"
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                    />
+            <TabsContent value="sales">
+                <div className="space-y-6">
+                    {/* Kanban Board Header */}
+                    <Card>
+                        <CardHeader className="pb-3">
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                <div className="flex-1">
+                                    <CardTitle className="text-xl font-bold flex items-center gap-2">
+                                        <RotateCw className="h-5 w-5 text-primary" />
+                                        Quy trình Lên đơn (Sales Kanban)
+                                    </CardTitle>
+                                    <p className="text-sm text-muted-foreground mt-1">
+                                        Kiểm tra thông tin → Tư vấn thêm → Chốt gói. Kéo thả thẻ hạng mục vào cột để chuyển bước.
+                                    </p>
                                 </div>
-                                <div className="flex items-center gap-2 bg-muted/50 p-1.5 rounded-lg border border-dashed border-muted-foreground/20">
-                                    <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-white shadow-sm border border-gray-100">
-                                        <Package className="h-3.5 w-3.5 text-primary" />
-                                        <span className="text-[11px] font-bold text-gray-700">Tổng số sp: {workflowKanbanGroups?.length || 0}</span>
+                                <div className="flex flex-wrap items-center gap-3">
+                                    <div className="relative w-64 mr-2">
+                                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                                        <Input
+                                            placeholder="Tìm theo số HĐ, tên NV, SĐT..."
+                                            className="pl-9 h-9 text-xs bg-muted/30 border-none ring-offset-background"
+                                            value={searchTerm}
+                                            onChange={(e) => setSearchTerm(e.target.value)}
+                                        />
                                     </div>
-                                    <div className="h-4 w-px bg-muted-foreground/20 mx-1" />
-                                    <span className="text-[11px] font-bold px-2 py-1 rounded bg-blue-100 text-blue-700">1-3: Quy trình Sales</span>
-                                    <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                                    <span className="text-[11px] font-bold px-2 py-1 rounded bg-red-100 text-red-700">4: Kỹ thuật xét</span>
-                                    <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                                    <span className="text-[11px] font-bold px-2 py-1 rounded bg-green-100 text-green-700">5: Chốt đơn</span>
+                                    <div className="flex items-center gap-2 bg-muted/50 p-1.5 rounded-lg border border-dashed border-muted-foreground/20">
+                                        <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-white shadow-sm border border-gray-100">
+                                            <Package className="h-3.5 w-3.5 text-primary" />
+                                            <span className="text-[11px] font-bold text-gray-700">Tổng số sp: {workflowKanbanGroups?.length || 0}</span>
+                                        </div>
+                                        <div className="h-4 w-px bg-muted-foreground/20 mx-1" />
+                                        <span className="text-[11px] font-bold px-2 py-1 rounded bg-blue-100 text-blue-700">1-3: Quy trình Sales</span>
+                                        <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                                        <span className="text-[11px] font-bold px-2 py-1 rounded bg-red-100 text-red-700">4: Kỹ thuật xét</span>
+                                        <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                                        <span className="text-[11px] font-bold px-2 py-1 rounded bg-green-100 text-green-700">5: Chốt đơn</span>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        {/* Kanban Board Layout */}
-                        <div className="overflow-x-auto pb-4">
-                            <DragDropContext
-                                onDragEnd={async (result: DropResult) => {
-                                    if (!result.destination || result.destination.droppableId === result.source.droppableId) return;
-                                    const draggableId = result.draggableId;
-                                    const newStatus = result.destination.droppableId;
-                                    const stepLabel = SALES_STEPS.find((s: any) => s.id === newStatus)?.label || newStatus;
+                        </CardHeader>
+                        <CardContent>
+                            {/* Kanban Board Layout */}
+                            <div className="overflow-x-auto pb-4">
+                                <DragDropContext
+                                    onDragEnd={async (result: DropResult) => {
+                                        if (!result.destination || result.destination.droppableId === result.source.droppableId) return;
+                                        const draggableId = result.draggableId;
+                                        const newStatus = result.destination.droppableId;
+                                        const stepLabel = SALES_STEPS.find((s: any) => s.id === newStatus)?.label || newStatus;
 
-                                    const group = workflowKanbanGroups?.find(g =>
-                                        (g.product?.id ?? g.services.map((s: OrderItem) => s.id).join('-')) === draggableId
-                                    );
-
-                                    if (group) {
-                                        const sourceIdx = SALES_STEPS.findIndex(s => s.id === result.source.droppableId);
-                                        const destIdx = SALES_STEPS.findIndex(s => s.id === newStatus);
-
-                                        if (destIdx < sourceIdx) {
-                                            // Backward move
-                                            setPendingMove({ group, targetStepId: newStatus });
-                                            setBackwardDialogOpen(true);
-                                            return;
-                                        }
-
-                                        const itemsToUpdate = [];
-                                        const leadItem = group.product || group.services[0];
-                                        if (leadItem) itemsToUpdate.push(leadItem);
-
-                                        // Step 1 validation
-                                        if (result.source.droppableId === 'step1' && destIdx > sourceIdx) {
-                                            const firstItem = itemsToUpdate[0];
-                                            const stepData = firstItem?.sales_step_data || {};
-                                            if (!stepData.step1_receiver_name || !stepData.step1_evidence_photos?.length) {
-                                                toast.error('Vui lòng hoàn thành thông tin nhân viên Sale và ảnh/video bằng chứng bước 1 trước khi chuyển');
-                                                onProductCardClick?.(group, 'step1');
-                                                return;
-                                            }
-                                        }
-
-                                        // Step 2 validation: TAGS + FORM TÚI + SHOESTREE
-                                        if (result.source.droppableId === 'step2' && destIdx > sourceIdx) {
-                                            const firstItem = itemsToUpdate[0];
-                                            const stepData = firstItem?.sales_step_data || {};
-                                            if (!stepData.step2_tags_photos?.length || !stepData.step2_form_photos?.length) {
-                                                toast.error('Vui lòng tải ảnh bằng chứng TAGS và FORM TÚI/SHOESTREE trước khi chuyển bước 2');
-                                                onProductCardClick?.(group, 'step2');
-                                                return;
-                                            }
-                                        }
-
-                                        try {
-                                            for (const item of itemsToUpdate) {
-                                                await updateOrderItemStatus(item.id, newStatus);
-                                            }
-                                            toast.success(`Đã chuyển nhóm sang: ${stepLabel}`);
-                                            if (newStatus === 'step5') {
-                                                onTabChange?.('workflow');
-                                            }
-                                            if (order?.id) fetchKanbanLogs(order.id);
-                                        } catch (error) {
-                                            reloadOrder();
-                                            toast.error('Lỗi khi cập nhật trạng thái');
-                                        }
-                                    }
-                                }}
-                            >
-                                <div className="flex gap-4 min-w-[1200px]">
-                                    {SALES_STEPS.map((column, colIdx) => {
-                                        const columnGroups = workflowKanbanGroups?.filter(group => {
-                                            const leadItem = group.product || group.services[0];
-                                            if (!leadItem) return false;
-                                            const itemAny = leadItem as any;
-                                            if (itemAny.current_phase !== 'sales') return false;
-                                            if (searchTerm) {
-                                                const term = searchTerm.toLowerCase();
-                                                const matchesSearch =
-                                                    leadItem.item_name?.toLowerCase().includes(term) ||
-                                                    leadItem.item_code?.toLowerCase().includes(term) ||
-                                                    group.services?.some(s => s.item_name?.toLowerCase().includes(term) || s.item_code?.toLowerCase().includes(term)) ||
-                                                    order.order_code?.toLowerCase().includes(term) ||
-                                                    order.customer?.name?.toLowerCase().includes(term) ||
-                                                    order.customer?.phone?.toLowerCase().includes(term) ||
-                                                    order.sales_user?.name?.toLowerCase().includes(term);
-                                                if (!matchesSearch) return false;
-                                            }
-                                            const phaseStage = itemAny.phase_stage || 'step1';
-                                            return phaseStage === column.id;
-                                        }) || [];
-
-                                        return (
-                                            <div key={column.id} className="flex-1 min-w-[220px] flex flex-col">
-                                                <div className="flex justify-between items-center mb-4 px-2">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className={cn("w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white",
-                                                            column.id === 'step4' ? "bg-red-500" :
-                                                                column.id === 'step5' ? "bg-green-500" :
-                                                                    column.id === 'cancelled' ? "bg-gray-500" :
-                                                                        "bg-blue-500"
-                                                        )}>
-                                                            {column.id === 'cancelled' ? 'X' : colIdx + 1}
-                                                        </div>
-                                                        <h3 className="font-bold text-xs uppercase tracking-widest text-gray-700">{column.title}</h3>
-                                                    </div>
-                                                    <span className="bg-gray-200 text-gray-700 text-[10px] px-2 py-0.5 rounded-full font-bold">
-                                                        {columnGroups.length}
-                                                    </span>
-                                                </div>
-
-                                                <Droppable droppableId={column.id}>
-                                                    {(provided, snapshot) => (
-                                                        <div
-                                                            ref={provided.innerRef}
-                                                            {...provided.droppableProps}
-                                                            className={cn(
-                                                                "min-h-[300px] p-2 rounded-xl flex-1 border-2 border-dashed transition-colors",
-                                                                snapshot.isDraggingOver ?
-                                                                    (column.id === 'step4' ? "bg-red-50 border-red-300" :
-                                                                        column.id === 'step5' ? "bg-green-50 border-green-300" :
-                                                                            column.id === 'cancelled' ? "bg-gray-100 border-gray-300" :
-                                                                                "bg-blue-50 border-blue-300") :
-                                                                    "bg-gray-100 border-transparent"
-                                                            )}
-                                                        >
-                                                            {columnGroups.map((group, groupIdx) => (
-                                                                <SalesCard
-                                                                    key={group.product?.id ?? group.services.map((s: OrderItem) => s.id).join('-')}
-                                                                    group={group}
-                                                                    index={groupIdx}
-                                                                    column={column}
-                                                                    order={order}
-                                                                    onProductCardClick={onProductCardClick}
-                                                                    colIdx={colIdx}
-                                                                    updateOrderItemStatus={updateOrderItemStatus}
-                                                                    fetchKanbanLogs={fetchKanbanLogs}
-                                                                    reloadOrder={reloadOrder}
-                                                                    onTabChange={onTabChange}
-                                                                    salesLogs={salesLogs}
-                                                                    onBackwardMove={(group, targetStepId) => {
-                                                                        setPendingMove({ group, targetStepId });
-                                                                        setBackwardDialogOpen(true);
-                                                                    }}
-                                                                    onUpsell={(group) => setUpsellGroup(group)}
-                                                                />
-                                                            ))}
-                                                            {provided.placeholder}
-                                                            {columnGroups.length === 0 && !snapshot.isDraggingOver && (
-                                                                <div className="flex items-center justify-center h-20 text-muted-foreground text-[10px] italic">
-                                                                    Trống
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    )}
-                                                </Droppable>
-                                            </div>
+                                        const group = workflowKanbanGroups?.find(g =>
+                                            (g.product?.id ?? g.services.map((s: OrderItem) => s.id).join('-')) === draggableId
                                         );
-                                    })}
-                                </div>
-                            </DragDropContext>
-                        </div>
-                    </CardContent>
-                </Card>
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div className="lg:col-span-2 space-y-6">
-                        {/* AI Message Templates */}
-                        <Card className="border-blue-100 bg-blue-50/30">
-                            <CardHeader className="pb-3 border-b border-blue-100">
-                                <CardTitle className="text-xs font-bold text-blue-800 flex items-center gap-2 tracking-widest uppercase">
-                                    <Bot className="h-4 w-4" /> AI Agent: Mẫu tin nhắn chăm sóc
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent className="pt-6">
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                    {[
-                                        { id: 'ship', title: '1. Xin địa chỉ Ship', sub: '"Chào anh, đồ đã xong..."', content: `Chào ${order.customer?.name} ạ, giày ${order.items?.[0]?.item_name || 'của mình'} đã xong. Anh/chị cho shop xin địa chỉ ship nhé!` },
-                                        { id: 'care', title: '2. HD Bảo quản', sub: '"Shop gửi HDSD..."', content: `Shop gửi ${order.customer?.name} HDSD: Tránh nước, lau bằng khăn mềm định kỳ ạ.` },
-                                        { id: 'feedback', title: '3. Xin Feedback', sub: '"Bạn đã nhận được đồ chưa..."', content: `Dạ chào ${order.customer?.name}, mình nhận được đồ chưa ạ? Cho shop xin feedback nhé!` }
-                                    ].map((tmp: any) => (
-                                        <div
-                                            key={tmp.id}
-                                            className="bg-white p-4 rounded-xl border border-blue-200 hover:shadow-md transition-all group relative cursor-pointer"
-                                            onClick={() => {
-                                                navigator.clipboard.writeText(tmp.content);
-                                                toast.success(`Đã copy mẫu: ${tmp.title}`);
-                                            }}
-                                        >
-                                            <p className="text-[10px] font-black text-blue-600 uppercase mb-1">{tmp.title}</p>
-                                            <p className="text-xs text-gray-500 line-clamp-2 italic">{tmp.sub}</p>
-                                            <Copy className="absolute bottom-4 right-4 h-3 w-3 text-gray-300 group-hover:text-blue-500 transition-colors" />
-                                        </div>
-                                    ))}
-                                </div>
-                            </CardContent>
-                        </Card>
+                                        if (group) {
+                                            const sourceIdx = SALES_STEPS.findIndex(s => s.id === result.source.droppableId);
+                                            const destIdx = SALES_STEPS.findIndex(s => s.id === newStatus);
 
-                        {/* Lịch sử chuyển bước */}
-                        <Card>
-                            <CardHeader className="pb-3">
-                                <CardTitle className="text-xs font-bold flex items-center gap-2 tracking-widest uppercase text-gray-500">
-                                    <History className="h-4 w-4 text-primary" /> Lịch sử chuyển bước (Lên đơn)
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                {displayedLogs.length === 0 ? (
-                                    <p className="text-[11px] text-muted-foreground italic py-2">Chưa có lịch sử chuyển bước.</p>
-                                ) : (
-                                    <ul className="space-y-2 max-h-48 overflow-y-auto">
-                                        {displayedLogs.map((log: any) => (
-                                            <li key={log.id} className="text-[11px] flex flex-col gap-1 py-1.5 border-b border-dashed last:border-0">
-                                                <div className="flex-1">
-                                                    <div className="flex items-center justify-between mb-1">
+                                            if (destIdx < sourceIdx) {
+                                                // Backward move
+                                                setPendingMove({ group, targetStepId: newStatus });
+                                                setBackwardDialogOpen(true);
+                                                return;
+                                            }
+
+                                            const itemsToUpdate: OrderItem[] = [];
+                                            const leadItem = group.product || group.services[0];
+                                            if (leadItem) itemsToUpdate.push(leadItem);
+
+                                            // Step 1 validation
+                                            if (result.source.droppableId === 'step1' && destIdx > sourceIdx) {
+                                                const firstItem = itemsToUpdate[0];
+                                                const stepData = firstItem?.sales_step_data || {};
+                                                if (!stepData.step1_receiver_name || !stepData.step1_evidence_photos?.length) {
+                                                    toast.error('Vui lòng hoàn thành thông tin nhân viên Sale và ảnh/video bằng chứng bước 1 trước khi chuyển');
+                                                    const moveAction = async () => {
+                                                        for (const item of itemsToUpdate) {
+                                                            await updateOrderItemStatus(item.id, newStatus);
+                                                        }
+                                                        toast.success(`Đã chuyển nhóm sang: ${stepLabel}`);
+                                                        if (newStatus === 'step5') onTabChange?.('workflow');
+                                                        if (order?.id) fetchKanbanLogs(order.id);
+                                                    };
+                                                    if (onOpenProductDialogWithMove) {
+                                                        onOpenProductDialogWithMove(group, 'step1', moveAction);
+                                                    } else {
+                                                        onProductCardClick?.(group, 'step1');
+                                                    }
+                                                    return;
+                                                }
+                                            }
+
+                                            // Step 2 validation: TAGS + FORM TÚI + SHOESTREE
+                                            if (result.source.droppableId === 'step2' && destIdx > sourceIdx) {
+                                                const firstItem = itemsToUpdate[0];
+                                                const stepData = firstItem?.sales_step_data || {};
+                                                if (!stepData.step2_tags_photos?.length || !stepData.step2_form_photos?.length) {
+                                                    toast.error('Vui lòng tải ảnh bằng chứng TAGS và FORM TÚI/SHOESTREE trước khi chuyển bước 2');
+                                                    const moveAction = async () => {
+                                                        for (const item of itemsToUpdate) {
+                                                            await updateOrderItemStatus(item.id, newStatus);
+                                                        }
+                                                        toast.success(`Đã chuyển nhóm sang: ${stepLabel}`);
+                                                        if (newStatus === 'step5') onTabChange?.('workflow');
+                                                        if (order?.id) fetchKanbanLogs(order.id);
+                                                    };
+                                                    if (onOpenProductDialogWithMove) {
+                                                        onOpenProductDialogWithMove(group, 'step2', moveAction);
+                                                    } else {
+                                                        onProductCardClick?.(group, 'step2');
+                                                    }
+                                                    return;
+                                                }
+                                            }
+
+                                            try {
+                                                for (const item of itemsToUpdate) {
+                                                    await updateOrderItemStatus(item.id, newStatus);
+                                                }
+                                                toast.success(`Đã chuyển nhóm sang: ${stepLabel}`);
+                                                if (newStatus === 'step5') {
+                                                    onTabChange?.('workflow');
+                                                }
+                                                if (order?.id) fetchKanbanLogs(order.id);
+                                            } catch (error) {
+                                                reloadOrder();
+                                                toast.error('Lỗi khi cập nhật trạng thái');
+                                            }
+                                        }
+                                    }}
+                                >
+                                    <div className="flex gap-4 min-w-[1200px]">
+                                        {SALES_STEPS.map((column, colIdx) => {
+                                            const columnGroups = workflowKanbanGroups?.filter(group => {
+                                                const leadItem = group.product || group.services[0];
+                                                if (!leadItem) return false;
+                                                const itemAny = leadItem as any;
+                                                if (itemAny.current_phase !== 'sales') return false;
+                                                if (searchTerm) {
+                                                    const term = searchTerm.toLowerCase();
+                                                    const matchesSearch =
+                                                        leadItem.item_name?.toLowerCase().includes(term) ||
+                                                        leadItem.item_code?.toLowerCase().includes(term) ||
+                                                        group.services?.some(s => s.item_name?.toLowerCase().includes(term) || s.item_code?.toLowerCase().includes(term)) ||
+                                                        order.order_code?.toLowerCase().includes(term) ||
+                                                        order.customer?.name?.toLowerCase().includes(term) ||
+                                                        order.customer?.phone?.toLowerCase().includes(term) ||
+                                                        order.sales_user?.name?.toLowerCase().includes(term);
+                                                    if (!matchesSearch) return false;
+                                                }
+                                                const phaseStage = itemAny.phase_stage || 'step1';
+                                                return phaseStage === column.id;
+                                            }) || [];
+
+                                            return (
+                                                <div key={column.id} className="flex-1 min-w-[220px] flex flex-col">
+                                                    <div className="flex justify-between items-center mb-4 px-2">
                                                         <div className="flex items-center gap-2">
-                                                            <span className="font-bold text-gray-900">{log.created_by_user?.name || 'Hệ thống'}</span>
-                                                            <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
-                                                                {formatDateTime(log.created_at)}
-                                                            </span>
+                                                            <div className={cn("w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white",
+                                                                column.id === 'step4' ? "bg-red-500" :
+                                                                    column.id === 'step5' ? "bg-green-500" :
+                                                                        column.id === 'cancelled' ? "bg-gray-500" :
+                                                                            "bg-blue-500"
+                                                            )}>
+                                                                {column.id === 'cancelled' ? 'X' : colIdx + 1}
+                                                            </div>
+                                                            <h3 className="font-bold text-xs uppercase tracking-widest text-gray-700">{column.title}</h3>
                                                         </div>
-                                                        <div className="flex gap-1 items-center">
-                                                            {(log.reason || (log.photos && log.photos.length > 0)) && (
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="sm"
-                                                                    className="h-7 text-[10px] text-primary hover:text-primary hover:bg-primary/10 gap-1"
-                                                                    onClick={() => {
-                                                                        const groupName = workflowKanbanGroups?.find(g =>
-                                                                            g.product?.id === log.entity_id || g.services.some(s => s.id === log.entity_id)
-                                                                        )?.product?.item_name || 'Sản phẩm';
-    
-                                                                        setViewLogData({
-                                                                            reason: log.reason,
-                                                                            photos: log.photos || [],
-                                                                            itemName: groupName
-                                                                        });
-                                                                    }}
-                                                                >
-                                                                    <ImageIcon className="h-3 w-3" />
-                                                                    Xem lý do
-                                                                </Button>
-                                                            )}
-                                                            {['step1', 'step2', 'step3', 'step4', 'step5'].includes(log.to_status) && (
-                                                                <Button
-                                                                    variant="ghost"
-                                                                    size="sm"
-                                                                    className="h-7 text-[10px] text-blue-600 hover:text-blue-700 hover:bg-blue-50 gap-1"
-                                                                    onClick={() => {
-                                                                        const targetGroup = workflowKanbanGroups?.find(g =>
-                                                                            g.product?.id === log.entity_id || g.services.some(s => s.id === log.entity_id)
-                                                                        );
-                                                                        if (targetGroup) {
-                                                                            onProductCardClick?.(targetGroup, log.to_status);
-                                                                        } else {
-                                                                            toast.error('Không tìm thấy thông tin sản phẩm tương ứng.');
-                                                                        }
-                                                                    }}
-                                                                >
-                                                                    <FileText className="h-3 w-3" />
-                                                                    Xem nội dung
-                                                                </Button>
-                                                            )}
+                                                        <span className="bg-gray-200 text-gray-700 text-[10px] px-2 py-0.5 rounded-full font-bold">
+                                                            {columnGroups.length}
+                                                        </span>
+                                                    </div>
+
+                                                    <Droppable droppableId={column.id}>
+                                                        {(provided, snapshot) => (
+                                                            <div
+                                                                ref={provided.innerRef}
+                                                                {...provided.droppableProps}
+                                                                className={cn(
+                                                                    "min-h-[300px] p-2 rounded-xl flex-1 border-2 border-dashed transition-colors",
+                                                                    snapshot.isDraggingOver ?
+                                                                        (column.id === 'step4' ? "bg-red-50 border-red-300" :
+                                                                            column.id === 'step5' ? "bg-green-50 border-green-300" :
+                                                                                column.id === 'cancelled' ? "bg-gray-100 border-gray-300" :
+                                                                                    "bg-blue-50 border-blue-300") :
+                                                                        "bg-gray-100 border-transparent"
+                                                                )}
+                                                            >
+                                                                {columnGroups.map((group, groupIdx) => (
+                                                                    <SalesCard
+                                                                        key={group.product?.id ?? group.services.map((s: OrderItem) => s.id).join('-')}
+                                                                        group={group}
+                                                                        index={groupIdx}
+                                                                        column={column}
+                                                                        order={order}
+                                                                        onProductCardClick={onProductCardClick}
+                                                                        colIdx={colIdx}
+                                                                        updateOrderItemStatus={updateOrderItemStatus}
+                                                                        fetchKanbanLogs={fetchKanbanLogs}
+                                                                        reloadOrder={reloadOrder}
+                                                                        onTabChange={onTabChange}
+                                                                        salesLogs={salesLogs}
+                                                                        onBackwardMove={(group, targetStepId) => {
+                                                                            setPendingMove({ group, targetStepId });
+                                                                            setBackwardDialogOpen(true);
+                                                                        }}
+                                                                        onUpsell={(group) => setUpsellGroup(group)}
+                                                                        onOpenProductDialogWithMove={onOpenProductDialogWithMove}
+                                                                    />
+                                                                ))}
+                                                                {provided.placeholder}
+                                                                {columnGroups.length === 0 && !snapshot.isDraggingOver && (
+                                                                    <div className="flex items-center justify-center h-20 text-muted-foreground text-[10px] italic">
+                                                                        Trống
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </Droppable>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </DragDropContext>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div className="lg:col-span-2 space-y-6">
+                            {/* AI Message Templates */}
+                            <Card className="border-blue-100 bg-blue-50/30">
+                                <CardHeader className="pb-3 border-b border-blue-100">
+                                    <CardTitle className="text-xs font-bold text-blue-800 flex items-center gap-2 tracking-widest uppercase">
+                                        <Bot className="h-4 w-4" /> AI Agent: Mẫu tin nhắn chăm sóc
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="pt-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        {[
+                                            { id: 'ship', title: '1. Xin địa chỉ Ship', sub: '"Chào anh, đồ đã xong..."', content: `Chào ${order.customer?.name} ạ, giày ${order.items?.[0]?.item_name || 'của mình'} đã xong. Anh/chị cho shop xin địa chỉ ship nhé!` },
+                                            { id: 'care', title: '2. HD Bảo quản', sub: '"Shop gửi HDSD..."', content: `Shop gửi ${order.customer?.name} HDSD: Tránh nước, lau bằng khăn mềm định kỳ ạ.` },
+                                            { id: 'feedback', title: '3. Xin Feedback', sub: '"Bạn đã nhận được đồ chưa..."', content: `Dạ chào ${order.customer?.name}, mình nhận được đồ chưa ạ? Cho shop xin feedback nhé!` }
+                                        ].map((tmp: any) => (
+                                            <div
+                                                key={tmp.id}
+                                                className="bg-white p-4 rounded-xl border border-blue-200 hover:shadow-md transition-all group relative cursor-pointer"
+                                                onClick={() => {
+                                                    navigator.clipboard.writeText(tmp.content);
+                                                    toast.success(`Đã copy mẫu: ${tmp.title}`);
+                                                }}
+                                            >
+                                                <p className="text-[10px] font-black text-blue-600 uppercase mb-1">{tmp.title}</p>
+                                                <p className="text-xs text-gray-500 line-clamp-2 italic">{tmp.sub}</p>
+                                                <Copy className="absolute bottom-4 right-4 h-3 w-3 text-gray-300 group-hover:text-blue-500 transition-colors" />
+                                            </div>
+                                        ))}
+                                    </div>
+                                </CardContent>
+                            </Card>
+
+                            {/* Lịch sử chuyển bước */}
+                            <Card>
+                                <CardHeader className="pb-3">
+                                    <CardTitle className="text-xs font-bold flex items-center gap-2 tracking-widest uppercase text-gray-500">
+                                        <History className="h-4 w-4 text-primary" /> Lịch sử chuyển bước (Lên đơn)
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    {displayedLogs.length === 0 ? (
+                                        <p className="text-[11px] text-muted-foreground italic py-2">Chưa có lịch sử chuyển bước.</p>
+                                    ) : (
+                                        <ul className="space-y-2 max-h-48 overflow-y-auto">
+                                            {displayedLogs.map((log: any) => (
+                                                <li key={log.id} className="text-[11px] flex flex-col gap-1 py-1.5 border-b border-dashed last:border-0">
+                                                    <div className="flex-1">
+                                                        <div className="flex items-center justify-between mb-1">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="font-bold text-gray-900">{log.created_by_user?.name || 'Hệ thống'}</span>
+                                                                <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">
+                                                                    {formatDateTime(log.created_at)}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex gap-1 items-center">
+                                                                {(log.reason || (log.photos && log.photos.length > 0)) && (
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="sm"
+                                                                        className="h-7 text-[10px] text-primary hover:text-primary hover:bg-primary/10 gap-1"
+                                                                        onClick={() => {
+                                                                            const groupName = workflowKanbanGroups?.find(g =>
+                                                                                g.product?.id === log.entity_id || g.services.some(s => s.id === log.entity_id)
+                                                                            )?.product?.item_name || 'Sản phẩm';
+
+                                                                            setViewLogData({
+                                                                                reason: log.reason,
+                                                                                photos: log.photos || [],
+                                                                                itemName: groupName
+                                                                            });
+                                                                        }}
+                                                                    >
+                                                                        <ImageIcon className="h-3 w-3" />
+                                                                        Xem lý do
+                                                                    </Button>
+                                                                )}
+                                                                {['step1', 'step2', 'step3', 'step4', 'step5'].includes(log.to_status) && (
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="sm"
+                                                                        className="h-7 text-[10px] text-blue-600 hover:text-blue-700 hover:bg-blue-50 gap-1"
+                                                                        onClick={() => {
+                                                                            const targetGroup = workflowKanbanGroups?.find(g =>
+                                                                                g.product?.id === log.entity_id || g.services.some(s => s.id === log.entity_id)
+                                                                            );
+                                                                            if (targetGroup) {
+                                                                                onProductCardClick?.(targetGroup, log.to_status);
+                                                                            } else {
+                                                                                toast.error('Không tìm thấy thông tin sản phẩm tương ứng.');
+                                                                            }
+                                                                        }}
+                                                                    >
+                                                                        <FileText className="h-3 w-3" />
+                                                                        Xem nội dung
+                                                                    </Button>
+                                                                )}
+                                                            </div>
                                                         </div>
                                                     </div>
-                                                </div>
-                                                <span className="text-muted-foreground">
-                                                    {log.from_status ? `${getSalesStatusLabel(log.from_status)} → ` : ''}{getSalesStatusLabel(log.to_status)}
-                                                </span>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                )}
-                            </CardContent>
-                        </Card>
-                    </div>
-
-                    {/* Right: Quick Tools */}
-                    <div className="lg:col-span-1 space-y-4">
-                        <Card className="border-purple-100">
-                            <CardHeader className="pb-3 bg-purple-50/50">
-                                <CardTitle className="text-[11px] font-bold text-purple-800 tracking-widest uppercase">Công cụ Sales</CardTitle>
-                            </CardHeader>
-                            <CardContent className="pt-4 space-y-3">
-                                <Button variant="outline" className="w-full justify-start h-12 text-xs font-bold border-gray-200 hover:bg-orange-50 hover:text-orange-700">
-                                    <Clock className="h-4 w-4 mr-2 text-orange-500" />
-                                    Nhắc việc (Flow-up)
-                                </Button>
-                                <div className="mt-4 pt-4 border-t border-dashed">
-                                    <p className="text-[10px] font-bold text-gray-400 uppercase mb-3">Thông tin sale phụ trách</p>
-                                    <div className="flex items-center gap-3">
-                                        <Avatar className="h-9 w-9">
-                                            <AvatarFallback className="bg-orange-100 text-orange-600 font-bold text-xs">
-                                                {order.sales_user?.name?.charAt(0) || 'S'}
-                                            </AvatarFallback>
-                                        </Avatar>
-                                        <div>
-                                            <p className="text-xs font-bold">{order.sales_user?.name || 'Chưa gán'}</p>
-                                            <p className="text-[9px] text-muted-foreground uppercase">Saler Phụ Trách</p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        <Card>
-                            <CardContent className="pt-6">
-                                <div className="space-y-4">
-                                    <div className="pb-4 border-b border-dashed">
-                                        <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">Tiến độ tổng thể hạng mục</p>
-                                        <div className="flex items-center justify-between mb-1">
-                                            <span className="text-[11px] font-bold">{order.items?.filter((i: OrderItem) => (i.status || 'step1') === 'step5').length || 0}/{order.items?.length || 0}</span>
-                                            <span className="text-[11px] font-bold text-primary">
-                                                {Math.round(((order.items?.filter((i: OrderItem) => (i.status || 'step1') === 'step5').length || 0) / (order.items?.length || 1)) * 100)}%
-                                            </span>
-                                        </div>
-                                        <div className="w-full bg-gray-100 rounded-full h-1.5">
-                                            <div
-                                                className="bg-primary h-1.5 rounded-full transition-all duration-500"
-                                                style={{ width: `${((order.items?.filter((i: OrderItem) => (i.status || 'step1') === 'step5').length || 0) / (order.items?.length || 1)) * 100}%` }}
-                                            />
-                                        </div>
-                                    </div>
-
-                                    <div className="p-4 rounded-xl bg-green-50 border border-green-100">
-                                        <p className="text-[10px] font-bold text-green-700 uppercase mb-1">Doanh thu dự kiến</p>
-                                        <p className="text-lg font-black text-green-700">{formatCurrency(order.total_amount)}</p>
-                                    </div>
-
-                                    {(order.status === 'before_sale' || (order.status as string).startsWith('step')) && (
-                                        <Button
-                                            className="w-full h-12 font-bold shadow-lg shadow-green-200 bg-green-600 hover:bg-green-700"
-                                            disabled={!order.items?.every(i => (i as any).current_phase !== 'sales')}
-                                            onClick={async () => {
-                                                try {
-                                                    await updateOrderStatus(order.id, 'in_progress');
-                                                    toast.success('Đã xác nhận đơn hàng sang Kỹ thuật!');
-                                                    await reloadOrder();
-                                                } catch {
-                                                    toast.error('Lỗi khi chốt đơn hàng');
-                                                }
-                                            }}
-                                        >
-                                            <CheckCircle className="h-5 w-5 mr-2" />
-                                            XÁC NHẬN CHỐT ĐƠN
-                                        </Button>
+                                                    <span className="text-muted-foreground">
+                                                        {log.from_status ? `${getSalesStatusLabel(log.from_status)} → ` : ''}{getSalesStatusLabel(log.to_status)}
+                                                    </span>
+                                                </li>
+                                            ))}
+                                        </ul>
                                     )}
+                                </CardContent>
+                            </Card>
+                        </div>
 
-                                    <div className="p-4 rounded-xl bg-blue-50 border border-blue-100">
-                                        <p className="text-[10px] font-bold text-blue-700 uppercase mb-1">Hoa hồng ước tính</p>
-                                        <p className="text-lg font-black text-blue-700">{formatCurrency(order.total_amount * 0.05)}</p>
-                                        <p className="text-[9px] text-blue-600 mt-1 italic leading-tight">* Tính dựa trên 5% doanh thu tạm tính</p>
+                        {/* Right: Quick Tools */}
+                        <div className="lg:col-span-1 space-y-4">
+                            <Card className="border-purple-100">
+                                <CardHeader className="pb-3 bg-purple-50/50">
+                                    <CardTitle className="text-[11px] font-bold text-purple-800 tracking-widest uppercase">Công cụ Sales</CardTitle>
+                                </CardHeader>
+                                <CardContent className="pt-4 space-y-3">
+                                    <Button variant="outline" className="w-full justify-start h-12 text-xs font-bold border-gray-200 hover:bg-orange-50 hover:text-orange-700">
+                                        <Clock className="h-4 w-4 mr-2 text-orange-500" />
+                                        Nhắc việc (Flow-up)
+                                    </Button>
+                                    <div className="mt-4 pt-4 border-t border-dashed">
+                                        <p className="text-[10px] font-bold text-gray-400 uppercase mb-3">Thông tin sale phụ trách</p>
+                                        <div className="flex items-center gap-3">
+                                            <Avatar className="h-9 w-9">
+                                                <AvatarFallback className="bg-orange-100 text-orange-600 font-bold text-xs">
+                                                    {order.sales_user?.name?.charAt(0) || 'S'}
+                                                </AvatarFallback>
+                                            </Avatar>
+                                            <div>
+                                                <p className="text-xs font-bold">{order.sales_user?.name || 'Chưa gán'}</p>
+                                                <p className="text-[9px] text-muted-foreground uppercase">Saler Phụ Trách</p>
+                                            </div>
+                                        </div>
                                     </div>
-                                </div>
-                            </CardContent>
-                        </Card>
+                                </CardContent>
+                            </Card>
+
+                            <Card>
+                                <CardContent className="pt-6">
+                                    <div className="space-y-4">
+                                        <div className="pb-4 border-b border-dashed">
+                                            <p className="text-[10px] font-bold text-gray-400 uppercase mb-2">Tiến độ tổng thể hạng mục</p>
+                                            <div className="flex items-center justify-between mb-1">
+                                                <span className="text-[11px] font-bold">{order.items?.filter((i: OrderItem) => (i.status || 'step1') === 'step5').length || 0}/{order.items?.length || 0}</span>
+                                                <span className="text-[11px] font-bold text-primary">
+                                                    {Math.round(((order.items?.filter((i: OrderItem) => (i.status || 'step1') === 'step5').length || 0) / (order.items?.length || 1)) * 100)}%
+                                                </span>
+                                            </div>
+                                            <div className="w-full bg-gray-100 rounded-full h-1.5">
+                                                <div
+                                                    className="bg-primary h-1.5 rounded-full transition-all duration-500"
+                                                    style={{ width: `${((order.items?.filter((i: OrderItem) => (i.status || 'step1') === 'step5').length || 0) / (order.items?.length || 1)) * 100}%` }}
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="p-4 rounded-xl bg-green-50 border border-green-100">
+                                            <p className="text-[10px] font-bold text-green-700 uppercase mb-1">Doanh thu dự kiến</p>
+                                            <p className="text-lg font-black text-green-700">{formatCurrency(order.total_amount)}</p>
+                                        </div>
+
+                                        {(order.status === 'before_sale' || (order.status as string).startsWith('step')) && (
+                                            <Button
+                                                className="w-full h-12 font-bold shadow-lg shadow-green-200 bg-green-600 hover:bg-green-700"
+                                                disabled={!order.items?.every(i => (i as any).current_phase !== 'sales')}
+                                                onClick={async () => {
+                                                    try {
+                                                        await updateOrderStatus(order.id, 'in_progress');
+                                                        toast.success('Đã xác nhận đơn hàng sang Kỹ thuật!');
+                                                        await reloadOrder();
+                                                    } catch {
+                                                        toast.error('Lỗi khi chốt đơn hàng');
+                                                    }
+                                                }}
+                                            >
+                                                <CheckCircle className="h-5 w-5 mr-2" />
+                                                XÁC NHẬN CHỐT ĐƠN
+                                            </Button>
+                                        )}
+
+                                        <div className="p-4 rounded-xl bg-blue-50 border border-blue-100">
+                                            <p className="text-[10px] font-bold text-blue-700 uppercase mb-1">Hoa hồng ước tính</p>
+                                            <p className="text-lg font-black text-blue-700">{formatCurrency(order.total_amount * 0.05)}</p>
+                                            <p className="text-[9px] text-blue-600 mt-1 italic leading-tight">* Tính dựa trên 5% doanh thu tạm tính</p>
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        </div>
                     </div>
                 </div>
-            </div>
-        </TabsContent>
+            </TabsContent>
 
-        <BackwardMoveDialog
-            open={backwardDialogOpen}
-            onClose={() => {
-                setBackwardDialogOpen(false);
-                setPendingMove(null);
-            }}
-            onConfirm={handleBackwardMoveConfirm}
-            itemName={pendingMove?.group?.product?.item_name || pendingMove?.group?.services?.[0]?.item_name}
-            mode="create"
-        />
+            <BackwardMoveDialog
+                open={backwardDialogOpen}
+                onClose={() => {
+                    setBackwardDialogOpen(false);
+                    setPendingMove(null);
+                }}
+                onConfirm={handleBackwardMoveConfirm}
+                itemName={pendingMove?.group?.product?.item_name || pendingMove?.group?.services?.[0]?.item_name}
+                mode="create"
+            />
 
-        <BackwardMoveDialog
-            open={!!viewLogData}
-            onClose={() => setViewLogData(null)}
-            itemName={viewLogData?.itemName}
-            mode="view"
-            initialData={viewLogData ? {
-                reason: viewLogData.reason || '',
-                photos: viewLogData.photos || []
-            } : undefined}
-        />
+            <BackwardMoveDialog
+                open={!!viewLogData}
+                onClose={() => setViewLogData(null)}
+                itemName={viewLogData?.itemName}
+                mode="view"
+                initialData={viewLogData ? {
+                    reason: viewLogData.reason || '',
+                    photos: viewLogData.photos || []
+                } : undefined}
+            />
 
-        <UpsellDialog
-            open={!!upsellGroup}
-            onOpenChange={(open) => !open && setUpsellGroup(null)}
-            orderId={order?.id || ''}
-            order={order}
-            preselectedProduct={upsellGroup?.product ? { 
-                id: upsellGroup.product.id, 
-                name: upsellGroup.product.item_name, 
-                type: upsellGroup.product.product_type || upsellGroup.product.item_type_label || '' 
-            } : null}
-            onSuccess={() => {
-                reloadOrder();
-                setUpsellGroup(null);
-            }}
-        />
+            <UpsellDialog
+                open={!!upsellGroup}
+                onOpenChange={(open) => !open && setUpsellGroup(null)}
+                orderId={order?.id || ''}
+                order={order}
+                preselectedProduct={upsellGroup?.product ? {
+                    id: upsellGroup.product.id,
+                    name: upsellGroup.product.item_name,
+                    type: upsellGroup.product.product_type || upsellGroup.product.item_type_label || ''
+                } : null}
+                onSuccess={() => {
+                    reloadOrder();
+                    setUpsellGroup(null);
+                }}
+            />
         </>
     );
 }

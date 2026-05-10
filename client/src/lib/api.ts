@@ -786,7 +786,6 @@ export const transactionsApi = {
         api.delete<ApiResponse<null>>(`/transactions/${id}`),
 };
 
-// Product Types API
 export const productChatsApi = {
     getRooms: () => api.get('/product-chats/rooms'),
     getMessages: (entityId: string, roomId: string) => api.get(`/product-chats/${entityId}/${roomId}`),
@@ -869,6 +868,26 @@ export const violationsApi = {
         api.delete<ApiResponse<null>>(`/violations/${id}`),
     getSummary: (params: { month: number; year: number }) =>
         api.get<ApiResponse<{ employees: Record<string, { violations: number; rewards: number; net: number }> }>>('/violations/summary', { params }),
+};
+
+export const notificationsApi = {
+    getAll: (params?: { type?: string; limit?: number }) =>
+        api.get<ApiResponse<any[]>>('/notifications', { params }),
+
+    getUnreadCount: () =>
+        api.get<ApiResponse<{ unreadCount: number }>>('/notifications/unread-count'),
+
+    markAsRead: (id: string) =>
+        api.put<ApiResponse<any>>(`/notifications/${id}/read`),
+
+    markAllAsRead: () =>
+        api.put<ApiResponse<{ count: number }>>('/notifications/read-all'),
+
+    create: (data: { user_id: string; type?: string; title: string; message: string; data?: any }) =>
+        api.post<ApiResponse<any>>('/notifications', data),
+
+    createBatch: (data: { user_ids: string[]; type?: string; title: string; message: string; data?: any }) =>
+        api.post<ApiResponse<{ count: number }>>('/notifications/batch', data),
 };
 
 export default api;

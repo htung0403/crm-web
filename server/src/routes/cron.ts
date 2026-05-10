@@ -156,6 +156,142 @@ router.get('/auto-payroll', verifyCronSecret, async (req: Request, res: Response
 });
 
 /**
+ * GET /api/cron/check-partner-appointments
+ * Check partner appointments:
+ * 1. If appointment is today -> mark card with red border (handled by frontend)
+ * 2. If appointment is tomorrow -> send notification to all managers/admins
+ */
+router.get('/check-partner-appointments', verifyCronSecret, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        console.log('[Cron] Partner Appointments Check Triggered');
+
+        const now = new Date();
+        
+        // Calculate tomorrow's date range (00:00:00 to 23:59:59)
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(0, 0, 0, 0);
+        
+        const dayAfterTomorrow = new Date(tomorrow);
+        dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 1);
+
+        // Find partner requests with appointment_time tomorrow
+        const { data: tomorrowAppointments, error: appointmentsError } = await supabaseAdmin
+            .from('order_item_partner')
+            .select(`
+                id,
+                status,
+                metadata,
+                order_item:order_items(id, item_name, order:orders(id, order_code)),
+                order_product:order_products(id, name, order:orders(id, order_code)),
+                order_product_service:order_product_services(id, order_product:order_products(name, order:orders(id, order_code)))
+            `)
+            .eq('status', 'partner_doing');
+
+        if (appointmentsError) {
+            throw new ApiError('Error fetching partner appointments: ' + appointmentsError.message, 500);
+        }
+
+        // Filter to only tomorrow's appointments
+        const tomorrowItems = (tomorrowAppointments || []).filter((item: any) => {
+            const appointmentTime = item.metadata?.appointment_time;
+            if (!appointmentTime) return false;
+            const aptDate = new Date(appointmentTime);
+            return aptDate.getTime() >= tomorrow.getTime() && aptDate.getTime() < dayAfterTomorrow.getTime();
+        });
+
+        // Get all managers and admins
+        const { data: managers, error: managersError } = await supabaseAdmin
+            .from('users')
+            .select('id, name, role')
+            .in('role', ['admin', 'manager'])
+            .eq('status', 'active');
+
+        if (managersError) {
+            throw new ApiError('Error fetching managers: ' + managersError.message, 500);
+        }
+
+// Create notifications for each tomorrow appointment
+        const notifications: any[] = [];
+        for (const item of tomorrowItems) {
+            // Supabase returns relations as arrays, get first element
+            const orderItem = Array.isArray(item.order_item) ? item.order_item[0] : item.order_item;
+            const orderProduct = Array.isArray(item.order_product) ? item.order_product[0] : item.order_product;
+            const orderProductService = Array.isArray(item.order_product_service) ? item.order_product_service[0] : item.order_product_service;
+            const orderProd = orderProductService?.order_product;
+            const orderProdFinal = Array.isArray(orderProd) ? orderProd[0] : orderProd;
+            
+            const itemName = orderItem?.item_name || 
+                           orderProduct?.name || 
+                           orderProdFinal?.name || 
+                           'Sản phẩm';
+            const orderObj = orderItem?.order || orderProduct?.order || orderProdFinal?.order;
+            const orderObjFinal = Array.isArray(orderObj) ? orderObj[0] : orderObj;
+            const orderCode = orderObjFinal?.order_code || 'N/A';
+            const appointmentDate = new Date(item.metadata.appointment_time).toLocaleString('vi-VN', {
+                hour: '2-digit',
+                minute: '2-digit',
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric'
+            });
+
+            for (const manager of (managers || [])) {
+                notifications.push({
+                    user_id: manager.id,
+                    type: 'partner_appointment',
+                    title: 'Nhắc lịch hẹn đối tác ngày mai',
+                    message: `${itemName} (${orderCode}) có lịch hẹn đối tác vào ngày mai: ${appointmentDate}`,
+                    data: {
+                partner_request_id: item.id,
+                order_code: orderCode,
+                appointment_time: item.metadata.appointment_time,
+                item_name: itemName
+            },
+                    is_read: false,
+                    created_at: new Date().toISOString()
+                });
+            }
+        }
+
+        // Insert all notifications
+        if (notifications.length > 0) {
+            const { error: insertError } = await supabaseAdmin
+                .from('notifications')
+                .insert(notifications);
+
+            if (insertError) {
+                console.error('[Cron] Error inserting notifications:', insertError);
+            } else {
+                console.log(`[Cron] Created ${notifications.length} notifications for ${(managers || []).length} managers`);
+            }
+        }
+
+        res.json({
+            status: 'success',
+            message: 'Partner appointments check completed',
+            data: {
+                tomorrow_appointments: tomorrowItems.length,
+                managers_notified: (managers || []).length,
+                notifications_created: notifications.length,
+                appointments: tomorrowItems.map((item: any) => {
+                    const oi = Array.isArray(item.order_item) ? item.order_item[0] : item.order_item;
+                    const op = Array.isArray(item.order_product) ? item.order_product[0] : item.order_product;
+                    return {
+                        id: item.id,
+                        appointment_time: item.metadata?.appointment_time,
+                        item_name: oi?.item_name || op?.name || 'N/A'
+                    };
+                })
+            },
+            timestamp: now.toISOString()
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+/**
  * GET /api/cron/check-debt-overdue
  * Detect orders at kiểm nợ stage with overdue debt (>10 days).
  * Auto-creates KPI violation logs for responsible sales.

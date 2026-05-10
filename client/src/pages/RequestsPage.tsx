@@ -386,11 +386,33 @@ function PartnerKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, getPr
     const { label: slaLabel, isOverdue, color: slaColor } = calculateSLADisplay(row.updated_at, slaConfig);
 
     const metadata = row.metadata || {};
+    const appointmentTime = metadata.appointment_time ? new Date(metadata.appointment_time) : null;
+    
+    // Check if appointment is today (any time today - midnight to midnight)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    const isAppointmentToday = row.status === 'partner_doing' &&
+        appointmentTime &&
+        appointmentTime.getTime() >= today.getTime() &&
+        appointmentTime.getTime() < tomorrow.getTime();
+    
+    // Check if appointment is tomorrow (1 day before)
+    const dayAfterTomorrow = new Date(tomorrow);
+    dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 1);
+    const isAppointmentTomorrow = row.status === 'partner_doing' &&
+        appointmentTime &&
+        appointmentTime.getTime() >= tomorrow.getTime() &&
+        appointmentTime.getTime() < dayAfterTomorrow.getTime();
+    
+    // Check if appointment is overdue (past due)
     const isAppointmentOverdue = row.status === 'partner_doing' &&
-        metadata.appointment_time &&
-        new Date(metadata.appointment_time).getTime() < Date.now();
-
-    const finalOverdue = isOverdue || isAppointmentOverdue;
+        appointmentTime &&
+        appointmentTime.getTime() < Date.now();
+    
+    const finalOverdue = isOverdue || isAppointmentOverdue || isAppointmentToday;
 
     return (
         <div
@@ -443,9 +465,14 @@ function PartnerKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, getPr
                     <div className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-600 bg-slate-50 border border-slate-100 p-1.5 rounded-md">
                         <Calendar className="w-3 h-3 text-slate-400" />
                         <span>Hẹn: </span>
-                        <span className={isAppointmentOverdue ? 'text-red-600 font-bold' : 'font-semibold'}>
+                        <span className={isAppointmentOverdue ? 'text-red-600 font-bold' : isAppointmentToday ? 'text-red-600 font-bold' : isAppointmentTomorrow ? 'text-amber-600 font-bold' : 'font-semibold'}>
                             {formatDateTime(metadata.appointment_time)}
                         </span>
+                        {isAppointmentTomorrow && (
+                            <Badge variant="outline" className="ml-1 text-[9px] h-4 px-1 bg-amber-50 border-amber-200 text-amber-700">
+                                Ngày mai
+                            </Badge>
+                        )}
                     </div>
                 )}
 
@@ -920,6 +947,26 @@ export function RequestsPage() {
             setPartners((partRes.data?.data as any[]) || []);
             setExtensions((extRes.data?.data as any[]) || []);
             setUsers((usersRes.data as any).data.users || []);
+            
+            // Check for appointments tomorrow and notify
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            tomorrow.setHours(0, 0, 0, 0);
+            const dayAfterTomorrow = new Date(tomorrow);
+            dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 1);
+            
+            const tomorrowAppointments = (partRes.data?.data || []).filter((p: any) => {
+                if (p.status !== 'partner_doing' || !p.metadata?.appointment_time) return false;
+                const aptDate = new Date(p.metadata.appointment_time);
+                return aptDate.getTime() >= tomorrow.getTime() && aptDate.getTime() < dayAfterTomorrow.getTime();
+            });
+            
+            if (tomorrowAppointments.length > 0) {
+                toast.warning(
+                    `Có ${tomorrowAppointments.length} lịch hẹn đối tác vào NGÀY MAI!`, 
+                    { duration: 5000 }
+                );
+            }
         } catch (e: any) {
             toast.error(e?.response?.data?.message || 'Không tải được danh sách');
         } finally {

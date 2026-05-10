@@ -83,6 +83,26 @@ router.post('/accessories', authenticate, async (req: AuthenticatedRequest, res,
             throw new ApiError('Không thể tạo yêu cầu mua phụ kiện: ' + error.message, 500);
         }
 
+        const entityId = order_item_id || order_product_id || order_product_service_id;
+        console.log('[Accessory] entityId:', entityId, 'order_item_id:', order_item_id, 'order_product_id:', order_product_id, 'order_product_service_id:', order_product_service_id);
+        const itemName = metadata?.item_name || 'Phụ kiện';
+        if (entityId) {
+            try {
+                const insertResult = await supabaseAdmin.from('order_workflow_step_log').insert({
+                    entity_id: entityId,
+                    order_item_step_id: null,
+                    action: 'accessory_requested',
+                    step_name: 'Yêu cầu mua phụ kiện',
+                    notes: `${itemName}${notes ? ': ' + notes : ''}`,
+                    created_by: userId
+                });
+                console.log('[Accessory] Insert result:', JSON.stringify(insertResult));
+                console.log('[Accessory] Log inserted successfully with entity_id:', entityId);
+            } catch (logErr) {
+                console.error('[Accessory] workflow log insert error:', logErr);
+            }
+        }
+
         res.status(201).json({ status: 'success', data });
     } catch (e) {
         next(e);
@@ -1005,6 +1025,19 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
 
         if (error) throw new ApiError('Lỗi tạo yêu cầu gia hạn: ' + error.message, 500);
 
+        try {
+            await supabaseAdmin.from('order_workflow_step_log').insert({
+                entity_id: id,
+                order_item_step_id: null,
+                action: 'extension_requested',
+                step_name: 'Xin gia hạn',
+                notes: `${itemName}: ${reason.trim()}${new_due_at ? ' - Hạn mới: ' + new Date(new_due_at).toLocaleDateString('vi-VN') : ''}`,
+                created_by: req.user!.id
+            });
+        } catch (logErr) {
+            console.error('workflow log insert error:', logErr);
+        }
+
         // Pause SLA: Set sla_paused_at cho tất cả steps liên quan
         const stepFilter = order_item_id 
             ? { order_item_id }
@@ -1481,6 +1514,23 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
             .single();
         if (error) throw new ApiError('Lỗi tạo: ' + error.message, 500);
 
+        // Create workflow log entry for accessory request
+        if (status === 'requested') {
+            const itemName = metadata?.item_name || 'Phụ kiện';
+            try {
+                await supabaseAdmin.from('order_workflow_step_log').insert({
+                    entity_id: id,
+                    order_item_step_id: null,
+                    action: 'accessory_requested',
+                    step_name: 'Yêu cầu mua phụ kiện',
+                    notes: `${itemName}${notes ? ': ' + notes : ''}`,
+                    created_by: req.user?.id
+                });
+            } catch (logErr) {
+                console.error('workflow log insert error:', logErr);
+            }
+        }
+
         res.json({
             status: 'success',
             data: inserted,
@@ -1556,6 +1606,21 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
             .select()
             .single();
         if (error) throw new ApiError('Lỗi tạo: ' + error.message, 500);
+
+        if (status === 'requested') {
+            try {
+                await supabaseAdmin.from('order_workflow_step_log').insert({
+                    entity_id: id,
+                    order_item_step_id: null,
+                    action: 'partner_requested',
+                    step_name: 'Gửi đối tác',
+                    notes: notes || 'Yêu cầu gửi đối tác',
+                    created_by: req.user?.id
+                });
+            } catch (logErr) {
+                console.error('workflow log insert error:', logErr);
+            }
+        }
 
         res.json({
             status: 'success',
@@ -2056,6 +2121,19 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
             reason,
             new_due_at,
         });
+
+        try {
+            await supabaseAdmin.from('order_workflow_step_log').insert({
+                entity_id: id,
+                order_item_step_id: null,
+                action: 'extension_requested',
+                step_name: 'Xin gia hạn',
+                notes: `${itemName}: ${reason}${new_due_at ? ' - Hạn mới: ' + new Date(new_due_at).toLocaleDateString('vi-VN') : ''}`,
+                created_by: userId
+            });
+        } catch (logErr) {
+            console.error('workflow log insert error:', logErr);
+        }
 
         res.status(201).json({ status: 'success', data });
     } catch (e) {

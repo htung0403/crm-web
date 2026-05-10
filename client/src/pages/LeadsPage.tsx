@@ -25,6 +25,7 @@ import {
     KanbanColumn,
     kanbanColumns,
     LeadHenQuaShipDialog,
+    LeadUpdatePhoneDialog,
     LeadFailDialog,
     MobileStageBottomSheet,
     MobileFilterSheet,
@@ -106,6 +107,10 @@ export function LeadsPage() {
     const [showFailDialog, setShowFailDialog] = useState(false);
     const [leadForFail, setLeadForFail] = useState<Lead | null>(null);
 
+    // State for UpdatePhoneDialog
+    const [showUpdatePhoneDialog, setShowUpdatePhoneDialog] = useState(false);
+    const [leadForUpdatePhone, setLeadForUpdatePhone] = useState<Lead | null>(null);
+
     // State for MobileStageBottomSheet
     const [showMobileSheet, setShowMobileSheet] = useState(false);
     const [leadForMobileSheet, setLeadForMobileSheet] = useState<Lead | null>(null);
@@ -185,7 +190,8 @@ export function LeadsPage() {
 
         // Validation: Must have phone number to move to 'chot_don'
         if (newPipelineStage === 'chot_don' && !leadToUpdate.phone) {
-            toast.error('Vui lòng cập nhật số điện thoại trước khi chốt đơn');
+            setLeadForUpdatePhone(leadToUpdate);
+            setShowUpdatePhoneDialog(true);
             return;
         }
 
@@ -253,6 +259,29 @@ export function LeadsPage() {
         }
     };
 
+    const handleSubmitUpdatePhone = async (data: Partial<Lead>) => {
+        if (!leadForUpdatePhone) return;
+        try {
+            await updateLead(leadForUpdatePhone.id, { ...data, pipeline_stage: 'chot_don', status: 'chot_don' });
+            toast.success(`Đã cập nhật số điện thoại cho "${leadForUpdatePhone.name}"`);
+            setShowUpdatePhoneDialog(false);
+            
+            // Navigate to create order page with lead info (including new phone)
+            const params = new URLSearchParams({
+                lead_id: leadForUpdatePhone.id,
+                lead_name: leadForUpdatePhone.name,
+                lead_phone: data.phone || leadForUpdatePhone.phone || '',
+                lead_email: leadForUpdatePhone.email || '',
+            });
+            navigate(`/orders/new?${params.toString()}`);
+            
+            setLeadForUpdatePhone(null);
+            await fetchLeads({ limit: 500 });
+        } catch {
+            toast.error('Lỗi khi cập nhật số điện thoại');
+        }
+    };
+
     const handleConvert = async (lead: Lead) => {
         try {
             await convertLead(lead.id);
@@ -292,7 +321,8 @@ export function LeadsPage() {
 
         // Validation: Must have phone number to move to 'chot_don'
         if (newStageId === 'chot_don' && !lead.phone) {
-            toast.error('Vui lòng cập nhật số điện thoại trước khi chốt đơn');
+            setLeadForUpdatePhone(lead);
+            setShowUpdatePhoneDialog(true);
             return;
         }
 
@@ -639,6 +669,16 @@ export function LeadsPage() {
                     }}
                     onSubmit={handleSubmitFail}
                     lead={leadForFail}
+                />
+
+                <LeadUpdatePhoneDialog
+                    open={showUpdatePhoneDialog}
+                    onClose={() => {
+                        setShowUpdatePhoneDialog(false);
+                        setLeadForUpdatePhone(null);
+                    }}
+                    onSubmit={handleSubmitUpdatePhone}
+                    lead={leadForUpdatePhone}
                 />
 
                 <MobileStageBottomSheet

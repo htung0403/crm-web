@@ -13,6 +13,7 @@ import {
     ThumbsUp, ThumbsDown, Calendar, XCircle, Maximize2
 } from 'lucide-react';
 import { WorkflowLogDetailDialog } from '@/components/orders/workflow/WorkflowLogDetailDialog';
+import { BackwardMoveDialog } from '@/components/orders/BackwardMoveDialog';
 import { UpsellDialog } from '@/components/orders/UpsellDialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -22,11 +23,12 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { ProductChat } from '@/components/orders/workflow/ProductChat';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import { cn, formatCurrency, formatDateTime, formatDate } from '@/lib/utils';
-import { SALES_STATUS_LABELS, getCareWarrantyStageLabel, getAfterSaleStageLabel } from '../constants';
-import { orderItemsApi, orderProductsApi } from '@/lib/api';
+import { SALES_STATUS_LABELS, getCareWarrantyStageLabel, getAfterSaleStageLabel, getSalesStatusLabel } from '../constants';
+import { orderItemsApi, orderProductsApi, productChatsApi } from '@/lib/api';
 import { toast } from 'sonner';
 import { ImageUpload } from '@/components/products/ImageUpload';
 import { useUsers } from '@/hooks/useUsers';
@@ -49,6 +51,9 @@ interface ProductDetailDialogProps {
     workflowLogs?: any[];
     aftersaleLogs?: any[];
     careLogs?: any[];
+    /** Callback được gọi sau khi xác nhận thành công — dùng để tự động chuyển trạng thái card */
+    onConfirmAndMove?: () => Promise<void>;
+    onRoomChange?: (roomId: string) => void;
 }
 
 export function MultiMediaUpload({ value, onChange, disabled, bucket = 'orders', folder = 'step1' }: { value: string[]; onChange: (urls: string[]) => void; disabled?: boolean; bucket?: string; folder?: string }) {
@@ -161,11 +166,23 @@ export function ProductDetailDialog({
     workflowLogs = [],
     aftersaleLogs = [],
     careLogs = [],
+    onConfirmAndMove,
+    onRoomChange,
 }: ProductDetailDialogProps) {
+    /** Strip Vietnamese diacritics so 'dung' matches 'Dũng', 'huong' matches 'Hương', etc. */
+    const normalizeVn = (str: string): string => {
+        if (!str) return '';
+        return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'd').toLowerCase();
+    };
+
     const [activeImageIdx, setActiveImageIdx] = useState(0);
     const [saving, setSaving] = useState(false);
     const [showUpsellDialog, setShowUpsellDialog] = useState(false);
     const { users, fetchUsers } = useUsers();
+
+    const [mentionSearch, setMentionSearch] = useState('');
+    const [showMentionList, setShowMentionList] = useState(false);
+    const [mentionInputType, setMentionInputType] = useState<'step3_technician_name' | null>(null);
 
     useEffect(() => {
         if (open) {
@@ -181,6 +198,12 @@ export function ProductDetailDialog({
     const [dueAt, setDueAt] = useState<string>('');
     const [selectedLogDetail, setSelectedLogDetail] = useState<any>(null);
     const [showLogDetailDialog, setShowLogDetailDialog] = useState(false);
+    const [viewLogData, setViewLogData] = useState<{
+        reason?: string;
+        photos?: string[];
+        notes?: string;
+        itemName?: string;
+    } | null>(null);
     const [mainPreviewUrl, setMainPreviewUrl] = useState<string | null>(null);
 
     // Initialize form data when the dialog is opened or order ID changes
@@ -333,7 +356,41 @@ export function ProductDetailDialog({
         try {
             await orderItemsApi.updateSalesStepData(itemId, stepData);
             toast.success('Đã lưu thông tin thành công');
+
+            // Send notifications if Step 3 and mentions exist
+            if (roomId === 'step3' && stepData.step3_technician_name && order) {
+                const mentionIds: string[] = [];
+                users.forEach(u => {
+                    if (stepData.step3_technician_name.includes(`@${u.name}`)) {
+                        mentionIds.push(u.id);
+                    }
+                });
+
+                if (mentionIds.length > 0) {
+                    try {
+                        const workDetails = stepData.step3_work_details ? `\nNội dung: ${stepData.step3_work_details}` : '';
+                        const location = stepData.step3_work_location ? `\nVị trí: ${stepData.step3_work_location}` : '';
+                        
+                        await productChatsApi.sendMessage({
+                            order_id: order.id,
+                            entity_id: entityId,
+                            entity_type: entityType,
+                            room_id: 'unified',
+                            content: `🔔 GIAO VIỆC: ${stepData.step3_technician_name}${workDetails}${location}\n(Đã xác nhận trong bước Trao đổi KT)`,
+                            mentions: mentionIds
+                        });
+                    } catch (err) {
+                        console.error('Lỗi gửi notification KT:', err);
+                    }
+                }
+            }
+
             if (onReloadOrder) onReloadOrder();
+            // Nếu có pending move (drag-and-drop yêu cầu thông tin), tự động chuyển trạng thái và đóng dialog
+            if (onConfirmAndMove) {
+                await onConfirmAndMove();
+                onOpenChange(false);
+            }
         } catch (error: any) {
             toast.error(error?.response?.data?.message || 'Lỗi khi lưu thông tin');
         } finally {
@@ -431,6 +488,12 @@ export function ProductDetailDialog({
                     console.error('Lỗi tạo phiếu thu nợ:', error);
                 }
             }
+
+            // Nếu có pending move (drag-and-drop yêu cầu thông tin), tự động chuyển trạng thái và đóng dialog
+            if (onConfirmAndMove) {
+                await onConfirmAndMove();
+                onOpenChange(false);
+            }
         } catch (error: any) {
             toast.error(error?.message || 'Lỗi khi cập nhật thông tin');
         } finally {
@@ -487,7 +550,10 @@ export function ProductDetailDialog({
     };
 
     const getRoomLogs = () => {
-        const filteredWorkflowLogs = workflowLogs.filter(log => log.action === 'assigned' || log.action === 'failed');
+        const REQUEST_ACTIONS = ['accessory_requested', 'partner_requested', 'extension_requested'];
+        const filteredWorkflowLogs = workflowLogs.filter(log => 
+            log.action === 'assigned' || log.action === 'failed' || REQUEST_ACTIONS.includes(log.action)
+        );
         const allLogs = [...salesLogs, ...filteredWorkflowLogs, ...aftersaleLogs, ...careLogs];
         return allLogs
             .filter(log => log.entity_id === entityId || log.order_item_step_id) // simplified filter
@@ -495,6 +561,148 @@ export function ProductDetailDialog({
     };
 
     const roomLogs = getRoomLogs();
+
+    const getLogStepLabel = (val: string | null | undefined) => {
+        if (!val || val === 'START') return 'Bắt đầu';
+        if (val.startsWith('step')) return getSalesStatusLabel(val);
+        if (val.startsWith('after')) return getAfterSaleStageLabel(val);
+        if (val.startsWith('war') || val.startsWith('care')) return getCareWarrantyStageLabel(val);
+        return val;
+    };
+
+    const renderLogItem = (log: any) => (
+        <div key={log.id} className="text-[11px] border-b border-gray-50 pb-2 last:border-0 relative">
+            <div className="flex justify-between items-start mb-1">
+                <span className="font-bold text-gray-700 uppercase">
+                    {log.order_item_step_id ? (
+                        <span className={log.action === 'failed' ? "text-red-500" : "text-blue-700"}>
+                            {log.action === 'failed' && <span className="mr-1">THẤT BẠI:</span>}
+                            {log.step_name}
+                        </span>
+                    ) : (
+                        <span className="text-gray-600">
+                            {getLogStepLabel(log.from_status || log.from_stage)} 
+                            <span className="mx-1 text-gray-300">→</span> 
+                            {getLogStepLabel(log.to_status || log.to_stage)}
+                        </span>
+                    )}
+                </span>
+                <span className="text-[9px] text-gray-400 tabular-nums">{formatDateTime(log.created_at)}</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-gray-500 mb-1">
+                <div className="h-3 w-3 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-[8px] font-bold">
+                    {log.created_by_user?.name?.charAt(0) || '?'}
+                </div>
+                {log.created_by_user?.name || 'Hệ thống'}
+            </div>
+
+            {log.action === 'assigned' && (
+                <div className="mt-1.5 space-y-1 bg-blue-50/50 p-2 rounded-lg border border-blue-50">
+                    {log.reason && (
+                        <div className="flex gap-2">
+                            <span className="font-semibold text-gray-500 min-w-[65px]">Lý do:</span>
+                            <span className="text-gray-700">{log.reason}</span>
+                        </div>
+                    )}
+                    <div className="flex gap-2">
+                        <span className="font-semibold text-gray-500 min-w-[65px]">KTV:</span>
+                        <span className="font-medium text-blue-700">{log.assigned_tech?.name || 'Chưa phân công'}</span>
+                    </div>
+                    {log.deadline_days > 0 && (
+                        <div className="flex gap-2">
+                            <span className="font-semibold text-gray-500 min-w-[65px]">Hạn:</span>
+                            <span className="text-gray-700">{log.deadline_days} ngày</span>
+                        </div>
+                    )}
+                    {log.notes && (
+                        <div className="flex gap-2 mt-1 pt-1 border-t border-blue-100/50">
+                            <span className="font-semibold text-gray-500 min-w-[65px]">Ghi chú:</span>
+                            <span className="text-gray-700 italic">{log.notes}</span>
+                        </div>
+                    )}
+                    {log.photos && log.photos.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1 pt-1 border-t border-blue-100/50">
+                            {log.photos.map((url: string, idx: number) => (
+                                <a key={idx} href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>
+                                    <img src={url} alt={`Evidence ${idx}`} className="h-8 w-8 object-cover rounded shadow-sm border border-gray-200" />
+                                </a>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {log.action === 'failed' && log.notes && (
+                <div className="mt-1.5 bg-red-50 p-2 rounded-lg border border-red-100 text-red-700 italic">
+                    {log.notes}
+                    {log.photos && log.photos.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5 pt-1.5 border-t border-red-100">
+                            {log.photos.map((url: string, idx: number) => (
+                                <a key={idx} href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>
+                                    <img src={url} alt={`Evidence ${idx}`} className="h-8 w-8 object-cover rounded shadow-sm border border-red-200" />
+                                </a>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {log.action === 'accessory_requested' && (
+                <div className="mt-1.5 bg-amber-50 p-2 rounded-lg border border-amber-100 text-amber-700">
+                    <div className="flex items-center gap-1.5 font-medium">
+                        <span>🛒</span>
+                        <span>Yêu cầu mua phụ kiện</span>
+                    </div>
+                    {log.notes && <div className="text-xs mt-1">{log.notes}</div>}
+                </div>
+            )}
+
+            {log.action === 'partner_requested' && (
+                <div className="mt-1.5 bg-purple-50 p-2 rounded-lg border border-purple-100 text-purple-700">
+                    <div className="flex items-center gap-1.5 font-medium">
+                        <span>📦</span>
+                        <span>Yêu cầu gửi đối tác</span>
+                    </div>
+                    {log.notes && <div className="text-xs mt-1">{log.notes}</div>}
+                </div>
+            )}
+
+            {log.action === 'extension_requested' && (
+                <div className="mt-1.5 bg-blue-50 p-2 rounded-lg border border-blue-100 text-blue-700">
+                    <div className="flex items-center gap-1.5 font-medium">
+                        <span>⏰</span>
+                        <span>Xin gia hạn</span>
+                    </div>
+                    {log.notes && <div className="text-xs mt-1">{log.notes}</div>}
+                </div>
+            )}
+
+            <Button 
+                variant="ghost" 
+                size="sm" 
+                className="h-6 px-2 absolute top-1 right-1 text-[10px] text-primary hover:bg-primary/10 font-bold border border-primary/20 rounded-md"
+                onClick={() => {
+                    const targetRoom = log.from_status || log.from_stage;
+                    if (onRoomChange && targetRoom) {
+                        onRoomChange(targetRoom);
+                    } else if (log.order_item_step_id) {
+                        setSelectedLogDetail(log);
+                        setShowLogDetailDialog(true);
+                    } else {
+                        setViewLogData({
+                            reason: log.reason || (['failed', 'backward_move'].includes(log.action) ? 'Lùi bước' : 'Chuyển bước'),
+                            photos: log.photos || [],
+                            notes: log.notes || '',
+                            itemName: productName
+                        });
+                    }
+                }}
+            >
+                <Maximize2 className="h-3 w-3 mr-1" />
+                Xem chi tiết
+            </Button>
+        </div>
+    );
 
     const [timeLeft, setTimeLeft] = useState<string>('');
 
@@ -1551,29 +1759,7 @@ export function ProductDetailDialog({
                                                 </div>
                                                 <ScrollArea className="flex-1 bg-white rounded-xl border border-gray-100 p-3">
                                                     <div className="space-y-3">
-                                                        {roomLogs.length > 0 ? roomLogs.map((log: any) => (
-                                                            <div key={log.id} className="text-[11px] border-b border-gray-50 pb-2 last:border-0 relative">
-                                                                <div className="flex justify-between items-start mb-1">
-                                                                    <span className="font-bold text-gray-700 uppercase">
-                                                                        {log.order_item_step_id ? (
-                                                                            <span className={log.action === 'failed' ? "text-red-500" : "text-blue-700"}>
-                                                                                {log.action === 'failed' && <span className="mr-1">THẤT BẠI:</span>}
-                                                                                {log.step_name}
-                                                                            </span>
-                                                                        ) : (
-                                                                            `${log.from_status || log.from_stage || 'START'} → ${log.to_status || log.to_stage}`
-                                                                        )}
-                                                                    </span>
-                                                                    <span className="text-[9px] text-gray-400 tabular-nums">{formatDateTime(log.created_at)}</span>
-                                                                </div>
-                                                                <div className="flex items-center gap-1.5 text-gray-500 mb-1">
-                                                                    <div className="h-3 w-3 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-[8px] font-bold">
-                                                                        {log.created_by_user?.name?.charAt(0) || '?'}
-                                                                    </div>
-                                                                    {log.created_by_user?.name || 'Hệ thống'}
-                                                                </div>
-                                                            </div>
-                                                        )) : (
+                                                        {roomLogs.length > 0 ? roomLogs.map(renderLogItem) : (
                                                             <div className="text-center py-8 text-gray-400 italic text-[11px]">Chưa có lịch sử thay đổi</div>
                                                         )}
                                                     </div>
@@ -1767,95 +1953,7 @@ export function ProductDetailDialog({
                                             </div>
                                             <ScrollArea className="flex-1 bg-white rounded-xl border border-gray-100 p-3">
                                                 <div className="space-y-3">
-                                                    {roomLogs.length > 0 ? roomLogs.map((log: any) => (
-                                                        <div key={log.id} className="text-[11px] border-b border-gray-50 pb-2 last:border-0 relative">
-                                                            <div className="flex justify-between items-start mb-1">
-                                                                <span className="font-bold text-gray-700 uppercase">
-                                                                    {log.order_item_step_id ? (
-                                                                        <span className={log.action === 'failed' ? "text-red-500" : "text-blue-700"}>
-                                                                            {log.action === 'failed' && <span className="mr-1">THẤT BẠI:</span>}
-                                                                            {log.step_name}
-                                                                        </span>
-                                                                    ) : (
-                                                                        `${log.from_status || log.from_stage || 'START'} → ${log.to_status || log.to_stage}`
-                                                                    )}
-                                                                </span>
-                                                                <span className="text-[9px] text-gray-400 tabular-nums">{formatDateTime(log.created_at)}</span>
-                                                            </div>
-                                                            <div className="flex items-center gap-1.5 text-gray-500 mb-1">
-                                                                <div className="h-3 w-3 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-[8px] font-bold">
-                                                                    {log.created_by_user?.name?.charAt(0) || '?'}
-                                                                </div>
-                                                                {log.created_by_user?.name || 'Hệ thống'}
-                                                            </div>
-
-                                                            {log.action === 'assigned' && (
-                                                                <div className="mt-1.5 space-y-1 bg-blue-50/50 p-2 rounded-lg border border-blue-50">
-                                                                    {log.reason && (
-                                                                        <div className="flex gap-2">
-                                                                            <span className="font-semibold text-gray-500 min-w-[65px]">Lý do:</span>
-                                                                            <span className="text-gray-700">{log.reason}</span>
-                                                                        </div>
-                                                                    )}
-                                                                    <div className="flex gap-2">
-                                                                        <span className="font-semibold text-gray-500 min-w-[65px]">KTV:</span>
-                                                                        <span className="font-medium text-blue-700">{log.assigned_tech?.name || 'Chưa phân công'}</span>
-                                                                    </div>
-                                                                    {log.deadline_days > 0 && (
-                                                                        <div className="flex gap-2">
-                                                                            <span className="font-semibold text-gray-500 min-w-[65px]">Hạn:</span>
-                                                                            <span className="text-gray-700">{log.deadline_days} ngày</span>
-                                                                        </div>
-                                                                    )}
-                                                                    {log.notes && (
-                                                                        <div className="flex gap-2 mt-1 pt-1 border-t border-blue-100/50">
-                                                                            <span className="font-semibold text-gray-500 min-w-[65px]">Ghi chú:</span>
-                                                                            <span className="text-gray-700 italic">{log.notes}</span>
-                                                                        </div>
-                                                                    )}
-                                                                    {log.photos && log.photos.length > 0 && (
-                                                                        <div className="flex flex-wrap gap-1 mt-1 pt-1 border-t border-blue-100/50">
-                                                                            {log.photos.map((url: string, idx: number) => (
-                                                                                <a key={idx} href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>
-                                                                                    <img src={url} alt={`Evidence ${idx}`} className="h-8 w-8 object-cover rounded shadow-sm border border-gray-200" />
-                                                                                </a>
-                                                                            ))}
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            )}
-
-                                                            {log.action === 'failed' && log.notes && (
-                                                                <div className="mt-1.5 bg-red-50 p-2 rounded-lg border border-red-100 text-red-700 italic">
-                                                                    {log.notes}
-                                                                    {log.photos && log.photos.length > 0 && (
-                                                                        <div className="flex flex-wrap gap-1 mt-1.5 pt-1.5 border-t border-red-100">
-                                                                            {log.photos.map((url: string, idx: number) => (
-                                                                                <a key={idx} href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>
-                                                                                    <img src={url} alt={`Evidence ${idx}`} className="h-8 w-8 object-cover rounded shadow-sm border border-red-200" />
-                                                                                </a>
-                                                                            ))}
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            )}
-
-                                                            {log.order_item_step_id && (
-                                                                <Button 
-                                                                    variant="ghost" 
-                                                                    size="sm" 
-                                                                    className="h-6 px-2 absolute top-1 right-1 text-[10px] text-primary hover:bg-primary/10 font-bold border border-primary/20 rounded-md"
-                                                                    onClick={() => {
-                                                                        setSelectedLogDetail(log);
-                                                                        setShowLogDetailDialog(true);
-                                                                    }}
-                                                                >
-                                                                    <Maximize2 className="h-3 w-3 mr-1" />
-                                                                    Xem chi tiết
-                                                                </Button>
-                                                            )}
-                                                        </div>
-                                                    )) : (
+                                                    {roomLogs.length > 0 ? roomLogs.map(renderLogItem) : (
                                                         <div className="text-center py-8 text-gray-400 italic text-[11px]">Chưa có lịch sử thay đổi</div>
                                                     )}
                                                 </div>
@@ -2038,14 +2136,67 @@ export function ProductDetailDialog({
                                                     <span className="text-xs font-black uppercase tracking-tight">Trao đổi với Kỹ thuật</span>
                                                 </div>
                                                 <div className="space-y-3">
-                                                    <div className="space-y-1.5">
-                                                        <Label className="text-xs font-bold text-gray-500">TÊN KỸ THUẬT VIÊN</Label>
-                                                        <Input
-                                                            placeholder="VD: KT Hùng, KT Minh..."
-                                                            value={stepData.step3_technician_name || ''}
-                                                            onChange={(e) => setStepData(prev => ({ ...prev, step3_technician_name: e.target.value }))}
-                                                        />
-                                                    </div>
+                                                        <Label className="text-xs font-bold text-gray-500">TÊN KỸ THUẬT VIÊN (Gõ @ để nhắc tên)</Label>
+                                                        <div className="relative">
+                                                            <Input
+                                                                placeholder="VD: @KT Hùng, @KT Minh..."
+                                                                value={stepData.step3_technician_name || ''}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Escape') setShowMentionList(false);
+                                                                }}
+                                                                onChange={(e) => {
+                                                                    const val = e.target.value;
+                                                                    setStepData(prev => ({ ...prev, step3_technician_name: val }));
+                                                                    
+                                                                    // Mention logic
+                                                                    const cursorPosition = e.target.selectionStart || 0;
+                                                                    const textBeforeCursor = val.substring(0, cursorPosition);
+                                                                    const lastAt = textBeforeCursor.lastIndexOf('@');
+                                                                    
+                                                                    if (lastAt !== -1 && (lastAt === 0 || textBeforeCursor[lastAt - 1] === ' ')) {
+                                                                        const search = textBeforeCursor.substring(lastAt + 1);
+                                                                        setMentionSearch(search);
+                                                                        setShowMentionList(true);
+                                                                        setMentionInputType('step3_technician_name');
+                                                                    } else {
+                                                                        setShowMentionList(false);
+                                                                    }
+                                                                }}
+                                                            />
+                                                            {showMentionList && mentionInputType === 'step3_technician_name' && (
+                                                                <div className="absolute bottom-full left-0 mb-2 w-64 max-h-48 bg-white border rounded-lg shadow-xl overflow-y-auto z-[100]">
+                                                                    <div className="p-2 text-[10px] font-bold text-gray-400 border-b bg-gray-50 uppercase tracking-wider">
+                                                                        Nhắc tên kỹ thuật viên
+                                                                    </div>
+                                                                    {users
+                                                                        .filter(u => u.role === 'technician' && normalizeVn(u.name).includes(normalizeVn(mentionSearch)))
+                                                                        .map(u => (
+                                                                            <button
+                                                                                key={u.id}
+                                                                                type="button"
+                                                                                onClick={() => {
+                                                                                    const currentText = stepData.step3_technician_name || '';
+                                                                                    const lastAt = currentText.lastIndexOf('@');
+                                                                                    const newText = currentText.substring(0, lastAt) + '@' + u.name + ' ';
+                                                                                    setStepData(prev => ({ ...prev, step3_technician_name: newText }));
+                                                                                    setShowMentionList(false);
+                                                                                }}
+                                                                                className="w-full text-left px-3 py-2 hover:bg-primary/10 flex items-center gap-2 transition-colors border-b last:border-0"
+                                                                            >
+                                                                                <Avatar className="h-6 w-6">
+                                                                                    <AvatarImage src={u.avatar} />
+                                                                                    <AvatarFallback><UserIcon className="h-3 w-3" /></AvatarFallback>
+                                                                                </Avatar>
+                                                                                <div className="flex flex-col">
+                                                                                    <span className="text-sm font-medium">{u.name}</span>
+                                                                                    <span className="text-[10px] text-gray-500 uppercase">{u.role}</span>
+                                                                                </div>
+                                                                            </button>
+                                                                        ))
+                                                                    }
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     <div className="space-y-1.5">
                                                         <Label className="text-xs font-bold text-gray-500">CHI TIẾT CÔNG VIỆC CẦN LÀM</Label>
                                                         <Textarea
@@ -2108,95 +2259,7 @@ export function ProductDetailDialog({
                                                 </div>
                                                 <ScrollArea className="flex-1 bg-white rounded-xl border border-gray-100 p-3">
                                                     <div className="space-y-3">
-                                                        {roomLogs.length > 0 ? roomLogs.map((log: any) => (
-                                                            <div key={log.id} className="text-[11px] border-b border-gray-50 pb-2 last:border-0 relative">
-                                                                <div className="flex justify-between items-start mb-1">
-                                                                    <span className="font-bold text-gray-700 uppercase">
-                                                                        {log.order_item_step_id ? (
-                                                                            <span className={log.action === 'failed' ? "text-red-500" : "text-blue-700"}>
-                                                                                {log.action === 'failed' && <span className="mr-1">THẤT BẠI:</span>}
-                                                                                {log.step_name}
-                                                                            </span>
-                                                                        ) : (
-                                                                            `${log.from_status || log.from_stage || 'START'} → ${log.to_status || log.to_stage}`
-                                                                        )}
-                                                                    </span>
-                                                                    <span className="text-[9px] text-gray-400 tabular-nums">{formatDateTime(log.created_at)}</span>
-                                                                </div>
-                                                                <div className="flex items-center gap-1.5 text-gray-500 mb-1">
-                                                                    <div className="h-3 w-3 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-[8px] font-bold">
-                                                                        {log.created_by_user?.name?.charAt(0) || '?'}
-                                                                    </div>
-                                                                    {log.created_by_user?.name || 'Hệ thống'}
-                                                                </div>
-
-                                                                {log.action === 'assigned' && (
-                                                                    <div className="mt-1.5 space-y-1 bg-blue-50/50 p-2 rounded-lg border border-blue-50">
-                                                                        {log.reason && (
-                                                                            <div className="flex gap-2">
-                                                                                <span className="font-semibold text-gray-500 min-w-[65px]">Lý do:</span>
-                                                                                <span className="text-gray-700">{log.reason}</span>
-                                                                            </div>
-                                                                        )}
-                                                                        <div className="flex gap-2">
-                                                                            <span className="font-semibold text-gray-500 min-w-[65px]">KTV:</span>
-                                                                            <span className="font-medium text-blue-700">{log.assigned_tech?.name || 'Chưa phân công'}</span>
-                                                                        </div>
-                                                                        {log.deadline_days > 0 && (
-                                                                            <div className="flex gap-2">
-                                                                                <span className="font-semibold text-gray-500 min-w-[65px]">Hạn:</span>
-                                                                                <span className="text-gray-700">{log.deadline_days} ngày</span>
-                                                                            </div>
-                                                                        )}
-                                                                        {log.notes && (
-                                                                            <div className="flex gap-2 mt-1 pt-1 border-t border-blue-100/50">
-                                                                                <span className="font-semibold text-gray-500 min-w-[65px]">Ghi chú:</span>
-                                                                                <span className="text-gray-700 italic">{log.notes}</span>
-                                                                            </div>
-                                                                        )}
-                                                                        {log.photos && log.photos.length > 0 && (
-                                                                            <div className="flex flex-wrap gap-1 mt-1 pt-1 border-t border-blue-100/50">
-                                                                                {log.photos.map((url: string, idx: number) => (
-                                                                                    <a key={idx} href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>
-                                                                                        <img src={url} alt={`Evidence ${idx}`} className="h-8 w-8 object-cover rounded shadow-sm border border-gray-200" />
-                                                                                    </a>
-                                                                                ))}
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                )}
-
-                                                                {log.action === 'failed' && log.notes && (
-                                                                    <div className="mt-1.5 bg-red-50 p-2 rounded-lg border border-red-100 text-red-700 italic">
-                                                                        {log.notes}
-                                                                        {log.photos && log.photos.length > 0 && (
-                                                                            <div className="flex flex-wrap gap-1 mt-1.5 pt-1.5 border-t border-red-100">
-                                                                                {log.photos.map((url: string, idx: number) => (
-                                                                                    <a key={idx} href={url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>
-                                                                                        <img src={url} alt={`Evidence ${idx}`} className="h-8 w-8 object-cover rounded shadow-sm border border-red-200" />
-                                                                                    </a>
-                                                                                ))}
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                )}
-
-                                                                {log.order_item_step_id && (
-                                                                    <Button 
-                                                                        variant="ghost" 
-                                                                        size="sm" 
-                                                                        className="h-6 px-2 absolute top-1 right-1 text-[10px] text-primary hover:bg-primary/10 font-bold border border-primary/20 rounded-md"
-                                                                        onClick={() => {
-                                                                            setSelectedLogDetail(log);
-                                                                            setShowLogDetailDialog(true);
-                                                                        }}
-                                                                    >
-                                                                        <Maximize2 className="h-3 w-3 mr-1" />
-                                                                        Xem chi tiết
-                                                                    </Button>
-                                                                )}
-                                                            </div>
-                                                        )) : (
+                                                        {roomLogs.length > 0 ? roomLogs.map(renderLogItem) : (
                                                             <div className="text-center py-8 text-gray-400 italic text-[11px]">Chưa có lịch sử thay đổi</div>
                                                         )}
                                                     </div>
@@ -2233,44 +2296,7 @@ export function ProductDetailDialog({
                                         </div>
                                         <ScrollArea className="flex-1 bg-white rounded-xl border border-gray-100 p-3">
                                             <div className="space-y-3">
-                                                {roomLogs.length > 0 ? roomLogs.map((log: any) => (
-                                                    <div key={log.id} className="text-[11px] border-b border-gray-50 pb-2 last:border-0 relative">
-                                                        <div className="flex justify-between items-start mb-1">
-                                                            <span className="font-bold text-gray-700 uppercase">
-                                                                {log.order_item_step_id ? (
-                                                                    <span className={log.action === 'failed' ? "text-red-500" : "text-blue-700"}>
-                                                                        {log.action === 'failed' && <span className="mr-1">THẤT BẠI:</span>}
-                                                                        {log.step_name}
-                                                                    </span>
-                                                                ) : (
-                                                                    `${log.from_status || log.from_stage || 'START'} → ${log.to_status || log.to_stage}`
-                                                                )}
-                                                            </span>
-                                                            <span className="text-[9px] text-gray-400 tabular-nums">{formatDateTime(log.created_at)}</span>
-                                                        </div>
-                                                        <div className="flex items-center gap-1.5 text-gray-500 mb-1">
-                                                            <div className="h-3 w-3 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-[8px] font-bold">
-                                                                {log.created_by_user?.name?.charAt(0) || '?'}
-                                                            </div>
-                                                            {log.created_by_user?.name || 'Hệ thống'}
-                                                        </div>
-
-                                                        {log.order_item_step_id && (
-                                                            <Button 
-                                                                variant="ghost" 
-                                                                size="sm" 
-                                                                className="h-6 px-2 absolute top-1 right-1 text-[10px] text-primary hover:bg-primary/10 font-bold border border-primary/20 rounded-md"
-                                                                onClick={() => {
-                                                                    setSelectedLogDetail(log);
-                                                                    setShowLogDetailDialog(true);
-                                                                }}
-                                                            >
-                                                                <Maximize2 className="h-3 w-3 mr-1" />
-                                                                Xem chi tiết
-                                                            </Button>
-                                                        )}
-                                                    </div>
-                                                )) : (
+                                                {roomLogs.length > 0 ? roomLogs.map(renderLogItem) : (
                                                     <div className="text-center py-8 text-gray-400 italic text-[11px]">Chưa có lịch sử thay đổi</div>
                                                 )}
                                             </div>
@@ -2302,6 +2328,18 @@ export function ProductDetailDialog({
                 open={showLogDetailDialog} 
                 onOpenChange={setShowLogDetailDialog} 
                 log={selectedLogDetail} 
+            />
+
+            <BackwardMoveDialog
+                open={!!viewLogData}
+                onClose={() => setViewLogData(null)}
+                itemName={viewLogData?.itemName || productName}
+                mode="view"
+                initialData={viewLogData ? {
+                    reason: viewLogData.reason || '',
+                    photos: viewLogData.photos || [],
+                    notes: viewLogData.notes
+                } : undefined}
             />
 
             <UpsellDialog

@@ -29,6 +29,8 @@ interface AftersaleTabProps {
     getGroupCurrentTechRoom: (group: any) => string;
     // Dialog control props
     onProductCardClick: (group: any, roomId: string) => void;
+    /** Mở dialog với pending move callback — sau khi user xác nhận, card tự chuyển và dialog tự đóng */
+    onOpenProductDialogWithMove?: (group: any, roomId: string, moveCallback: () => Promise<void>) => void;
 }
 
 const AFTER_COLS = [
@@ -268,7 +270,8 @@ export function AftersaleTab({
     getSLADisplay,
     getAfterSaleStageLabel,
     getGroupCurrentTechRoom,
-    onProductCardClick
+    onProductCardClick,
+    onOpenProductDialogWithMove,
 }: AftersaleTabProps) {
     if (!order) return null;
 
@@ -309,8 +312,6 @@ export function AftersaleTab({
 
         const isCustomerItem = !!draggedGroup.product.is_customer_item;
 
-        toast.success(`Đã chuyển sản phẩm "${draggedGroup.product.item_name}" sang bước mới`);
-
         if (result.source.droppableId === 'after1' && newStage === 'after1_debt') {
             const hasPhotos = draggedGroup.product.completion_photos && draggedGroup.product.completion_photos.length > 0;
             const hasReceiver = order.aftersale_receiver_name;
@@ -321,7 +322,24 @@ export function AftersaleTab({
                 if (!hasPhotos) errorMsg += "\n- Cần upload ít nhất một \"Ảnh hoàn thiện\"";
                 
                 toast.error(errorMsg, { duration: 5000 });
-                onProductCardClick(draggedGroup, 'after1');
+                // Mở dialog kèm move callback — sau khi confirm thành công sẽ tự chuyển bước
+                const moveAction = async () => {
+                    const api = isCustomerItem
+                        ? orderProductsApi.updateAfterSaleData(itemId, { stage: newStage })
+                        : orderItemsApi.updateAfterSaleData(itemId, { stage: newStage });
+                    await api;
+                    if (order.status !== 'after_sale') {
+                        ordersApi.updateStatus(order.id, 'after_sale').catch(console.error);
+                    }
+                    reloadOrder();
+                    fetchKanbanLogs(order.id);
+                    toast.success(`Đã chuyển sản phẩm "${draggedGroup.product?.item_name}" sang bước mới`);
+                };
+                if (onOpenProductDialogWithMove) {
+                    onOpenProductDialogWithMove(draggedGroup, 'after1', moveAction);
+                } else {
+                    onProductCardClick(draggedGroup, 'after1');
+                }
                 return;
             }
         }
@@ -336,7 +354,24 @@ export function AftersaleTab({
                 if (!hasNames) errorMsg += "\n- Phải điền tên \"Người thu tiền\"";
                 
                 toast.error(errorMsg, { duration: 5000 });
-                onProductCardClick(draggedGroup, 'after1_debt');
+                // Mở dialog kèm move callback
+                const moveAction = async () => {
+                    const api = isCustomerItem
+                        ? orderProductsApi.updateAfterSaleData(itemId, { stage: newStage })
+                        : orderItemsApi.updateAfterSaleData(itemId, { stage: newStage });
+                    await api;
+                    if (order.status !== 'after_sale') {
+                        ordersApi.updateStatus(order.id, 'after_sale').catch(console.error);
+                    }
+                    reloadOrder();
+                    fetchKanbanLogs(order.id);
+                    toast.success(`Đã chuyển sản phẩm "${draggedGroup.product?.item_name}" sang bước mới`);
+                };
+                if (onOpenProductDialogWithMove) {
+                    onOpenProductDialogWithMove(draggedGroup, 'after1_debt', moveAction);
+                } else {
+                    onProductCardClick(draggedGroup, 'after1_debt');
+                }
                 return;
             }
         }
@@ -353,7 +388,24 @@ export function AftersaleTab({
                 if (!arePhotosOk) errorMsg += "\n- Cần ít nhất một \"Ảnh đóng gói/trả đồ\"";
                 
                 toast.error(errorMsg, { duration: 5000 });
-                onProductCardClick(draggedGroup, 'after2');
+                // Mở dialog kèm move callback
+                const moveAction = async () => {
+                    const api = isCustomerItem
+                        ? orderProductsApi.updateAfterSaleData(itemId, { stage: newStage })
+                        : orderItemsApi.updateAfterSaleData(itemId, { stage: newStage });
+                    await api;
+                    if (order.status !== 'after_sale') {
+                        ordersApi.updateStatus(order.id, 'after_sale').catch(console.error);
+                    }
+                    reloadOrder();
+                    fetchKanbanLogs(order.id);
+                    toast.success(`Đã chuyển sản phẩm "${draggedGroup.product?.item_name}" sang bước mới`);
+                };
+                if (onOpenProductDialogWithMove) {
+                    onOpenProductDialogWithMove(draggedGroup, 'after2', moveAction);
+                } else {
+                    onProductCardClick(draggedGroup, 'after2');
+                }
                 return;
             }
         }
@@ -361,6 +413,8 @@ export function AftersaleTab({
         const apiPromise = isCustomerItem
             ? orderProductsApi.updateAfterSaleData(itemId, { stage: newStage })
             : orderItemsApi.updateAfterSaleData(itemId, { stage: newStage });
+
+        toast.success(`Đã chuyển sản phẩm "${draggedGroup.product.item_name}" sang bước mới`);
 
         apiPromise.then(() => {
             // Also ensure the order status is 'after_sale' if it's not already

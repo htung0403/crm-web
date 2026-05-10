@@ -261,6 +261,38 @@ export function UpsellManagementPage() {
         </Card>
     );
 
+    const ProductImage = ({ src, alt, className }: { src?: string; alt?: string; className?: string }) => {
+        if (!src) return (
+            <div className={cn("bg-slate-100 flex items-center justify-center rounded-xl border border-slate-200", className)}>
+                <Package className="h-6 w-6 text-slate-300" />
+            </div>
+        );
+        return (
+            <div className={cn("relative group overflow-hidden rounded-xl border border-slate-200", className)}>
+                <img 
+                    src={src} 
+                    alt={alt || "Sản phẩm"} 
+                    className="w-full h-full object-cover cursor-zoom-in hover:scale-110 transition-transform duration-500"
+                    onClick={() => window.open(src, '_blank')}
+                />
+                <div className="absolute inset-0 bg-black/5 group-hover:bg-black/0 transition-colors pointer-events-none" />
+            </div>
+        );
+    };
+
+    const getItemImage = (req: any) => {
+        if (!req) return undefined;
+        const item = req.order_item || req.order_product;
+        if (!item) return undefined;
+
+        // Try various sources for images
+        return item.product_images?.[0] || 
+               item.image || 
+               item.product?.image || 
+               (Array.isArray(item.completion_photos) ? item.completion_photos[0] : 
+               (typeof item.completion_photos === 'string' && item.completion_photos.startsWith('[') ? JSON.parse(item.completion_photos)[0] : undefined));
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -369,32 +401,36 @@ export function UpsellManagementPage() {
                             accessoryRequests.map((req) => (
                                 <Card key={req.id} className="overflow-hidden hover:shadow-md transition-shadow border-blue-100">
                                     <div className="flex flex-col md:flex-row">
-                                        <div className="flex-1 p-5">
-                                            <div className="flex items-start justify-between mb-3">
-                                                <div className="space-y-1">
-                                                    <h3 className="font-bold text-base text-slate-800">{req.metadata?.item_name || 'Phụ kiện không tên'}</h3>
-                                                    <div className="flex items-center gap-3 text-xs text-slate-500">
-                                                        <div className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {formatDateTime(req.created_at)}</div>
-                                                        <div className="flex items-center gap-1"><User className="h-3 w-3" /> KT: {req.technician?.name || '—'}</div>
+                                        <div className="p-4 md:p-5 flex gap-4 flex-1">
+                                            <div className="shrink-0">
+                                                <ProductImage 
+                                                    src={req.metadata?.photos?.[0]} 
+                                                    className="h-24 w-24 md:h-28 md:w-28" 
+                                                />
+                                                {req.metadata?.photos?.length > 1 && (
+                                                    <p className="text-[10px] text-center mt-1 text-slate-400 font-bold">+{req.metadata.photos.length - 1} ảnh khác</p>
+                                                )}
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className="flex items-start justify-between mb-3">
+                                                    <div className="space-y-1">
+                                                        <h3 className="font-bold text-base text-slate-800 line-clamp-1">{req.metadata?.item_name || 'Phụ kiện không tên'}</h3>
+                                                        <div className="flex items-center gap-3 text-xs text-slate-500">
+                                                            <div className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {formatDateTime(req.created_at)}</div>
+                                                            <div className="flex items-center gap-1"><User className="h-3 w-3" /> KT: {req.technician?.name || '—'}</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right shrink-0">
+                                                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Giá</span>
+                                                        <span className="text-lg font-black text-blue-600">{req.metadata?.price_estimate ? formatCurrency(Number(req.metadata.price_estimate.replace(/\D/g, ''))) : '—'}</span>
                                                     </div>
                                                 </div>
-                                                <div className="text-right">
-                                                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Giá</span>
-                                                    <span className="text-lg font-black text-blue-600">{req.metadata?.price_estimate ? formatCurrency(Number(req.metadata.price_estimate.replace(/\D/g, ''))) : '—'}</span>
+                                                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 py-2 bg-blue-50/30 px-3 rounded-lg border border-blue-50 mb-3">
+                                                    <div><p className="text-[10px] font-bold text-slate-400 uppercase">Số lượng</p><p className="text-sm font-black text-slate-700">{req.metadata?.quantity || '1'}</p></div>
+                                                    <div><p className="text-[10px] font-bold text-slate-400 uppercase">Đơn hàng</p><Button variant="link" className="p-0 h-auto text-blue-600 font-bold text-xs" onClick={() => navigate(`/orders/${getOrderId(req)}`)}>{getOrderCode(req)}</Button></div>
+                                                    <div className="col-span-2 md:col-span-1"><p className="text-[10px] font-bold text-slate-400 uppercase">Ghi chú KT</p><p className="text-xs text-slate-600 italic line-clamp-1">{req.notes || 'Không có'}</p></div>
                                                 </div>
                                             </div>
-                                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 py-3 bg-blue-50/30 px-3 rounded-lg border border-blue-50 mb-3">
-                                                <div><p className="text-[10px] font-bold text-slate-400 uppercase">Số lượng</p><p className="text-sm font-black text-slate-700">{req.metadata?.quantity || '1'}</p></div>
-                                                <div><p className="text-[10px] font-bold text-slate-400 uppercase">Đơn hàng</p><Button variant="link" className="p-0 h-auto text-blue-600 font-bold text-xs" onClick={() => navigate(`/orders/${getOrderId(req)}`)}>{getOrderCode(req)}</Button></div>
-                                                <div className="col-span-2 md:col-span-1"><p className="text-[10px] font-bold text-slate-400 uppercase">Ghi chú KT</p><p className="text-xs text-slate-600 italic line-clamp-1">{req.notes || 'Không có'}</p></div>
-                                            </div>
-                                            {req.metadata?.photos?.length > 0 && (
-                                                <div className="flex gap-2 overflow-x-auto pb-1">
-                                                    {req.metadata.photos.map((url: string, i: number) => (
-                                                        <img key={i} src={url} alt="PK" className="h-10 w-10 object-cover rounded border" onClick={() => window.open(url, '_blank')} />
-                                                    ))}
-                                                </div>
-                                            )}
                                         </div>
                                         <div className="bg-slate-50 md:w-32 border-l border-slate-100 p-4 flex flex-col justify-center gap-2">
                                             <Button className="w-full bg-blue-600 hover:bg-blue-700 h-9 text-xs font-bold" onClick={() => handleApproveAccessory(req.id)} disabled={processing}>Duyệt</Button>
@@ -418,23 +454,29 @@ export function UpsellManagementPage() {
                             partnerRequests.map((req) => (
                                 <Card key={req.id} className="overflow-hidden hover:shadow-md transition-shadow border-amber-100">
                                     <div className="flex flex-col md:flex-row">
-                                        <div className="flex-1 p-5">
-                                            <div className="flex items-start justify-between mb-3">
-                                                <div className="space-y-1">
-                                                    <h3 className="font-bold text-base text-slate-800">{req.order_item?.item_name || 'Hạng mục gửi đối tác'}</h3>
-                                                    <div className="flex items-center gap-3 text-xs text-slate-500">
-                                                        <div className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {formatDateTime(req.created_at)}</div>
-                                                        <div className="flex items-center gap-1"><User className="h-3 w-3" /> KT: {req.technician?.name || '—'}</div>
+                                        <div className="p-4 md:p-5 flex gap-4 flex-1">
+                                            <ProductImage 
+                                                src={getItemImage(req)} 
+                                                className="h-24 w-24 md:h-28 md:w-28 shrink-0" 
+                                            />
+                                            <div className="flex-1">
+                                                <div className="flex items-start justify-between mb-3">
+                                                    <div className="space-y-1">
+                                                        <h3 className="font-bold text-base text-slate-800 line-clamp-1">{req.order_item?.item_name || 'Hạng mục gửi đối tác'}</h3>
+                                                        <div className="flex items-center gap-3 text-xs text-slate-500">
+                                                            <div className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {formatDateTime(req.created_at)}</div>
+                                                            <div className="flex items-center gap-1"><User className="h-3 w-3" /> KT: {req.technician?.name || '—'}</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right shrink-0">
+                                                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Trạng thái</span>
+                                                        <Badge className="bg-amber-50 text-amber-600 border-amber-200">Chờ duyệt</Badge>
                                                     </div>
                                                 </div>
-                                                <div className="text-right">
-                                                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Trạng thái</span>
-                                                    <Badge className="bg-amber-50 text-amber-600 border-amber-200">Chờ duyệt</Badge>
+                                                <div className="grid grid-cols-2 gap-4 py-2 bg-amber-50/30 px-3 rounded-lg border border-amber-100 mb-3">
+                                                    <div><p className="text-[10px] font-bold text-slate-400 uppercase">Đơn hàng</p><Button variant="link" className="p-0 h-auto text-amber-600 font-bold text-xs" onClick={() => navigate(`/orders/${getOrderId(req)}`)}>{getOrderCode(req)}</Button></div>
+                                                    <div><p className="text-[10px] font-bold text-slate-400 uppercase">Lý do / Mô tả</p><p className="text-xs text-slate-600 italic line-clamp-2">{req.notes || 'Không có ghi chú'}</p></div>
                                                 </div>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-4 py-3 bg-amber-50/30 px-3 rounded-lg border border-amber-100 mb-3">
-                                                <div><p className="text-[10px] font-bold text-slate-400 uppercase">Đơn hàng</p><Button variant="link" className="p-0 h-auto text-amber-600 font-bold text-xs" onClick={() => navigate(`/orders/${getOrderId(req)}`)}>{getOrderCode(req)}</Button></div>
-                                                <div><p className="text-[10px] font-bold text-slate-400 uppercase">Lý do / Mô tả</p><p className="text-xs text-slate-600 italic line-clamp-2">{req.notes || 'Không có ghi chú'}</p></div>
                                             </div>
                                         </div>
                                         <div className="bg-slate-50 md:w-32 border-l border-slate-100 p-4 flex flex-col justify-center gap-2">
@@ -459,28 +501,34 @@ export function UpsellManagementPage() {
                             extensionRequests.map((req) => (
                                 <Card key={req.id} className="overflow-hidden hover:shadow-md transition-shadow border-purple-100">
                                     <div className="flex flex-col md:flex-row">
-                                        <div className="flex-1 p-5">
-                                            <div className="flex items-start justify-between mb-3">
-                                                <div className="space-y-1">
-                                                    <h3 className="font-bold text-base text-slate-800">{req.order_item?.item_name || 'Hạng mục gia hạn'}</h3>
-                                                    <div className="flex items-center gap-3 text-xs text-slate-500">
-                                                        <div className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {formatDateTime(req.created_at)}</div>
-                                                        <div className="flex items-center gap-1"><User className="h-3 w-3" /> KT: {req.requested_by_user?.name || usersMap[req.requested_by] || '—'}</div>
+                                        <div className="p-4 md:p-5 flex gap-4 flex-1">
+                                            <ProductImage 
+                                                src={getItemImage(req)} 
+                                                className="h-24 w-24 md:h-28 md:w-28 shrink-0" 
+                                            />
+                                            <div className="flex-1">
+                                                <div className="flex items-start justify-between mb-3">
+                                                    <div className="space-y-1">
+                                                        <h3 className="font-bold text-base text-slate-800 line-clamp-1">{req.order_item?.item_name || 'Hạng mục gia hạn'}</h3>
+                                                        <div className="flex items-center gap-3 text-xs text-slate-500">
+                                                            <div className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {formatDateTime(req.created_at)}</div>
+                                                            <div className="flex items-center gap-1"><User className="h-3 w-3" /> KT: {req.requested_by_user?.name || usersMap[req.requested_by] || '—'}</div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right shrink-0">
+                                                        <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Hạn mới đề xuất</span>
+                                                        <span className="text-base font-black text-purple-600">{formatDateTime(req.new_due_at)}</span>
                                                     </div>
                                                 </div>
-                                                <div className="text-right">
-                                                    <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Hạn mới đề xuất</span>
-                                                    <span className="text-base font-black text-purple-600">{formatDateTime(req.new_due_at)}</span>
-                                                </div>
-                                            </div>
-                                            <div className="py-3 bg-purple-50/30 px-3 rounded-lg border border-purple-100 mb-3">
-                                                <div className="flex items-center gap-2 mb-2">
-                                                    <Badge variant="outline" className="bg-white text-indigo-700 text-[10px] h-5 cursor-pointer hover:bg-slate-50" onClick={() => navigate(`/orders/${getOrderId(req)}`)}>Đơn: {getOrderCode(req)}</Badge>
-                                                    <Badge variant="outline" className="bg-white text-emerald-700 text-[10px] h-5">Hạn hiện tại: {formatDateTime(req.order_item?.due_at)}</Badge>
-                                                </div>
-                                                <div className="flex gap-2">
-                                                    <AlertCircle className="h-4 w-4 text-purple-500 shrink-0 mt-0.5" />
-                                                    <p className="text-xs text-slate-600 leading-relaxed"><span className="font-bold">Lý do xin gia hạn:</span> {req.reason}</p>
+                                                <div className="py-2 bg-purple-50/30 px-3 rounded-lg border border-purple-100 mb-3">
+                                                    <div className="flex items-center gap-2 mb-2">
+                                                        <Badge variant="outline" className="bg-white text-indigo-700 text-[10px] h-5 cursor-pointer hover:bg-slate-50" onClick={() => navigate(`/orders/${getOrderId(req)}`)}>Đơn: {getOrderCode(req)}</Badge>
+                                                        <Badge variant="outline" className="bg-white text-emerald-700 text-[10px] h-5">Hạn hiện tại: {formatDateTime(req.order_item?.due_at)}</Badge>
+                                                    </div>
+                                                    <div className="flex gap-2">
+                                                        <AlertCircle className="h-4 w-4 text-purple-500 shrink-0 mt-0.5" />
+                                                        <p className="text-xs text-slate-600 leading-relaxed"><span className="font-bold">Lý do xin gia hạn:</span> {req.reason}</p>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>

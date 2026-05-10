@@ -236,6 +236,8 @@ export function OrderDetailPage() {
     const [selectedProductGroup, setSelectedProductGroup] = useState<any>(null);
     const [currentRoomId, setCurrentRoomId] = useState('');
     const [highlightMessageId, setHighlightMessageId] = useState<string | undefined>(undefined);
+    // Pending move callback: được set khi drag fail validation — sau khi user confirm dialog sẽ tự chuyển trạng thái
+    const [pendingMoveCallback, setPendingMoveCallback] = useState<(() => Promise<void>) | null>(null);
 
     // Departments and Technicians/Sales
     const { departments, fetchDepartments } = useDepartments();
@@ -514,6 +516,15 @@ export function OrderDetailPage() {
     const handleOpenProductDialog = (group: any, roomId: string) => {
         setSelectedProductGroup(group);
         setCurrentRoomId(roomId);
+        setPendingMoveCallback(null); // xóa pending move khi mở dialog bình thường
+        setShowProductDialog(true);
+    };
+
+    /** Mở ProductDetailDialog kèm callback move — sau khi user xác nhận, card tự chuyển và dialog tự đóng */
+    const handleOpenProductDialogWithMove = (group: any, roomId: string, moveCallback: () => Promise<void>) => {
+        setSelectedProductGroup(group);
+        setCurrentRoomId(roomId);
+        setPendingMoveCallback(() => moveCallback); // store callback in state
         setShowProductDialog(true);
     };
 
@@ -650,6 +661,7 @@ export function OrderDetailPage() {
                     onProductCardClick={handleOpenProductDialog}
                     workflowKanbanGroups={workflowKanbanGroups}
                     onTabChange={setActiveTab}
+                    onOpenProductDialogWithMove={handleOpenProductDialogWithMove}
                 />
 
                 <WorkflowTab
@@ -685,6 +697,7 @@ export function OrderDetailPage() {
                     getAfterSaleStageLabel={getAfterSaleStageLabel}
                     getGroupCurrentTechRoom={getGroupCurrentTechRoom}
                     onProductCardClick={handleOpenProductDialog}
+                    onOpenProductDialogWithMove={handleOpenProductDialogWithMove}
                 />
 
                 <CareTab
@@ -1070,7 +1083,10 @@ export function OrderDetailPage() {
                 open={showProductDialog}
                 onOpenChange={(open) => {
                     setShowProductDialog(open);
-                    if (!open) setHighlightMessageId(undefined);
+                    if (!open) {
+                        setHighlightMessageId(undefined);
+                        setPendingMoveCallback(null); // xóa pending move khi dialog đóng
+                    }
                 }}
                 group={selectedProductGroup}
                 roomId={currentRoomId}
@@ -1085,6 +1101,8 @@ export function OrderDetailPage() {
                 workflowLogs={workflowLogs}
                 aftersaleLogs={aftersaleLogs}
                 careLogs={careLogs}
+                onConfirmAndMove={pendingMoveCallback || undefined}
+                onRoomChange={setCurrentRoomId}
             />
 
             <UpsellDialog

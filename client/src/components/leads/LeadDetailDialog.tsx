@@ -12,6 +12,7 @@ import { formatDateTime } from '@/lib/utils';
 import type { Lead } from '@/hooks/useLeads';
 import { kanbanColumns, sourceLabels, getStatusLabel } from './constants';
 import { LeadHenQuaShipDialog } from './LeadHenQuaShipDialog';
+import { LeadUpdatePhoneDialog } from './LeadUpdatePhoneDialog';
 
 interface LeadDetailDialogProps {
     lead: Lead | null;
@@ -39,6 +40,7 @@ export function LeadDetailDialog({
     const [activities, setActivities] = useState<any[]>([]);
     const [loadingActivities, setLoadingActivities] = useState(false);
     const [showHenQuaShipDialog, setShowHenQuaShipDialog] = useState(false);
+    const [showUpdatePhoneDialog, setShowUpdatePhoneDialog] = useState(false);
 
     // Fetch activities when dialog opens
     useEffect(() => {
@@ -104,7 +106,7 @@ export function LeadDetailDialog({
     const handleStatusChange = async (newStatus: string) => {
         // Validation: Must have phone number to move to 'chot_don'
         if (newStatus === 'chot_don' && !lead.phone) {
-            toast.error('Vui lòng cập nhật số điện thoại trước khi chốt đơn');
+            setShowUpdatePhoneDialog(true);
             return;
         }
 
@@ -135,6 +137,21 @@ export function LeadDetailDialog({
             toast.success('Đã cập nhật thông tin');
         } catch {
             toast.error('Lỗi khi cập nhật thông tin');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleSubmitUpdatePhone = async (data: Partial<Lead>) => {
+        if (!lead) return;
+        setIsSaving(true);
+        try {
+            await onUpdate(lead.id, { ...data, pipeline_stage: 'chot_don', status: 'chot_don' });
+            setSelectedStatus('chot_don');
+            setShowUpdatePhoneDialog(false);
+            toast.success('Đã cập nhật số điện thoại');
+        } catch {
+            toast.error('Lỗi khi cập nhật số điện thoại');
         } finally {
             setIsSaving(false);
         }
@@ -371,6 +388,12 @@ export function LeadDetailDialog({
                 open={showHenQuaShipDialog}
                 onClose={() => setShowHenQuaShipDialog(false)}
                 onSubmit={handleSubmitHenQuaShip}
+                lead={lead}
+            />
+            <LeadUpdatePhoneDialog
+                open={showUpdatePhoneDialog}
+                onClose={() => setShowUpdatePhoneDialog(false)}
+                onSubmit={handleSubmitUpdatePhone}
                 lead={lead}
             />
         </Dialog>

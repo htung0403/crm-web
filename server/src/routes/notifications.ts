@@ -4,6 +4,73 @@ import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 
 const router = express.Router();
 
+// Create notification (internal use - for cron jobs, webhooks, etc.)
+router.post('/', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+        const { user_id, type, title, message, data } = req.body;
+
+        if (!user_id || !title || !message) {
+            return res.status(400).json({ message: 'user_id, title, message are required' });
+        }
+
+        const { data: notification, error } = await supabaseAdmin
+            .from('notifications')
+            .insert({
+                user_id,
+                type: type || 'system',
+                title,
+                message,
+                data: data || {},
+                is_read: false,
+                created_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        res.status(201).json({ status: 'success', data: notification });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Create notifications for multiple users
+router.post('/batch', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    try {
+        const { user_ids, type, title, message, data } = req.body;
+
+        if (!user_ids || !Array.isArray(user_ids) || user_ids.length === 0) {
+            return res.status(400).json({ message: 'user_ids array is required' });
+        }
+
+        if (!title || !message) {
+            return res.status(400).json({ message: 'title and message are required' });
+        }
+
+        const notifications = user_ids.map((user_id: string) => ({
+            user_id,
+            type: type || 'system',
+            title,
+            message,
+            data: data || {},
+            is_read: false,
+            created_at: new Date().toISOString()
+        }));
+
+        const { data: inserted, error } = await supabaseAdmin
+            .from('notifications')
+            .insert(notifications)
+            .select();
+
+        if (error) throw error;
+
+        res.status(201).json({ status: 'success', count: inserted?.length || 0, data: inserted });
+    } catch (error) {
+        next(error);
+    }
+});
+
 // Get notifications for current user
 router.get('/', authenticate, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
