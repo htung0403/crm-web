@@ -517,14 +517,26 @@ export function LeadsPage() {
 
                                 {/* Employee Filter */}
                                 <Select 
-                                    value={selectedEmployees.length === 1 ? selectedEmployees[0] : 'all'} 
-                                    onValueChange={(val) => setSelectedEmployees(val === 'all' ? [] : [val])}
+                                    value={onlyUnassigned ? 'unassigned' : selectedEmployees.length === 1 ? selectedEmployees[0] : 'all'} 
+                                    onValueChange={(val) => {
+                                        if (val === 'all') {
+                                            setSelectedEmployees([]);
+                                            setOnlyUnassigned(false);
+                                        } else if (val === 'unassigned') {
+                                            setSelectedEmployees([]);
+                                            setOnlyUnassigned(true);
+                                        } else {
+                                            setSelectedEmployees([val]);
+                                            setOnlyUnassigned(false);
+                                        }
+                                    }}
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="Nhân viên" />
                                     </SelectTrigger>
                                     <SelectContent>
                                         <SelectItem value="all">Tất cả NV</SelectItem>
+                                        <SelectItem value="unassigned">Chưa phân công</SelectItem>
                                         {employees.map(user => (
                                             <SelectItem key={user.id} value={user.id}>{user.name}</SelectItem>
                                         ))}
