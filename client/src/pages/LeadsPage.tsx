@@ -120,7 +120,7 @@ export function LeadsPage() {
 
     // Fetch data on mount
     useEffect(() => {
-        fetchLeads({ limit: 500 });
+        fetchLeads({ limit: 1000 });
         fetchEmployees({ role: 'sale' });
         // Fetch data for CreateOrderDialog
         fetchCustomers();
@@ -226,10 +226,10 @@ export function LeadsPage() {
                 navigate(`/orders/new?${params.toString()}`);
             }
 
-            await fetchLeads({ limit: 500 }); // Refresh data
+            await fetchLeads({ limit: 1000 }); // Refresh data
         } catch {
             toast.error('Lỗi khi cập nhật trạng thái');
-            await fetchLeads({ limit: 500 }); // Revert by refreshing
+            await fetchLeads({ limit: 1000 }); // Revert by refreshing
         }
     };
 
@@ -240,7 +240,7 @@ export function LeadsPage() {
             toast.success(`Đã cập nhật thông tin cho "${leadForHenQuaShip.name}"`);
             setShowHenQuaShipDialog(false);
             setLeadForHenQuaShip(null);
-            await fetchLeads({ limit: 500 });
+            await fetchLeads({ limit: 1000 });
         } catch {
             toast.error('Lỗi khi cập nhật thông tin');
         }
@@ -253,7 +253,7 @@ export function LeadsPage() {
             toast.success(`Đã chuyển "${leadForFail.name}" sang trạng thái Fail`);
             setShowFailDialog(false);
             setLeadForFail(null);
-            await fetchLeads({ limit: 500 });
+            await fetchLeads({ limit: 1000 });
         } catch {
             toast.error('Lỗi khi cập nhật trạng thái');
         }
@@ -276,7 +276,7 @@ export function LeadsPage() {
             navigate(`/orders/new?${params.toString()}`);
             
             setLeadForUpdatePhone(null);
-            await fetchLeads({ limit: 500 });
+            await fetchLeads({ limit: 1000 });
         } catch {
             toast.error('Lỗi khi cập nhật số điện thoại');
         }
@@ -286,7 +286,7 @@ export function LeadsPage() {
         try {
             await convertLead(lead.id);
             toast.success(`Đã chuyển đổi ${lead.name} thành khách hàng!`);
-            await fetchLeads({ limit: 500 });
+            await fetchLeads({ limit: 1000 });
         } catch {
             toast.error('Lỗi khi chuyển đổi lead');
         }
@@ -296,7 +296,7 @@ export function LeadsPage() {
         try {
             await createLead(data);
             toast.success('Đã tạo lead thành công!');
-            await fetchLeads({ limit: 500 });
+            await fetchLeads({ limit: 1000 });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Lỗi khi tạo lead';
             toast.error(message);
@@ -353,10 +353,10 @@ export function LeadsPage() {
                 navigate(`/orders/new?${params.toString()}`);
             }
 
-            await fetchLeads({ limit: 500 });
+            await fetchLeads({ limit: 1000 });
         } catch {
             toast.error('Lỗi khi cập nhật trạng thái');
-            await fetchLeads({ limit: 500 });
+            await fetchLeads({ limit: 1000 });
         }
     };
 
@@ -649,7 +649,7 @@ export function LeadsPage() {
                         }
                         setShowOrderConfirmation(false);
                         setCreatedOrder(null);
-                        fetchLeads({ limit: 500 }); // Refresh leads data
+                        fetchLeads({ limit: 1000 }); // Refresh leads data
                     }}
                 />
 
