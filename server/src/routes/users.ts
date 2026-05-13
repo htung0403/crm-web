@@ -121,11 +121,13 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
             throw new ApiError('Mật khẩu phải có ít nhất 6 ký tự', 400);
         }
 
+        const normalizedEmail = email.toLowerCase().trim();
+
         // Check if email already exists
         const { data: existingUser } = await supabaseAdmin
             .from('users')
             .select('id')
-            .eq('email', email)
+            .eq('email', normalizedEmail)
             .single();
 
         if (existingUser) {
@@ -154,7 +156,7 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
         const { data: user, error: insertError } = await supabaseAdmin
             .from('users')
             .insert({
-                email,
+                email: normalizedEmail,
                 password_hash: passwordHash,
                 name,
                 phone: phone || null,
