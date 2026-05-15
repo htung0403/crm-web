@@ -91,12 +91,20 @@ export function EmployeeFormDialog({
     const [branches, setBranches] = useState<{ id: string, name: string }[]>([]);
 
     useEffect(() => {
-        if (open) {
-            fetch(import.meta.env.VITE_API_URL + '/branches')
-                .then(res => res.json())
-                .then(data => setBranches(data?.data?.branches || []))
-                .catch(console.error);
-        }
+        if (!open) return;
+        api.get('/branches')
+            .then((res) => {
+                const body = res.data;
+                const list =
+                    body?.data?.branches ??
+                    body?.branches ??
+                    (Array.isArray(body) ? body : []);
+                setBranches(Array.isArray(list) ? list : []);
+            })
+            .catch((err) => {
+                console.warn('Could not load branches:', err);
+                setBranches([]);
+            });
     }, [open]);
 
     // Active tab

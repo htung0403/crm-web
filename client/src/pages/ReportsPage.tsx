@@ -11,6 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatCurrency } from '@/lib/utils';
 import api from '@/lib/api';
+import { ReportsDashboard } from '@/components/reports/ReportsDashboard';
+import { CustomerAnalysisReport } from '@/components/reports/CustomerAnalysisReport';
 
 // Types for report data
 interface RevenueData {
@@ -224,7 +226,7 @@ function StatCard({
 
 export function ReportsPage() {
     const [period, setPeriod] = useState('month');
-    const [reportType, setReportType] = useState('revenue');
+    const [reportType, setReportType] = useState('dashboard');
     const [loading, setLoading] = useState(true);
     const [reportData, setReportData] = useState<ReportSummary | null>(null);
 
@@ -233,11 +235,11 @@ export function ReportsPage() {
     const [toDate, setToDate] = useState('');
 
     useEffect(() => {
-        // Only fetch if not custom, or if custom has both dates
+        if (reportType === 'dashboard' || reportType === 'customer-analysis') return;
         if (period !== 'custom' || (fromDate && toDate)) {
             fetchReportData();
         }
-    }, [period, fromDate, toDate]);
+    }, [period, fromDate, toDate, reportType]);
 
     const fetchReportData = async () => {
         setLoading(true);
@@ -502,7 +504,7 @@ export function ReportsPage() {
         }
     };
 
-    if (loading) {
+    if (loading && reportType !== 'dashboard' && reportType !== 'customer-analysis') {
         return (
             <div className="flex items-center justify-center h-96">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -518,6 +520,7 @@ export function ReportsPage() {
                     <h1 className="text-2xl font-bold text-foreground">Báo cáo</h1>
                     <p className="text-muted-foreground">Phân tích và thống kê hoạt động kinh doanh</p>
                 </div>
+                {reportType !== 'dashboard' && reportType !== 'customer-analysis' && (
                 <div className="flex flex-wrap gap-2 items-center">
                     <Select value={period} onValueChange={(v) => {
                         setPeriod(v);
@@ -565,11 +568,20 @@ export function ReportsPage() {
                         In báo cáo
                     </Button>
                 </div>
+                )}
             </div>
 
             {/* Report Tabs */}
             <Tabs value={reportType} onValueChange={setReportType}>
                 <TabsList className="mb-4 flex-wrap h-auto gap-2">
+                    <TabsTrigger value="dashboard" className="gap-2">
+                        <BarChart3 className="h-4 w-4" />
+                        Dashboard
+                    </TabsTrigger>
+                    <TabsTrigger value="customer-analysis" className="gap-2">
+                        <Users className="h-4 w-4" />
+                        Phân tích KH
+                    </TabsTrigger>
                     <TabsTrigger value="revenue" className="gap-2">
                         <DollarSign className="h-4 w-4" />
                         Doanh thu
@@ -583,6 +595,14 @@ export function ReportsPage() {
                         Nhân sự
                     </TabsTrigger>
                 </TabsList>
+
+                <TabsContent value="dashboard" className="space-y-6">
+                    <ReportsDashboard />
+                </TabsContent>
+
+                <TabsContent value="customer-analysis" className="space-y-6">
+                    <CustomerAnalysisReport />
+                </TabsContent>
 
                 {/* Revenue Report */}
                 <TabsContent value="revenue" className="space-y-6">

@@ -37,6 +37,7 @@ import { CreatePackagePage } from '@/pages/CreatePackagePage';
 import { CreateProductPage } from '@/pages/CreateProductPage';
 import { UpsellManagementPage } from '@/pages/UpsellManagementPage';
 import { LeaveRequestsPage } from '@/pages/LeaveRequestsPage';
+import { AttendanceMobilePage } from '@/pages/AttendanceMobilePage';
 import { WorkSchedulePage } from '@/pages/WorkSchedulePage';
 import { TimesheetsPage } from '@/pages/TimesheetsPage';
 import { CommissionsPage } from '@/pages/CommissionsPage';
@@ -94,6 +95,7 @@ const pagePermissions: Record<string, UserRole[]> = {
   'upsell-management': ['admin', 'manager'],
   settings: ['admin', 'manager'],
   'leave-requests': ['admin', 'manager', 'accountant', 'sale', 'technician'],
+  'attendance-mobile': ['admin', 'manager', 'accountant', 'sale', 'technician'],
   'work-schedule': ['admin', 'manager', 'accountant', 'sale', 'technician'],
   timesheets: ['admin', 'manager', 'accountant'],
   commissions: ['admin', 'manager', 'accountant'],
@@ -390,6 +392,12 @@ function AppContent() {
             <Route path="/leave-requests" element={
               <ProtectedRoute allowedRoles={pagePermissions['leave-requests']}>
                 <LeaveRequestsPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/attendance-mobile" element={
+              <ProtectedRoute allowedRoles={pagePermissions['attendance-mobile']}>
+                <AttendanceMobilePage />
               </ProtectedRoute>
             } />
 

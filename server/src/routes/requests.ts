@@ -3,6 +3,11 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
+import {
+    logAccessoryStatusChange,
+    logExtensionStatusChange,
+    logPartnerStatusChange,
+} from '../utils/workflowRequestLog.js';
 
 const router = Router();
 console.log('🚀 Requests Router Loaded');
@@ -42,7 +47,6 @@ router.patch('/accessories/:id', authenticate, async (req: AuthenticatedRequest,
         const { status, notes, metadata } = req.body;
         const userId = req.user?.id;
 
-        // Fetch CURRENT to validate status change
         const { data: current, error: fetchError } = await supabaseAdmin
             .from('order_item_accessories')
             .select('*')
@@ -85,7 +89,19 @@ router.patch('/accessories/:id', authenticate, async (req: AuthenticatedRequest,
             throw new ApiError('Không thể cập nhật yêu cầu: ' + error.message, 500);
         }
 
-        // 🔔 WH5: Fire webhook — Mua phụ kiện (status change)
+        if (status && status !== current.status) {
+            await logAccessoryStatusChange(
+                {
+                    order_item_id: current.order_item_id,
+                    order_product_service_id: current.order_product_service_id,
+                },
+                current.status,
+                status,
+                notes ?? current.notes,
+                userId
+            );
+        }
+
         if (status) {
             fireWebhook('accessory.status_changed', {
                 accessory_id: id,
@@ -107,6 +123,16 @@ router.patch('/partners/:id', authenticate, async (req: AuthenticatedRequest, re
         const { status, notes, metadata } = req.body;
         const userId = req.user?.id;
 
+        const { data: current, error: fetchError } = await supabaseAdmin
+            .from('order_item_partner')
+            .select('id, status, notes, order_item_id, order_product_service_id')
+            .eq('id', id)
+            .single();
+
+        if (fetchError || !current) {
+            throw new ApiError('Không tìm thấy yêu cầu gửi đối tác', 404);
+        }
+
         const { data, error } = await supabaseAdmin
             .from('order_item_partner')
             .update({
@@ -124,10 +150,23 @@ router.patch('/partners/:id', authenticate, async (req: AuthenticatedRequest, re
             throw new ApiError('Không thể cập nhật yêu cầu đối tác: ' + error.message, 500);
         }
 
-        // 🔔 WH5: Fire webhook — Gửi đối tác (status change)
+        if (status && status !== current.status) {
+            await logPartnerStatusChange(
+                {
+                    order_item_id: current.order_item_id,
+                    order_product_service_id: current.order_product_service_id,
+                },
+                current.status,
+                status,
+                notes ?? current.notes,
+                userId
+            );
+        }
+
         if (status) {
             fireWebhook('partner.status_changed', {
                 partner_id: id,
+                old_status: current.status,
                 new_status: status,
                 notes: notes || null,
             });
@@ -254,6 +293,16 @@ router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, 
         const { status, customer_result, new_due_at, valid_reason, kpi_impact } = req.body;
         const userId = req.user?.id;
 
+        const { data: current, error: fetchError } = await supabaseAdmin
+            .from('order_extension_requests')
+            .select('id, status, reason, order_item_id, order_product_service_id')
+            .eq('id', id)
+            .single();
+
+        if (fetchError || !current) {
+            throw new ApiError('Không tìm thấy yêu cầu gia hạn', 404);
+        }
+
         const updatePayload: Record<string, any> = {
             status: status || undefined,
             customer_result: customer_result !== undefined ? customer_result : undefined,
@@ -278,6 +327,22 @@ router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, 
 
         if (error) {
             throw new ApiError('Không thể cập nhật yêu cầu gia hạn: ' + error.message, 500);
+        }
+
+        if (status && status !== current.status) {
+            const noteText =
+                customer_result ||
+                (status === 'rejected' ? 'QL từ chối yêu cầu gia hạn' : 'QL đã xử lý yêu cầu gia hạn');
+            await logExtensionStatusChange(
+                {
+                    order_item_id: current.order_item_id,
+                    order_product_service_id: current.order_product_service_id,
+                },
+                current.status,
+                status,
+                noteText,
+                userId
+            );
         }
 
         // When extension approved, propagate new_due_at to orders.due_at

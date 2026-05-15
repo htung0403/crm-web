@@ -28,11 +28,13 @@ import { ProductChat } from '@/components/orders/workflow/ProductChat';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import { cn, formatCurrency, formatDateTime, formatDate } from '@/lib/utils';
 import { SALES_STATUS_LABELS, getCareWarrantyStageLabel, getAfterSaleStageLabel, getSalesStatusLabel } from '../constants';
+import { getWorkflowRequestLogDisplay, isWorkflowRequestLogAction } from '../workflowRequestLog';
 import { orderItemsApi, orderProductsApi, productChatsApi } from '@/lib/api';
 import { toast } from 'sonner';
 import { ImageUpload } from '@/components/products/ImageUpload';
 import { useUsers } from '@/hooks/useUsers';
 import { uploadFile } from '@/lib/supabase';
+import { DELIVERY_CARRIER_OPTIONS } from '@/constants/deliveryCarriers';
 
 
 interface ProductDetailDialogProps {
@@ -464,7 +466,7 @@ export function ProductDetailDialog({
                     await ordersApi.createPayment(order.id, {
                         content: 'Phí giao hàng',
                         amount: formData.delivery_fee,
-                        notes: `Phí ship giao đồ cho đơn ${order.order_code || order.id}`,
+                        notes: `Phí ship giao đồ cho đơn ${order.order_code || order.id}${formData.delivery_carrier ? `. Đơn vị VC: ${formData.delivery_carrier}` : ''}`,
                         payment_method: (formData as any).delivery_payment_method || 'cash',
                     });
                     toast.success('Đã tạo phiếu thu cho phí ship');
@@ -550,9 +552,8 @@ export function ProductDetailDialog({
     };
 
     const getRoomLogs = () => {
-        const REQUEST_ACTIONS = ['accessory_requested', 'partner_requested', 'extension_requested'];
         const filteredWorkflowLogs = workflowLogs.filter(log => 
-            log.action === 'assigned' || log.action === 'failed' || REQUEST_ACTIONS.includes(log.action)
+            log.action === 'assigned' || log.action === 'failed' || isWorkflowRequestLogAction(log.action)
         );
         const allLogs = [...salesLogs, ...filteredWorkflowLogs, ...aftersaleLogs, ...careLogs];
         return allLogs
@@ -676,6 +677,22 @@ export function ProductDetailDialog({
                     {log.notes && <div className="text-xs mt-1">{log.notes}</div>}
                 </div>
             )}
+
+            {['partner_approved', 'partner_rejected', 'accessory_approved', 'accessory_rejected', 'extension_approved', 'extension_rejected'].includes(log.action) && (() => {
+                const display = getWorkflowRequestLogDisplay(log.action);
+                if (!display) return null;
+                return (
+                    <div className={cn('mt-1.5 p-2 rounded-lg border', display.boxClass)}>
+                        <div className="flex items-center gap-1.5 font-medium">
+                            <span>{display.emoji}</span>
+                            <span>{display.label}</span>
+                        </div>
+                        {(log.reason || log.notes) && (
+                            <div className="text-xs mt-1">{log.reason || log.notes}</div>
+                        )}
+                    </div>
+                );
+            })()}
 
             <Button 
                 variant="ghost" 
@@ -1497,21 +1514,42 @@ export function ProductDetailDialog({
                                                                 <div className="grid grid-cols-2 gap-4">
                                                                     <div className="space-y-2">
                                                                         <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
-                                                                            NHÂN VIÊN GIAO SHIP <span className="text-red-500">*</span>
+                                                                            NV VẬN CHUYỂN <span className="text-red-500">*</span>
                                                                         </Label>
                                                                         <Select
-                                                                            value={formData.delivery_staff_name || ''}
-                                                                            onValueChange={(val) => setFormData(prev => ({ ...prev, delivery_staff_name: val }))}
+                                                                            value={
+                                                                                DELIVERY_CARRIER_OPTIONS.includes(formData.delivery_carrier as (typeof DELIVERY_CARRIER_OPTIONS)[number])
+                                                                                    ? formData.delivery_carrier
+                                                                                    : formData.delivery_carrier
+                                                                                        ? 'Khác'
+                                                                                        : ''
+                                                                            }
+                                                                            onValueChange={(val) => {
+                                                                                if (val === 'Khác') {
+                                                                                    setFormData(prev => ({ ...prev, delivery_carrier: '' }));
+                                                                                } else {
+                                                                                    setFormData(prev => ({ ...prev, delivery_carrier: val }));
+                                                                                }
+                                                                            }}
                                                                         >
                                                                             <SelectTrigger className="h-9 bg-white">
-                                                                                <SelectValue placeholder="Chọn..." />
+                                                                                <SelectValue placeholder="Chọn đơn vị..." />
                                                                             </SelectTrigger>
                                                                             <SelectContent>
-                                                                                {users.map(u => (
-                                                                                    <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
+                                                                                {DELIVERY_CARRIER_OPTIONS.map((name) => (
+                                                                                    <SelectItem key={name} value={name}>{name}</SelectItem>
                                                                                 ))}
                                                                             </SelectContent>
                                                                         </Select>
+                                                                        {(formData.delivery_carrier === '' ||
+                                                                            !DELIVERY_CARRIER_OPTIONS.includes(formData.delivery_carrier as (typeof DELIVERY_CARRIER_OPTIONS)[number])) && (
+                                                                            <Input
+                                                                                className="h-9"
+                                                                                placeholder="Nhập tên đơn vị..."
+                                                                                value={formData.delivery_carrier || ''}
+                                                                                onChange={(e) => setFormData(prev => ({ ...prev, delivery_carrier: e.target.value }))}
+                                                                            />
+                                                                        )}
                                                                     </div>
                                                                     <div className="space-y-2">
                                                                         <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
@@ -1528,14 +1566,6 @@ export function ProductDetailDialog({
 
                                                                 <div className="space-y-4 border-t border-blue-50 pt-4">
                                                                     <div className="grid grid-cols-2 gap-4">
-                                                                        <div className="space-y-2">
-                                                                            <Label className="text-xs font-bold text-gray-500 uppercase">ĐƠN VỊ VẬN CHUYỂN</Label>
-                                                                            <Input
-                                                                                placeholder="VD: GHTK, Viettel Post..."
-                                                                                value={formData.delivery_carrier || ''}
-                                                                                onChange={(e) => setFormData(prev => ({ ...prev, delivery_carrier: e.target.value }))}
-                                                                            />
-                                                                        </div>
                                                                         <div className="space-y-2">
                                                                             <Label className="text-xs font-bold text-gray-500 uppercase">Mã vận đơn</Label>
                                                                             <Input

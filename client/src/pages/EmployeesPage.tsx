@@ -384,7 +384,8 @@ export function EmployeesPage() {
     const [loadingBranches, setLoadingBranches] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
-    const [roleFilter, setRoleFilter] = useState<string>('all');
+    const [departmentFilter, setDepartmentFilter] = useState<string>('all');
+    const [jobTitleFilter, setJobTitleFilter] = useState<string>('all');
     const [statusFilter, setStatusFilter] = useState<string>('active');
     const [showForm, setShowForm] = useState(false);
     const [showEmployeeDetailModal, setShowEmployeeDetailModal] = useState(false);
@@ -518,11 +519,16 @@ export function EmployeesPage() {
         setLoadingBranches(true);
         try {
             const response = await api.get('/branches');
-            const data = response.data?.data?.branches || [];
-            setBranches(data);
-        } catch (error) {
-            console.error('Error fetching branches:', error);
-            toast.error('Lỗi khi lấy danh sách chi nhánh');
+            const body = response.data;
+            const list =
+                body?.data?.branches ??
+                body?.branches ??
+                (Array.isArray(body?.data) ? body.data : null) ??
+                (Array.isArray(body) ? body : []);
+            setBranches(Array.isArray(list) ? list : []);
+        } catch (error: unknown) {
+            console.warn('Could not load branches (optional):', error);
+            setBranches([]);
         } finally {
             setLoadingBranches(false);
         }
@@ -547,9 +553,15 @@ export function EmployeesPage() {
         const matchesSearch = emp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             emp.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
             (emp.phone || '').includes(searchTerm);
-        const matchesRole = roleFilter === 'all' || emp.role === roleFilter;
         const matchesStatus = statusFilter === 'all' || emp.status === statusFilter;
-        return matchesSearch && matchesRole && matchesStatus;
+        const matchesDepartment =
+            departmentFilter === 'all' ||
+            (emp as Employee & { departmentId?: string }).departmentId === departmentFilter ||
+            emp.department === departmentFilter ||
+            departments.find((d) => d.id === departmentFilter)?.name === emp.department;
+        const matchesJobTitle =
+            jobTitleFilter === 'all' || emp.job_title_id === jobTitleFilter;
+        return matchesSearch && matchesStatus && matchesDepartment && matchesJobTitle;
     });
 
     // Stats
@@ -641,95 +653,78 @@ export function EmployeesPage() {
     }
 
     return (
-        <div className="flex h-[calc(100vh-6rem)] bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-            {/* Sidebar / Filters (Left Panel) */}
-            <div className="w-[280px] border-r border-gray-200 bg-[#fbfcfd] flex flex-col p-5 flex-shrink-0">
-                <h1 className="text-[17px] font-bold mb-7 text-gray-900 tracking-tight">Danh sách nhân viên</h1>
-
-                <div className="space-y-8">
-                    <div className="space-y-4">
-                        <h3 className="text-[13px] font-bold text-gray-700">Trạng thái nhân viên</h3>
-                        <div className="space-y-3.5 mt-2">
-                            <label className="flex items-center gap-3 cursor-pointer">
-                                <input 
-                                    type="radio" 
-                                    className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 cursor-pointer" 
-                                    name="status" 
-                                    value="active" 
-                                    checked={statusFilter === 'active'} 
-                                    onChange={() => setStatusFilter('active')} 
-                                />
-                                <span className={statusFilter === 'active' ? "text-sm text-blue-600 font-medium" : "text-sm text-gray-700"}>Đang làm việc</span>
-                            </label>
-                            <label className="flex items-center gap-3 cursor-pointer">
-                                <input 
-                                    type="radio" 
-                                    className="w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 cursor-pointer" 
-                                    name="status" 
-                                    value="inactive" 
-                                    checked={statusFilter === 'inactive'}
-                                    onChange={() => setStatusFilter('inactive')} 
-                                />
-                                <span className={statusFilter === 'inactive' ? "text-sm text-blue-600 font-medium" : "text-sm text-gray-700"}>Đã nghỉ</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-[13px] font-bold text-gray-700">Phòng ban</h3>
-                            <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full hover:bg-gray-200" onClick={() => { setDeptForm({ name: '', description: '', status: 'active' }); setShowDeptDialog(true); }}>
-                                <Plus className="h-3.5 w-3.5 text-gray-600" />
-                            </Button>
-                        </div>
-                        <Select>
-                            <SelectTrigger className="w-full h-[38px] bg-white border-gray-200 text-[13px] shadow-sm rounded-lg text-gray-500">
-                                <SelectValue placeholder="Chọn phòng ban" />
+        <div className="flex h-[calc(100vh-6rem)] flex-col bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <div className="shrink-0 border-b border-gray-200 bg-[#fbfcfd] px-4 py-3 space-y-3">
+                <h1 className="text-[17px] font-bold text-gray-900 tracking-tight">Danh sách nhân viên</h1>
+                <div className="flex flex-wrap items-end gap-3">
+                    <div className="space-y-1 min-w-[140px]">
+                        <Label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Trạng thái</Label>
+                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="h-[36px] w-full min-w-[140px] bg-white border-gray-200 text-[13px]">
+                                <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                                {departments.map(d => (
+                                <SelectItem value="active" className="text-[13px]">Đang làm việc</SelectItem>
+                                <SelectItem value="inactive" className="text-[13px]">Đã nghỉ</SelectItem>
+                                <SelectItem value="all" className="text-[13px]">Tất cả</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div className="space-y-1 min-w-[160px] flex-1 max-w-[220px]">
+                        <div className="flex items-center justify-between gap-1">
+                            <Label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Phòng ban</Label>
+                            <Button variant="ghost" size="icon" className="h-5 w-5 rounded-full hover:bg-gray-200" onClick={() => { setDeptForm({ name: '', description: '', status: 'active' }); setShowDeptDialog(true); }}>
+                                <Plus className="h-3 w-3 text-gray-600" />
+                            </Button>
+                        </div>
+                        <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                            <SelectTrigger className="h-[36px] w-full bg-white border-gray-200 text-[13px]">
+                                <SelectValue placeholder="Tất cả phòng ban" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all" className="text-[13px]">Tất cả phòng ban</SelectItem>
+                                {departments.map((d) => (
                                     <SelectItem key={d.id} value={d.id} className="text-[13px]">{d.name}</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
                     </div>
-
-                    <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-[13px] font-bold text-gray-700">Chức danh</h3>
-                            <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full hover:bg-gray-200" onClick={() => { setTitleForm({ name: '', description: '', status: 'active' }); setShowTitleDialog(true); }}>
-                                <Plus className="h-3.5 w-3.5 text-gray-600" />
+                    <div className="space-y-1 min-w-[160px] flex-1 max-w-[220px]">
+                        <div className="flex items-center justify-between gap-1">
+                            <Label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Chức danh</Label>
+                            <Button variant="ghost" size="icon" className="h-5 w-5 rounded-full hover:bg-gray-200" onClick={() => { setTitleForm({ name: '', description: '', status: 'active' }); setShowTitleDialog(true); }}>
+                                <Plus className="h-3 w-3 text-gray-600" />
                             </Button>
                         </div>
-                        <Select value={roleFilter} onValueChange={setRoleFilter}>
-                            <SelectTrigger className="w-full h-[38px] bg-white border-gray-200 text-[13px] shadow-sm rounded-lg text-gray-500">
-                                <SelectValue placeholder="Chọn chức danh" />
+                        <Select value={jobTitleFilter} onValueChange={setJobTitleFilter}>
+                            <SelectTrigger className="h-[36px] w-full bg-white border-gray-200 text-[13px]">
+                                <SelectValue placeholder="Tất cả chức danh" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="all" className="text-[13px]">Chọn chức danh</SelectItem>
-                                {jobTitles.map(jt => (
+                                <SelectItem value="all" className="text-[13px]">Tất cả chức danh</SelectItem>
+                                {jobTitles.map((jt) => (
                                     <SelectItem key={jt.id} value={jt.id} className="text-[13px]">{jt.name}</SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
                     </div>
+                    <div className="space-y-1 flex-1 min-w-[200px] max-w-md">
+                        <Label className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Tìm kiếm</Label>
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                            <Input
+                                className="w-full pl-9 h-[36px] border-gray-200 text-[13px] bg-white shadow-sm rounded-lg"
+                                placeholder="Mã, tên, email, SĐT..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                            />
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            {/* Main Content (Right Panel) */}
-            <div className="flex-1 flex flex-col min-w-0 bg-white">
-                {/* Search Bar & Actions */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3 border-b border-gray-100 gap-3 bg-[#fbfcfd]">
-                    <div className="flex-1 relative max-w-sm">
-                        <Search className="absolute left-3 top-1/2 -translate-y-[45%] h-[15px] w-[15px] text-gray-400" />
-                        <Input 
-                            className="w-full pl-[34px] h-[36px] border-gray-200 text-[13px] placeholder:text-gray-400 bg-white shadow-sm rounded-lg focus-visible:ring-1 focus-visible:ring-blue-500" 
-                            placeholder="Tìm theo mã, tên nhân viên" 
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                        />
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap justify-end">
+            <div className="flex-1 flex flex-col min-w-0 bg-white min-h-0">
+                <div className="shrink-0 flex flex-wrap items-center justify-end gap-2 px-4 py-2 border-b border-gray-100 bg-white">
                         <div className="flex rounded-lg border border-gray-200 bg-white p-0.5 shadow-sm">
                             <Button
                                 type="button"
@@ -832,17 +827,18 @@ export function EmployeesPage() {
                         )}
 
                     </div>
-                </div>
 
                 {viewMode === 'kanban' ? (
-                    <EmployeeDepartmentKanban
-                        employees={filteredEmployees}
-                        departments={[...departments].sort((a, b) => a.name.localeCompare(b.name, 'vi'))}
-                        getJobTitleName={getJobTitleName}
-                        onView={handleViewEmployee}
-                        onEdit={handleEditEmployee}
-                        onDelete={handleDeleteEmployee}
-                    />
+                    <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+                        <EmployeeDepartmentKanban
+                            employees={filteredEmployees}
+                            departments={[...departments].sort((a, b) => a.name.localeCompare(b.name, 'vi'))}
+                            getJobTitleName={getJobTitleName}
+                            onView={handleViewEmployee}
+                            onEdit={handleEditEmployee}
+                            onDelete={handleDeleteEmployee}
+                        />
+                    </div>
                 ) : (
                 <>
                 {/* Mobile list */}

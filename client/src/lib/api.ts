@@ -418,6 +418,8 @@ export const invoicesApi = {
 
     updateStatus: (id: string, status: string) =>
         api.patch<ApiResponse<{ invoice: any }>>(`/invoices/${id}/status`, { status }),
+
+    delete: (id: string) => api.delete<ApiResponse<{ id: string; invoice_code: string }>>(`/invoices/${id}`),
 };
 
 // Products API
@@ -700,6 +702,27 @@ export const reportsApi = {
 
     getFinancial: (params?: { from_date?: string; to_date?: string }) =>
         api.get<ApiResponse<any>>('/reports/financial', { params }),
+
+    getDashboard: (params?: {
+        chart_range?: string;
+        from_date?: string;
+        to_date?: string;
+        group_by?: 'hour' | 'day' | 'weekday';
+    }) => api.get<ApiResponse<any>>('/reports/dashboard', { params }),
+
+    getDashboard2: (params?: {
+        staff_range?: string;
+        staff_from?: string;
+        staff_to?: string;
+        staff_metric?: 'revenue' | 'quantity' | 'commission';
+        products_range?: string;
+        products_from?: string;
+        products_to?: string;
+        product_category?: 'service' | 'package' | 'product' | 'account_card';
+    }) => api.get<ApiResponse<any>>('/reports/dashboard-2', { params }),
+
+    getCustomerAnalysis: (params?: { year?: number; month?: number; tab?: string }) =>
+        api.get<ApiResponse<any>>('/reports/customer-analysis', { params }),
 };
 
 // Interactions API

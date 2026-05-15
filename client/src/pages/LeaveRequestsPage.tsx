@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import api from '@/lib/api';
+import { MobileLeaveRequestsList } from '@/components/salary';
 
 interface LeaveRequest {
     id: string;
@@ -188,6 +189,11 @@ export function LeaveRequestsPage() {
         const matchesSearch = searchTarget.includes(searchTerm.toLowerCase()) || req.reason.toLowerCase().includes(searchTerm.toLowerCase());
         return matchesTab && matchesSearch;
     });
+    const mobileRequests = filteredRequests.map(req => ({
+        ...req,
+        end_time: req.end_time ?? undefined,
+        approved_by: req.approved_by ?? undefined,
+    }));
 
     const canApprove = user?.role === 'admin' || user?.role === 'manager';
 
@@ -231,7 +237,15 @@ export function LeaveRequestsPage() {
                     </div>
                 </CardHeader>
                 <CardContent className="p-0">
-                    <div className="overflow-x-auto">
+                    <div className="p-3 sm:hidden">
+                        <MobileLeaveRequestsList
+                            requests={mobileRequests}
+                            loading={loading}
+                            onApprove={canApprove ? (requestId) => handleUpdateStatus(requestId, 'approved') : undefined}
+                            onReject={canApprove ? (requestId) => handleUpdateStatus(requestId, 'rejected') : undefined}
+                        />
+                    </div>
+                    <div className="hidden sm:block overflow-x-auto">
                         <table className="w-full text-sm">
                             <thead className="bg-muted/50 border-y">
                                 <tr>
@@ -275,8 +289,28 @@ export function LeaveRequestsPage() {
                                                 {req.approver && <div className="text-[10px] text-muted-foreground mt-1">bởi {req.approver.name}</div>}
                                             </td>
                                             <td className="p-3 text-right">
-                                                 <span className="text-xs text-muted-foreground">-</span>
-                                             </td>
+                                                {req.status === 'pending' && canApprove ? (
+                                                    <div className="flex justify-end gap-2">
+                                                        <Button
+                                                            size="sm"
+                                                            className="h-7 px-2"
+                                                            onClick={() => handleUpdateStatus(req.id, 'approved')}
+                                                        >
+                                                            Duyệt
+                                                        </Button>
+                                                        <Button
+                                                            size="sm"
+                                                            variant="destructive"
+                                                            className="h-7 px-2"
+                                                            onClick={() => handleUpdateStatus(req.id, 'rejected')}
+                                                        >
+                                                            Từ chối
+                                                        </Button>
+                                                    </div>
+                                                ) : (
+                                                    <span className="text-xs text-muted-foreground">-</span>
+                                                )}
+                                            </td>
                                         </tr>
                                     ))
                                 )}

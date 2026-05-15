@@ -1,12 +1,11 @@
 import { useMemo } from 'react';
-import { Building2, Crown, Edit, Eye, Phone, Shield, Trash2, Users } from 'lucide-react';
+import { Building2, Crown, Edit, Eye, Phone, Trash2, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
     getEmployeeDepartmentKey,
     isManagerPosition,
-    roleLabels,
     sortEmployeesForKanban,
     UNASSIGNED_DEPARTMENT_ID,
     type KanbanEmployee,
@@ -53,77 +52,74 @@ function EmployeeKanbanCard({
 
     return (
         <div
-            className={`group rounded-xl border p-3 transition-all hover:shadow-md ${
+            className={`group flex w-full h-[38px] items-center gap-2 rounded-md border px-2 transition-all hover:shadow-sm ${
                 isManager
-                    ? 'border-amber-400 bg-gradient-to-br from-amber-50 via-orange-50/90 to-amber-100/80 shadow-sm ring-2 ring-amber-300/60'
+                    ? 'border-amber-400 bg-gradient-to-r from-amber-50 via-orange-50/80 to-amber-50/50 ring-1 ring-amber-300/40'
                     : 'border-gray-200 bg-white hover:border-blue-200'
             }`}
         >
-            <div className="flex items-start gap-2.5">
-                <div className="relative shrink-0">
-                    <Avatar className={`h-10 w-10 ${isManager ? 'ring-2 ring-amber-400' : ''}`}>
-                        {emp.avatar && <AvatarImage src={emp.avatar} alt={emp.name} />}
-                        <AvatarFallback
-                            className={
-                                isManager
-                                    ? 'bg-gradient-to-br from-amber-500 to-orange-600 text-white font-bold text-sm'
-                                    : 'bg-slate-100 text-slate-600 font-semibold text-sm'
-                            }
-                        >
-                            {emp.name.charAt(0)}
-                        </AvatarFallback>
-                    </Avatar>
-                    {isManager && (
-                        <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-amber-500 text-white shadow ring-2 ring-white">
-                            <Crown className="h-3 w-3" />
-                        </span>
-                    )}
-                </div>
-
-                <div className="min-w-0 flex-1">
-                    <p className={`truncate text-[13px] ${isManager ? 'font-bold text-amber-950' : 'font-semibold text-gray-900'}`}>
-                        {emp.name}
-                    </p>
-                    <p className="truncate text-[11px] text-gray-500 mt-0.5">{jobTitleName}</p>
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                        {isManager ? (
-                            <Badge className="text-[10px] px-1.5 py-0 h-5 bg-amber-500 hover:bg-amber-500 text-white border-0 gap-0.5">
-                                <Shield className="h-3 w-3" />
-                                Quản lý
-                            </Badge>
-                        ) : (
-                            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-5 font-normal">
-                                <Users className="h-3 w-3 mr-0.5" />
-                                Nhân viên
-                            </Badge>
-                        )}
-                        <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 font-normal text-gray-600">
-                            {roleLabels[emp.role]}
-                        </Badge>
-                    </div>
-                    {emp.phone && (
-                        <p className="flex items-center gap-1 mt-1.5 text-[11px] text-gray-500">
-                            <Phone className="h-3 w-3 shrink-0" />
-                            <span className="truncate">{emp.phone}</span>
-                        </p>
-                    )}
-                </div>
+            <div className="relative shrink-0">
+                <Avatar className={`h-7 w-7 ${isManager ? 'ring-1 ring-amber-400' : ''}`}>
+                    {emp.avatar && <AvatarImage src={emp.avatar} alt={emp.name} />}
+                    <AvatarFallback
+                        className={
+                            isManager
+                                ? 'bg-gradient-to-br from-amber-500 to-orange-600 text-white text-[10px] font-bold'
+                                : 'bg-slate-100 text-slate-600 text-[10px] font-semibold'
+                        }
+                    >
+                        {emp.name.charAt(0)}
+                    </AvatarFallback>
+                </Avatar>
+                {isManager && (
+                    <span className="absolute -bottom-0.5 -right-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-500 text-white ring-1 ring-white">
+                        <Crown className="h-2 w-2" />
+                    </span>
+                )}
             </div>
 
-            <div className="mt-2.5 flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                <Button variant="ghost" size="sm" className="h-7 flex-1 text-[11px] px-2" onClick={() => onView(emp)}>
-                    <Eye className="h-3 w-3 mr-1" />
-                    Xem
+            <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+                <p
+                    className={`shrink-0 max-w-[42%] truncate text-[11px] leading-none ${
+                        isManager ? 'font-bold text-amber-950' : 'font-semibold text-gray-900'
+                    }`}
+                    title={emp.name}
+                >
+                    {emp.name}
+                </p>
+                <span className="shrink-0 text-[10px] text-gray-300">·</span>
+                <p className="min-w-0 flex-1 truncate text-[10px] leading-none text-gray-500" title={jobTitleName}>
+                    {jobTitleName}
+                </p>
+                {isManager && (
+                    <Badge className="shrink-0 h-4 px-1 text-[9px] bg-amber-500 text-white border-0 hover:bg-amber-500">
+                        QL
+                    </Badge>
+                )}
+                {emp.phone && (
+                    <span
+                        className="hidden lg:flex shrink-0 items-center gap-0.5 max-w-[80px] text-[10px] text-gray-400"
+                        title={emp.phone}
+                    >
+                        <Phone className="h-2.5 w-2.5" />
+                        <span className="truncate">{emp.phone}</span>
+                    </span>
+                )}
+            </div>
+
+            <div className="flex shrink-0 items-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:text-blue-600" onClick={() => onView(emp)} title="Xem">
+                    <Eye className="h-3.5 w-3.5" />
                 </Button>
-                <Button variant="ghost" size="sm" className="h-7 flex-1 text-[11px] px-2" onClick={() => onEdit(emp)}>
-                    <Edit className="h-3 w-3 mr-1" />
-                    Sửa
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:text-blue-600" onClick={() => onEdit(emp)} title="Sửa">
+                    <Edit className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                     variant="ghost"
-                    size="sm"
-                    className="h-7 w-8 px-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                    size="icon"
+                    className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50"
                     onClick={() => onDelete(emp)}
+                    title="Xóa"
                 >
                     <Trash2 className="h-3.5 w-3.5" />
                 </Button>
@@ -177,21 +173,24 @@ export function EmployeeDepartmentKanban({
     }
 
     return (
-        <div className="flex flex-col flex-1 min-h-0">
-            <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 border-b border-gray-100 bg-[#fbfcfd] text-[12px]">
+        <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            <div className="flex flex-wrap items-center gap-3 px-4 py-2 border-b border-gray-100 bg-[#fbfcfd] text-[12px]">
                 <span className="text-gray-500 font-medium">Chú thích:</span>
-                <span className="inline-flex items-center gap-1.5 rounded-md border-2 border-amber-400 bg-gradient-to-r from-amber-50 to-orange-50 px-2 py-1 font-medium text-amber-900">
+                <span className="inline-flex items-center gap-1.5 rounded-md border-2 border-amber-400 bg-gradient-to-r from-amber-50 to-orange-50 px-2 py-0.5 font-medium text-amber-900">
                     <Crown className="h-3.5 w-3.5 text-amber-600" />
                     Quản lý ({managerCount})
                 </span>
-                <span className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 text-gray-700">
+                <span className="inline-flex items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-0.5 text-gray-700">
                     <Users className="h-3.5 w-3.5 text-gray-400" />
                     Nhân viên ({staffCount})
                 </span>
             </div>
 
-            <div className="flex-1 overflow-x-auto overflow-y-hidden p-4">
-                <div className="flex gap-4 min-h-full pb-2 h-full items-stretch">
+            <p className="shrink-0 px-4 pb-1 text-[11px] text-gray-400">
+                Kéo thanh cuộn ngang (hoặc Shift + con lăn chuột) để xem tất cả phòng ban
+            </p>
+            <div className="employees-kanban-h-scroll flex-1 min-h-0 px-4 pb-3">
+                <div className="flex h-full min-h-[320px] w-max min-w-full items-stretch gap-4 pr-2">
                     {columns.map((col, index) => {
                         const palette = COLUMN_PALETTES[index % COLUMN_PALETTES.length];
                         const managersInCol = col.employees.filter((e) =>
@@ -201,30 +200,30 @@ export function EmployeeDepartmentKanban({
                         return (
                             <div
                                 key={col.id}
-                                className={`flex w-[min(100%,300px)] sm:w-[280px] shrink-0 flex-col rounded-xl border border-gray-200 bg-gray-50/80 shadow-sm ring-1 ${palette.ring}`}
+                                className={`flex h-full max-h-[calc(100vh-13rem)] w-[280px] shrink-0 flex-col rounded-lg border border-gray-200 bg-gray-50/80 shadow-sm ring-1 ${palette.ring}`}
                             >
-                                <div className={`rounded-t-xl px-3 py-2.5 text-white ${palette.header}`}>
+                                <div className={`rounded-t-lg px-2.5 py-1.5 text-white ${palette.header}`}>
                                     <div className="flex items-center justify-between gap-2">
-                                        <div className="flex items-center gap-2 min-w-0">
-                                            <Building2 className="h-4 w-4 shrink-0 opacity-90" />
-                                            <h3 className="font-bold text-[13px] truncate" title={col.name}>
+                                        <div className="flex items-center gap-1.5 min-w-0">
+                                            <Building2 className="h-3.5 w-3.5 shrink-0 opacity-90" />
+                                            <h3 className="font-bold text-[12px] truncate" title={col.name}>
                                                 {col.name}
                                             </h3>
                                         </div>
-                                        <Badge className="bg-white/20 text-white border-0 text-[10px] shrink-0">
+                                        <Badge className="bg-white/20 text-white border-0 text-[10px] shrink-0 h-5">
                                             {col.employees.length}
                                         </Badge>
                                     </div>
                                     {managersInCol > 0 && (
-                                        <p className="text-[10px] text-white/85 mt-1 pl-6">
-                                            {managersInCol} quản lý · {col.employees.length - managersInCol} nhân viên
+                                        <p className="text-[10px] text-white/85 mt-0.5 pl-5 leading-tight">
+                                            {managersInCol} QL · {col.employees.length - managersInCol} NV
                                         </p>
                                     )}
                                 </div>
 
-                                <div className="flex-1 overflow-y-auto p-2 space-y-2 max-h-[calc(100vh-16rem)] min-h-[120px]">
+                                <div className="flex-1 min-h-0 overflow-y-auto p-1.5 space-y-1 min-h-[80px]">
                                     {col.employees.length === 0 ? (
-                                        <p className="py-6 text-center text-[12px] text-gray-400">Chưa có nhân viên</p>
+                                        <p className="py-3 text-center text-[11px] text-gray-400">Chưa có nhân viên</p>
                                     ) : (
                                         col.employees.map((emp) => (
                                             <EmployeeKanbanCard
@@ -246,4 +245,3 @@ export function EmployeeDepartmentKanban({
         </div>
     );
 }
-

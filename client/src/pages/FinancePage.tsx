@@ -17,6 +17,7 @@ import { formatCurrency, formatDate, cn, normalizeSearchText } from '@/lib/utils
 import type { User } from '@/types';
 import { InvoiceDetailDialog } from '@/components/invoices/InvoiceDetailDialog';
 import { MobileFinanceList } from '@/components/finance';
+import { DELIVERY_CARRIER_OPTIONS } from '@/constants/deliveryCarriers';
 
 interface FinancePageProps {
     currentUser: User;
@@ -74,6 +75,7 @@ const incomeCategories = [
     'Thanh toán đơn hàng',
     'Đặt cọc',
     'Phí giao hàng',
+    'Thu hồi máy',
     'Thu khác',
 ];
 
@@ -90,13 +92,16 @@ const expenseCategories = [
 
 interface TransactionFormProps {
     type: TransactionType;
+    initialCategory?: string;
     onClose: () => void;
     onSubmit: (data: any) => Promise<void>;
     loading: boolean;
 }
 
-function TransactionForm({ type, onClose, onSubmit, loading }: TransactionFormProps) {
-    const [category, setCategory] = useState('');
+function TransactionForm({ type, initialCategory, onClose, onSubmit, loading }: TransactionFormProps) {
+    const [category, setCategory] = useState(initialCategory || '');
+    const [transportCarrier, setTransportCarrier] = useState('');
+    const [customCarrierName, setCustomCarrierName] = useState('');
     const [amount, setAmount] = useState<number>(0);
     const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'zalopay'>('cash');
     const [notes, setNotes] = useState('');
@@ -107,6 +112,14 @@ function TransactionForm({ type, onClose, onSubmit, loading }: TransactionFormPr
     const [orderSuggestions, setOrderSuggestions] = useState<any[]>([]);
     const [searchingOrders, setSearchingOrders] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
+
+    const isMachineRecoveryIncome = type === 'income' && category === 'Thu hồi máy';
+
+    useEffect(() => {
+        if (initialCategory) {
+            setCategory(initialCategory);
+        }
+    }, [initialCategory]);
 
     useEffect(() => {
         const searchOrders = async () => {
@@ -149,16 +162,31 @@ function TransactionForm({ type, onClose, onSubmit, loading }: TransactionFormPr
             return;
         }
 
+        const resolvedCarrier = transportCarrier === 'Khác'
+            ? customCarrierName.trim()
+            : transportCarrier.trim();
+
+        if (isMachineRecoveryIncome && !resolvedCarrier) {
+            toast.error('Vui lòng chọn hoặc nhập tên đơn vị vận chuyển');
+            return;
+        }
+
+        const carrierNote = isMachineRecoveryIncome ? `Đơn vị VC: ${resolvedCarrier}` : '';
+        const mergedNotes = [carrierNote, notes.trim()].filter(Boolean).join('. ') || undefined;
+
         await onSubmit({
             type,
             category,
             amount,
             payment_method: paymentMethod,
-            notes,
+            notes: mergedNotes,
             date,
             image_url: imageUrl || undefined,
             order_code: orderCode || undefined,
             order_id: orderId,
+            metadata: isMachineRecoveryIncome
+                ? { transport_carrier: resolvedCarrier, transport_unit: resolvedCarrier }
+                : undefined,
         });
     };
 
@@ -186,10 +214,12 @@ function TransactionForm({ type, onClose, onSubmit, loading }: TransactionFormPr
                             <FileText className="h-4 w-4 text-red-600" />
                         </div>
                     )}
-                    Tạo phiếu {type === 'income' ? 'thu' : 'chi'}
+                    {isMachineRecoveryIncome ? 'Tạo phiếu thu hồi máy' : `Tạo phiếu ${type === 'income' ? 'thu' : 'chi'}`}
                 </DialogTitle>
                 <DialogDescription>
-                    Nhập thông tin phiếu {type === 'income' ? 'thu' : 'chi'} mới
+                    {isMachineRecoveryIncome
+                        ? 'Ghi nhận thu phí/khoản liên quan thu hồi máy từ khách'
+                        : `Nhập thông tin phiếu ${type === 'income' ? 'thu' : 'chi'} mới`}
                 </DialogDescription>
             </DialogHeader>
 
@@ -219,8 +249,38 @@ function TransactionForm({ type, onClose, onSubmit, loading }: TransactionFormPr
                     </Select>
                 </div>
 
+                {isMachineRecoveryIncome && (
+                    <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                        <Label>NV vận chuyển *</Label>
+                        <p className="text-xs text-muted-foreground">Chọn tên đơn vị (GHTK, Viettel Post...), không phải tên nhân viên</p>
+                        <Select
+                            value={transportCarrier || undefined}
+                            onValueChange={(val) => {
+                                setTransportCarrier(val);
+                                if (val !== 'Khác') setCustomCarrierName('');
+                            }}
+                        >
+                            <SelectTrigger>
+                                <SelectValue placeholder="Chọn đơn vị vận chuyển..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {DELIVERY_CARRIER_OPTIONS.map((name) => (
+                                    <SelectItem key={name} value={name}>{name}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        {transportCarrier === 'Khác' && (
+                            <Input
+                                placeholder="Nhập tên đơn vị..."
+                                value={customCarrierName}
+                                onChange={(e) => setCustomCarrierName(e.target.value)}
+                            />
+                        )}
+                    </div>
+                )}
+
                 {/* Order Code - Only for specific income categories */}
-                {type === 'income' && ['Thanh toán đơn hàng', 'Đặt cọc', 'Phí giao hàng'].includes(category) && (
+                {type === 'income' && ['Thanh toán đơn hàng', 'Đặt cọc', 'Phí giao hàng', 'Thu hồi máy'].includes(category) && (
                     <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300 relative">
                         <Label>Mã đơn hàng</Label>
                         <div className="relative group/input">
@@ -643,6 +703,17 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState<'income' | 'expense'>(initialTab);
     const [showForm, setShowForm] = useState<TransactionType | null>(null);
+    const [formInitialCategory, setFormInitialCategory] = useState<string | undefined>();
+
+    const openCreateForm = (type: TransactionType, category?: string) => {
+        setFormInitialCategory(category);
+        setShowForm(type);
+    };
+
+    const closeCreateForm = () => {
+        setShowForm(null);
+        setFormInitialCategory(undefined);
+    };
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');
 
@@ -847,7 +918,7 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
             }
 
             toast.success(`Đã tạo phiếu ${data.type === 'income' ? 'thu' : 'chi'}`);
-            setShowForm(null);
+            closeCreateForm();
             fetchTransactions();
         } catch (error: any) {
             toast.error(error.response?.data?.message || 'Lỗi khi tạo phiếu');
@@ -1054,7 +1125,7 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-56 rounded-xl p-1">
                                 {(activeTab === 'income' ? incomeCategories : expenseCategories).map(cat => (
-                                    <DropdownMenuItem key={cat} className="rounded-lg cursor-pointer font-medium py-2" onClick={() => setShowForm(activeTab)}>
+                                    <DropdownMenuItem key={cat} className="rounded-lg cursor-pointer font-medium py-2" onClick={() => openCreateForm(activeTab, cat)}>
                                         {cat}
                                     </DropdownMenuItem>
                                 ))}
@@ -1097,7 +1168,7 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-56 rounded-xl p-1">
                                 {incomeCategories.map(cat => (
-                                    <DropdownMenuItem key={cat} className="rounded-lg cursor-pointer font-medium py-2" onClick={() => setShowForm('income')}>
+                                    <DropdownMenuItem key={cat} className="rounded-lg cursor-pointer font-medium py-2" onClick={() => openCreateForm('income', cat)}>
                                         {cat}
                                     </DropdownMenuItem>
                                 ))}
@@ -1114,7 +1185,7 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-56 rounded-xl p-1">
                                 {expenseCategories.map(cat => (
-                                    <DropdownMenuItem key={cat} className="rounded-lg cursor-pointer font-medium py-2" onClick={() => setShowForm('expense')}>
+                                    <DropdownMenuItem key={cat} className="rounded-lg cursor-pointer font-medium py-2" onClick={() => openCreateForm('expense', cat)}>
                                         {cat}
                                     </DropdownMenuItem>
                                 ))}
@@ -1229,11 +1300,12 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
             </div>
 
             {/* Create Transaction Dialog */}
-            <Dialog open={!!showForm} onOpenChange={() => setShowForm(null)}>
+            <Dialog open={!!showForm} onOpenChange={(open) => { if (!open) closeCreateForm(); }}>
                 {showForm && (
                     <TransactionForm
                         type={showForm}
-                        onClose={() => setShowForm(null)}
+                        initialCategory={formInitialCategory}
+                        onClose={closeCreateForm}
                         onSubmit={handleCreateTransaction}
                         loading={actionLoading}
                     />

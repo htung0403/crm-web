@@ -26,10 +26,17 @@ interface DetailTabProps {
     order: Order;
     productStatusSummary: any;
     onShowPrintDialog: () => void;
+    onShowInvoicePrintDialog: () => void;
     onShowPaymentDialog: () => void;
 }
 
-export function DetailTab({ order, productStatusSummary, onShowPrintDialog, onShowPaymentDialog }: DetailTabProps) {
+export function DetailTab({
+    order,
+    productStatusSummary,
+    onShowPrintDialog,
+    onShowInvoicePrintDialog,
+    onShowPaymentDialog,
+}: DetailTabProps) {
     const navigate = useNavigate();
     const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
 
@@ -527,6 +534,14 @@ export function DetailTab({ order, productStatusSummary, onShowPrintDialog, onSh
                             >
                                 <Printer className="h-4 w-4 mr-2" />
                                 In phiếu QR
+                            </Button>
+                            <Button
+                                variant="outline"
+                                className="w-full justify-start"
+                                onClick={onShowInvoicePrintDialog}
+                            >
+                                <FileText className="h-4 w-4 mr-2" />
+                                In hóa đơn
                             </Button>
                             {order.status !== 'after_sale' && order.status !== 'cancelled' && (
                                 <Button

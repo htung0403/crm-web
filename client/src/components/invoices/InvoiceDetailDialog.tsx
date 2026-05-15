@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, Calculator, XCircle, CheckCircle, Package, Gift, Clock } from 'lucide-react';
+import { FileText, Calculator, XCircle, CheckCircle, Package, Gift, Clock, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -34,6 +34,7 @@ interface InvoiceDetailDialogProps {
     onClose: () => void;
     onStatusChange?: (id: string, status: string) => void;
     onPayButtonClick?: (invoice: Invoice) => void;
+    onDelete?: (invoiceId: string) => void;
     canEdit?: boolean;
 }
 
@@ -43,7 +44,8 @@ export function InvoiceDetailDialog({
     onClose,
     onStatusChange,
     onPayButtonClick,
-    canEdit = false
+    onDelete,
+    canEdit = false,
 }: InvoiceDetailDialogProps) {
     if (!invoice) return null;
 
@@ -415,29 +417,43 @@ export function InvoiceDetailDialog({
                 </Tabs>
 
                 {/* Actions */}
-                {canEdit && invoice.status !== 'paid' && invoice.status !== 'cancelled' && (
-                    <div className="flex gap-2 pt-4 border-t px-6 pb-4">
-                        <Button
-                            variant="outline"
-                            className="flex-1 text-red-600 hover:bg-red-50"
-                            onClick={() => {
-                                onStatusChange?.(invoice.id, 'cancelled');
-                                onClose();
-                            }}
-                        >
-                            <XCircle className="h-4 w-4 mr-2" />
-                            Hủy hóa đơn
-                        </Button>
-                        <Button
-                            className="flex-1 bg-green-600 hover:bg-green-700"
-                            onClick={() => {
-                                onPayButtonClick?.(invoice);
-                                onClose();
-                            }}
-                        >
-                            <CheckCircle className="h-4 w-4 mr-2" />
-                            Xác nhận thanh toán
-                        </Button>
+                {canEdit && invoice.status !== 'paid' && (
+                    <div className="flex flex-wrap gap-2 pt-4 border-t px-6 pb-4">
+                        {onDelete && (
+                            <Button
+                                variant="outline"
+                                className="text-destructive hover:bg-destructive/10 border-destructive/30"
+                                onClick={() => onDelete(invoice.id)}
+                            >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Xóa hóa đơn
+                            </Button>
+                        )}
+                        {invoice.status !== 'cancelled' && (
+                            <>
+                                <Button
+                                    variant="outline"
+                                    className="flex-1 text-red-600 hover:bg-red-50 min-w-[140px]"
+                                    onClick={() => {
+                                        onStatusChange?.(invoice.id, 'cancelled');
+                                        onClose();
+                                    }}
+                                >
+                                    <XCircle className="h-4 w-4 mr-2" />
+                                    Hủy hóa đơn
+                                </Button>
+                                <Button
+                                    className="flex-1 bg-green-600 hover:bg-green-700 min-w-[140px]"
+                                    onClick={() => {
+                                        onPayButtonClick?.(invoice);
+                                        onClose();
+                                    }}
+                                >
+                                    <CheckCircle className="h-4 w-4 mr-2" />
+                                    Xác nhận thanh toán
+                                </Button>
+                            </>
+                        )}
                     </div>
                 )}
             </DialogContent>

@@ -379,12 +379,18 @@ export function AftersaleTab({
         // Add validation for transition from after2 to after3
         if (result.source.droppableId === 'after2' && newStage === 'after3') {
             const arePhotosOk = draggedGroup.product.packaging_photos && draggedGroup.product.packaging_photos.length > 0;
-            const areFieldsOk = order.delivery_creator_name && order.delivery_shipper_phone && 
-                                order.delivery_staff_name && order.delivery_received_at;
+            const isPickup = order.delivery_type === 'pickup';
+            const areFieldsOk = order.delivery_creator_name && order.delivery_shipper_phone &&
+                order.delivery_received_at &&
+                (isPickup ? order.delivery_staff_name : order.delivery_carrier);
             
             if (!areFieldsOk || !arePhotosOk) {
                 let errorMsg = "Vui lòng hoàn thành các yêu cầu sau để chuyển bước:";
-                if (!areFieldsOk) errorMsg += "\n- Nhập đầy đủ: NV Tạo đơn, SĐT Liên hệ, NV Giao đồ và Thời gian nhận đồ";
+                if (!areFieldsOk) {
+                    errorMsg += isPickup
+                        ? "\n- Nhập đầy đủ: NV Tạo đơn, SĐT Liên hệ, NV Giao đồ và Thời gian nhận đồ"
+                        : "\n- Nhập đầy đủ: NV Tạo đơn, SĐT ship, NV vận chuyển (đơn vị) và Thời gian khách nhận";
+                }
                 if (!arePhotosOk) errorMsg += "\n- Cần ít nhất một \"Ảnh đóng gói/trả đồ\"";
                 
                 toast.error(errorMsg, { duration: 5000 });

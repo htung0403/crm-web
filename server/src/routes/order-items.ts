@@ -4,6 +4,7 @@ import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { checkAndCompleteOrder } from '../utils/orderHelper.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
+import { logAccessoryStatusChange, logPartnerStatusChange } from '../utils/workflowRequestLog.js';
 
 function derivePhaseFromStatus(status: string): { current_phase: string; phase_stage: string } {
     if (['step1', 'step2', 'step3', 'step4'].includes(status)) {
@@ -1491,6 +1492,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
         const { data: existing } = existingResult;
 
         if (existing) {
+            const oldStatus = (existing as { status?: string }).status;
             const { data: updated, error } = await supabaseAdmin
                 .from('order_item_accessories')
                 .update({ 
@@ -1504,6 +1506,17 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
                 .select()
                 .single();
             if (error) throw new ApiError('Lỗi cập nhật: ' + error.message, 500);
+
+            if (status !== oldStatus) {
+                await logAccessoryStatusChange(
+                    { order_item_id: isV1 ? id : null, order_product_service_id: isV2 ? id : null },
+                    oldStatus,
+                    status,
+                    notes,
+                    req.user?.id
+                );
+            }
+
             return res.json({ status: 'success', data: updated, message: 'Đã cập nhật trạng thái mua phụ kiện' });
         }
 
@@ -1514,21 +1527,15 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
             .single();
         if (error) throw new ApiError('Lỗi tạo: ' + error.message, 500);
 
-        // Create workflow log entry for accessory request
         if (status === 'requested') {
             const itemName = metadata?.item_name || 'Phụ kiện';
-            try {
-                await supabaseAdmin.from('order_workflow_step_log').insert({
-                    entity_id: id,
-                    order_item_step_id: null,
-                    action: 'accessory_requested',
-                    step_name: 'Yêu cầu mua phụ kiện',
-                    notes: `${itemName}${notes ? ': ' + notes : ''}`,
-                    created_by: req.user?.id
-                });
-            } catch (logErr) {
-                console.error('workflow log insert error:', logErr);
-            }
+            await logAccessoryStatusChange(
+                { order_item_id: isV1 ? id : null, order_product_service_id: isV2 ? id : null },
+                undefined,
+                status,
+                `${itemName}${notes ? ': ' + notes : ''}`,
+                req.user?.id
+            );
         }
 
         res.json({
@@ -1575,7 +1582,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
 
         const existingQuery = supabaseAdmin
             .from('order_item_partner')
-            .select('id, metadata')
+            .select('id, status, metadata')
             .order('updated_at', { ascending: false })
             .limit(1);
         const existingResult = isV1
@@ -1584,6 +1591,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
         const { data: existing } = existingResult;
 
         if (existing) {
+            const oldStatus = (existing as { status?: string }).status;
             const { data: updated, error } = await supabaseAdmin
                 .from('order_item_partner')
                 .update({ 
@@ -1597,6 +1605,17 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
                 .select()
                 .single();
             if (error) throw new ApiError('Lỗi cập nhật: ' + error.message, 500);
+
+            if (status !== oldStatus) {
+                await logPartnerStatusChange(
+                    { order_item_id: isV1 ? id : null, order_product_service_id: isV2 ? id : null },
+                    oldStatus,
+                    status,
+                    notes,
+                    req.user?.id
+                );
+            }
+
             return res.json({ status: 'success', data: updated, message: 'Đã cập nhật trạng thái gửi đối tác' });
         }
 
@@ -1608,18 +1627,13 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
         if (error) throw new ApiError('Lỗi tạo: ' + error.message, 500);
 
         if (status === 'requested') {
-            try {
-                await supabaseAdmin.from('order_workflow_step_log').insert({
-                    entity_id: id,
-                    order_item_step_id: null,
-                    action: 'partner_requested',
-                    step_name: 'Gửi đối tác',
-                    notes: notes || 'Yêu cầu gửi đối tác',
-                    created_by: req.user?.id
-                });
-            } catch (logErr) {
-                console.error('workflow log insert error:', logErr);
-            }
+            await logPartnerStatusChange(
+                { order_item_id: isV1 ? id : null, order_product_service_id: isV2 ? id : null },
+                undefined,
+                status,
+                notes,
+                req.user?.id
+            );
         }
 
         res.json({

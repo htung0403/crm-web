@@ -77,6 +77,7 @@ import { formatDate } from '@/lib/utils';
 
 // Specific Dialogs
 import { PrintQRDialog } from '@/components/orders/PrintQRDialog';
+import { PrintThermalInvoiceDialog } from '@/components/orders/PrintThermalInvoiceDialog';
 import { PaymentDialog } from '@/components/orders/PaymentDialog';
 import { PaymentRecordDialog } from '@/components/orders/PaymentRecordDialog';
 import { AssignTechnicianDialog } from './OrderDetailPage/dialogs/AssignTechnicianDialog';
@@ -189,6 +190,7 @@ export function OrderDetailPage() {
     // Dialog & UI States
     const [activeTab, setActiveTab] = useState('detail');
     const [showPrintDialog, setShowPrintDialog] = useState(false);
+    const [showInvoicePrintDialog, setShowInvoicePrintDialog] = useState(false);
     const [showPaymentDialog, setShowPaymentDialog] = useState(false);
     const [showPaymentRecordDialog, setShowPaymentRecordDialog] = useState(false);
 
@@ -238,6 +240,7 @@ export function OrderDetailPage() {
     const [highlightMessageId, setHighlightMessageId] = useState<string | undefined>(undefined);
     // Pending move callback: được set khi drag fail validation — sau khi user confirm dialog sẽ tự chuyển trạng thái
     const [pendingMoveCallback, setPendingMoveCallback] = useState<(() => Promise<void>) | null>(null);
+    const [isPhoneView, setIsPhoneView] = useState<boolean>(() => window.innerWidth < 768);
 
     // Departments and Technicians/Sales
     const { departments, fetchDepartments } = useDepartments();
@@ -258,6 +261,12 @@ export function OrderDetailPage() {
             setActiveTab(stateTab);
         }
     }, [id, navigate, fetchTechnicians, fetchSales, fetchDepartments, location.state]);
+
+    useEffect(() => {
+        const onResize = () => setIsPhoneView(window.innerWidth < 768);
+        window.addEventListener('resize', onResize);
+        return () => window.removeEventListener('resize', onResize);
+    }, []);
 
     // Tab switching logic for completed orders
     useEffect(() => {
@@ -552,7 +561,7 @@ export function OrderDetailPage() {
     }
 
     return (
-        <div className="space-y-6 animate-fade-in">
+        <div className="space-y-4 sm:space-y-6 animate-fade-in">
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-start sm:items-center gap-4">
@@ -579,7 +588,11 @@ export function OrderDetailPage() {
                     </Button>
                     <Button variant="outline" onClick={() => setShowPrintDialog(true)} className="flex-1 sm:flex-none">
                         <Printer className="h-4 w-4 mr-2" />
-                        In phiếu
+                        In phiếu QR
+                    </Button>
+                    <Button variant="outline" onClick={() => setShowInvoicePrintDialog(true)} className="flex-1 sm:flex-none">
+                        <FileText className="h-4 w-4 mr-2" />
+                        In hóa đơn
                     </Button>
                     {order.status !== 'after_sale' && order.status !== 'cancelled' && (
                         <Button variant="outline" onClick={() => navigate(`/orders/${order.id}/edit`)} className="flex-1 sm:flex-none">
@@ -619,9 +632,26 @@ export function OrderDetailPage() {
                 </div>
             </div>
 
+            {isPhoneView && (
+                <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-xl border bg-card p-3">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Tong tien</p>
+                        <p className="text-base font-bold mt-1">
+                            {(order.total_amount || 0).toLocaleString('vi-VN')}d
+                        </p>
+                    </div>
+                    <div className="rounded-xl border bg-card p-3">
+                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Con lai</p>
+                        <p className="text-base font-bold mt-1">
+                            {(order.remaining_debt ?? (order.total_amount - (order.paid_amount || 0))).toLocaleString('vi-VN')}d
+                        </p>
+                    </div>
+                </div>
+            )}
+
             {/* Tabs */}
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="mb-4 w-full justify-start overflow-x-auto no-scrollbar md:w-auto md:overflow-visible">
+                <TabsList className={`mb-4 w-full justify-start overflow-x-auto no-scrollbar ${isPhoneView ? '' : 'md:w-auto md:overflow-visible'}`}>
                     <TabsTrigger value="detail" className="gap-2 shrink-0">
                         <FileText className="h-4 w-4" />
                         Chi tiết
@@ -648,6 +678,7 @@ export function OrderDetailPage() {
                     order={order}
                     productStatusSummary={productStatusSummary}
                     onShowPrintDialog={() => setShowPrintDialog(true)}
+                    onShowInvoicePrintDialog={() => setShowInvoicePrintDialog(true)}
                     onShowPaymentDialog={() => setShowPaymentDialog(true)}
                 />
 
@@ -718,6 +749,12 @@ export function OrderDetailPage() {
                 order={order}
                 open={showPrintDialog}
                 onClose={() => setShowPrintDialog(false)}
+            />
+
+            <PrintThermalInvoiceDialog
+                order={order}
+                open={showInvoicePrintDialog}
+                onClose={() => setShowInvoicePrintDialog(false)}
             />
 
             <PaymentDialog

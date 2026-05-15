@@ -273,5 +273,40 @@ router.patch('/:id/status', authenticate, requireAccountant, async (req: Authent
     }
 });
 
+// Delete invoice (draft / pending / cancelled only)
+router.delete('/:id', authenticate, requireAccountant, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+
+        const { data: invoice, error: fetchError } = await supabaseAdmin
+            .from('invoices')
+            .select('id, invoice_code, status')
+            .eq('id', id)
+            .single();
+
+        if (fetchError || !invoice) {
+            throw new ApiError('Không tìm thấy hóa đơn', 404);
+        }
+
+        if (invoice.status === 'paid') {
+            throw new ApiError('Không thể xóa hóa đơn đã thanh toán', 400);
+        }
+
+        const { error } = await supabaseAdmin.from('invoices').delete().eq('id', id);
+
+        if (error) {
+            throw new ApiError('Lỗi khi xóa hóa đơn: ' + error.message, 500);
+        }
+
+        res.json({
+            status: 'success',
+            message: 'Đã xóa hóa đơn',
+            data: { id, invoice_code: invoice.invoice_code },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 export { router as invoicesRouter };
 // Final Reload for Log 3

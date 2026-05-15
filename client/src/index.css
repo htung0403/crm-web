@@ -86,6 +86,36 @@ body {
   background: var(--color-secondary);
 }
 
+/* Employees page — Kanban phòng ban (cuộn ngang) */
+.employees-kanban-h-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #64748b #e2e8f0;
+}
+
+.employees-kanban-h-scroll::-webkit-scrollbar {
+  height: 10px;
+}
+
+.employees-kanban-h-scroll::-webkit-scrollbar-track {
+  background: #e2e8f0;
+  border-radius: 6px;
+  margin: 0 8px 4px;
+}
+
+.employees-kanban-h-scroll::-webkit-scrollbar-thumb {
+  background: #64748b;
+  border-radius: 6px;
+}
+
+.employees-kanban-h-scroll::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
 /* Custom utilities */
 .glass-effect {
   background: rgba(255, 255, 255, 0.9);

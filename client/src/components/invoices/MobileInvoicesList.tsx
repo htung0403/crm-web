@@ -11,7 +11,8 @@ interface Invoice {
     invoice_code?: string;
     order_id: string;
     order?: { order_code: string; customer?: { name: string; phone: string } };
-    amount: number;
+    amount?: number;
+    total_amount?: number;
     paid_amount?: number;
     payment_method?: string;
     status?: string;
@@ -119,7 +120,7 @@ export function MobileInvoicesList({ invoices, loading, onView, onDelete }: Mobi
                             <div>
                                 <p className="text-xs text-muted-foreground">Tổng tiền</p>
                                 <p className="font-bold text-primary">
-                                    {formatCurrency(invoice.amount)}
+                                    {formatCurrency(invoice.total_amount ?? invoice.amount ?? 0)}
                                 </p>
                             </div>
                             <Badge className={statusBadgeColor[invoice.status || 'pending']}>

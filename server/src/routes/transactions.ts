@@ -228,7 +228,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 // Create transaction
 router.post('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { type, category, amount, payment_method, notes, image_url, date, order_id, order_code } = req.body;
+        const { type, category, amount, payment_method, notes, image_url, date, order_id, order_code, metadata } = req.body;
 
         if (!type || !category || !amount) {
             throw new ApiError('Loại, danh mục và số tiền là bắt buộc', 400);
@@ -253,6 +253,7 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                 date: date || new Date().toISOString().split('T')[0],
                 order_id,
                 order_code,
+                metadata: metadata && typeof metadata === 'object' ? metadata : {},
                 status: req.body.status || 'pending',
                 created_by: req.user!.id,
                 approved_by: req.body.status === 'approved' ? req.user!.id : null,

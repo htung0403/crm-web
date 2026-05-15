@@ -271,6 +271,36 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
         }
     };
 
+    const handleDeleteInvoice = async (invoiceId: string) => {
+        const inv = invoices.find((i) => i.id === invoiceId);
+        if (!inv) return;
+
+        if (inv.status === 'paid') {
+            toast.error('Không thể xóa hóa đơn đã thanh toán');
+            return;
+        }
+
+        if (
+            !window.confirm(
+                `Bạn có chắc muốn xóa hóa đơn "${inv.invoice_code}"? Hành động này không thể hoàn tác.`
+            )
+        ) {
+            return;
+        }
+
+        try {
+            await invoicesApi.delete(invoiceId);
+            toast.success('Đã xóa hóa đơn');
+            if (selectedInvoice?.id === invoiceId) {
+                setShowInvoiceDetail(false);
+                setSelectedInvoice(null);
+            }
+            fetchInvoices();
+        } catch (err: any) {
+            toast.error(err.response?.data?.message || 'Lỗi khi xóa hóa đơn');
+        }
+    };
+
     const filteredInvoices = useMemo(() => {
         if (!searchQuery) return invoices;
         const query = searchQuery.toLowerCase();
@@ -391,7 +421,8 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
                             <MobileInvoicesList
                                 invoices={filteredInvoices}
                                 loading={false}
-                                onView={fetchInvoiceDetail}
+                                onView={(inv) => fetchInvoiceDetail(inv.id)}
+                                onDelete={canEdit ? handleDeleteInvoice : undefined}
                             />
                         </div>
 
@@ -439,9 +470,22 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
                                                     }</Badge>
                                                 </td>
                                                 <td className="p-4 text-center">
-                                                    <Button variant="ghost" size="sm" onClick={() => fetchInvoiceDetail(inv.id)}>
-                                                        <Eye className="h-4 w-4" />
-                                                    </Button>
+                                                    <div className="flex items-center justify-center gap-1">
+                                                        <Button variant="ghost" size="sm" onClick={() => fetchInvoiceDetail(inv.id)} title="Xem chi tiết">
+                                                            <Eye className="h-4 w-4" />
+                                                        </Button>
+                                                        {canEdit && inv.status !== 'paid' && (
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                                                onClick={() => handleDeleteInvoice(inv.id)}
+                                                                title="Xóa hóa đơn"
+                                                            >
+                                                                <Trash2 className="h-4 w-4" />
+                                                            </Button>
+                                                        )}
+                                                    </div>
                                                 </td>
                                             </tr>
                                         ))
@@ -466,6 +510,7 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
                 onClose={() => setShowInvoiceDetail(false)}
                 onStatusChange={handleStatusChange}
                 onPayButtonClick={handlePayButtonClick}
+                onDelete={canEdit ? handleDeleteInvoice : undefined}
                 canEdit={canEdit}
             />
 
