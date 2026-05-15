@@ -66,7 +66,7 @@ export function MobileWorkScheduleCard({
                         const dayAbbr = VN_DAY_ABBR[date.getDay()];
                         const dayNum = date.getDate();
                         const daySchedules = schedules.filter((s) => {
-                            const sDate = new Date(s.date);
+                            const sDate = new Date(s.schedule_date);
                             return (
                                 sDate.getFullYear() === date.getFullYear() &&
                                 sDate.getMonth() === date.getMonth() &&
@@ -75,7 +75,7 @@ export function MobileWorkScheduleCard({
                         });
 
                         const schedule = daySchedules[0];
-                        const shiftColor = schedule ? getShiftColor(schedule.shift?.color_key || 'blue') : null;
+                        const shiftColor = schedule ? getShiftColor(schedule.shift?.color || 'blue') : null;
 
                         return (
                             <button
@@ -91,7 +91,7 @@ export function MobileWorkScheduleCard({
                                 <div className="text-[10px] leading-tight">{dayNum}</div>
                                 {schedule && (
                                     <div className="text-[9px] truncate mt-0.5">
-                                        {schedule.shift?.code || 'Ca'}
+                                        {schedule.shift?.name?.substring(0, 2) || 'Ca'}
                                     </div>
                                 )}
                             </button>
@@ -105,7 +105,7 @@ export function MobileWorkScheduleCard({
                         {schedules.slice(0, 3).map((schedule) => (
                             <div key={schedule.id} className="text-xs">
                                 <Badge variant="outline" className="text-[10px]">
-                                    {new Date(schedule.date).toLocaleDateString('vi-VN', {
+                                    {new Date(schedule.schedule_date).toLocaleDateString('vi-VN', {
                                         day: '2-digit',
                                         month: '2-digit'
                                     })}: {schedule.shift?.name || 'Ca không tên'} ({formatTimeRange(

@@ -14,6 +14,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatCurrency, formatDate, formatDateTime, cn } from '@/lib/utils';
 import { PaymentRecordDialog } from '@/components/orders/PaymentRecordDialog';
 import { InvoiceDetailDialog, MobileInvoicesList } from '@/components/invoices';
+import type { User } from '@/types';
+import type { Invoice } from '@/components/invoices/InvoiceDetailDialog';
 
 interface Order {
     id: string;

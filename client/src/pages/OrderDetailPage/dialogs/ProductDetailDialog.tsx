@@ -1518,8 +1518,8 @@ export function ProductDetailDialog({
                                                                         </Label>
                                                                         <Select
                                                                             value={
-                                                                                DELIVERY_CARRIER_OPTIONS.includes(formData.delivery_carrier as (typeof DELIVERY_CARRIER_OPTIONS)[number])
-                                                                                    ? formData.delivery_carrier
+                                                                                DELIVERY_CARRIER_OPTIONS.includes(formData.delivery_carrier as any)
+                                                                                    ? (formData.delivery_carrier as string)
                                                                                     : formData.delivery_carrier
                                                                                         ? 'Khác'
                                                                                         : ''
