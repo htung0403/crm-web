@@ -13,10 +13,7 @@ import { invoicesApi, ordersApi } from '@/lib/api';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatCurrency, formatDate, formatDateTime, cn } from '@/lib/utils';
 import { PaymentRecordDialog } from '@/components/orders/PaymentRecordDialog';
-
-import type { User } from '@/types';
-
-import { InvoiceDetailDialog, type Invoice } from '@/components/invoices/InvoiceDetailDialog';
+import { InvoiceDetailDialog, MobileInvoicesList } from '@/components/invoices';
 
 interface Order {
     id: string;
@@ -389,7 +386,17 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
                             </Select>
                         </div>
 
-                        <div className="rounded-md border overflow-x-auto">
+                        {/* Mobile view */}
+                        <div className="lg:hidden">
+                            <MobileInvoicesList
+                                invoices={filteredInvoices}
+                                loading={false}
+                                onView={fetchInvoiceDetail}
+                            />
+                        </div>
+
+                        {/* Desktop view - Table */}
+                        <div className="hidden lg:block rounded-md border overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead className="bg-muted/50">
                                     <tr className="border-b">

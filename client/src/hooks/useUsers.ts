@@ -29,6 +29,19 @@ interface UpdateUserData {
     bankAccount?: string;
     bankName?: string;
     telegramChatId?: string;
+    password?: string;
+    jobTitleId?: string;
+    joinDate?: string;
+    payrollBranchId?: string;
+    workingBranchId?: string;
+    dob?: string;
+    gender?: string;
+    identityCard?: string;
+    kiotvietAccount?: string;
+    facebook?: string;
+    address?: string;
+    mobileDevice?: string;
+    notes?: string;
 }
 
 interface UseUsersReturn {

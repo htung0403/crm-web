@@ -1,6 +1,7 @@
-import { Edit, Trash2, Wrench, GitBranch } from 'lucide-react';
+import { Edit, Trash2, Wrench, GitBranch, MoreVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { formatCurrency } from '@/lib/utils';
 import type { Service } from './types';
 import { getDepartmentLabel, type DepartmentOption } from './ServiceFormDialog';
@@ -121,7 +122,7 @@ export function ServicesTable({ services, loading, onEdit, onDelete, departments
             </div>
 
             {/* Mobile Card View */}
-            <div className="md:hidden space-y-4">
+            <div className="space-y-2.5 overflow-x-hidden md:hidden">
                 {loading && services.length === 0 ? (
                     <div className="p-8 text-center text-muted-foreground">
                         Đang tải dữ liệu...
@@ -132,75 +133,65 @@ export function ServicesTable({ services, loading, onEdit, onDelete, departments
                     </div>
                 ) : (
                     services.map((service) => (
-                        <div key={service.id} className="bg-card rounded-lg border p-4 space-y-3">
-                            <div className="flex items-start gap-3">
+                        <div key={service.id} className="w-full space-y-2 rounded-lg border bg-card p-2.5 shadow-sm">
+                            <div className="flex items-start gap-2">
                                 {service.image ? (
                                     <img
                                         src={service.image}
                                         alt={service.name}
-                                        className="w-16 h-16 rounded-lg object-cover border shadow-sm shrink-0"
+                                        className="h-12 w-12 shrink-0 rounded-lg border object-cover shadow-sm"
                                     />
                                 ) : (
-                                    <div className="w-16 h-16 rounded-lg bg-muted flex items-center justify-center shrink-0">
-                                        <Wrench className="h-8 w-8 text-muted-foreground" />
+                                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-muted">
+                                        <Wrench className="h-6 w-6 text-muted-foreground" />
                                     </div>
                                 )}
                                 <div className="flex-1 min-w-0">
                                     <div className="flex items-start justify-between">
                                         <div>
-                                            <h3 className="font-medium truncate pr-2">{service.name}</h3>
-                                            <p className="text-sm text-muted-foreground font-mono">{service.code}</p>
+                                            <h3 className="line-clamp-2 pr-2 text-[13px] font-medium leading-5">{service.name}</h3>
+                                            <p className="font-mono text-xs text-muted-foreground">{service.code}</p>
                                         </div>
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0">
+                                                    <MoreVertical className="h-4 w-4" />
+                                                </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end">
+                                                <DropdownMenuItem onClick={() => onEdit(service)}>
+                                                    <Edit className="mr-2 h-4 w-4" />
+                                                    Sửa
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem onClick={() => onDelete(service.id)} className="text-red-600 focus:text-red-600">
+                                                    <Trash2 className="mr-2 h-4 w-4" />
+                                                    Xóa
+                                                </DropdownMenuItem>
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
                                     </div>
-                                    <div className="flex items-center gap-2 mt-1">
-                                        <span className="font-bold text-primary">{formatCurrency(service.price)}</span>
+                                    <div className="mt-1 flex items-center gap-2">
+                                        <span className="text-sm font-bold text-primary">{formatCurrency(service.price)}</span>
                                         <Badge variant="outline" className="text-xs">
                                             {service.duration || 0} phút
                                         </Badge>
                                     </div>
                                 </div>
                             </div>
-
-                            <div className="grid grid-cols-2 gap-2 text-sm pt-2 border-t">
-                                <div className="col-span-2">
-                                    <span className="text-muted-foreground block mb-1">Quy trình:</span>
-                                    {getWorkflowName(service.workflow_id) ? (
-                                        <Badge variant="secondary" className="text-xs gap-1">
-                                            <GitBranch className="h-3 w-3" />
-                                            {getWorkflowName(service.workflow_id)}
-                                        </Badge>
-                                    ) : (
-                                        <span className="text-muted-foreground text-xs">-</span>
-                                    )}
-                                </div>
-                                <div className="flex items-center justify-between col-span-2">
-                                    <span className="text-muted-foreground">Phòng ban:</span>
-                                    {service.department ? (
-                                        <Badge variant="outline" className="text-xs">
-                                            {getDepartmentLabel(service.department, departments)}
-                                        </Badge>
-                                    ) : (
-                                        <span className="text-muted-foreground text-xs">-</span>
-                                    )}
-                                </div>
-                                <div className="flex items-center justify-between col-span-2">
-                                    <span className="text-muted-foreground">HH Sale / KTV:</span>
-                                    <div className="flex gap-2">
-                                        <Badge variant="info" className="bg-amber-100 text-amber-700 border-amber-200">{service.commission_sale || 0}%</Badge>
-                                        <Badge variant="info" className="bg-emerald-100 text-emerald-700 border-emerald-200">{service.commission_tech || 0}%</Badge>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="flex justify-end gap-2 pt-2 border-t">
-                                <Button variant="outline" size="sm" onClick={() => onEdit(service)} className="flex-1">
-                                    <Edit className="h-4 w-4 mr-2" />
-                                    Sửa
-                                </Button>
-                                <Button variant="outline" size="sm" onClick={() => onDelete(service.id)} className="flex-1 text-red-500 hover:text-red-600 hover:bg-red-50">
-                                    <Trash2 className="h-4 w-4 mr-2" />
-                                    Xóa
-                                </Button>
+                            <div className="flex flex-wrap gap-1.5 border-t pt-2">
+                                {getWorkflowName(service.workflow_id) && (
+                                    <Badge variant="secondary" className="max-w-full gap-1 truncate text-[11px]">
+                                        <GitBranch className="h-3 w-3 shrink-0" />
+                                        <span className="truncate">{getWorkflowName(service.workflow_id)}</span>
+                                    </Badge>
+                                )}
+                                {service.department && (
+                                    <Badge variant="outline" className="text-[11px]">
+                                        {getDepartmentLabel(service.department, departments)}
+                                    </Badge>
+                                )}
+                                <Badge variant="info" className="bg-amber-100 text-[11px] text-amber-700 border-amber-200">Sale {service.commission_sale || 0}%</Badge>
+                                <Badge variant="info" className="bg-emerald-100 text-[11px] text-emerald-700 border-emerald-200">KTV {service.commission_tech || 0}%</Badge>
                             </div>
                         </div>
                     ))
@@ -209,3 +200,4 @@ export function ServicesTable({ services, loading, onEdit, onDelete, departments
         </>
     );
 }
+

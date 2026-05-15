@@ -34,8 +34,11 @@ interface Employee {
     gender?: string;
     identityCard?: string;
     jobTitleId?: string;
+    job_title_id?: string;
     payrollBranchId?: string;
+    payroll_branch_id?: string;
     workingBranchId?: string;
+    working_branch_id?: string;
     kiotvietAccount?: string;
     facebook?: string;
     address?: string;
@@ -68,8 +71,8 @@ interface EmployeeFormDialogProps {
     jobTitles: { id: string; name: string }[];
     users: SystemUser[];
     onSubmit: (data: any) => Promise<void>;
-    onCreateDepartment?: (data: { name: string; description: string; status: string }) => Promise<void>;
-    onCreateJobTitle?: (data: { name: string; description: string; status: string }) => Promise<void>;
+    onCreateDepartment?: (data: { name: string; description: string; status: string }) => Promise<{ id: string } | void>;
+    onCreateJobTitle?: (data: { name: string; description: string; status: string }) => Promise<{ id: string } | void>;
     onRefreshUsers?: () => void;
 }
 
@@ -103,6 +106,9 @@ export function EmployeeFormDialog({
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [passwordConfirm, setPasswordConfirm] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+    const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
     const [phone, setPhone] = useState('');
     const [role, setRole] = useState<UserRole>('sale');
     const [department, setDepartment] = useState('');
@@ -143,6 +149,7 @@ export function EmployeeFormDialog({
     const [showInlineTitle, setShowInlineTitle] = useState(false);
     const [inlineTitleName, setInlineTitleName] = useState('');
     const [savingInlineTitle, setSavingInlineTitle] = useState(false);
+    const [localJobTitles, setLocalJobTitles] = useState(jobTitlesProp);
 
     // Account dialog states
     const [showCreateAccountDialog, setShowCreateAccountDialog] = useState(false);
@@ -160,6 +167,10 @@ export function EmployeeFormDialog({
     const [selectedAccountId, setSelectedAccountId] = useState<string>('none');
 
     const isEditing = !!employee;
+
+    useEffect(() => {
+        setLocalJobTitles(jobTitlesProp);
+    }, [jobTitlesProp]);
 
     // Reset form when employee changes
     useEffect(() => {
@@ -180,9 +191,9 @@ export function EmployeeFormDialog({
             setDob(employee.dob || '');
             setGender(employee.gender || 'Nữ');
             setIdentityCard(employee.identityCard || '');
-            setJobTitleId(employee.jobTitleId || 'none');
-            setPayrollBranchId(employee.payrollBranchId || 'none');
-            setWorkingBranchId(employee.workingBranchId || 'none');
+            setJobTitleId(employee.jobTitleId || employee.job_title_id || 'none');
+            setPayrollBranchId(employee.payrollBranchId || employee.payroll_branch_id || 'none');
+            setWorkingBranchId(employee.workingBranchId || employee.working_branch_id || 'none');
             setKiotvietAccount(employee.kiotvietAccount || '');
             setFacebook(employee.facebook || '');
             setAddress(employee.address || '');
@@ -191,10 +202,12 @@ export function EmployeeFormDialog({
             setSelectedAccountId(employee.id || 'none');
 
             setPassword('');
+            setPasswordConfirm('');
         } else {
             setName('');
             setEmail('');
             setPassword('');
+            setPasswordConfirm('');
             setAvatar('');
             setPhone('');
             setRole('sale');
@@ -234,9 +247,24 @@ export function EmployeeFormDialog({
             return;
         }
 
-        if (!isEditing && (!password || password.length < 6)) {
-            toast.error('Mật khẩu phải có ít nhất 6 ký tự');
-            return;
+        if (!isEditing) {
+            if (!password || password.length < 6) {
+                toast.error('Mật khẩu phải có ít nhất 6 ký tự');
+                return;
+            }
+            if (password !== passwordConfirm) {
+                toast.error('Mật khẩu nhập lại không khớp');
+                return;
+            }
+        } else if (password) {
+            if (password.length < 6) {
+                toast.error('Mật khẩu phải có ít nhất 6 ký tự');
+                return;
+            }
+            if (password !== passwordConfirm) {
+                toast.error('Mật khẩu nhập lại không khớp');
+                return;
+            }
         }
 
         setSubmitting(true);
@@ -268,7 +296,7 @@ export function EmployeeFormDialog({
                 notes: notes || undefined
             };
 
-            if (!isEditing && password) {
+            if (password) {
                 submitData.password = password;
             }
 
@@ -290,7 +318,8 @@ export function EmployeeFormDialog({
         setSavingInlineDept(true);
         try {
             if (onCreateDepartment) {
-                await onCreateDepartment({ name: inlineDeptName, description: '', status: 'active' });
+                const created = await onCreateDepartment({ name: inlineDeptName, description: '', status: 'active' });
+                if (created?.id) setDepartment(created.id);
             }
             toast.success('Đã tạo phòng ban mới!');
             setInlineDeptName('');
@@ -311,7 +340,14 @@ export function EmployeeFormDialog({
         setSavingInlineTitle(true);
         try {
             if (onCreateJobTitle) {
-                await onCreateJobTitle({ name: inlineTitleName, description: '', status: 'active' });
+                const created = await onCreateJobTitle({ name: inlineTitleName, description: '', status: 'active' });
+                if (created?.id) {
+                    setJobTitleId(created.id);
+                    setLocalJobTitles((prev) => {
+                        if (prev.some((jt) => jt.id === created.id)) return prev;
+                        return [...prev, { id: created.id, name: inlineTitleName.trim() }];
+                    });
+                }
             }
             toast.success('Đã tạo chức danh mới!');
             setInlineTitleName('');
@@ -549,7 +585,10 @@ export function EmployeeFormDialog({
 
                                             {/* Chức danh with + button */}
                                             <div className="space-y-1">
-                                                <Label className="text-[12px] text-gray-500">Chức danh</Label>
+                                                <Label className="text-[12px] text-gray-500">
+                                                    Chức danh
+                                                    <span className="text-gray-400 font-normal ml-1">(chọn hoặc nhấn + thêm mới)</span>
+                                                </Label>
                                                 <div className="flex items-center gap-1.5">
                                                     <Select value={jobTitleId} onValueChange={setJobTitleId}>
                                                         <SelectTrigger className="flex-1 h-[34px] text-[13px]">
@@ -557,7 +596,7 @@ export function EmployeeFormDialog({
                                                         </SelectTrigger>
                                                         <SelectContent>
                                                             <SelectItem value="none">-- Không chọn --</SelectItem>
-                                                            {jobTitlesProp.map(jt => (
+                                                            {localJobTitles.map(jt => (
                                                                 <SelectItem key={jt.id} value={jt.id}>{jt.name}</SelectItem>
                                                             ))}
                                                         </SelectContent>
@@ -763,6 +802,50 @@ export function EmployeeFormDialog({
                                                     disabled={isEditing}
                                                     className="h-[34px] text-[13px]"
                                                 />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label className="text-[12px] text-gray-500">
+                                                    Mật khẩu {isEditing ? '' : '*'}
+                                                </Label>
+                                                <div className="relative">
+                                                    <Input
+                                                        type={showPassword ? 'text' : 'password'}
+                                                        value={password}
+                                                        onChange={(e) => setPassword(e.target.value)}
+                                                        placeholder={isEditing ? 'Để trống nếu không đổi' : 'Tối thiểu 6 ký tự'}
+                                                        className="h-[34px] text-[13px] pr-9"
+                                                        autoComplete="new-password"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                                        onClick={() => setShowPassword(!showPassword)}
+                                                    >
+                                                        {showPassword ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label className="text-[12px] text-gray-500">
+                                                    Nhập lại mật khẩu {isEditing ? '' : '*'}
+                                                </Label>
+                                                <div className="relative">
+                                                    <Input
+                                                        type={showPasswordConfirm ? 'text' : 'password'}
+                                                        value={passwordConfirm}
+                                                        onChange={(e) => setPasswordConfirm(e.target.value)}
+                                                        placeholder={isEditing ? 'Để trống nếu không đổi' : 'Nhập lại mật khẩu'}
+                                                        className="h-[34px] text-[13px] pr-9"
+                                                        autoComplete="new-password"
+                                                    />
+                                                    <button
+                                                        type="button"
+                                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                                        onClick={() => setShowPasswordConfirm(!showPasswordConfirm)}
+                                                    >
+                                                        {showPasswordConfirm ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                                                    </button>
+                                                </div>
                                             </div>
                                             <div className="space-y-1">
                                                 <Label className="text-[12px] text-gray-500">Telegram Chat ID</Label>

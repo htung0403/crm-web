@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search, Edit, Trash2, Eye, Phone, Mail, Shield, Calendar, UserPlus, Loader2, ShoppingCart, FileText, ExternalLink, LayoutGrid, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Eye, Phone, Mail, Shield, Calendar, UserPlus, Loader2, ShoppingCart, FileText, ExternalLink, LayoutGrid, List, Columns3, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 
@@ -18,6 +18,8 @@ import { Separator } from '@/components/ui/separator';
 import { EmployeeFormDialog } from '@/components/employees/EmployeeFormDialog';
 import { EmployeeScheduleTab } from '@/components/employees/EmployeeScheduleTab';
 import { EmployeeSalaryTab } from '@/components/employees/EmployeeSalaryTab';
+import { MobileEmployeesList } from '@/components/employees/MobileEmployeesList';
+import { EmployeeDepartmentKanban } from '@/components/employees/EmployeeDepartmentKanban';
 
 import { formatCurrency } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -86,17 +88,25 @@ const orderStatusLabels: Record<string, { label: string; variant: 'default' | 's
     cancelled: { label: 'Đã hủy', variant: 'destructive' },
 };
 
-// Employee Detail Dialog
+// Employee Detail Dialog (modal xem chi tiết)
 function EmployeeDetailDialog({
     open,
     onClose,
     employee,
-    departments
+    departments,
+    getJobTitleName,
+    branches,
+    onEdit,
+    onDelete,
 }: {
     open: boolean;
     onClose: () => void;
     employee: Employee | null;
     departments: { id: string; name: string }[];
+    getJobTitleName: (jobTitleId?: string) => string;
+    branches: { id: string; name: string }[];
+    onEdit?: (emp: Employee) => void;
+    onDelete?: (emp: Employee) => void;
 }) {
     const [activeTab, setActiveTab] = useState('info');
     const [orders, setOrders] = useState<EmployeeOrder[]>([]);
@@ -160,14 +170,17 @@ function EmployeeDetailDialog({
 
     return (
         <>
-            <Dialog open={open} onOpenChange={onClose}>
-                <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-                    <DialogHeader>
-                        <DialogTitle>Chi tiết nhân viên</DialogTitle>
+            <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+                <DialogContent className="max-w-4xl w-[min(96vw,56rem)] max-h-[92vh] overflow-hidden flex flex-col p-0 gap-0">
+                    <DialogHeader className="px-6 pt-6 pb-4 border-b shrink-0">
+                        <DialogTitle className="text-xl">Chi tiết nhân viên</DialogTitle>
+                        <DialogDescription>
+                            {employee.name} · {employee.employee_code || '—'}
+                        </DialogDescription>
                     </DialogHeader>
 
-                    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
-                        <TabsList className="grid w-full grid-cols-2">
+                    <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden min-h-0 px-6">
+                        <TabsList className="grid w-full grid-cols-2 shrink-0 mt-2">
                             <TabsTrigger value="info" className="gap-2">
                                 <FileText className="h-4 w-4" />
                                 Thông tin
@@ -217,8 +230,22 @@ function EmployeeDetailDialog({
                                         </p>
                                     </div>
                                     <div className="space-y-1">
+                                        <p className="text-xs text-muted-foreground">Mã nhân viên</p>
+                                        <p className="text-sm font-medium">{employee.employee_code || 'Chưa cập nhật'}</p>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-xs text-muted-foreground">Chức danh</p>
+                                        <p className="text-sm font-medium">{getJobTitleName(employee.job_title_id)}</p>
+                                    </div>
+                                    <div className="space-y-1">
                                         <p className="text-xs text-muted-foreground">Phòng ban</p>
                                         <p className="text-sm font-medium">{getDepartmentName(employee.department)}</p>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-xs text-muted-foreground">Chi nhánh làm việc</p>
+                                        <p className="text-sm font-medium">
+                                            {branches.find((b) => b.id === employee.working_branch_id)?.name || 'Chưa cập nhật'}
+                                        </p>
                                     </div>
                                     <div className="space-y-1">
                                         <p className="text-xs text-muted-foreground">Ngày vào làm</p>
@@ -312,8 +339,25 @@ function EmployeeDetailDialog({
                         </TabsContent>
                     </Tabs>
 
-                    <DialogFooter className="mt-4">
-                        <Button variant="outline" onClick={onClose}>Đóng</Button>
+                    <DialogFooter className="px-6 py-4 border-t shrink-0 gap-2 sm:gap-2">
+                        {onDelete && (
+                            <Button
+                                type="button"
+                                variant="outline"
+                                className="text-red-600 border-red-200 hover:bg-red-50 mr-auto"
+                                onClick={() => onDelete(employee)}
+                            >
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Xóa
+                            </Button>
+                        )}
+                        {onEdit && (
+                            <Button type="button" variant="outline" onClick={() => onEdit(employee)}>
+                                <Edit className="h-4 w-4 mr-2" />
+                                Sửa
+                            </Button>
+                        )}
+                        <Button type="button" variant="outline" onClick={onClose}>Đóng</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
@@ -339,9 +383,12 @@ export function EmployeesPage() {
     const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
     const [loadingBranches, setLoadingBranches] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
+    const [viewMode, setViewMode] = useState<'table' | 'kanban'>('table');
     const [roleFilter, setRoleFilter] = useState<string>('all');
     const [statusFilter, setStatusFilter] = useState<string>('active');
     const [showForm, setShowForm] = useState(false);
+    const [showEmployeeDetailModal, setShowEmployeeDetailModal] = useState(false);
+    const [detailModalEmployee, setDetailModalEmployee] = useState<Employee | null>(null);
     const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
     const [detailActiveTab, setDetailActiveTab] = useState('info');
     const [detailOrders, setDetailOrders] = useState<EmployeeOrder[]>([]);
@@ -369,10 +416,12 @@ export function EmployeesPage() {
         email: false,
         facebook: false,
         address: false,
-        department: false,
+        account: true,
+        password: true,
+        position: true,
+        department: true,
         role: false,
         joinDate: false,
-        account: false,
     });
 
 
@@ -484,6 +533,8 @@ export function EmployeesPage() {
         ...user,
         status: (user.status as 'active' | 'inactive' | 'onleave') || 'active',
         department: user.department,
+        departmentId: (user as { departmentId?: string; department_id?: string }).departmentId
+            ?? (user as { department_id?: string }).department_id,
         joinDate: user.created_at?.split('T')[0],
         salary: user.salary || 0,
         commission: user.commission || 0,
@@ -528,13 +579,44 @@ export function EmployeesPage() {
         }
     };
 
-    const handleDeleteEmployee = async (id: string) => {
-        if (!confirm('Bạn có chắc muốn xoá nhân viên này?')) return;
+    const handleViewEmployee = (emp: Employee) => {
+        setDetailModalEmployee(emp);
+        setShowEmployeeDetailModal(true);
+    };
+
+    const closeEmployeeDetailModal = () => {
+        setShowEmployeeDetailModal(false);
+        setDetailModalEmployee(null);
+    };
+
+    const handleEditEmployee = (emp: Employee) => {
+        setSelectedEmployee(emp);
+        setShowForm(true);
+    };
+
+    const handleDeactivateEmployee = async (emp: Employee) => {
+        if (!confirm(`Xác nhận ngừng làm việc cho "${emp.name}"?`)) return;
         try {
-            await deleteUser(id);
-            toast.success('Đã xoá nhân viên!');
-        } catch (error) {
-            toast.error('Lỗi khi xoá');
+            await updateUser(emp.id, { status: 'inactive' } as any);
+            toast.success('Đã cập nhật trạng thái nghỉ việc');
+            await fetchUsers();
+            if (selectedEmployee?.id === emp.id) setSelectedEmployee(null);
+            if (detailModalEmployee?.id === emp.id) closeEmployeeDetailModal();
+        } catch {
+            toast.error('Lỗi khi cập nhật trạng thái');
+        }
+    };
+
+    const handleDeleteEmployee = async (emp: Employee) => {
+        if (!confirm(`Bạn có chắc muốn xóa nhân viên "${emp.name}"?`)) return;
+        try {
+            await deleteUser(emp.id);
+            toast.success('Đã xóa nhân viên!');
+            if (selectedEmployee?.id === emp.id) setSelectedEmployee(null);
+            if (detailModalEmployee?.id === emp.id) closeEmployeeDetailModal();
+            await fetchUsers();
+        } catch {
+            toast.error('Lỗi khi xóa');
         }
     };
 
@@ -542,6 +624,12 @@ export function EmployeesPage() {
         if (!deptId) return 'Chưa phân bổ';
         const dept = departments.find(d => d.id === deptId);
         return dept?.name || deptId;
+    };
+
+    const getJobTitleName = (jobTitleId?: string) => {
+        if (!jobTitleId) return 'Chưa cập nhật';
+        const jobTitle = jobTitles.find(t => t.id === jobTitleId);
+        return jobTitle?.name || jobTitleId;
     };
 
     if (loading && employees.length === 0) {
@@ -641,7 +729,29 @@ export function EmployeesPage() {
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
+                        <div className="flex rounded-lg border border-gray-200 bg-white p-0.5 shadow-sm">
+                            <Button
+                                type="button"
+                                variant={viewMode === 'table' ? 'default' : 'ghost'}
+                                size="sm"
+                                className={`h-8 px-3 text-[12px] rounded-md ${viewMode === 'table' ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''}`}
+                                onClick={() => setViewMode('table')}
+                            >
+                                <List className="h-4 w-4 mr-1" />
+                                Bảng
+                            </Button>
+                            <Button
+                                type="button"
+                                variant={viewMode === 'kanban' ? 'default' : 'ghost'}
+                                size="sm"
+                                className={`h-8 px-3 text-[12px] rounded-md ${viewMode === 'kanban' ? 'bg-blue-600 hover:bg-blue-700 text-white' : ''}`}
+                                onClick={() => setViewMode('kanban')}
+                            >
+                                <LayoutGrid className="h-4 w-4 mr-1" />
+                                Kanban
+                            </Button>
+                        </div>
                         <Button 
                             variant="outline" 
                             className="h-[36px] px-3.5 text-blue-600 border border-blue-200 bg-white hover:bg-blue-50 text-[13px] font-semibold rounded-lg shadow-sm"
@@ -657,10 +767,11 @@ export function EmployeesPage() {
                         <Button variant="outline" size="icon" className="h-[36px] w-[36px] border-gray-200 bg-white text-gray-600 rounded-lg shadow-sm hover:bg-gray-50">
                             <span className="leading-none pb-2 text-[18px] font-bold">...</span>
                         </Button>
+                        {viewMode === 'table' && (
                         <Popover>
                             <PopoverTrigger asChild>
-                                <Button variant="outline" size="icon" className="h-[36px] w-[36px] border-gray-200 bg-white text-gray-600 rounded-lg shadow-sm hover:bg-gray-50">
-                                    <LayoutGrid className="h-[15px] w-[15px]" />
+                                <Button variant="outline" size="icon" className="h-[36px] w-[36px] border-gray-200 bg-white text-gray-600 rounded-lg shadow-sm hover:bg-gray-50" title="Ẩn/hiện cột">
+                                    <Columns3 className="h-[15px] w-[15px]" />
                                 </Button>
                             </PopoverTrigger>
                             <PopoverContent className="w-[500px] p-4" align="end">
@@ -693,12 +804,14 @@ export function EmployeesPage() {
                                         { id: 'birthday', label: 'Ngày sinh' },
                                         { id: 'gender', label: 'Giới tính' },
                                         { id: 'email', label: 'Email' },
+                                        { id: 'account', label: 'Tên đăng nhập' },
+                                        { id: 'password', label: 'Mật khẩu' },
                                         { id: 'facebook', label: 'Facebook' },
+                                        { id: 'position', label: 'Vị trí' },
                                         { id: 'address', label: 'Địa chỉ' },
                                         { id: 'department', label: 'Phòng ban' },
                                         { id: 'role', label: 'Chức danh' },
                                         { id: 'joinDate', label: 'Ngày bắt đầu làm việc' },
-                                        { id: 'account', label: 'Tài khoản đăng nhập' },
                                     ].map((col) => (
                                         <div key={col.id} className="flex items-center gap-3">
                                             <Checkbox 
@@ -716,12 +829,49 @@ export function EmployeesPage() {
                                 </div>
                             </PopoverContent>
                         </Popover>
+                        )}
 
                     </div>
                 </div>
 
+                {viewMode === 'kanban' ? (
+                    <EmployeeDepartmentKanban
+                        employees={filteredEmployees}
+                        departments={[...departments].sort((a, b) => a.name.localeCompare(b.name, 'vi'))}
+                        getJobTitleName={getJobTitleName}
+                        onView={handleViewEmployee}
+                        onEdit={handleEditEmployee}
+                        onDelete={handleDeleteEmployee}
+                    />
+                ) : (
+                <>
+                {/* Mobile list */}
+                <div className="lg:hidden flex-1 overflow-auto p-3">
+                    <MobileEmployeesList
+                        employees={filteredEmployees.map((emp) => ({
+                            id: emp.id,
+                            name: emp.name,
+                            email: emp.email,
+                            phone: emp.phone,
+                            employee_code: emp.employee_code,
+                            status: emp.status,
+                            avatar: emp.avatar,
+                            job_titles: emp.job_title_id
+                                ? { name: getJobTitleName(emp.job_title_id) }
+                                : undefined,
+                            departments: emp.department
+                                ? { name: getDepartmentName(emp.department) }
+                                : undefined,
+                        }))}
+                        loading={loading}
+                        onView={(e) => handleViewEmployee(e as Employee)}
+                        onEdit={(e) => handleEditEmployee(e as Employee)}
+                        onDelete={(e) => handleDeleteEmployee(e as Employee)}
+                    />
+                </div>
+
                 {/* Table Area */}
-                <div className="flex-1 overflow-auto">
+                <div className="hidden lg:block flex-1 overflow-auto">
                     <table className="w-full text-left border-collapse whitespace-nowrap">
                         <thead className="bg-[#f2f6ff] sticky top-0 z-10 box-border">
                             <tr>
@@ -740,19 +890,24 @@ export function EmployeesPage() {
                                 {columnVisibility.birthday && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">NGÀY SINH</th>}
                                 {columnVisibility.gender && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">GIỚI TÍNH</th>}
                                 {columnVisibility.email && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">EMAIL</th>}
+                                {columnVisibility.account && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">TÊN ĐĂNG NHẬP</th>}
+                                {columnVisibility.password && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">MẬT KHẨU</th>}
                                 {columnVisibility.facebook && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">FACEBOOK</th>}
                                 {columnVisibility.address && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">ĐỊA CHỈ</th>}
+                                {columnVisibility.position && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">VỊ TRÍ</th>}
                                 {columnVisibility.department && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">PHÒNG BAN</th>}
                                 {columnVisibility.role && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">CHỨC DANH</th>}
                                 {columnVisibility.joinDate && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">NGÀY VÀO LÀM</th>}
-                                {columnVisibility.account && <th className="px-4 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide">TÀI KHOẢN</th>}
+                                <th className="px-3 py-3 font-bold text-[11px] text-gray-900 border-b border-gray-100 tracking-wide text-center sticky right-0 bg-[#f2f6ff] min-w-[120px]">
+                                    THAO TÁC
+                                </th>
                             </tr>
                         </thead>
 
                         <tbody className="divide-y divide-gray-100">
                             {filteredEmployees.map((emp, index) => {
                                 const isExpanded = selectedEmployee?.id === emp.id;
-                                const totalCols = Object.values(columnVisibility).filter(v => v).length + 1;
+                                const totalCols = Object.values(columnVisibility).filter(v => v).length + 2;
                                 return (
                                 <React.Fragment key={emp.id}>
                                 <tr className={`hover:bg-blue-50/30 cursor-pointer transition-colors ${isExpanded ? 'bg-blue-50 ring-1 ring-inset ring-blue-200' : ''}`} onClick={(e) => {
@@ -814,8 +969,23 @@ export function EmployeesPage() {
                                     {columnVisibility.birthday && <td className="px-4 py-[13px] text-gray-600 text-[13px]"></td>}
                                     {columnVisibility.gender && <td className="px-4 py-[13px] text-gray-600 text-[13px]"></td>}
                                     {columnVisibility.email && <td className="px-4 py-[13px] text-gray-600 text-[13px]">{emp.email}</td>}
+                                    {columnVisibility.account && (
+                                        <td className="px-4 py-[13px] text-gray-600 text-[13px]">
+                                            {emp.email}
+                                        </td>
+                                    )}
+                                    {columnVisibility.password && (
+                                        <td className="px-4 py-[13px] text-gray-500 text-[13px] font-mono">
+                                            ••••••
+                                        </td>
+                                    )}
                                     {columnVisibility.facebook && <td className="px-4 py-[13px] text-gray-600 text-[13px]"></td>}
                                     {columnVisibility.address && <td className="px-4 py-[13px] text-gray-600 text-[13px]"></td>}
+                                    {columnVisibility.position && (
+                                        <td className="px-4 py-[13px] text-gray-600 text-[13px]">
+                                            {getJobTitleName(emp.job_title_id)}
+                                        </td>
+                                    )}
                                     {columnVisibility.department && (
                                         <td className="px-4 py-[13px] text-gray-600 text-[13px]">
                                             {getDepartmentName(emp.department)}
@@ -831,11 +1001,40 @@ export function EmployeesPage() {
                                             {emp.joinDate}
                                         </td>
                                     )}
-                                    {columnVisibility.account && (
-                                        <td className="px-4 py-[13px] text-gray-600 text-[13px]">
-                                            {emp.email}
-                                        </td>
-                                    )}
+                                    <td
+                                        className={`px-2 py-[13px] sticky right-0 border-l border-gray-100 ${isExpanded ? 'bg-blue-50' : 'bg-white'}`}
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        <div className="flex items-center justify-center gap-0.5">
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 text-gray-500 hover:text-blue-600 hover:bg-blue-50"
+                                                title="Xem"
+                                                onClick={() => handleViewEmployee(emp)}
+                                            >
+                                                <Eye className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 text-gray-500 hover:text-blue-600 hover:bg-blue-50"
+                                                title="Sửa"
+                                                onClick={() => handleEditEmployee(emp)}
+                                            >
+                                                <Edit className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 text-gray-500 hover:text-red-600 hover:bg-red-50"
+                                                title="Xóa"
+                                                onClick={() => handleDeleteEmployee(emp)}
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    </td>
                                 </tr>
                                 {/* Expandable detail row - appears right below the clicked employee */}
                                 {isExpanded && (
@@ -864,8 +1063,26 @@ export function EmployeesPage() {
                                                             </div>
                                                         </div>
                                                     </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-400 hover:text-gray-600 hover:bg-gray-100" onClick={(e) => { e.stopPropagation(); setSelectedEmployee(null); }}>
+                                                    <div className="flex items-center gap-1">
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className="h-8 text-[12px]"
+                                                            onClick={(e) => { e.stopPropagation(); handleEditEmployee(emp); }}
+                                                        >
+                                                            <Edit className="h-3.5 w-3.5 mr-1" />
+                                                            Sửa
+                                                        </Button>
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className="h-8 text-[12px] text-red-600 border-red-200 hover:bg-red-50"
+                                                            onClick={(e) => { e.stopPropagation(); handleDeleteEmployee(emp); }}
+                                                        >
+                                                            <Trash2 className="h-3.5 w-3.5 mr-1" />
+                                                            Xóa
+                                                        </Button>
+                                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-gray-600" onClick={(e) => { e.stopPropagation(); setSelectedEmployee(null); }}>
                                                             <X className="h-4 w-4" />
                                                         </Button>
                                                     </div>
@@ -1019,16 +1236,29 @@ export function EmployeesPage() {
                                                                 </div>
                                                             </div>
                                                             {/* Actions footer */}
-                                                            <div className="mt-6 flex justify-end gap-3">
-                                                                <Button variant="outline" className="h-9 px-4 text-[13px] text-gray-700 bg-white border-gray-300 hover:bg-gray-50 font-medium shadow-sm">
+                                                            <div className="mt-6 flex flex-wrap justify-end gap-2">
+                                                                <Button
+                                                                    variant="outline"
+                                                                    className="h-9 px-4 text-[13px] text-gray-700 bg-white border-gray-300 hover:bg-gray-50 font-medium shadow-sm"
+                                                                    onClick={(e) => { e.stopPropagation(); handleDeactivateEmployee(emp); }}
+                                                                >
                                                                     Ngừng làm việc
                                                                 </Button>
-                                                                <Button 
-                                                                    className="h-9 px-6 text-[13px] bg-blue-600 hover:bg-blue-700 text-white font-medium shadow-sm transition-all flex items-center gap-1.5"
-                                                                    onClick={(e) => { e.stopPropagation(); setShowForm(true); }}
+                                                                <Button
+                                                                    variant="outline"
+                                                                    className="h-9 px-4 text-[13px] font-medium shadow-sm flex items-center gap-1.5"
+                                                                    onClick={(e) => { e.stopPropagation(); handleEditEmployee(emp); }}
                                                                 >
                                                                     <Edit className="h-3.5 w-3.5" />
-                                                                    Cập nhật
+                                                                    Sửa
+                                                                </Button>
+                                                                <Button
+                                                                    variant="outline"
+                                                                    className="h-9 px-4 text-[13px] text-red-600 border-red-200 hover:bg-red-50 font-medium shadow-sm flex items-center gap-1.5"
+                                                                    onClick={(e) => { e.stopPropagation(); handleDeleteEmployee(emp); }}
+                                                                >
+                                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                                    Xóa
                                                                 </Button>
                                                             </div>
                                                         </div>
@@ -1112,7 +1342,7 @@ export function EmployeesPage() {
                             })}
                             {filteredEmployees.length === 0 && (
                                 <tr>
-                                    <td colSpan={Object.values(columnVisibility).filter(v => v).length + 1} className="px-4 py-8 text-center text-[13px] text-gray-500">
+                                    <td colSpan={Object.values(columnVisibility).filter(v => v).length + 2} className="px-4 py-8 text-center text-[13px] text-gray-500">
                                         Không tìm thấy nhân viên nào
                                     </td>
                                 </tr>
@@ -1121,9 +1351,24 @@ export function EmployeesPage() {
                         </tbody>
                     </table>
                 </div>
+                </>
+                )}
             </div>
             
             {/* Dialogs */}
+            <EmployeeDetailDialog
+                open={showEmployeeDetailModal}
+                onClose={closeEmployeeDetailModal}
+                employee={detailModalEmployee}
+                departments={departments}
+                getJobTitleName={getJobTitleName}
+                branches={branches}
+                onEdit={(emp) => {
+                    closeEmployeeDetailModal();
+                    handleEditEmployee(emp);
+                }}
+                onDelete={handleDeleteEmployee}
+            />
             <EmployeeFormDialog
                 open={showForm}
                 onClose={() => { setShowForm(false); setSelectedEmployee(null); }}
@@ -1132,12 +1377,14 @@ export function EmployeesPage() {
                 jobTitles={jobTitles}
                 onSubmit={selectedEmployee ? handleUpdateEmployee : handleCreateEmployee}
                 onCreateDepartment={async (data) => {
-                    await createDepartment(data as any);
-                    fetchDepartments();
+                    const created = await createDepartment(data as any);
+                    await fetchDepartments();
+                    return { id: created.id };
                 }}
                 onCreateJobTitle={async (data) => {
-                    await createJobTitle(data as any);
-                    fetchJobTitles();
+                    const created = await createJobTitle(data as any);
+                    await fetchJobTitles();
+                    return { id: created.id };
                 }}
                 users={users.map(u => ({ id: u.id, name: u.name, email: u.email, phone: u.phone, role: u.role }))}
                 onRefreshUsers={() => fetchUsers()}
@@ -1272,3 +1519,4 @@ export function EmployeesPage() {
         </div>
     );
 }
+

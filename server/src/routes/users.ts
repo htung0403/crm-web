@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import bcrypt from 'bcrypt';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireManager } from '../middleware/auth.js';
+import { hashPassword } from '../utils/password.js';
 
 const router = Router();
 
@@ -134,9 +134,7 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
             throw new ApiError('Email đã tồn tại trong hệ thống', 400);
         }
 
-        // Hash password with bcrypt
-        const saltRounds = 10;
-        const passwordHash = await bcrypt.hash(password, saltRounds);
+        const passwordHash = await hashPassword(password);
 
         // Generate timekeepingCode
         const { data: lastTimekeeping } = await supabaseAdmin
@@ -270,7 +268,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         const { 
             name, phone, avatar, department, departmentId, status, role, salary, commission, bankAccount, bankName, telegramChatId,
             dob, gender, identityCard, jobTitleId, joinDate, payrollBranchId, workingBranchId, kiotvietAccount, facebook, address, mobileDevice, notes,
-            kpiPolicyId
+            kpiPolicyId, password
         } = req.body;
 
         // Chỉ cho phép cập nhật thông tin của chính mình hoặc quản lý
@@ -314,6 +312,12 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             if (workingBranchId !== undefined) updateData.working_branch_id = workingBranchId || null;
             if (kiotvietAccount !== undefined) updateData.kiotviet_account = kiotvietAccount || null;
             if (kpiPolicyId !== undefined) updateData.kpi_policy_id = kpiPolicyId || null;
+            if (password) {
+                if (password.length < 6) {
+                    throw new ApiError('Mật khẩu phải có ít nhất 6 ký tự', 400);
+                }
+                updateData.password_hash = await hashPassword(password);
+            }
         }
 
         console.log('[DEBUG PUT /users/:id] req.body.jobTitleId =', jobTitleId, '| updateData =', JSON.stringify(updateData));

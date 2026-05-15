@@ -86,6 +86,16 @@ export function Header({ onMenuToggle, isMobile, currentUser, onLogout }: Header
             <div className="flex h-full items-center justify-between px-4 lg:px-6">
                 {/* Left section - Logo & Search */}
                 <div className="flex items-center gap-4">
+                    {isMobile && (
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={onMenuToggle}
+                            className="relative z-10 min-h-[44px] min-w-[44px] touch-manipulation"
+                        >
+                            <Menu className="h-6 w-6" />
+                        </Button>
+                    )}
                     <div className="flex items-center gap-3">
                         <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-blue-600 text-white font-bold text-lg">
                             C
@@ -285,17 +295,6 @@ export function Header({ onMenuToggle, isMobile, currentUser, onLogout }: Header
                         </Button>
                     )}
 
-                    {/* Mobile menu toggle */}
-                    {isMobile && (
-                        <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={onMenuToggle}
-                            className="ml-2 relative z-10 min-h-[44px] min-w-[44px] touch-manipulation"
-                        >
-                            <Menu className="h-6 w-6" />
-                        </Button>
-                    )}
                 </div>
             </div>
         </header>

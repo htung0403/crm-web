@@ -6,6 +6,7 @@ export { OrderConfirmationDialog } from './OrderConfirmationDialog';
 export { PaymentDialog } from './PaymentDialog';
 export { ProductStatusCard } from './ProductStatusCard';
 export { ProductUnifiedTimeline } from './ProductUnifiedTimeline';
+export { MobileOrdersKanban } from './MobileOrdersKanban';
 export {
     columns,
     calculateSLAProgress,

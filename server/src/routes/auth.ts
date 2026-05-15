@@ -5,10 +5,11 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { config } from '../config/index.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
+import { hashPassword, verifyPassword } from '../utils/password.js';
 
 const router = Router();
 
-// Login
+// Login — email + mật khẩu so với users.password_hash (bcrypt)
 router.post('/login', async (req, res, next) => {
     try {
         const { email, password } = req.body;
@@ -17,23 +18,31 @@ router.post('/login', async (req, res, next) => {
             throw new ApiError('Email và mật khẩu là bắt buộc', 400);
         }
 
-        // Lấy user từ database
+        const normalizedEmail = String(email).trim().toLowerCase();
+
         const { data: user, error } = await supabaseAdmin
             .from('users')
-            .select('*')
-            .eq('email', email.toLowerCase())
-            .single();
+            .select('id, email, name, role, avatar, phone, department, status, password_hash')
+            .eq('email', normalizedEmail)
+            .maybeSingle();
 
-        if (error || !user) {
+        if (error) {
+            throw new ApiError('Lỗi khi đăng nhập', 500);
+        }
+
+        if (!user) {
             throw new ApiError('Email hoặc mật khẩu không đúng', 401);
         }
 
-        if (user.status !== 'active') {
+        if (user.status && user.status !== 'active') {
             throw new ApiError('Tài khoản đã bị vô hiệu hóa', 401);
         }
 
-        // Kiểm tra password
-        const isValidPassword = await bcrypt.compare(password, user.password_hash);
+        if (!user.password_hash) {
+            throw new ApiError('Tài khoản chưa có mật khẩu. Liên hệ quản trị viên.', 401);
+        }
+
+        const isValidPassword = await verifyPassword(String(password), user.password_hash);
         if (!isValidPassword) {
             throw new ApiError('Email hoặc mật khẩu không đúng', 401);
         }
@@ -98,9 +107,7 @@ router.post('/register', authenticate, async (req: AuthenticatedRequest, res, ne
             throw new ApiError('Email đã được sử dụng', 400);
         }
 
-        // Hash password
-        const salt = await bcrypt.genSalt(10);
-        const passwordHash = await bcrypt.hash(password, salt);
+        const passwordHash = await hashPassword(password);
 
         // Tạo user mới
         const { data: newUser, error } = await supabaseAdmin
@@ -181,14 +188,12 @@ router.post('/change-password', authenticate, async (req: AuthenticatedRequest, 
         }
 
         // Kiểm tra mật khẩu hiện tại
-        const isValidPassword = await bcrypt.compare(currentPassword, user.password_hash);
+        const isValidPassword = await verifyPassword(currentPassword, user.password_hash);
         if (!isValidPassword) {
             throw new ApiError('Mật khẩu hiện tại không đúng', 400);
         }
 
-        // Hash mật khẩu mới
-        const salt = await bcrypt.genSalt(10);
-        const newPasswordHash = await bcrypt.hash(newPassword, salt);
+        const newPasswordHash = await hashPassword(newPassword);
 
         // Cập nhật mật khẩu
         await supabaseAdmin

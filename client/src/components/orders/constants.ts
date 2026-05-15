@@ -1,9 +1,11 @@
+import { Ban, CheckCircle2, Clock, HeartHandshake, ShoppingCart, type LucideIcon } from 'lucide-react';
 import type { OrderStatus, Package as PackageType, Voucher } from '@/types';
 import type { Order } from '@/hooks/useOrders';
 
 export interface KanbanColumn {
     id: OrderStatus;
     title: string;
+    icon: LucideIcon;
     color: string;
     bgColor: string;
     borderColor: string;
@@ -34,11 +36,11 @@ export function getTechRoomByDepartmentName(departmentName: string | undefined |
 }
 
 export const columns: KanbanColumn[] = [
-    { id: 'before_sale', title: 'Before Sale', color: 'text-blue-600', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
-    { id: 'in_progress', title: 'Đang thực hiện', color: 'text-amber-600', bgColor: 'bg-amber-50', borderColor: 'border-amber-200' },
-    { id: 'done', title: 'Đã hoàn thiện', color: 'text-cyan-600', bgColor: 'bg-cyan-50', borderColor: 'border-cyan-200' },
-    { id: 'after_sale', title: 'After sale', color: 'text-emerald-600', bgColor: 'bg-emerald-50', borderColor: 'border-emerald-200' },
-    { id: 'cancelled', title: 'Đã huỷ', color: 'text-red-600', bgColor: 'bg-red-50', borderColor: 'border-red-200' }
+    { id: 'before_sale', title: 'Before Sale', icon: ShoppingCart, color: 'text-blue-600', bgColor: 'bg-blue-50', borderColor: 'border-blue-200' },
+    { id: 'in_progress', title: 'Đang thực hiện', icon: Clock, color: 'text-amber-600', bgColor: 'bg-amber-50', borderColor: 'border-amber-200' },
+    { id: 'done', title: 'Đã hoàn thiện', icon: CheckCircle2, color: 'text-cyan-600', bgColor: 'bg-cyan-50', borderColor: 'border-cyan-200' },
+    { id: 'after_sale', title: 'After sale', icon: HeartHandshake, color: 'text-emerald-600', bgColor: 'bg-emerald-50', borderColor: 'border-emerald-200' },
+    { id: 'cancelled', title: 'Đã huỷ', icon: Ban, color: 'text-red-600', bgColor: 'bg-red-50', borderColor: 'border-red-200' }
 ];
 
 export function calculateSLAProgress(deadline: string | undefined, createdAt: string): { percentage: number; label: string; color: string } {

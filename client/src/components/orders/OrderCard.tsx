@@ -18,9 +18,10 @@ interface OrderCardProps {
     columnId: string;
     index: number;
     onClick: () => void;
+    draggable?: boolean;
 }
 
-export function OrderCard({ draggableId, order, productGroup, columnId, index, onClick }: OrderCardProps) {
+export function OrderCard({ draggableId, order, productGroup, columnId, index, onClick, draggable = true }: OrderCardProps) {
     const { product, services } = productGroup;
 
     const effectiveProduct = product;
@@ -101,16 +102,14 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
         return { color, remainingLabel };
     })();
 
-    return (
-        <Draggable draggableId={draggableId} index={index}>
-            {(provided, snapshot) => (
-                <div
-                    ref={provided.innerRef}
-                    {...provided.draggableProps}
-                    {...provided.dragHandleProps}
-                    onClick={onClick}
-                    className={`kanban-card p-3 rounded-xl bg-white border shadow-sm cursor-pointer text-sm ${snapshot.isDragging ? 'shadow-lg ring-2 ring-primary/20' : ''}`}
-                >
+    const renderCard = (provided?: any, isDragging = false) => (
+        <div
+            ref={provided?.innerRef}
+            {...(provided?.draggableProps ?? {})}
+            {...(provided?.dragHandleProps ?? {})}
+            onClick={onClick}
+            className={`kanban-card p-3 rounded-xl bg-white border shadow-sm cursor-pointer text-sm ${isDragging ? 'shadow-lg ring-2 ring-primary/20' : ''}`}
+        >
                     {/* Header: Ảnh + Mã SP + Trạng thái */}
                     <div className="flex gap-2 mb-2">
                         <Avatar className="h-12 w-12 shrink-0 rounded-lg overflow-hidden bg-muted">
@@ -205,8 +204,16 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
                             <span className="truncate">{order.sales_user?.name || 'N/A'}</span>
                         </div>
                     </div>
-                </div>
-            )}
+        </div>
+    );
+
+    if (!draggable) {
+        return renderCard();
+    }
+
+    return (
+        <Draggable draggableId={draggableId} index={index}>
+            {(provided, snapshot) => renderCard(provided, snapshot.isDragging)}
         </Draggable>
     );
 }

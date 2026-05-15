@@ -319,7 +319,7 @@ function AccessoryKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, get
         <div
             className={`group relative rounded-xl border bg-card text-sm shadow-sm transition-all hover:shadow-md overflow-hidden ${isOverdue ? 'border-red-500 ring-1 ring-red-500' : ''}`}
         >
-            <div className="relative w-full aspect-[4/3] bg-muted flex items-center justify-center overflow-hidden">
+            <div className="relative flex h-36 w-full items-center justify-center overflow-hidden bg-muted sm:h-auto sm:aspect-[4/3]">
                 {productImage ? (
                     <img src={productImage} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
                 ) : (
@@ -332,14 +332,14 @@ function AccessoryKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, get
                     </div>
                 )}
             </div>
-            <div className="p-3">
+            <div className="p-2.5 sm:p-3">
                 <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                         <div className="flex items-center gap-1.5 overflow-hidden">
                             <span className="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider">{productCode.includes('.') ? 'Mã SP' : 'Mã ĐH'}:</span>
                             <span className="font-mono font-bold text-primary truncate" title={productCode}>{productCode}</span>
                         </div>
-                        <p className="mt-1 font-medium text-slate-900 truncate" title={getItemName(row)}>
+                        <p className="mt-1 truncate text-[13px] font-medium text-slate-900 sm:text-sm" title={getItemName(row)}>
                             {row.metadata?.item_name || getItemName(row)}
                             {row.metadata?.quantity && <span className="text-muted-foreground ml-1">x{row.metadata.quantity}</span>}
                         </p>
@@ -367,7 +367,7 @@ function AccessoryKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, get
                 <Button
                     variant={isOverdue ? "destructive" : "outline"}
                     size="sm"
-                    className="mt-3 w-full h-8 text-xs font-semibold rounded-lg"
+                    className="mt-2.5 h-7 w-full rounded-lg text-[11px] font-semibold sm:mt-3 sm:h-8 sm:text-xs"
                     onClick={() => onOpenDialog(row)}
                 >
                     {isOverdue ? "Xử lý quá hạn" : "Cập nhật"}
@@ -418,7 +418,7 @@ function PartnerKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, getPr
         <div
             className={`group relative rounded-xl border bg-card text-sm shadow-sm transition-all hover:shadow-md overflow-hidden ${finalOverdue ? 'border-red-500 ring-1 ring-red-500' : ''}`}
         >
-            <div className="relative w-full aspect-[4/3] bg-muted flex items-center justify-center overflow-hidden">
+            <div className="relative flex h-36 w-full items-center justify-center overflow-hidden bg-muted sm:h-auto sm:aspect-[4/3]">
                 {productImage ? (
                     <img src={productImage} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
                 ) : (
@@ -431,14 +431,14 @@ function PartnerKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, getPr
                     </div>
                 )}
             </div>
-            <div className="p-3">
+            <div className="p-2.5 sm:p-3">
                 <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                         <div className="flex items-center gap-1.5 overflow-hidden">
                             <span className="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider">{productCode.includes('.') ? 'Mã SP' : 'Mã ĐH'}:</span>
                             <span className="font-mono font-bold text-primary truncate" title={productCode}>{productCode}</span>
                         </div>
-                        <p className="mt-1 font-medium text-slate-900 truncate" title={getItemName(row)}>
+                        <p className="mt-1 truncate text-[13px] font-medium text-slate-900 sm:text-sm" title={getItemName(row)}>
                             {row.metadata?.item_name || getItemName(row)}
                         </p>
                     </div>
@@ -487,7 +487,7 @@ function PartnerKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, getPr
                 <Button
                     variant={finalOverdue ? "destructive" : "outline"}
                     size="sm"
-                    className="mt-3 w-full h-8 text-xs font-semibold rounded-lg"
+                    className="mt-2.5 h-7 w-full rounded-lg text-[11px] font-semibold sm:mt-3 sm:h-8 sm:text-xs"
                     onClick={() => onOpenDialog(row)}
                 >
                     {finalOverdue ? "Xử lý quá hạn" : "Cập nhật"}
@@ -510,7 +510,7 @@ function ExtensionKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, get
         <div
             className={`group relative rounded-xl border bg-card text-sm shadow-sm transition-all hover:shadow-md overflow-hidden ${isOverdue ? 'border-red-500 ring-1 ring-red-500' : ''}`}
         >
-            <div className="relative w-full aspect-[4/3] bg-muted flex items-center justify-center overflow-hidden">
+            <div className="relative flex h-36 w-full items-center justify-center overflow-hidden bg-muted sm:h-auto sm:aspect-[4/3]">
                 {productImage ? (
                     <img src={productImage} alt="" className="w-full h-full object-cover transition-transform group-hover:scale-105" />
                 ) : (
@@ -524,14 +524,14 @@ function ExtensionKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, get
                 )}
             </div>
 
-            <div className="p-3">
+            <div className="p-2.5 sm:p-3">
                 <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                         <div className="flex items-center gap-1.5 overflow-hidden">
                             <span className="text-[10px] font-bold text-muted-foreground/70 uppercase tracking-wider">{productCode.includes('.') ? 'Mã SP' : 'Mã ĐH'}:</span>
                             <span className="font-mono font-bold text-primary truncate" title={productCode}>{productCode}</span>
                         </div>
-                        <p className="mt-1 font-medium text-slate-900 truncate" title={getItemName(row)}>
+                        <p className="mt-1 truncate text-[13px] font-medium text-slate-900 sm:text-sm" title={getItemName(row)}>
                             {getItemName(row)}
                         </p>
                     </div>
@@ -564,7 +564,7 @@ function ExtensionKanbanCard({ row, onOpenDialog, onNavigateOrder, getOrder, get
                 <Button
                     variant={isOverdue ? "destructive" : "outline"}
                     size="sm"
-                    className="mt-3 w-full h-8 text-xs font-semibold rounded-lg"
+                    className="mt-2.5 h-7 w-full rounded-lg text-[11px] font-semibold sm:mt-3 sm:h-8 sm:text-xs"
                     onClick={() => onOpenDialog(row)}
                 >
                     Cập nhật
@@ -592,14 +592,14 @@ function AccessoryKanban({
     const isUpdating = !!updatingId;
     return (
         <DragDropContext onDragEnd={onDragEnd}>
-            <div className="flex gap-4 overflow-x-auto pb-2 min-h-[320px]">
+            <div className="-mx-4 flex min-h-[320px] gap-4 overflow-x-auto px-4 pb-2 snap-x snap-mandatory sm:mx-0 sm:gap-4 sm:px-0">
                 {columns.map((col) => (
                     <Droppable key={col.id} droppableId={col.id}>
                         {(provided, snapshot) => (
                             <div
                                 ref={provided.innerRef}
                                 {...provided.droppableProps}
-                                className={`shrink-0 w-[280px] rounded-lg border bg-muted/30 p-3 transition-colors ${snapshot.isDraggingOver ? 'bg-primary/10 border-primary/30' : ''}`}
+                                className={`shrink-0 w-[88vw] snap-center rounded-xl border bg-muted/30 p-2 transition-colors sm:w-[280px] sm:p-3 ${snapshot.isDraggingOver ? 'bg-primary/10 border-primary/30' : ''}`}
                             >
                                 <div className="mb-3 flex flex-col gap-1">
                                     <div className="flex items-center justify-between">
@@ -691,14 +691,14 @@ function PartnerKanban({
     const isUpdating = !!updatingId;
     return (
         <DragDropContext onDragEnd={onDragEnd}>
-            <div className="flex gap-4 overflow-x-auto pb-2 min-h-[320px]">
+            <div className="-mx-4 flex min-h-[320px] gap-4 overflow-x-auto px-4 pb-2 snap-x snap-mandatory sm:mx-0 sm:gap-4 sm:px-0">
                 {columns.map((col) => (
                     <Droppable key={col.id} droppableId={col.id}>
                         {(provided, snapshot) => (
                             <div
                                 ref={provided.innerRef}
                                 {...provided.droppableProps}
-                                className={`shrink-0 w-[280px] rounded-lg border bg-muted/30 p-3 transition-colors ${snapshot.isDraggingOver ? 'bg-primary/10 border-primary/30' : ''}`}
+                                className={`shrink-0 w-[88vw] snap-center rounded-xl border bg-muted/30 p-2 transition-colors sm:w-[280px] sm:p-3 ${snapshot.isDraggingOver ? 'bg-primary/10 border-primary/30' : ''}`}
                             >
                                 <div className="mb-3 flex flex-col gap-1">
                                     <div className="flex items-center justify-between">
@@ -790,14 +790,14 @@ function ExtensionKanban({
     const isUpdating = !!updatingId;
     return (
         <DragDropContext onDragEnd={onDragEnd}>
-            <div className="flex gap-4 overflow-x-auto pb-2 min-h-[320px]">
+            <div className="-mx-4 flex min-h-[320px] gap-4 overflow-x-auto px-4 pb-2 snap-x snap-mandatory sm:mx-0 sm:gap-4 sm:px-0">
                 {columns.map((col) => (
                     <Droppable key={col.id} droppableId={col.id}>
                         {(provided, snapshot) => (
                             <div
                                 ref={provided.innerRef}
                                 {...provided.droppableProps}
-                                className={`shrink-0 w-[280px] rounded-lg border bg-muted/30 p-3 transition-colors ${snapshot.isDraggingOver ? 'bg-primary/10 border-primary/30' : ''}`}
+                                className={`shrink-0 w-[88vw] snap-center rounded-xl border bg-muted/30 p-2 transition-colors sm:w-[280px] sm:p-3 ${snapshot.isDraggingOver ? 'bg-primary/10 border-primary/30' : ''}`}
                             >
                                 <div className="mb-2 flex items-center justify-between">
                                     <span className="font-medium text-sm">{col.label}</span>
@@ -1503,34 +1503,34 @@ export function RequestsPage() {
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold flex items-center gap-2">
+                    <h1 className="flex items-center gap-2 text-xl font-bold sm:text-2xl">
                         <FileText className="h-7 w-7 text-primary" />
                         Quản lý yêu cầu
                     </h1>
-                    <p className="text-muted-foreground text-sm mt-1">
+                    <p className="mt-1 hidden text-sm text-muted-foreground sm:block">
                         Trang dành cho Admin / Quản lý xử lý các phiếu Mua phụ kiện, Gửi Đối Tác và Xin gia hạn do kỹ thuật tạo.
                     </p>
                 </div>
-                <Button variant="outline" size="sm" onClick={loadAll} disabled={loading}>
+                <Button variant="outline" size="sm" onClick={loadAll} disabled={loading} className="h-9 w-full sm:w-auto">
                     <RefreshCw className={loading ? 'animate-spin h-4 w-4 mr-2' : 'h-4 w-4 mr-2'} />
                     Tải lại
                 </Button>
             </div>
 
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-3 max-w-2xl">
-                    <TabsTrigger value="accessories" className="gap-2">
+                <TabsList className="flex h-12 w-full max-w-2xl items-center justify-start gap-2 overflow-x-auto rounded-xl border bg-slate-50 p-1">
+                    <TabsTrigger value="accessories" className="min-h-[44px] shrink-0 self-center rounded-xl border bg-white px-4 text-sm font-medium data-[state=active]:border-primary data-[state=active]:bg-primary data-[state=active]:text-white sm:text-sm">
                         <Package className="h-4 w-4" />
                         Mua phụ kiện ({accessories.length})
                     </TabsTrigger>
-                    <TabsTrigger value="partners" className="gap-2">
+                    <TabsTrigger value="partners" className="min-h-[44px] shrink-0 self-center rounded-xl border bg-white px-4 text-sm font-medium data-[state=active]:border-primary data-[state=active]:bg-primary data-[state=active]:text-white sm:text-sm">
                         <Truck className="h-4 w-4" />
                         Gửi Đối Tác ({partners.length})
                     </TabsTrigger>
-                    <TabsTrigger value="extensions" className="gap-2">
+                    <TabsTrigger value="extensions" className="min-h-[44px] shrink-0 self-center rounded-xl border bg-white px-4 text-sm font-medium data-[state=active]:border-primary data-[state=active]:bg-primary data-[state=active]:text-white sm:text-sm">
                         <Clock className="h-4 w-4" />
                         Xin gia hạn ({extensions.length})
                     </TabsTrigger>
@@ -1554,7 +1554,7 @@ export function RequestsPage() {
                                 </div>
                             </div>
                         </CardHeader>
-                        <CardContent>
+                        <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
                             {accessories.length === 0 ? (
                                 <p className="text-sm text-muted-foreground text-center py-8">Chưa có yêu cầu nào.</p>
                             ) : (
@@ -1580,7 +1580,7 @@ export function RequestsPage() {
                                 </div>
                             </div>
                         </CardHeader>
-                        <CardContent>
+                        <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
                             {partners.length === 0 ? (
                                 <p className="text-sm text-muted-foreground text-center py-8">Chưa có yêu cầu nào.</p>
                             ) : (
@@ -1606,7 +1606,7 @@ export function RequestsPage() {
                                 </div>
                             </div>
                         </CardHeader>
-                        <CardContent>
+                        <CardContent className="p-3 pt-0 sm:p-6 sm:pt-0">
                             {extensions.length === 0 ? (
                                 <p className="text-sm text-muted-foreground text-center py-8">Chưa có yêu cầu nào.</p>
                             ) : (
@@ -2210,3 +2210,4 @@ export function RequestsPage() {
         </div>
     );
 }
+

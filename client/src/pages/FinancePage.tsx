@@ -16,6 +16,7 @@ import { transactionsApi, ordersApi, requestsApi, invoicesApi } from '@/lib/api'
 import { formatCurrency, formatDate, cn, normalizeSearchText } from '@/lib/utils';
 import type { User } from '@/types';
 import { InvoiceDetailDialog } from '@/components/invoices/InvoiceDetailDialog';
+import { MobileFinanceList } from '@/components/finance';
 
 interface FinancePageProps {
     currentUser: User;
@@ -408,197 +409,231 @@ function TransactionTable({
         setExpandedRow(expandedRow === id ? null : id);
     };
 
+    // Convert to mobile-friendly format
+    const mobileVouchers = transactions.map(trans => {
+        const orderData: any = Array.isArray(trans.orders) ? trans.orders[0] : (trans.orders || trans.order || (trans as any).order);
+        const customer = Array.isArray(orderData?.customer) ? orderData.customer[0] : (orderData?.customer || orderData?.customers?.[0] || orderData?.customers);
+
+        return {
+            id: trans.id,
+            voucher_code: trans.code,
+            type: trans.type as 'income' | 'expense',
+            amount: trans.amount,
+            account_name: customer?.name || trans.metadata?.customer_name,
+            description: trans.notes,
+            created_at: trans.date,
+            created_by: trans.created_by_user,
+            status: trans.status,
+        };
+    });
+
     return (
-        <div className="overflow-x-auto rounded-lg border bg-card">
-            <table className="w-full border-collapse">
-                <thead className="bg-[#f9fafb] border-b">
-                    <tr>
-                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider w-[120px]">Mã phiếu</th>
-                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider w-[140px]">Thời gian</th>
-                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Người tạo</th>
-                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Loại thu chi</th>
-                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Người nộp/nhận</th>
-                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Mã người NN</th>
-                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">SĐT người NN</th>
-                        <th className="p-3 text-right text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Số tiền</th>
-                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Ghi chú</th>
-                        <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Trạng thái</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {transactions.map((trans) => {
-                        const isExpanded = expandedRow === trans.id;
-                        
-                        // Extract payer info from linked order → customer data
-                        const orderData: any = Array.isArray(trans.orders) ? trans.orders[0] : (trans.orders || trans.order || (trans as any).order);
-                        const customer = Array.isArray(orderData?.customer) ? orderData.customer[0] : (orderData?.customer || orderData?.customers?.[0] || orderData?.customers);
-                        
-                        const payerName = customer?.name || trans.metadata?.customer_name || trans.metadata?.payer_name || (trans.order_id ? `Đơn hàng #${trans.order_code || trans.order_id.slice(0,8)}` : 'N/A');
-                        const payerCode = customer?.id ? `KH${customer.id.slice(0, 6).toUpperCase()}` : trans.metadata?.customer_code || 'N/A';
-                        const payerPhone = customer?.phone || trans.metadata?.customer_phone || 'N/A';
+        <>
+            {/* Mobile view */}
+            <div className="lg:hidden">
+                <MobileFinanceList
+                    vouchers={mobileVouchers}
+                    loading={loading}
+                    onView={(voucher) => {
+                        const trans = transactions.find(t => t.id === voucher.id);
+                        if (trans) onView(trans);
+                    }}
+                    onDelete={isManagement ? onDelete : undefined}
+                />
+            </div>
 
-                        return (
-                            <Fragment key={trans.id}>
-                                <tr
-                                    className={cn(
-                                        "border-b hover:bg-[#f0f7ff] transition-colors cursor-pointer text-sm group",
-                                        isExpanded && "bg-[#f0f7ff]"
-                                    )}
-                                    onClick={() => toggleRow(trans.id)}
-                                >
-                                    <td className="p-3 font-bold text-primary flex items-center gap-2">
-                                        {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                                        {trans.code}
-                                    </td>
-                                    <td className="p-3 whitespace-nowrap">{formatDate(trans.date)}</td>
-                                    <td className="p-3 text-muted-foreground">{trans.created_by_user?.name || 'N/A'}</td>
-                                    <td className="p-3">
-                                        <Badge variant="secondary" className="font-normal">{trans.category}</Badge>
-                                    </td>
-                                    <td className="p-3">
-                                        <span 
-                                            className={cn(
-                                                "font-medium", 
-                                                customer?.id ? "text-blue-600 hover:text-blue-700 underline cursor-pointer" : ""
-                                            )}
-                                            onClick={(e) => {
-                                                if (customer?.id) {
-                                                    e.stopPropagation();
-                                                    onCustomerClick(customer.id);
-                                                }
-                                            }}
-                                        >
-                                            {payerName}
-                                        </span>
-                                    </td>
-                                    <td className="p-3 text-muted-foreground">{payerCode}</td>
-                                    <td className="p-3 text-muted-foreground">{payerPhone}</td>
-                                    <td className={cn(
-                                        "p-3 text-right font-bold",
-                                        trans.type === 'income' ? 'text-emerald-600' : 'text-rose-600'
-                                    )}>
-                                        {formatCurrency(trans.amount)}
-                                    </td>
-                                    <td className="p-3 max-w-[200px] truncate text-muted-foreground italic">
-                                        {trans.notes || '---'}
-                                    </td>
-                                    <td className="p-3">
-                                        <Badge variant={statusLabels[trans.status].variant} className="rounded-full px-3">
-                                            {statusLabels[trans.status].label}
-                                        </Badge>
-                                    </td>
-                                </tr>
-                                {isExpanded && (
-                                    <tr className="bg-[#f8faff] border-b animate-in fade-in slide-in-from-top-1 duration-200">
-                                        <td colSpan={10} className="p-6">
-                                            <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-                                                <div className="space-y-4">
-                                                    <div>
-                                                        <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Số tiền</p>
-                                                        <p className={cn("text-2xl font-black", trans.type === 'income' ? 'text-emerald-600' : 'text-rose-600')}>
-                                                            {formatCurrency(trans.amount)}
-                                                        </p>
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Người nộp</p>
-                                                        <div className="flex flex-col gap-1">
-                                                            <p 
-                                                                className={cn(
-                                                                    "font-bold text-primary underline cursor-pointer",
-                                                                    !customer?.id && "no-underline pointer-events-none"
-                                                                )}
-                                                                onClick={(e) => {
-                                                                    if (customer?.id) {
-                                                                        e.stopPropagation();
-                                                                        onCustomerClick(customer.id);
-                                                                    }
-                                                                }}
-                                                            >
-                                                                {payerName}
-                                                            </p>
-                                                            <p className="text-xs text-muted-foreground">{payerCode} - {payerPhone}</p>
-                                                        </div>
-                                                    </div>
-                                                </div>
+            {/* Desktop view - Table */}
+            <div className="hidden lg:block overflow-x-auto rounded-lg border bg-card">
+                <table className="w-full border-collapse">
+                    <thead className="bg-[#f9fafb] border-b">
+                        <tr>
+                            <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider w-[120px]">Mã phiếu</th>
+                            <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider w-[140px]">Thời gian</th>
+                            <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Người tạo</th>
+                            <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Loại thu chi</th>
+                            <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Người nộp/nhận</th>
+                            <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Mã người NN</th>
+                            <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">SĐT người NN</th>
+                            <th className="p-3 text-right text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Số tiền</th>
+                            <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Ghi chú</th>
+                            <th className="p-3 text-left text-[13px] font-bold text-muted-foreground uppercase tracking-wider">Trạng thái</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {transactions.map((trans) => {
+                            const isExpanded = expandedRow === trans.id;
 
-                                                <div className="space-y-4">
-                                                    <div>
-                                                        <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Loại thu</p>
-                                                        <p className="font-medium">{trans.category}</p>
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Thời gian</p>
-                                                        <p className="font-medium">{formatDate(trans.date)}</p>
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Đối tượng nộp</p>
-                                                        <p className="font-medium">Khách hàng</p>
-                                                    </div>
-                                                </div>
+                            // Extract payer info from linked order → customer data
+                            const orderData: any = Array.isArray(trans.orders) ? trans.orders[0] : (trans.orders || trans.order || (trans as any).order);
+                            const customer = Array.isArray(orderData?.customer) ? orderData.customer[0] : (orderData?.customer || orderData?.customers?.[0] || orderData?.customers);
 
-                                                <div className="space-y-4">
-                                                    <div>
-                                                        <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Nhân viên</p>
-                                                        <p className="font-medium">{trans.created_by_user?.name || 'N/A'}</p>
-                                                    </div>
-                                                    <div>
-                                                        <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Phương thức</p>
-                                                        <p className="font-medium">{paymentMethodLabels[trans.payment_method]}</p>
-                                                    </div>
-                                                    {trans.order_code && (
-                                                        <div>
-                                                            <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Ghi chú liên kết</p>
-                                                            <p className="text-xs text-[#64748b]">
-                                                                Tự động được tạo gắn với hóa đơn{' '}
-                                                                <span 
-                                                                    className="font-bold text-blue-600 underline cursor-pointer hover:text-blue-700"
-                                                                    onClick={(e) => {
-                                                                        e.stopPropagation();
-                                                                        onInvoiceClick(trans.order_code!);
-                                                                    }}
-                                                                >
-                                                                    {trans.order_code}
-                                                                </span>
-                                                            </p>
-                                                        </div>
-                                                    )}
-                                                </div>
+                            const payerName = customer?.name || trans.metadata?.customer_name || trans.metadata?.payer_name || (trans.order_id ? `Đơn hàng #${trans.order_code || trans.order_id.slice(0,8)}` : 'N/A');
+                            const payerCode = customer?.id ? `KH${customer.id.slice(0, 6).toUpperCase()}` : trans.metadata?.customer_code || 'N/A';
+                            const payerPhone = customer?.phone || trans.metadata?.customer_phone || 'N/A';
 
-                                                <div className="flex flex-col justify-end items-end gap-3 pb-2">
-                                                    <div className="flex gap-2">
-                                                        <Button variant="outline" size="sm" className="h-9 px-4 gap-2 font-bold shadow-sm">
-                                                            <Printer className="h-4 w-4" />
-                                                            In
-                                                        </Button>
-                                                        {isManagement && (
-                                                            <>
-                                                                <Button variant="outline" size="sm" className="h-9 px-4 gap-2 font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-100 shadow-sm">
-                                                                    <Edit className="h-4 w-4" />
-                                                                    Chỉnh sửa
-                                                                </Button>
-                                                                <Button 
-                                                                    variant="outline" 
-                                                                    size="sm" 
-                                                                    className="h-9 px-4 gap-2 font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-100 shadow-sm"
-                                                                    onClick={(e) => { e.stopPropagation(); onDelete(trans.id); }}
-                                                                >
-                                                                    <Trash2 className="h-4 w-4" />
-                                                                    Hủy bỏ
-                                                                </Button>
-                                                            </>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
+                            return (
+                                <Fragment key={trans.id}>
+                                    <tr
+                                        className={cn(
+                                            "border-b hover:bg-[#f0f7ff] transition-colors cursor-pointer text-sm group",
+                                            isExpanded && "bg-[#f0f7ff]"
+                                        )}
+                                        onClick={() => toggleRow(trans.id)}
+                                    >
+                                        <td className="p-3 font-bold text-primary flex items-center gap-2">
+                                            {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                                            {trans.code}
+                                        </td>
+                                        <td className="p-3 whitespace-nowrap">{formatDate(trans.date)}</td>
+                                        <td className="p-3 text-muted-foreground">{trans.created_by_user?.name || 'N/A'}</td>
+                                        <td className="p-3">
+                                            <Badge variant="secondary" className="font-normal">{trans.category}</Badge>
+                                        </td>
+                                        <td className="p-3">
+                                            <span
+                                                className={cn(
+                                                    "font-medium",
+                                                    customer?.id ? "text-blue-600 hover:text-blue-700 underline cursor-pointer" : ""
+                                                )}
+                                                onClick={(e) => {
+                                                    if (customer?.id) {
+                                                        e.stopPropagation();
+                                                        onCustomerClick(customer.id);
+                                                    }
+                                                }}
+                                            >
+                                                {payerName}
+                                            </span>
+                                        </td>
+                                        <td className="p-3 text-muted-foreground">{payerCode}</td>
+                                        <td className="p-3 text-muted-foreground">{payerPhone}</td>
+                                        <td className={cn(
+                                            "p-3 text-right font-bold",
+                                            trans.type === 'income' ? 'text-emerald-600' : 'text-rose-600'
+                                        )}>
+                                            {formatCurrency(trans.amount)}
+                                        </td>
+                                        <td className="p-3 max-w-[200px] truncate text-muted-foreground italic">
+                                            {trans.notes || '---'}
+                                        </td>
+                                        <td className="p-3">
+                                            <Badge variant={statusLabels[trans.status].variant} className="rounded-full px-3">
+                                                {statusLabels[trans.status].label}
+                                            </Badge>
                                         </td>
                                     </tr>
-                                )}
-                            </Fragment>
-                        );
-                    })}
-                </tbody>
-            </table>
-        </div>
+                                    {isExpanded && (
+                                        <tr className="bg-[#f8faff] border-b animate-in fade-in slide-in-from-top-1 duration-200">
+                                            <td colSpan={10} className="p-6">
+                                                <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+                                                    <div className="space-y-4">
+                                                        <div>
+                                                            <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Số tiền</p>
+                                                            <p className={cn("text-2xl font-black", trans.type === 'income' ? 'text-emerald-600' : 'text-rose-600')}>
+                                                                {formatCurrency(trans.amount)}
+                                                            </p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Người nộp</p>
+                                                            <div className="flex flex-col gap-1">
+                                                                <p
+                                                                    className={cn(
+                                                                        "font-bold text-primary underline cursor-pointer",
+                                                                        !customer?.id && "no-underline pointer-events-none"
+                                                                    )}
+                                                                    onClick={(e) => {
+                                                                        if (customer?.id) {
+                                                                            e.stopPropagation();
+                                                                            onCustomerClick(customer.id);
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    {payerName}
+                                                                </p>
+                                                                <p className="text-xs text-muted-foreground">{payerCode} - {payerPhone}</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="space-y-4">
+                                                        <div>
+                                                            <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Loại thu</p>
+                                                            <p className="font-medium">{trans.category}</p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Thời gian</p>
+                                                            <p className="font-medium">{formatDate(trans.date)}</p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Đối tượng nộp</p>
+                                                            <p className="font-medium">Khách hàng</p>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="space-y-4">
+                                                        <div>
+                                                            <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Nhân viên</p>
+                                                            <p className="font-medium">{trans.created_by_user?.name || 'N/A'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Phương thức</p>
+                                                            <p className="font-medium">{paymentMethodLabels[trans.payment_method]}</p>
+                                                        </div>
+                                                        {trans.order_code && (
+                                                            <div>
+                                                                <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Ghi chú liên kết</p>
+                                                                <p className="text-xs text-[#64748b]">
+                                                                    Tự động được tạo gắn với hóa đơn{' '}
+                                                                    <span
+                                                                        className="font-bold text-blue-600 underline cursor-pointer hover:text-blue-700"
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            onInvoiceClick(trans.order_code!);
+                                                                        }}
+                                                                    >
+                                                                        {trans.order_code}
+                                                                    </span>
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="flex flex-col justify-end items-end gap-3 pb-2">
+                                                        <div className="flex gap-2">
+                                                            <Button variant="outline" size="sm" className="h-9 px-4 gap-2 font-bold shadow-sm">
+                                                                <Printer className="h-4 w-4" />
+                                                                In
+                                                            </Button>
+                                                            {isManagement && (
+                                                                <>
+                                                                    <Button variant="outline" size="sm" className="h-9 px-4 gap-2 font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-100 shadow-sm">
+                                                                        <Edit className="h-4 w-4" />
+                                                                        Chỉnh sửa
+                                                                    </Button>
+                                                                    <Button
+                                                                        variant="outline"
+                                                                        size="sm"
+                                                                        className="h-9 px-4 gap-2 font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-100 shadow-sm"
+                                                                        onClick={(e) => { e.stopPropagation(); onDelete(trans.id); }}
+                                                                    >
+                                                                        <Trash2 className="h-4 w-4" />
+                                                                        Hủy bỏ
+                                                                    </Button>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )}
+                                </Fragment>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+        </>
     );
 }
 
@@ -610,12 +645,12 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
     const [showForm, setShowForm] = useState<TransactionType | null>(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');
-    
+
     // Invoice Detail Modal States
     const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
     const [showInvoiceDetail, setShowInvoiceDetail] = useState(false);
     const [loadingInvoice, setLoadingInvoice] = useState(false);
-    
+
     // New Sidebar Filters
     const [fundFilter, setFundFilter] = useState<string>('all');
     const [creatorFilter, setCreatorFilter] = useState('');
@@ -665,10 +700,10 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
             // Find invoice by order code
             const response = await invoicesApi.getAll();
             const invoices = response.data.data?.invoices || [];
-            
+
             // Search for invoice that matches this order code
-            const invoice = invoices.find((inv: any) => 
-                inv.order?.order_code === orderCode || 
+            const invoice = invoices.find((inv: any) =>
+                inv.order?.order_code === orderCode ||
                 inv.invoice_code === orderCode
             );
 
@@ -743,7 +778,7 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
         setLoading(true);
         try {
             const params: any = {};
-            
+
             if (statusFilter !== 'all') params.status = statusFilter;
             if (searchTerm) params.search = searchTerm;
             if (fundFilter !== 'all') params.payment_method = fundFilter;
@@ -793,7 +828,7 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
     const handleCreateTransaction = async (data: any) => {
         setActionLoading(true);
         try {
-            // If it's an income related to an order, use ordersApi.createPayment 
+            // If it's an income related to an order, use ordersApi.createPayment
             // to ensure the order's remaining debt and payment status are updated.
             const isOrderIncome = data.type === 'income' &&
                 data.order_id &&
@@ -843,9 +878,9 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
     const currentTransactions = activeTab === 'income' ? incomeTransactions : expenseTransactions;
 
     return (
-        <div className="flex flex-col lg:flex-row gap-6 animate-fade-in p-4 lg:p-0">
+        <div className="flex flex-col gap-4 p-3 lg:flex-row lg:gap-6 lg:p-0 animate-fade-in">
             {/* Sidebar Filter Panel */}
-            <div className="w-full lg:w-[280px] space-y-6 shrink-0">
+            <div className="hidden w-full shrink-0 space-y-6 lg:block lg:w-[280px]">
                 <div className="flex items-center gap-2 mb-4">
                     <Filter className="h-5 w-5 text-blue-600" />
                     <h2 className="text-xl font-bold">Bộ lọc</h2>
@@ -857,30 +892,30 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
                         <Label className="text-[12px] font-black uppercase text-slate-400 tracking-wider">Thời gian</Label>
                         <div className="space-y-2">
                             <label className="flex items-center gap-3 cursor-pointer group">
-                                <input 
-                                    type="radio" 
-                                    name="time" 
-                                    className="w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" 
+                                <input
+                                    type="radio"
+                                    name="time"
+                                    className="w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
                                     checked={timeFilter === 'all'}
                                     onChange={() => setTimeFilter('all')}
                                 />
                                 <span className="text-sm font-medium group-hover:text-blue-600 transition-colors">Toàn thời gian</span>
                             </label>
                             <label className="flex items-center gap-3 cursor-pointer group">
-                                <input 
-                                    type="radio" 
-                                    name="time" 
-                                    className="w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" 
+                                <input
+                                    type="radio"
+                                    name="time"
+                                    className="w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
                                     checked={timeFilter === 'this_month'}
                                     onChange={() => setTimeFilter('this_month')}
                                 />
                                 <span className="text-sm font-medium group-hover:text-blue-600 transition-colors">Tháng này</span>
                             </label>
                             <label className="flex items-center gap-3 cursor-pointer group">
-                                <input 
-                                    type="radio" 
-                                    name="time" 
-                                    className="w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" 
+                                <input
+                                    type="radio"
+                                    name="time"
+                                    className="w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
                                     checked={timeFilter === 'custom'}
                                     onChange={() => setTimeFilter('custom')}
                                 />
@@ -890,15 +925,15 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
                             </label>
                             {timeFilter === 'custom' && (
                                 <div className="pt-2">
-                                    <Input 
-                                        type="date" 
-                                        className="h-9 mb-2" 
+                                    <Input
+                                        type="date"
+                                        className="h-9 mb-2"
                                         value={startDate}
                                         onChange={(e) => setStartDate(e.target.value)}
                                     />
-                                    <Input 
-                                        type="date" 
-                                        className="h-9" 
+                                    <Input
+                                        type="date"
+                                        className="h-9"
                                         value={endDate}
                                         onChange={(e) => setEndDate(e.target.value)}
                                     />
@@ -915,10 +950,10 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
                         <div className="space-y-2">
                             {['all', 'cash', 'transfer', 'zalopay'].map((f) => (
                                 <label key={f} className="flex items-center gap-3 cursor-pointer group">
-                                    <input 
-                                        type="radio" 
-                                        name="fund" 
-                                        className="w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer" 
+                                    <input
+                                        type="radio"
+                                        name="fund"
+                                        className="w-4 h-4 text-blue-600 focus:ring-blue-500 cursor-pointer"
                                         checked={fundFilter === f}
                                         onChange={() => setFundFilter(f)}
                                     />
@@ -1007,15 +1042,43 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
             </div>
 
             {/* Main Content Area */}
-            <div className="flex-1 space-y-6">
+            <div className="flex-1 space-y-4 lg:space-y-6">
+                <div className="space-y-3 lg:hidden">
+                    <div className="flex items-center justify-between gap-3">
+                        <h1 className="text-xl font-black text-slate-900">Sổ quỹ</h1>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button size="icon" className={activeTab === 'income' ? "h-10 w-10 bg-[#0070f3] hover:bg-blue-700" : "h-10 w-10 bg-rose-600 hover:bg-rose-700"}>
+                                    <Plus className="h-5 w-5" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-56 rounded-xl p-1">
+                                {(activeTab === 'income' ? incomeCategories : expenseCategories).map(cat => (
+                                    <DropdownMenuItem key={cat} className="rounded-lg cursor-pointer font-medium py-2" onClick={() => setShowForm(activeTab)}>
+                                        {cat}
+                                    </DropdownMenuItem>
+                                ))}
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </div>
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                        <Input
+                            placeholder="Tìm theo mã phiếu"
+                            className="h-10 rounded-xl border border-slate-200 bg-white pl-9"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+                    </div>
+                </div>
                 {/* Header Actions & Search */}
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="hidden flex-col justify-between gap-4 md:flex md:flex-row md:items-center lg:flex">
                     <div className="flex items-center gap-4 flex-1">
                         <h1 className="text-2xl font-black text-slate-900 shrink-0">Sổ quỹ</h1>
                         <div className="relative max-w-lg w-full">
                             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                            <Input 
-                                placeholder="Tìm theo mã phiếu" 
+                            <Input
+                                placeholder="Tìm theo mã phiếu"
                                 className="pl-9 h-11 rounded-full border-2 border-slate-100 hover:border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50/50 transition-all bg-white"
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -1066,7 +1129,22 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
                 </div>
 
                 {/* Stats Summary Bar */}
-                <div className="flex flex-wrap items-center justify-end gap-x-12 gap-y-4 bg-white p-5 rounded-xl border shadow-sm border-blue-50">
+                <div className="grid grid-cols-2 gap-2 rounded-xl border border-blue-50 bg-white p-3 shadow-sm lg:hidden">
+                    <div>
+                        <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Tổng thu</p>
+                        <p className="text-sm font-black text-emerald-600">+{formatCurrency(summary.totalIncome)}</p>
+                    </div>
+                    <div>
+                        <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Tổng chi</p>
+                        <p className="text-sm font-black text-rose-600">-{formatCurrency(summary.totalExpense)}</p>
+                    </div>
+                    <div className="col-span-2 border-t pt-2">
+                        <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Tồn quỹ</p>
+                        <p className="text-lg font-black text-emerald-600">{formatCurrency(summary.balance)}</p>
+                    </div>
+                </div>
+
+                <div className="hidden flex-wrap items-center justify-end gap-x-12 gap-y-4 bg-white p-5 rounded-xl border shadow-sm border-blue-50 lg:flex">
                     <div className="text-right">
                         <p className="text-[12px] font-bold text-slate-400 uppercase tracking-wider mb-1">Quỹ đầu kỳ</p>
                         <p className="text-lg font-black text-slate-700">{formatCurrency(summary.balance - summary.totalIncome + summary.totalExpense)}</p>
@@ -1090,17 +1168,17 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
                 {/* Main Content Card */}
                 <Card className="rounded-xl border-none shadow-xl overflow-hidden ring-1 ring-slate-100">
                     <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-                        <TabsList className="w-full justify-start rounded-none h-14 bg-white border-b gap-8 px-6">
-                            <TabsTrigger 
-                                value="income" 
-                                className="data-[state=active]:bg-transparent data-[state=active]:border-b-4 data-[state=active]:border-blue-600 data-[state=active]:text-blue-600 rounded-none h-14 px-0 font-black uppercase text-[13px] tracking-widest gap-2"
+                        <TabsList className="w-full justify-start rounded-none h-12 bg-white border-b gap-2 px-2 overflow-x-auto lg:h-14 lg:gap-8 lg:px-6">
+                            <TabsTrigger
+                                value="income"
+                                className="h-9 shrink-0 rounded-lg border px-3 text-xs font-bold data-[state=active]:border-blue-600 data-[state=active]:bg-blue-50 data-[state=active]:text-blue-600 lg:data-[state=active]:bg-transparent lg:data-[state=active]:border-b-4 lg:rounded-none lg:h-14 lg:px-0 lg:text-[13px] lg:tracking-widest"
                             >
                                 Phiếu thu
                                 <Badge variant="secondary" className="px-1.5 h-5 bg-blue-100 text-blue-600 font-black border-none rounded-sm">{summary.incomeCount || 0}</Badge>
                             </TabsTrigger>
-                            <TabsTrigger 
-                                value="expense" 
-                                className="data-[state=active]:bg-transparent data-[state=active]:border-b-4 data-[state=active]:border-rose-600 data-[state=active]:text-rose-600 rounded-none h-14 px-0 font-black uppercase text-[13px] tracking-widest gap-2"
+                            <TabsTrigger
+                                value="expense"
+                                className="h-9 shrink-0 rounded-lg border px-3 text-xs font-bold data-[state=active]:border-rose-600 data-[state=active]:bg-rose-50 data-[state=active]:text-rose-600 lg:data-[state=active]:bg-transparent lg:data-[state=active]:border-b-4 lg:rounded-none lg:h-14 lg:px-0 lg:text-[13px] lg:tracking-widest"
                             >
                                 Phiếu chi
                                 <Badge variant="secondary" className="px-1.5 h-5 bg-rose-100 text-rose-600 font-black border-none rounded-sm">{summary.expenseCount || 0}</Badge>

@@ -39,10 +39,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const login = useCallback(async (email: string, password: string) => {
         setIsLoading(true);
         try {
-            const response = await authApi.login(email, password);
-            const { user: userData, token: authToken } = response.data.data!;
+            const response = await authApi.login(email.trim(), password);
+            const payload = response.data;
 
-            // Map API user to our User type
+            if (payload.status !== 'success' || !payload.data?.token || !payload.data?.user) {
+                throw new Error(payload.message || 'Đăng nhập thất bại');
+            }
+
+            const { user: userData, token: authToken } = payload.data;
+
             const mappedUser: User = {
                 id: userData.id,
                 email: userData.email,

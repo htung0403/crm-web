@@ -291,42 +291,72 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
     };
 
     return (
-        <div className="space-y-6 animate-fade-in">
+        <div className="w-full overflow-x-hidden space-y-4 sm:space-y-6 animate-fade-in">
             {/* Page Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                 <div>
-                    <h1 className="text-2xl font-bold text-foreground">Sản phẩm & Dịch vụ</h1>
-                    <p className="text-muted-foreground">Quản lý danh mục sản phẩm, dịch vụ, gói và thẻ</p>
+                    <h1 className="text-xl font-bold text-foreground sm:text-2xl">Sản phẩm & Dịch vụ</h1>
+                    <p className="hidden text-muted-foreground sm:block">Quản lý danh mục sản phẩm, dịch vụ, gói và thẻ</p>
                 </div>
             </div>
 
+            {activeTab === 'services' && (
+                <div className="mx-auto w-full max-w-[390px] space-y-3 md:hidden">
+                    <div className="flex items-center justify-between gap-3">
+                        <div>
+                            <h2 className="text-base font-bold text-foreground">Dịch vụ</h2>
+                            <p className="text-xs text-muted-foreground">{filteredServices.length} mục</p>
+                        </div>
+                        <Button onClick={handleAddClick} size="icon" className="h-10 w-10 shrink-0 rounded-xl">
+                            <Plus className="h-5 w-5" />
+                        </Button>
+                    </div>
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                            placeholder="Tìm theo mã, tên..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="h-10 rounded-xl pl-9"
+                        />
+                    </div>
+                    <ServicesTable
+                        services={filteredServices}
+                        loading={loading}
+                        onEdit={(service) => navigate(`/services/${service.id}/edit`)}
+                        onDelete={handleDeleteService}
+                        departments={departments}
+                    />
+                </div>
+            )}
+
             {/* Tabs */}
-            <Card>
+            <Card className={activeTab === 'services' ? 'hidden overflow-hidden md:block' : 'overflow-hidden'}>
                 <CardContent className="p-0">
                     <Tabs value={activeTab} onValueChange={handleTabChange}>
-                        <div className="border-b px-4 pt-4">
-                            <TabsList className="mb-4 flex-wrap h-auto gap-2">
-                                <TabsTrigger value="products" className="gap-2">
+                        <div className="border-b px-3 pt-3 sm:px-4 sm:pt-4">
+                            <TabsList className={`${activeTab === 'services' ? 'hidden sm:flex' : 'flex'} mb-3 h-auto w-full justify-start gap-2 overflow-x-auto bg-transparent p-0 sm:mb-4`}>
+                                <TabsTrigger value="products" className="h-9 shrink-0 rounded-lg border bg-white px-3 text-xs sm:text-sm">
                                     <Package className="h-4 w-4" />
                                     Sản phẩm
                                     <Badge variant="secondary">{products.length}</Badge>
                                 </TabsTrigger>
-                                <TabsTrigger value="services" className="gap-2">
+                                <TabsTrigger value="services" className="h-9 shrink-0 rounded-lg border bg-white px-3 text-xs sm:text-sm">
                                     <Wrench className="h-4 w-4" />
                                     Dịch vụ
                                     <Badge variant="secondary">{services.length}</Badge>
                                 </TabsTrigger>
-                                <TabsTrigger value="packages" className="gap-2">
+                                <TabsTrigger value="packages" className="h-9 shrink-0 rounded-lg border bg-white px-3 text-xs sm:text-sm">
                                     <Gift className="h-4 w-4" />
                                     Gói dịch vụ
                                     <Badge variant="secondary">{packages.length}</Badge>
                                 </TabsTrigger>
-                                <TabsTrigger value="vouchers" className="gap-2">
+                                <TabsTrigger value="vouchers" className="h-9 shrink-0 rounded-lg border bg-white px-3 text-xs sm:text-sm">
                                     <CreditCard className="h-4 w-4" />
                                     Thẻ/Voucher
                                     <Badge variant="secondary">{vouchers.length}</Badge>
                                 </TabsTrigger>
-                                <TabsTrigger value="product-types" className="gap-2">
+                                <TabsTrigger value="product-types" className="h-9 shrink-0 rounded-lg border bg-white px-3 text-xs sm:text-sm">
                                     <Tags className="h-4 w-4" />
                                     Loại sản phẩm
                                     <Badge variant="secondary">{productTypes.length}</Badge>
@@ -334,17 +364,17 @@ export function ProductsPage({ initialTab = 'products', onTabChange }: ProductsP
                             </TabsList>
 
                             {/* Search & Add Button */}
-                            <div className="flex flex-col sm:flex-row gap-3 pb-4">
+                            <div className="flex flex-col gap-2 pb-3 sm:flex-row sm:gap-3 sm:pb-4">
                                 <div className="relative flex-1">
                                     <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                                     <Input
                                         placeholder="Tìm theo mã, tên..."
                                         value={searchTerm}
                                         onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="pl-9"
+                                        className="h-10 rounded-xl pl-9"
                                     />
                                 </div>
-                                <Button onClick={handleAddClick}>
+                                <Button onClick={handleAddClick} className="h-10 w-full sm:w-auto">
                                     <Plus className="h-4 w-4 mr-2" />
                                     Thêm mới
                                 </Button>
