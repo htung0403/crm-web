@@ -28,6 +28,7 @@ import { useDepartments } from '@/hooks/useDepartments';
 import { useJobTitles } from '@/hooks/useJobTitles';
 import api from '@/lib/api';
 import type { User, UserRole } from '@/types';
+import { useViewActionForRoles } from '@/hooks/useViewAction';
 import { OrderDetailDialog } from '@/components/orders/OrderDetailDialog';
 import type { Order } from '@/hooks/useOrders';
 
@@ -377,6 +378,7 @@ function EmployeeDetailDialog({
 
 export function EmployeesPage() {
     const navigate = useNavigate();
+    const { canEdit, canDelete } = useViewActionForRoles('employees', ['admin', 'manager']);
     const { users, loading, fetchUsers, createUser, updateUser, deleteUser } = useUsers();
     const { departments, fetchDepartments, createDepartment } = useDepartments();
     const { jobTitles, fetchJobTitles, createJobTitle } = useJobTitles();
@@ -602,6 +604,7 @@ export function EmployeesPage() {
     };
 
     const handleEditEmployee = (emp: Employee) => {
+        if (!canEdit) return;
         setSelectedEmployee(emp);
         setShowForm(true);
     };
@@ -620,6 +623,7 @@ export function EmployeesPage() {
     };
 
     const handleDeleteEmployee = async (emp: Employee) => {
+        if (!canDelete) return;
         if (!confirm(`Bạn có chắc muốn xóa nhân viên "${emp.name}"?`)) return;
         try {
             await deleteUser(emp.id);
@@ -747,14 +751,16 @@ export function EmployeesPage() {
                                 Kanban
                             </Button>
                         </div>
-                        <Button 
-                            variant="outline" 
-                            className="h-[36px] px-3.5 text-blue-600 border border-blue-200 bg-white hover:bg-blue-50 text-[13px] font-semibold rounded-lg shadow-sm"
-                            onClick={() => { setSelectedEmployee(null); setShowForm(true); }}
-                        >
-                            <Plus className="h-4 w-4 mr-1.5" />
-                            Nhân viên
-                        </Button>
+                        {canEdit && (
+                            <Button 
+                                variant="outline" 
+                                className="h-[36px] px-3.5 text-blue-600 border border-blue-200 bg-white hover:bg-blue-50 text-[13px] font-semibold rounded-lg shadow-sm"
+                                onClick={() => { setSelectedEmployee(null); setShowForm(true); }}
+                            >
+                                <Plus className="h-4 w-4 mr-1.5" />
+                                Nhân viên
+                            </Button>
+                        )}
                         <Button variant="outline" className="h-[36px] px-3.5 border-gray-200 bg-white text-gray-700 text-[13px] font-semibold rounded-lg shadow-sm hover:bg-gray-50 flex items-center">
                             <FileText className="h-[15px] w-[15px] mr-2 text-gray-500" />
                             Duyệt yêu cầu
@@ -835,8 +841,8 @@ export function EmployeesPage() {
                             departments={[...departments].sort((a, b) => a.name.localeCompare(b.name, 'vi'))}
                             getJobTitleName={getJobTitleName}
                             onView={handleViewEmployee}
-                            onEdit={handleEditEmployee}
-                            onDelete={handleDeleteEmployee}
+                            onEdit={canEdit ? handleEditEmployee : undefined}
+                            onDelete={canDelete ? handleDeleteEmployee : undefined}
                         />
                     </div>
                 ) : (
@@ -861,8 +867,8 @@ export function EmployeesPage() {
                         }))}
                         loading={loading}
                         onView={(e) => handleViewEmployee(e as Employee)}
-                        onEdit={(e) => handleEditEmployee(e as Employee)}
-                        onDelete={(e) => handleDeleteEmployee(e as Employee)}
+                        onEdit={canEdit ? (e) => handleEditEmployee(e as Employee) : undefined}
+                        onDelete={canDelete ? (e) => handleDeleteEmployee(e as Employee) : undefined}
                     />
                 </div>
 

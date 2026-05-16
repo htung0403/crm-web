@@ -16,6 +16,7 @@ import { PaymentRecordDialog } from '@/components/orders/PaymentRecordDialog';
 import { InvoiceDetailDialog, MobileInvoicesList } from '@/components/invoices';
 import type { User } from '@/types';
 import type { Invoice } from '@/components/invoices/InvoiceDetailDialog';
+import { useViewActionForRoles } from '@/hooks/useViewAction';
 
 interface Order {
     id: string;
@@ -199,7 +200,7 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [searchQuery, setSearchQuery] = useState('');
 
-    const canEdit = ['manager', 'admin', 'accountant'].includes(currentUser.role);
+    const { canEdit, canDelete } = useViewActionForRoles('invoices', ['manager', 'admin', 'accountant', 'sale']);
 
     const fetchInvoices = useCallback(async () => {
         try {
@@ -424,7 +425,7 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
                                 invoices={filteredInvoices}
                                 loading={false}
                                 onView={(inv) => fetchInvoiceDetail(inv.id)}
-                                onDelete={canEdit ? handleDeleteInvoice : undefined}
+                                onDelete={canDelete ? handleDeleteInvoice : undefined}
                             />
                         </div>
 
@@ -512,7 +513,7 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
                 onClose={() => setShowInvoiceDetail(false)}
                 onStatusChange={handleStatusChange}
                 onPayButtonClick={handlePayButtonClick}
-                onDelete={canEdit ? handleDeleteInvoice : undefined}
+                onDelete={canDelete ? handleDeleteInvoice : undefined}
                 canEdit={canEdit}
             />
 

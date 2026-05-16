@@ -44,10 +44,12 @@ import { CommissionsPage } from '@/pages/CommissionsPage';
 import { EmployeeSettingsPage } from '@/pages/EmployeeSettingsPage';
 import { SalaryAdvancesPage } from '@/pages/SalaryAdvancesPage';
 import { ViolationsPage } from '@/pages/ViolationsPage';
+import { TrainingPage } from '@/pages/TrainingPage';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import type { UserRole, User } from '@/types';
 import { Toaster } from 'sonner';
+import { canAccessView, getDefaultHomePath, resolveViewKeyFromPath } from '@/lib/viewPermissions';
 
 // Placeholder pages for routes not yet implemented
 function PlaceholderPage({ title }: { title: string }) {
@@ -102,6 +104,7 @@ const pagePermissions: Record<string, UserRole[]> = {
   'employee-settings': ['admin', 'manager'],
   'salary-advances': ['admin', 'manager', 'accountant'],
   violations: ['admin', 'manager', 'accountant'],
+  training: ['admin', 'manager', 'accountant', 'sale', 'technician'],
 };
 
 // Protected Route Component
@@ -124,7 +127,11 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode;
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
-  if (allowedRoles && user && !allowedRoles.includes(user.role)) {
+  const viewId = resolveViewKeyFromPath(location.pathname);
+  const roleAllowed = !allowedRoles || !user || allowedRoles.includes(user.role);
+  const viewAllowed = !viewId || !user || canAccessView(user, viewId, roleAllowed);
+
+  if (!roleAllowed || !viewAllowed) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
         <div className="h-20 w-20 rounded-2xl bg-red-100 flex items-center justify-center mb-4">
@@ -139,6 +146,12 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode;
   }
 
   return <>{children}</>;
+}
+
+function DefaultHomeRedirect() {
+  const { user } = useAuth();
+  if (!user) return <Navigate to="/login" replace />;
+  return <Navigate to={getDefaultHomePath(user)} replace />;
 }
 
 // Wrapper for ProductsPage with routing
@@ -505,6 +518,12 @@ function AppContent() {
               </ProtectedRoute>
             } />
 
+            <Route path="/training" element={
+              <ProtectedRoute allowedRoles={pagePermissions.training}>
+                <TrainingPage />
+              </ProtectedRoute>
+            } />
+
             <Route path="/salary-advances" element={
               <ProtectedRoute allowedRoles={pagePermissions['salary-advances']}>
                 <SalaryAdvancesPage />
@@ -608,8 +627,8 @@ function AppContent() {
             } /> */}
 
             {/* Default redirect */}
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/" element={<DefaultHomeRedirect />} />
+            <Route path="*" element={<DefaultHomeRedirect />} />
           </Routes>
         </AppLayout>
       } />

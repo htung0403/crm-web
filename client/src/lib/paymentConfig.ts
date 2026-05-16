@@ -7,6 +7,9 @@ export interface PaymentConfig {
     companyName: string;
     companyAddress: string;
     companyPhone: string;
+    invoiceCopyLabel: string;
+    companyLogoUrl: string;
+    termsAgreementLine: string;
 }
 
 function env(key: keyof ImportMetaEnv): string {
@@ -21,9 +24,14 @@ export function getPaymentConfig(): PaymentConfig {
         bankName: env('VITE_PAYMENT_BANK_NAME') || 'MB Bank',
         accountNumber: env('VITE_PAYMENT_ACCOUNT_NUMBER'),
         accountName: env('VITE_PAYMENT_ACCOUNT_NAME') || 'CONG TY TNHH',
-        companyName: env('VITE_COMPANY_NAME') || 'CRM',
-        companyAddress: env('VITE_COMPANY_ADDRESS'),
-        companyPhone: env('VITE_COMPANY_PHONE'),
+        companyName: env('VITE_COMPANY_NAME') || 'XOXO Luxury Authentic',
+        companyAddress: env('VITE_COMPANY_ADDRESS') || '1H Sơn Tây, Ba Đình, Hà Nội',
+        companyPhone: env('VITE_COMPANY_PHONE') || '0963378537',
+        invoiceCopyLabel: env('VITE_INVOICE_COPY_LABEL') || 'Liên 1',
+        companyLogoUrl: env('VITE_COMPANY_LOGO_URL') || '/logo-xoxo.png',
+        termsAgreementLine:
+            env('VITE_INVOICE_TERMS_LINE') ||
+            'Tôi đã đồng ý với tất cả các điều khoản trong quy định của XoXo',
     };
 }
 

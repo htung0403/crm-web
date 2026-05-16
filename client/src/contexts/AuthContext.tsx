@@ -20,7 +20,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [token, setToken] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
-    // Load user from localStorage on mount
+    const applyUserFromApi = useCallback((userData: Record<string, unknown>) => {
+        const mappedUser: User = {
+            id: userData.id as string,
+            email: userData.email as string,
+            name: userData.name as string,
+            role: userData.role as UserRole,
+            avatar: userData.avatar as string | undefined,
+            phone: userData.phone as string | undefined,
+            department: userData.department as string | undefined,
+            allowed_views: (userData.allowed_views as string[] | null | undefined) ?? null,
+            view_actions: (userData.view_actions as User['view_actions']) ?? null,
+            uses_role_defaults:
+                (userData.uses_role_defaults as boolean | undefined) ?? userData.allowed_views == null,
+        };
+        setUser(mappedUser);
+        localStorage.setItem('user', JSON.stringify(mappedUser));
+        return mappedUser;
+    }, []);
+
+    // Load user from localStorage on mount + refresh quyền xem
     useEffect(() => {
         const storedToken = localStorage.getItem('token');
         const storedUser = localStorage.getItem('user');
@@ -29,12 +48,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setToken(storedToken);
             try {
                 setUser(JSON.parse(storedUser));
-            } catch (e) {
+            } catch {
                 localStorage.removeItem('user');
             }
+            authApi
+                .getMe()
+                .then((res) => {
+                    if (res.data?.status === 'success' && res.data.data?.user) {
+                        applyUserFromApi(res.data.data.user);
+                    }
+                })
+                .catch(() => {});
         }
         setIsLoading(false);
-    }, []);
+    }, [applyUserFromApi]);
 
     const login = useCallback(async (email: string, password: string) => {
         setIsLoading(true);
@@ -48,25 +75,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             const { user: userData, token: authToken } = payload.data;
 
-            const mappedUser: User = {
-                id: userData.id,
-                email: userData.email,
-                name: userData.name,
-                role: userData.role as UserRole,
-                avatar: userData.avatar,
-                phone: userData.phone,
-                department: userData.department,
-            };
-
-            setUser(mappedUser);
             setToken(authToken);
-
             localStorage.setItem('token', authToken);
-            localStorage.setItem('user', JSON.stringify(mappedUser));
+            applyUserFromApi(userData);
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [applyUserFromApi]);
 
     const logout = useCallback(() => {
         setUser(null);

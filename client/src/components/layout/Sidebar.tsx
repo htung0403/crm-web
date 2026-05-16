@@ -21,6 +21,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import type { User, UserRole } from '@/types';
+import { canAccessView } from '@/lib/viewPermissions';
 
 interface SidebarProps {
     isOpen: boolean;
@@ -138,6 +139,7 @@ const menuItems: MenuItem[] = [
             { id: 'salary-advances', label: 'Ứng lương', roles: ['admin', 'manager', 'accountant'] },
             { id: 'violations', label: 'Vi phạm/Thưởng', roles: ['admin', 'manager', 'accountant'] },
             { id: 'salary', label: 'Bảng lương', roles: ['admin', 'manager', 'accountant'] },
+            { id: 'training', label: 'Đào tạo', roles: ['admin', 'manager', 'accountant', 'sale', 'technician'] },
             { id: 'employee-settings', label: 'Thiết lập nhân viên', roles: ['admin', 'manager'] }
         ]
     },
@@ -188,9 +190,16 @@ export function Sidebar({ isOpen, onClose, isMobile, currentUser, onLogout }: Si
         return currentPath === id;
     };
 
-    const canView = (item: MenuItem | { id: string; label: string; roles?: UserRole[] }) => {
-        if (!item.roles) return true;
-        return item.roles.includes(userRole);
+    const canViewItem = (item: { id: string; roles?: UserRole[] }) => {
+        const roleAllowed = !item.roles || item.roles.includes(userRole);
+        return canAccessView(currentUser, item.id, roleAllowed);
+    };
+
+    const canView = (item: MenuItem) => {
+        if (item.children?.length) {
+            return item.children.some((child) => canViewItem(child));
+        }
+        return canViewItem(item);
     };
 
     return (
@@ -254,7 +263,7 @@ export function Sidebar({ isOpen, onClose, isMobile, currentUser, onLogout }: Si
                                     {/* Children */}
                                     {expandedItems.includes(item.id) && (
                                         <div className="ml-5 mt-1 space-y-1 border-l-2 border-muted pl-4">
-                                            {item.children.filter(canView).map((child) => (
+                                            {item.children.filter(canViewItem).map((child) => (
                                                 <button
                                                     key={child.id}
                                                     onClick={() => handleNavigate(child.id)}

@@ -34,10 +34,12 @@ import {
 import { orderItemsApi, ordersApi } from '@/lib/api';
 import { normalizeSearchText } from '@/lib/utils';
 import { ConfirmDoneDialog } from '@/components/orders/workflow/ConfirmDoneDialog';
+import { useViewActionForRoles } from '@/hooks/useViewAction';
 
 export function OrdersPage() {
     const location = useLocation();
     const navigate = useNavigate();
+    const { canEdit, canDelete } = useViewActionForRoles('orders', ['admin', 'manager', 'accountant', 'sale', 'technician']);
     const { orders, loading, error, fetchOrders, updateOrderStatus, updateOrder, createOrder, deleteOrder } = useOrders();
     const { customers, fetchCustomers } = useCustomers();
     const { products, services, fetchProducts, fetchServices } = useProducts();
@@ -358,6 +360,7 @@ export function OrdersPage() {
     };
 
     const handleDeleteOrder = async (order: Order) => {
+        if (!canDelete) return;
         const confirmed = window.confirm(`Xóa đơn hàng ${order.order_code}?`);
         if (!confirmed) return;
 
@@ -468,8 +471,8 @@ export function OrdersPage() {
                             getCardsByStatus={getCardsByStatus}
                             onCardClick={(order) => navigate(`/orders/${order.id}`)}
                             onViewOrder={(order) => navigate(`/orders/${order.id}`)}
-                            onEditOrder={(order) => navigate(`/orders/${order.id}/edit`)}
-                            onDeleteOrder={handleDeleteOrder}
+                            onEditOrder={canEdit ? (order) => navigate(`/orders/${order.id}/edit`) : undefined}
+                            onDeleteOrder={canDelete ? handleDeleteOrder : undefined}
                         />
                     </div>
 

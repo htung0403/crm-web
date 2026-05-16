@@ -6,6 +6,7 @@ import { config } from '../config/index.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { hashPassword, verifyPassword } from '../utils/password.js';
+import { getUserViewPermissionProfile } from '../utils/employeeViewPermissions.js';
 
 const router = Router();
 
@@ -65,6 +66,8 @@ router.post('/login', async (req, res, next) => {
             .update({ last_login: new Date().toISOString() })
             .eq('id', user.id);
 
+        const permProfile = await getUserViewPermissionProfile(user.id, user.role);
+
         res.json({
             status: 'success',
             data: {
@@ -74,6 +77,9 @@ router.post('/login', async (req, res, next) => {
                     name: user.name,
                     role: user.role,
                     avatar: user.avatar,
+                    allowed_views: permProfile.allowed_views,
+                    view_actions: permProfile.view_actions,
+                    uses_role_defaults: permProfile.uses_role_defaults,
                 },
                 token,
             },
@@ -158,9 +164,18 @@ router.get('/me', authenticate, async (req: AuthenticatedRequest, res, next) => 
             throw new ApiError('Không tìm thấy người dùng', 404);
         }
 
+        const permProfile = await getUserViewPermissionProfile(user.id, user.role);
+
         res.json({
             status: 'success',
-            data: { user },
+            data: {
+                user: {
+                    ...user,
+                    allowed_views: permProfile.allowed_views,
+                    view_actions: permProfile.view_actions,
+                    uses_role_defaults: permProfile.uses_role_defaults,
+                },
+            },
         });
     } catch (error) {
         next(error);

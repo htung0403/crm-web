@@ -761,6 +761,54 @@ export const usersApi = {
         api.delete<ApiResponse<null>>(`/users/${id}`),
 };
 
+export interface ViewActionFlags {
+    edit: boolean;
+    delete: boolean;
+}
+
+export type ViewActionsMap = Record<string, ViewActionFlags>;
+
+export interface EmployeeViewPermissionRow {
+    user_id: string;
+    email: string;
+    name: string;
+    role: string;
+    status?: string;
+    has_custom_permissions: boolean;
+    allowed_views: string[] | null;
+    view_actions?: ViewActionsMap | null;
+    updated_at: string | null;
+}
+
+export const employeeViewPermissionsApi = {
+    list: () =>
+        api.get<ApiResponse<{ permissions: EmployeeViewPermissionRow[] }>>('/employee-view-permissions'),
+
+    getMe: () =>
+        api.get<
+            ApiResponse<{
+                allowed_views: string[] | null;
+                view_actions: ViewActionsMap | null;
+                uses_role_defaults: boolean;
+            }>
+        >('/employee-view-permissions/me'),
+
+    save: (userId: string, allowed_views: string[], view_actions: ViewActionsMap) =>
+        api.put<
+            ApiResponse<{
+                permission: {
+                    user_id: string;
+                    email: string;
+                    allowed_views: string[];
+                    view_actions: ViewActionsMap;
+                };
+            }>
+        >(`/employee-view-permissions/${userId}`, { allowed_views, view_actions }),
+
+    remove: (userId: string) =>
+        api.delete<ApiResponse<null>>(`/employee-view-permissions/${userId}`),
+};
+
 // Transactions API (Thu Chi)
 export const transactionsApi = {
     getAll: (params?: {

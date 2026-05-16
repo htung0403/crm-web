@@ -31,6 +31,11 @@ export interface User {
     address?: string;
     mobile_device?: string;
     notes?: string;
+    /** null = dùng quyền theo role; mảng = chỉ các view được liệt kê */
+    allowed_views?: string[] | null;
+    /** Quyền sửa/xóa theo view khi có cấu hình tùy chỉnh */
+    view_actions?: Record<string, { edit: boolean; delete: boolean }> | null;
+    uses_role_defaults?: boolean;
 }
 
 export interface Branch {

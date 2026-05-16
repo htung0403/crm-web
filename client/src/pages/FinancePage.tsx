@@ -18,6 +18,7 @@ import type { User } from '@/types';
 import { InvoiceDetailDialog } from '@/components/invoices/InvoiceDetailDialog';
 import { MobileFinanceList } from '@/components/finance';
 import { DELIVERY_CARRIER_OPTIONS } from '@/constants/deliveryCarriers';
+import { useViewActionForRoles } from '@/hooks/useViewAction';
 
 interface FinancePageProps {
     currentUser: User;
@@ -436,7 +437,8 @@ function TransactionForm({ type, initialCategory, onClose, onSubmit, loading }: 
 
 function TransactionTable({
     transactions,
-    userRole,
+    canEdit,
+    canDelete,
     onDelete,
     onView,
     onCustomerClick,
@@ -444,7 +446,8 @@ function TransactionTable({
     loading,
 }: {
     transactions: Transaction[];
-    userRole: string;
+    canEdit: boolean;
+    canDelete: boolean;
     onDelete: (id: string) => void;
     onView: (trans: Transaction) => void;
     onCustomerClick: (id: string) => void;
@@ -452,8 +455,6 @@ function TransactionTable({
     loading: boolean;
 }) {
     const [expandedRow, setExpandedRow] = useState<string | null>(null);
-
-    const isManagement = ['manager', 'admin', 'accountant'].includes(userRole);
 
     if (transactions.length === 0) {
         return (
@@ -498,7 +499,7 @@ function TransactionTable({
                         const trans = transactions.find(t => t.id === voucher.id);
                         if (trans) onView(trans);
                     }}
-                    onDelete={isManagement ? onDelete : undefined}
+                    onDelete={canDelete ? onDelete : undefined}
                 />
             </div>
 
@@ -664,21 +665,25 @@ function TransactionTable({
                                                                 <Printer className="h-4 w-4" />
                                                                 In
                                                             </Button>
-                                                            {isManagement && (
+                                                            {(canEdit || canDelete) && (
                                                                 <>
-                                                                    <Button variant="outline" size="sm" className="h-9 px-4 gap-2 font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-100 shadow-sm">
-                                                                        <Edit className="h-4 w-4" />
-                                                                        Chỉnh sửa
-                                                                    </Button>
-                                                                    <Button
-                                                                        variant="outline"
-                                                                        size="sm"
-                                                                        className="h-9 px-4 gap-2 font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-100 shadow-sm"
-                                                                        onClick={(e) => { e.stopPropagation(); onDelete(trans.id); }}
-                                                                    >
-                                                                        <Trash2 className="h-4 w-4" />
-                                                                        Hủy bỏ
-                                                                    </Button>
+                                                                    {canEdit && (
+                                                                        <Button variant="outline" size="sm" className="h-9 px-4 gap-2 font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 border-blue-100 shadow-sm">
+                                                                            <Edit className="h-4 w-4" />
+                                                                            Chỉnh sửa
+                                                                        </Button>
+                                                                    )}
+                                                                    {canDelete && (
+                                                                        <Button
+                                                                            variant="outline"
+                                                                            size="sm"
+                                                                            className="h-9 px-4 gap-2 font-bold text-rose-600 hover:text-rose-700 hover:bg-rose-50 border-rose-100 shadow-sm"
+                                                                            onClick={(e) => { e.stopPropagation(); onDelete(trans.id); }}
+                                                                        >
+                                                                            <Trash2 className="h-4 w-4" />
+                                                                            Hủy bỏ
+                                                                        </Button>
+                                                                    )}
                                                                 </>
                                                             )}
                                                         </div>
@@ -702,6 +707,8 @@ function TransactionTable({
 export function FinancePage({ currentUser, initialTab = 'income', onTabChange }: FinancePageProps) {
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState<'income' | 'expense'>(initialTab);
+    const incomeActions = useViewActionForRoles('income', ['admin', 'manager', 'accountant', 'sale']);
+    const expenseActions = useViewActionForRoles('expense', ['admin', 'manager', 'accountant', 'sale']);
     const [showForm, setShowForm] = useState<TransactionType | null>(null);
     const [formInitialCategory, setFormInitialCategory] = useState<string | undefined>();
 
@@ -1266,7 +1273,8 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
                                 ) : (
                                     <TransactionTable
                                         transactions={currentTransactions}
-                                        userRole={currentUser.role}
+                                        canEdit={incomeActions.canEdit}
+                                        canDelete={incomeActions.canDelete}
                                         onDelete={handleDelete}
                                         onView={setSelectedTransaction}
                                         onCustomerClick={handleCustomerClick}
@@ -1285,7 +1293,8 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
                                 ) : (
                                     <TransactionTable
                                         transactions={currentTransactions}
-                                        userRole={currentUser.role}
+                                        canEdit={expenseActions.canEdit}
+                                        canDelete={expenseActions.canDelete}
                                         onDelete={handleDelete}
                                         onView={setSelectedTransaction}
                                         onCustomerClick={handleCustomerClick}
@@ -1319,7 +1328,7 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
                 onClose={() => setShowInvoiceDetail(false)}
                 onStatusChange={() => {}} // Read-only from here usually or implement if needed
                 onPayButtonClick={() => {}}
-                canEdit={['admin', 'manager', 'accountant'].includes(currentUser.role)}
+                canEdit={incomeActions.canEdit}
             />
 
             {/* Global Loader for Invoice Fetching */}

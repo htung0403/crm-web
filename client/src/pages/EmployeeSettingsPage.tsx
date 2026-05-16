@@ -10,7 +10,9 @@ import {
   Info,
   Pencil,
   Plus,
+  Shield,
 } from 'lucide-react';
+import { ViewPermissionsPanel } from '@/components/employee-settings/ViewPermissionsTab';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -20,7 +22,7 @@ import { cn } from '@/lib/utils';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type SettingsTab = 'init' | 'attendance' | 'salary' | 'workdays';
+type SettingsTab = 'init' | 'attendance' | 'salary' | 'workdays' | 'permissions';
 
 interface SetupStep {
   id: string;
@@ -53,6 +55,7 @@ const sidebarTabs: { id: SettingsTab; label: string; icon: React.ReactNode }[] =
   { id: 'attendance', label: 'Chấm công', icon: <Clock className="h-4 w-4" /> },
   { id: 'salary', label: 'Tính lương', icon: <DollarSign className="h-4 w-4" /> },
   { id: 'workdays', label: 'Ngày làm & Nghỉ', icon: <CalendarDays className="h-4 w-4" /> },
+  { id: 'permissions', label: 'Phân quyền', icon: <Shield className="h-4 w-4" /> },
 ];
 
 // ─── Tooltip Component ──────────────────────────────────────────────────────
@@ -876,6 +879,7 @@ export function EmployeeSettingsPage() {
           {activeTab === 'attendance' && <AttendanceTab />}
           {activeTab === 'salary' && <SalaryTab />}
           {activeTab === 'workdays' && <WorkDaysTab />}
+          {activeTab === 'permissions' && <ViewPermissionsPanel />}
         </div>
       </div>
     </div>

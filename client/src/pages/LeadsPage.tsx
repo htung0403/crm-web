@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useLeads } from '@/hooks/useLeads';
+import { useViewActionForRoles } from '@/hooks/useViewAction';
 import type { Lead } from '@/hooks/useLeads';
 import { useEmployees } from '@/hooks/useEmployees';
 import { useUsers } from '@/hooks/useUsers';
@@ -34,6 +35,7 @@ import type { CreateLeadFormData } from '@/components/leads';
 
 export function LeadsPage() {
     const navigate = useNavigate();
+    const { canEdit, canDelete } = useViewActionForRoles('leads', ['admin', 'manager', 'sale']);
     const { leads, loading, error, fetchLeads, createLead, updateLead, deleteLead, convertLead } = useLeads();
     const { employees, fetchEmployees } = useEmployees();
     const { users: technicians, fetchTechnicians } = useUsers();
@@ -305,6 +307,7 @@ export function LeadsPage() {
     };
 
     const handleDeleteLead = async (id: string) => {
+        if (!canDelete) return;
         try {
             await deleteLead(id);
             toast.success('Đã xóa lead thành công');

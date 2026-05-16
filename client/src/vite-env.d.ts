@@ -11,6 +11,9 @@ interface ImportMetaEnv {
     readonly VITE_COMPANY_NAME?: string;
     readonly VITE_COMPANY_ADDRESS?: string;
     readonly VITE_COMPANY_PHONE?: string;
+    readonly VITE_INVOICE_COPY_LABEL?: string;
+    readonly VITE_COMPANY_LOGO_URL?: string;
+    readonly VITE_INVOICE_TERMS_LINE?: string;
 }
 
 interface ImportMeta {
