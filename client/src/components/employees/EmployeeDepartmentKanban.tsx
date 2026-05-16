@@ -31,8 +31,8 @@ interface EmployeeDepartmentKanbanProps {
     departments: { id: string; name: string }[];
     getJobTitleName: (jobTitleId?: string) => string;
     onView: (emp: KanbanEmployee) => void;
-    onEdit: (emp: KanbanEmployee) => void;
-    onDelete: (emp: KanbanEmployee) => void;
+    onEdit?: (emp: KanbanEmployee) => void;
+    onDelete?: (emp: KanbanEmployee) => void;
 }
 
 function EmployeeKanbanCard({
@@ -45,8 +45,8 @@ function EmployeeKanbanCard({
     emp: KanbanEmployee;
     jobTitleName: string;
     onView: (emp: KanbanEmployee) => void;
-    onEdit: (emp: KanbanEmployee) => void;
-    onDelete: (emp: KanbanEmployee) => void;
+    onEdit?: (emp: KanbanEmployee) => void;
+    onDelete?: (emp: KanbanEmployee) => void;
 }) {
     const isManager = isManagerPosition(emp, jobTitleName);
 
@@ -111,18 +111,22 @@ function EmployeeKanbanCard({
                 <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:text-blue-600" onClick={() => onView(emp)} title="Xem">
                     <Eye className="h-3.5 w-3.5" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:text-blue-600" onClick={() => onEdit(emp)} title="Sửa">
-                    <Edit className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50"
-                    onClick={() => onDelete(emp)}
-                    title="Xóa"
-                >
-                    <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+                {onEdit && (
+                    <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-500 hover:text-blue-600" onClick={() => onEdit(emp)} title="Sửa">
+                        <Edit className="h-3.5 w-3.5" />
+                    </Button>
+                )}
+                {onDelete && (
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-red-500 hover:text-red-600 hover:bg-red-50"
+                        onClick={() => onDelete(emp)}
+                        title="Xóa"
+                    >
+                        <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                )}
             </div>
         </div>
     );

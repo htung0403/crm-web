@@ -19,8 +19,8 @@ interface MobileOrdersKanbanProps {
     getCardsByStatus: (status: string) => Array<{ order: Order; group: ProductGroup; groupIndex: number }>;
     onCardClick: (order: Order, group: ProductGroup) => void;
     onViewOrder: (order: Order, group: ProductGroup) => void;
-    onEditOrder: (order: Order) => void;
-    onDeleteOrder: (order: Order) => void;
+    onEditOrder?: (order: Order) => void;
+    onDeleteOrder?: (order: Order) => void;
 }
 
 function getTechnicianNames(services: OrderItem[]) {
@@ -91,8 +91,8 @@ function MobileOrderCard({
     group: ProductGroup;
     onClick: () => void;
     onView: () => void;
-    onEdit: () => void;
-    onDelete: () => void;
+    onEdit?: () => void;
+    onDelete?: () => void;
 }) {
     const product = group.product;
     const services = group.services || [];
@@ -163,10 +163,12 @@ function MobileOrderCard({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                         <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onView(); }}>Xem</DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit(); }}>Sửa</DropdownMenuItem>
-                        <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
-                            Xóa
-                        </DropdownMenuItem>
+                        {onEdit && <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit(); }}>Sửa</DropdownMenuItem>}
+                        {onDelete && (
+                            <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
+                                Xóa
+                            </DropdownMenuItem>
+                        )}
                     </DropdownMenuContent>
                 </DropdownMenu>
             </div>
@@ -288,8 +290,8 @@ export function MobileOrdersKanban({
                                                     group={item.group}
                                                     onClick={() => onCardClick(item.order, item.group)}
                                                     onView={() => onViewOrder(item.order, item.group)}
-                                                    onEdit={() => onEditOrder(item.order)}
-                                                    onDelete={() => onDeleteOrder(item.order)}
+                                                    onEdit={onEditOrder ? () => onEditOrder(item.order) : undefined}
+                                                    onDelete={onDeleteOrder ? () => onDeleteOrder(item.order) : undefined}
                                                 />
                                             ))
                                         )}
