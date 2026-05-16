@@ -45,6 +45,7 @@ import { EmployeeSettingsPage } from '@/pages/EmployeeSettingsPage';
 import { SalaryAdvancesPage } from '@/pages/SalaryAdvancesPage';
 import { ViolationsPage } from '@/pages/ViolationsPage';
 import { TrainingPage } from '@/pages/TrainingPage';
+import { RecruitmentPage } from '@/pages/RecruitmentPage';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import type { UserRole, User } from '@/types';
@@ -105,6 +106,7 @@ const pagePermissions: Record<string, UserRole[]> = {
   'salary-advances': ['admin', 'manager', 'accountant'],
   violations: ['admin', 'manager', 'accountant'],
   training: ['admin', 'manager', 'accountant', 'sale', 'technician'],
+  recruitment: ['admin', 'manager', 'accountant'],
 };
 
 // Protected Route Component
@@ -521,6 +523,12 @@ function AppContent() {
             <Route path="/training" element={
               <ProtectedRoute allowedRoles={pagePermissions.training}>
                 <TrainingPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/recruitment" element={
+              <ProtectedRoute allowedRoles={pagePermissions.recruitment}>
+                <RecruitmentPage />
               </ProtectedRoute>
             } />
 

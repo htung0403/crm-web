@@ -140,6 +140,7 @@ const menuItems: MenuItem[] = [
             { id: 'violations', label: 'Vi phạm/Thưởng', roles: ['admin', 'manager', 'accountant'] },
             { id: 'salary', label: 'Bảng lương', roles: ['admin', 'manager', 'accountant'] },
             { id: 'training', label: 'Đào tạo', roles: ['admin', 'manager', 'accountant', 'sale', 'technician'] },
+            { id: 'recruitment', label: 'Tuyển dụng', roles: ['admin', 'manager', 'accountant'] },
             { id: 'employee-settings', label: 'Thiết lập nhân viên', roles: ['admin', 'manager'] }
         ]
     },

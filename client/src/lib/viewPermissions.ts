@@ -41,6 +41,7 @@ export const VIEW_DEFINITIONS: ViewDefinition[] = [
     { id: 'violations', label: 'Vi phạm / Thưởng', group: 'Nhân sự', pathPrefixes: ['violations'] },
     { id: 'salary', label: 'Bảng lương', group: 'Nhân sự', pathPrefixes: ['salary'] },
     { id: 'training', label: 'Đào tạo', group: 'Nhân sự', pathPrefixes: ['training'] },
+    { id: 'recruitment', label: 'Tuyển dụng', group: 'Nhân sự', pathPrefixes: ['recruitment'] },
     { id: 'employee-settings', label: 'Thiết lập nhân viên', group: 'Nhân sự', pathPrefixes: ['employee-settings'] },
 ];
 
