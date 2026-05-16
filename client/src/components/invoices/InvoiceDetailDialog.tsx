@@ -36,6 +36,49 @@ interface InvoiceDetailDialogProps {
     onPayButtonClick?: (invoice: Invoice) => void;
     onDelete?: (invoiceId: string) => void;
     canEdit?: boolean;
+    canDelete?: boolean;
+}
+
+function CompactItemRow({
+    tag,
+    tagClass,
+    name,
+    sub,
+    qty,
+    amount,
+    amountClass,
+    muted,
+    rowClass,
+}: {
+    tag: string;
+    tagClass: string;
+    name: string;
+    sub?: string;
+    qty: number | string;
+    amount: string;
+    amountClass?: string;
+    muted?: boolean;
+    rowClass?: string;
+}) {
+    return (
+        <div
+            className={cn(
+                'flex items-center gap-1.5 px-2 py-1.5 text-[11px] leading-tight',
+                muted && 'opacity-50',
+                rowClass,
+            )}
+        >
+            <span className={cn('shrink-0 rounded px-1 py-px text-[8px] font-bold leading-none', tagClass)}>
+                {tag}
+            </span>
+            <p className="min-w-0 flex-1 truncate">
+                <span className="font-medium">{name}</span>
+                {sub ? <span className="font-normal text-muted-foreground">{sub}</span> : null}
+            </p>
+            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">×{qty}</span>
+            <span className={cn('shrink-0 whitespace-nowrap font-bold tabular-nums', amountClass)}>{amount}</span>
+        </div>
+    );
 }
 
 export function InvoiceDetailDialog({
@@ -46,6 +89,7 @@ export function InvoiceDetailDialog({
     onPayButtonClick,
     onDelete,
     canEdit = false,
+    canDelete = false,
 }: InvoiceDetailDialogProps) {
     if (!invoice) return null;
 
@@ -67,48 +111,50 @@ export function InvoiceDetailDialog({
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-                <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2">
-                        <FileText className="h-5 w-5 text-primary" />
+            <DialogContent className="flex max-h-[90vh] w-[calc(100vw-0.5rem)] max-w-[calc(100vw-0.5rem)] flex-col gap-0 overflow-hidden p-0 sm:w-[min(96vw,48rem)] sm:max-w-3xl">
+                <DialogHeader className="space-y-1 pr-6">
+                    <DialogTitle className="flex flex-wrap items-center gap-1.5 text-base sm:gap-2 sm:text-lg">
+                        <FileText className="h-4 w-4 shrink-0 text-primary sm:h-5 sm:w-5" />
                         <span className="font-bold">{invoice.invoice_code}</span>
                         <Badge variant={statusConfig[invoice.status]?.variant || 'secondary'}>
                             {statusConfig[invoice.status]?.label || invoice.status}
                         </Badge>
                     </DialogTitle>
-                    <DialogDescription>Chi tiết hóa đơn</DialogDescription>
+                    <DialogDescription className="hidden sm:block">Chi tiết hóa đơn</DialogDescription>
                 </DialogHeader>
                 <Tabs defaultValue="details" className="flex-1 flex flex-col overflow-hidden">
-                    <TabsList className="bg-muted/50 p-1 mx-6 mt-2">
+                    <TabsList className="mx-3 mt-2 bg-muted/50 p-1 sm:mx-6">
                         <TabsTrigger value="details" className="flex-1 text-xs sm:text-sm">Chi tiết</TabsTrigger>
                         <TabsTrigger value="receipts" className="flex-1 text-xs sm:text-sm">Phiếu thu ({receipts.length})</TabsTrigger>
                         <TabsTrigger value="expenses" className="flex-1 text-xs sm:text-sm">Phiếu chi ({expenses.length})</TabsTrigger>
                     </TabsList>
 
-                    <TabsContent value="details" className="flex-1 overflow-y-auto p-6 pt-2 space-y-4 outline-none">
+                    <TabsContent value="details" className="flex-1 space-y-2 overflow-y-auto p-3 pt-2 outline-none sm:space-y-4 sm:p-6">
                         {/* Customer Info */}
-                        <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
-                            <Avatar className="h-12 w-12">
+                        <div className="flex items-center gap-2 rounded-lg bg-muted/50 p-2 sm:gap-3 sm:p-3">
+                            <Avatar className="h-9 w-9 sm:h-12 sm:w-12">
                                 <AvatarFallback className="bg-primary text-white">
                                     {invoice.customer?.name?.charAt(0) || 'K'}
                                 </AvatarFallback>
                             </Avatar>
-                            <div className="flex-1">
-                                <p className="font-semibold">{invoice.customer?.name || 'N/A'}</p>
-                                <p className="text-sm text-muted-foreground">{invoice.customer?.phone || 'Không có SĐT'}</p>
+                            <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-semibold sm:text-base">{invoice.customer?.name || 'N/A'}</p>
+                                <p className="truncate text-xs text-muted-foreground sm:text-sm">{invoice.customer?.phone || 'Không có SĐT'}</p>
                             </div>
                         </div>
 
                         {/* Order Info */}
                         {invoice.order && (
-                            <div className="p-3 bg-blue-50 rounded-lg border border-blue-200 flex justify-between items-center">
-                                <p className="text-sm text-blue-600 font-medium">
-                                    Đơn hàng: {invoice.order.order_code}
+                            <div className="flex items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50/80 px-2.5 py-2 sm:px-3 sm:py-2.5">
+                                <p className="min-w-0 truncate text-xs font-medium text-blue-700 sm:text-sm">
+                                    Đơn hàng: <span className="font-bold">{invoice.order.order_code}</span>
                                 </p>
                                 {invoice.order.remaining_debt !== undefined && (
-                                    <div className="text-right">
-                                        <p className="text-[10px] text-blue-500 uppercase font-bold">Còn nợ đơn hàng</p>
-                                        <p className="text-sm font-bold text-red-600">
+                                    <div className="shrink-0 text-right leading-tight">
+                                        <p className="text-[9px] font-semibold uppercase tracking-wide text-blue-500 sm:text-[10px]">
+                                            Còn nợ
+                                        </p>
+                                        <p className="text-xs font-bold text-red-600 sm:text-sm">
                                             {formatCurrency(invoice.order.remaining_debt)}
                                         </p>
                                     </div>
@@ -119,7 +165,7 @@ export function InvoiceDetailDialog({
 
                         {/* Items Table */}
                         {invoice.order && (
-                            <div className="space-y-4">
+                            <div className="space-y-2 sm:space-y-4">
                                 {(() => {
                                     const saleItems = invoice.order?.items || [];
                                     const products = (invoice.order as any).products || [];
@@ -128,18 +174,92 @@ export function InvoiceDetailDialog({
 
                                     return (
                                         <>
-                                            <p className="text-sm font-medium text-muted-foreground flex items-center gap-1">
-                                                <Package className="h-4 w-4" />
+                                            <p className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground sm:text-sm">
+                                                <Package className="h-3 w-3 sm:h-4 sm:w-4" />
                                                 Chi tiết sản phẩm/dịch vụ
                                             </p>
-                                            <div className="border rounded-lg overflow-hidden overflow-x-auto">
+
+                                            {/* Mobile: danh sách 1 dòng / mục */}
+                                            <div className="divide-y overflow-hidden rounded-lg border lg:hidden">
+                                                {products.map((p: any, pIdx: number) => {
+                                                    const services = p.services || [];
+                                                    const servicesTotal = services.reduce(
+                                                        (acc: number, s: any) =>
+                                                            acc + Number(s.unit_price) * (s.quantity || 1),
+                                                        0,
+                                                    );
+                                                    const productSurchargesTotal = Number(p.surcharge_amount) || 0;
+                                                    const rowTotal = servicesTotal + productSurchargesTotal;
+
+                                                    return (
+                                                        <React.Fragment key={`m-p-${pIdx}`}>
+                                                            <CompactItemRow
+                                                                tag="SP"
+                                                                tagClass="bg-blue-600 text-white"
+                                                                name={p.name}
+                                                                sub={p.product_code ? ` (${p.product_code})` : undefined}
+                                                                qty={1}
+                                                                amount={formatCurrency(rowTotal)}
+                                                                amountClass="text-blue-700"
+                                                                rowClass="bg-blue-50/40"
+                                                            />
+                                                            {services.map((s: any, sIdx: number) => {
+                                                                const isPaid =
+                                                                    invoice.order_product_service_ids?.includes(s.id);
+                                                                const qty = s.quantity || 1;
+                                                                const unitPrice = Number(s.unit_price) || 0;
+                                                                return (
+                                                                    <CompactItemRow
+                                                                        key={`m-s-${sIdx}`}
+                                                                        tag="DV"
+                                                                        tagClass="border border-purple-200 bg-purple-50 text-purple-700"
+                                                                        name={s.item_name}
+                                                                        qty={qty}
+                                                                        amount={formatCurrency(qty * unitPrice)}
+                                                                        muted={
+                                                                            !isPaid &&
+                                                                            !!invoice.order_product_service_ids?.length
+                                                                        }
+                                                                        rowClass="bg-muted/20 pl-3"
+                                                                    />
+                                                                );
+                                                            })}
+                                                        </React.Fragment>
+                                                    );
+                                                })}
+                                                {saleItems.length > 0 && (
+                                                    <>
+                                                        <div className="bg-emerald-50/60 px-2 py-1 text-[10px] font-semibold text-emerald-700">
+                                                            Bán kèm / Voucher
+                                                        </div>
+                                                        {saleItems.map((item: any, i: number) => {
+                                                            const isPaid = invoice.order_item_ids?.includes(item.id);
+                                                            const qty = item.quantity || 1;
+                                                            const unitPrice = Number(item.unit_price) || 0;
+                                                            return (
+                                                                <CompactItemRow
+                                                                    key={`m-sale-${i}`}
+                                                                    tag={item.item_type === 'voucher' ? 'VC' : 'BK'}
+                                                                    tagClass="border border-emerald-200 bg-emerald-50 text-emerald-700"
+                                                                    name={item.item_name}
+                                                                    qty={qty}
+                                                                    amount={formatCurrency(qty * unitPrice)}
+                                                                    muted={!isPaid && !!invoice.order_item_ids?.length}
+                                                                />
+                                                            );
+                                                        })}
+                                                    </>
+                                                )}
+                                            </div>
+
+                                            <div className="hidden overflow-hidden overflow-x-auto rounded-lg border lg:block">
                                                 <table className="w-full text-sm">
                                                     <thead className="bg-muted/50">
                                                         <tr>
-                                                            <th className="text-left p-3 font-medium">Tên khoản mục</th>
-                                                            <th className="text-center p-3 font-medium">SL</th>
-                                                            <th className="text-right p-3 font-medium">Đơn giá</th>
-                                                            <th className="text-right p-3 font-medium">Thành tiền</th>
+                                                            <th className="p-2 text-left font-medium sm:p-3">Tên khoản mục</th>
+                                                            <th className="w-10 p-2 text-center font-medium sm:p-3">SL</th>
+                                                            <th className="hidden p-2 text-right font-medium sm:table-cell sm:p-3">Đơn giá</th>
+                                                            <th className="p-2 text-right font-medium sm:p-3">T.Tiền</th>
                                                         </tr>
                                                     </thead>
                                                     <tbody className="divide-y">
@@ -152,11 +272,15 @@ export function InvoiceDetailDialog({
                                                             return (
                                                                 <React.Fragment key={`p-${pIdx}`}>
                                                                     <tr className="bg-blue-50/50">
-                                                                        <td className="p-3 font-bold text-blue-700">
-                                                                            <div className="flex items-center gap-2">
-                                                                                <Badge className="bg-blue-600">Sản phẩm khách</Badge>
-                                                                                <span>{p.name}</span>
-                                                                                <span className="text-[10px] font-normal opacity-70">({p.product_code})</span>
+                                                                        <td className="p-2 font-bold text-blue-700 sm:p-3">
+                                                                            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+                                                                                <Badge className="h-5 w-fit shrink-0 bg-blue-600 px-1.5 text-[9px] sm:text-[10px]">
+                                                                                    SP khách
+                                                                                </Badge>
+                                                                                <span className="text-xs leading-snug sm:text-sm">
+                                                                                    {p.name}
+                                                                                    <span className="ml-1 font-normal opacity-70">({p.product_code})</span>
+                                                                                </span>
                                                                             </div>
                                                                             {p.surcharges && p.surcharges.length > 0 && (
                                                                                 <div className="flex flex-wrap gap-1 mt-1 px-1">
@@ -171,9 +295,9 @@ export function InvoiceDetailDialog({
                                                                                 </div>
                                                                             )}
                                                                         </td>
-                                                                        <td className="p-3 text-center">1</td>
-                                                                        <td className="p-3 text-right text-muted-foreground">—</td>
-                                                                        <td className="p-3 text-right font-bold text-blue-700">
+                                                                        <td className="p-2 text-center sm:p-3">1</td>
+                                                                        <td className="hidden p-2 text-right text-muted-foreground sm:table-cell sm:p-3">—</td>
+                                                                        <td className="p-2 text-right text-xs font-bold text-blue-700 sm:p-3 sm:text-sm">
                                                                             {formatCurrency(rowTotal)}
                                                                         </td>
                                                                     </tr>
@@ -185,11 +309,13 @@ export function InvoiceDetailDialog({
 
                                                                         return (
                                                                             <tr key={`s-${sIdx}`} className={cn("hover:bg-muted/30", !isPaidByThisInvoice && invoice.order_product_service_ids?.length && "opacity-50")}>
-                                                                                <td className="p-3 pl-8">
-                                                                                    <div className="flex flex-col">
-                                                                                        <div className="flex items-center gap-2">
-                                                                                            <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200">Dịch vụ</Badge>
-                                                                                            <span className="font-medium">{s.item_name}</span>
+                                                                                <td className="p-2 pl-3 sm:p-3 sm:pl-8">
+                                                                                    <div className="flex flex-col gap-0.5">
+                                                                                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+                                                                                            <Badge variant="outline" className="h-5 w-fit shrink-0 border-purple-200 bg-purple-50 px-1.5 text-[9px] text-purple-700 sm:text-[10px]">
+                                                                                                DV
+                                                                                            </Badge>
+                                                                                            <span className="text-xs font-medium leading-snug sm:text-sm">{s.item_name}</span>
                                                                                         </div>
                                                                                         {s.surcharges && s.surcharges.length > 0 && (
                                                                                             <div className="flex flex-wrap gap-1 mt-1">
@@ -205,9 +331,9 @@ export function InvoiceDetailDialog({
                                                                                         )}
                                                                                     </div>
                                                                                 </td>
-                                                                                <td className="p-3 text-center">{qty}</td>
-                                                                                <td className="p-3 text-right text-muted-foreground">{formatCurrency(unitPrice)}</td>
-                                                                                <td className="p-3 text-right font-semibold">{formatCurrency(totalPrice)}</td>
+                                                                                <td className="p-2 text-center sm:p-3">{qty}</td>
+                                                                                <td className="hidden p-2 text-right text-muted-foreground sm:table-cell sm:p-3">{formatCurrency(unitPrice)}</td>
+                                                                                <td className="p-2 text-right text-xs font-semibold sm:p-3 sm:text-sm">{formatCurrency(totalPrice)}</td>
                                                                             </tr>
                                                                         );
                                                                     })}
@@ -218,7 +344,7 @@ export function InvoiceDetailDialog({
                                                         {saleItems.length > 0 && (
                                                             <>
                                                                 <tr className="bg-emerald-50/50">
-                                                                    <td colSpan={4} className="p-3 font-bold text-emerald-700">
+                                                                    <td colSpan={4} className="p-2 text-xs font-bold text-emerald-700 sm:p-3 sm:text-sm">
                                                                         Sản phẩm bán kèm / Voucher
                                                                     </td>
                                                                 </tr>
@@ -230,13 +356,13 @@ export function InvoiceDetailDialog({
 
                                                                     return (
                                                                         <tr key={`sale-${i}`} className={cn("hover:bg-muted/30", !isPaidByThisInvoice && invoice.order_item_ids?.length && "opacity-50")}>
-                                                                            <td className="p-3 pl-8">
-                                                                                <div className="flex flex-col">
-                                                                                    <div className="flex items-center gap-2">
-                                                                                        <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">
-                                                                                            {item.item_type === 'voucher' ? 'Voucher' : 'Sản phẩm'}
+                                                                            <td className="p-2 pl-3 sm:p-3 sm:pl-8">
+                                                                                <div className="flex flex-col gap-0.5">
+                                                                                    <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-2">
+                                                                                        <Badge className="h-5 w-fit shrink-0 border-emerald-200 bg-emerald-100 px-1.5 text-[9px] text-emerald-700 sm:text-[10px]">
+                                                                                            {item.item_type === 'voucher' ? 'VC' : 'SP'}
                                                                                         </Badge>
-                                                                                        <span className="font-medium">{item.item_name}</span>
+                                                                                        <span className="text-xs font-medium leading-snug sm:text-sm">{item.item_name}</span>
                                                                                     </div>
                                                                                     {item.surcharges && item.surcharges.length > 0 && (
                                                                                         <div className="flex flex-wrap gap-1 mt-1">
@@ -252,9 +378,9 @@ export function InvoiceDetailDialog({
                                                                                     )}
                                                                                 </div>
                                                                             </td>
-                                                                            <td className="p-3 text-center">{qty}</td>
-                                                                            <td className="p-3 text-right text-muted-foreground">{formatCurrency(unitPrice)}</td>
-                                                                            <td className="p-3 text-right font-semibold">{formatCurrency(totalPrice)}</td>
+                                                                            <td className="p-2 text-center sm:p-3">{qty}</td>
+                                                                            <td className="hidden p-2 text-right text-muted-foreground sm:table-cell sm:p-3">{formatCurrency(unitPrice)}</td>
+                                                                            <td className="p-2 text-right text-xs font-semibold sm:p-3 sm:text-sm">{formatCurrency(totalPrice)}</td>
                                                                         </tr>
                                                                     );
                                                                 })}
@@ -270,28 +396,28 @@ export function InvoiceDetailDialog({
                         )}
 
                         {/* Summary */}
-                        <div className="p-4 bg-gradient-to-r from-primary/5 to-primary/10 rounded-lg border border-primary/10 space-y-2">
-                            <div className="flex justify-between text-sm">
-                                <span>Tạm tính:</span>
+                        <div className="space-y-1 rounded-lg border border-primary/10 bg-gradient-to-r from-primary/5 to-primary/10 p-2.5 sm:space-y-2 sm:p-4">
+                            <div className="flex justify-between text-xs sm:text-sm">
+                                <span>Tạm tính</span>
                                 <span className="font-medium">{formatCurrency(invoice.subtotal)}</span>
                             </div>
                             {invoice.discount > 0 && (
-                                <div className="flex justify-between text-sm text-green-600">
+                                <div className="flex justify-between text-xs text-green-600 sm:text-sm">
                                     <span className="flex items-center gap-1">
-                                        <Gift className="h-3.5 w-3.5" />
-                                        Giảm giá:
+                                        <Gift className="h-3 w-3" />
+                                        Giảm giá
                                     </span>
                                     <span className="font-medium">-{formatCurrency(invoice.discount)}</span>
                                 </div>
                             )}
-                            <div className="flex justify-between text-lg font-bold pt-2 border-t border-primary/20">
-                                <span>Tổng thanh toán:</span>
+                            <div className="flex justify-between border-t border-primary/20 pt-1.5 text-sm font-bold sm:pt-2 sm:text-lg">
+                                <span>Tổng TT</span>
                                 <span className="text-primary">{formatCurrency(invoice.total_amount)}</span>
                             </div>
                         </div>
 
                         {/* Details */}
-                        <div className="grid grid-cols-2 gap-4 text-sm">
+                        <div className="grid grid-cols-2 gap-2 text-xs sm:gap-4 sm:text-sm">
                             <div>
                                 <p className="text-muted-foreground">Ngày tạo</p>
                                 <p className="font-medium">{formatDateTime(invoice.created_at)}</p>
@@ -417,40 +543,43 @@ export function InvoiceDetailDialog({
                 </Tabs>
 
                 {/* Actions */}
-                {canEdit && invoice.status !== 'paid' && (
-                    <div className="flex flex-wrap gap-2 pt-4 border-t px-6 pb-4">
-                        {onDelete && (
+                {(canEdit || canDelete) && invoice.status !== 'paid' && (
+                    <div className="flex flex-nowrap items-center justify-end gap-1 border-t px-3 py-2 sm:gap-2 sm:px-6 sm:pb-4">
+                        {canDelete && onDelete && (
                             <Button
                                 variant="outline"
-                                className="text-destructive hover:bg-destructive/10 border-destructive/30"
+                                size="sm"
+                                className="h-7 shrink-0 gap-1 px-2 text-xs text-destructive hover:bg-destructive/10 border-destructive/30"
                                 onClick={() => onDelete(invoice.id)}
                             >
-                                <Trash2 className="h-4 w-4 mr-2" />
-                                Xóa hóa đơn
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Xóa
                             </Button>
                         )}
-                        {invoice.status !== 'cancelled' && (
+                        {canEdit && invoice.status !== 'cancelled' && (
                             <>
                                 <Button
                                     variant="outline"
-                                    className="flex-1 text-red-600 hover:bg-red-50 min-w-[140px]"
+                                    size="sm"
+                                    className="h-7 shrink-0 gap-1 border-red-200 px-2 text-xs text-red-600 hover:bg-red-50"
                                     onClick={() => {
                                         onStatusChange?.(invoice.id, 'cancelled');
                                         onClose();
                                     }}
                                 >
-                                    <XCircle className="h-4 w-4 mr-2" />
-                                    Hủy hóa đơn
+                                    <XCircle className="h-3.5 w-3.5" />
+                                    Hủy
                                 </Button>
                                 <Button
-                                    className="flex-1 bg-green-600 hover:bg-green-700 min-w-[140px]"
+                                    size="sm"
+                                    className="h-7 shrink-0 gap-1 bg-green-600 px-2 text-xs hover:bg-green-700"
                                     onClick={() => {
                                         onPayButtonClick?.(invoice);
                                         onClose();
                                     }}
                                 >
-                                    <CheckCircle className="h-4 w-4 mr-2" />
-                                    Xác nhận thanh toán
+                                    <CheckCircle className="h-3.5 w-3.5" />
+                                    Thanh toán
                                 </Button>
                             </>
                         )}

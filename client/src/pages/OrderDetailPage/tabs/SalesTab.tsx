@@ -28,6 +28,7 @@ import { UpsellDialog } from '@/components/orders/UpsellDialog';
 
 interface SalesTabProps {
     order: Order;
+    isPhoneView?: boolean;
     salesLogs: any[];
     updateOrderItemStatus: (itemId: string, status: string, reason?: string, photos?: string[]) => Promise<void>;
     updateOrderStatus: (orderId: string, status: string) => Promise<void>;
@@ -325,6 +326,7 @@ SalesCard.displayName = 'SalesCard';
 
 export function SalesTab({
     order,
+    isPhoneView = false,
     salesLogs,
     updateOrderItemStatus,
     updateOrderStatus,
@@ -340,6 +342,7 @@ export function SalesTab({
     const [backwardDialogOpen, setBackwardDialogOpen] = useState(false);
     const [viewLogData, setViewLogData] = useState<{ reason?: string; photos?: string[]; itemName?: string } | null>(null);
     const [upsellGroup, setUpsellGroup] = useState<any>(null);
+    const [mobileSalesStep, setMobileSalesStep] = useState('step1');
 
     const displayedLogs = React.useMemo(() => {
         return (salesLogs || []).reduce((acc: any[], log: any) => {
@@ -402,7 +405,7 @@ export function SalesTab({
                                         Kiểm tra thông tin → Tư vấn thêm → Chốt gói. Kéo thả thẻ hạng mục vào cột để chuyển bước.
                                     </p>
                                 </div>
-                                <div className="flex flex-wrap items-center gap-3">
+                                <div className="hidden flex-wrap items-center gap-3 md:flex">
                                     <div className="relative w-64 mr-2">
                                         <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                                         <Input
@@ -429,7 +432,110 @@ export function SalesTab({
                         </CardHeader>
                         <CardContent>
                             {/* Kanban Board Layout */}
-                            <div className="overflow-x-auto pb-4">
+                            <div className="pb-4">
+                                {isPhoneView && (
+                                    <div className="mb-4 space-y-3 md:hidden">
+                                        <div className="flex gap-1 overflow-x-auto pb-1 no-scrollbar">
+                                            {SALES_STEPS.map((column, colIdx) => {
+                                                const columnGroups =
+                                                    workflowKanbanGroups?.filter((group) => {
+                                                        const leadItem = group.product || group.services[0];
+                                                        if (!leadItem) return false;
+                                                        const itemAny = leadItem as { current_phase?: string; phase_stage?: string };
+                                                        if (itemAny.current_phase !== 'sales') return false;
+                                                        return (itemAny.phase_stage || 'step1') === column.id;
+                                                    }) || [];
+                                                return (
+                                                    <button
+                                                        key={column.id}
+                                                        type="button"
+                                                        onClick={() => setMobileSalesStep(column.id)}
+                                                        className={cn(
+                                                            'shrink-0 rounded-lg border px-2 py-1.5 text-[10px] font-medium',
+                                                            mobileSalesStep === column.id
+                                                                ? 'border-primary bg-primary text-primary-foreground'
+                                                                : 'border-border bg-background',
+                                                        )}
+                                                    >
+                                                        {colIdx + 1}. {column.title} ({columnGroups.length})
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                        <DragDropContext
+                                            onDragEnd={async (result: DropResult) => {
+                                                if (!result.destination || result.destination.droppableId === result.source.droppableId) return;
+                                                const draggableId = result.draggableId;
+                                                const newStatus = result.destination.droppableId;
+                                                const group = workflowKanbanGroups?.find(
+                                                    (g) =>
+                                                        (g.product?.id ?? g.services.map((s: OrderItem) => s.id).join('-')) ===
+                                                        draggableId,
+                                                );
+                                                if (!group) return;
+                                                const leadItem = group.product || group.services[0];
+                                                if (leadItem) {
+                                                    try {
+                                                        await updateOrderItemStatus(leadItem.id, newStatus);
+                                                        if (order?.id) fetchKanbanLogs(order.id);
+                                                    } catch {
+                                                        reloadOrder();
+                                                    }
+                                                }
+                                            }}
+                                        >
+                                            <Droppable droppableId={mobileSalesStep}>
+                                                {(provided) => {
+                                                    const column = SALES_STEPS.find((s) => s.id === mobileSalesStep)!;
+                                                    const colIdx = SALES_STEPS.findIndex((s) => s.id === mobileSalesStep);
+                                                    const columnGroups =
+                                                        workflowKanbanGroups?.filter((group) => {
+                                                            const leadItem = group.product || group.services[0];
+                                                            if (!leadItem) return false;
+                                                            const itemAny = leadItem as { current_phase?: string; phase_stage?: string };
+                                                            if (itemAny.current_phase !== 'sales') return false;
+                                                            return (itemAny.phase_stage || 'step1') === column.id;
+                                                        }) || [];
+                                                    return (
+                                                        <div
+                                                            ref={provided.innerRef}
+                                                            {...provided.droppableProps}
+                                                            className="min-h-[100px] space-y-2 rounded-xl border-2 border-dashed border-muted p-2"
+                                                        >
+                                                            {columnGroups.map((group, groupIdx) => (
+                                                                <SalesCard
+                                                                    key={
+                                                                        group.product?.id ??
+                                                                        group.services.map((s: OrderItem) => s.id).join('-')
+                                                                    }
+                                                                    group={group}
+                                                                    index={groupIdx}
+                                                                    column={column}
+                                                                    order={order}
+                                                                    onProductCardClick={onProductCardClick}
+                                                                    colIdx={colIdx}
+                                                                    updateOrderItemStatus={updateOrderItemStatus}
+                                                                    fetchKanbanLogs={fetchKanbanLogs}
+                                                                    reloadOrder={reloadOrder}
+                                                                    onTabChange={onTabChange}
+                                                                    salesLogs={salesLogs}
+                                                                    onBackwardMove={(g, targetStepId) => {
+                                                                        setPendingMove({ group: g, targetStepId });
+                                                                        setBackwardDialogOpen(true);
+                                                                    }}
+                                                                    onUpsell={(g) => setUpsellGroup(g)}
+                                                                    onOpenProductDialogWithMove={onOpenProductDialogWithMove}
+                                                                />
+                                                            ))}
+                                                            {provided.placeholder}
+                                                        </div>
+                                                    );
+                                                }}
+                                            </Droppable>
+                                        </DragDropContext>
+                                    </div>
+                                )}
+                            <div className="hidden overflow-x-auto pb-4 md:block">
                                 <DragDropContext
                                     onDragEnd={async (result: DropResult) => {
                                         if (!result.destination || result.destination.droppableId === result.source.droppableId) return;
@@ -518,7 +624,7 @@ export function SalesTab({
                                         }
                                     }}
                                 >
-                                    <div className="flex gap-4 min-w-[1200px]">
+                                    <div className="flex min-w-0 flex-col gap-4 md:min-w-[1200px] md:flex-row">
                                         {SALES_STEPS.map((column, colIdx) => {
                                             const columnGroups = workflowKanbanGroups?.filter(group => {
                                                 const leadItem = group.product || group.services[0];
@@ -612,10 +718,11 @@ export function SalesTab({
                                     </div>
                                 </DragDropContext>
                             </div>
+                            </div>
                         </CardContent>
                     </Card>
 
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div className="hidden grid-cols-1 gap-6 lg:grid lg:grid-cols-3">
                         <div className="lg:col-span-2 space-y-6">
                             {/* AI Message Templates */}
                             <Card className="border-blue-100 bg-blue-50/30">

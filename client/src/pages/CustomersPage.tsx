@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import {
     Plus, Search, Edit, Trash2, Eye, Phone, Mail, MapPin,
     Building2, User, ShoppingCart, DollarSign,
-    Star, MessageCircle, Loader2, Package, Calendar, Clock, ArrowRight, FileText, Video
+    Star, MessageCircle, Loader2, Package, Calendar, Clock, ArrowRight, FileText, Video,
+    ListFilter,
 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { useCustomers } from '@/hooks/useCustomers';
@@ -23,6 +24,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { CreateCustomerDialog } from '@/components/customers/CreateCustomerDialog';
+import { MobileCustomersList } from '@/components/customers';
 
 // Customer types imported from hook
 
@@ -736,7 +738,108 @@ export function CustomersPage() {
     return (
         <>
             <Toaster position="top-right" richColors />
-            <div className="space-y-6 animate-fade-in">
+            <div className="animate-fade-in space-y-3 p-3 md:space-y-6 md:p-0">
+                {/* ——— Mobile ——— */}
+                <div className="space-y-3 md:hidden">
+                    <div className="rounded-xl bg-muted/60 p-2">
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-10 w-10 shrink-0 border-slate-200 bg-white shadow-sm"
+                                title="Bộ lọc"
+                                type="button"
+                            >
+                                <ListFilter className="h-4 w-4 text-muted-foreground" />
+                            </Button>
+                            <div className="relative min-w-0 flex-1">
+                                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                <Input
+                                    placeholder="Tìm tên, mã, SĐT"
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="h-10 border-slate-200 bg-white pl-9 shadow-sm"
+                                />
+                            </div>
+                            <Button
+                                size="icon"
+                                className="h-10 w-10 shrink-0 shadow-sm"
+                                onClick={() => {
+                                    setSelectedCustomer(null);
+                                    setShowForm(true);
+                                }}
+                                title="Thêm khách hàng"
+                            >
+                                <Plus className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                        <div className="relative overflow-hidden rounded-xl bg-blue-600 p-3 text-white shadow-sm">
+                            <User className="absolute right-2 top-2 h-4 w-4 opacity-40" />
+                            <p className="text-[11px] font-medium opacity-90">Tổng KH</p>
+                            <p className="text-xl font-bold">{totalCustomers}</p>
+                        </div>
+                        <div className="relative overflow-hidden rounded-xl bg-purple-600 p-3 text-white shadow-sm">
+                            <Star className="absolute right-2 top-2 h-4 w-4 opacity-40" />
+                            <p className="text-[11px] font-medium opacity-90">Đang hoạt động</p>
+                            <p className="text-xl font-bold">{activeCustomers}</p>
+                        </div>
+                        <div className="relative overflow-hidden rounded-xl bg-emerald-600 p-3 text-white shadow-sm">
+                            <DollarSign className="absolute right-2 top-2 h-4 w-4 opacity-40" />
+                            <p className="text-[11px] font-medium opacity-90">Tổng doanh thu</p>
+                            <p className="text-base font-bold leading-tight">{formatCurrency(totalSpent)}</p>
+                        </div>
+                        <div className="relative overflow-hidden rounded-xl bg-orange-500 p-3 text-white shadow-sm">
+                            <ShoppingCart className="absolute right-2 top-2 h-4 w-4 opacity-40" />
+                            <p className="text-[11px] font-medium opacity-90">Chi tiêu TB/KH</p>
+                            <p className="text-base font-bold leading-tight">{formatCurrency(avgSpent)}</p>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                        <Select value={typeFilter} onValueChange={setTypeFilter}>
+                            <SelectTrigger className="h-10 border-slate-200 bg-white shadow-sm">
+                                <SelectValue placeholder="Loại KH" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tất cả</SelectItem>
+                                <SelectItem value="individual">Cá nhân</SelectItem>
+                                <SelectItem value="company">Doanh nghiệp</SelectItem>
+                            </SelectContent>
+                        </Select>
+                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="h-10 border-slate-200 bg-white shadow-sm">
+                                <SelectValue placeholder="Trạng thái" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tất cả</SelectItem>
+                                <SelectItem value="active">Hoạt động</SelectItem>
+                                <SelectItem value="inactive">Không hoạt động</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    {error && (
+                        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600">
+                            {error}
+                        </div>
+                    )}
+
+                    <MobileCustomersList
+                        customers={filteredCustomers}
+                        loading={loading}
+                        onView={(c) => navigate(`/customers/${c.id}`)}
+                        onEdit={(c) => {
+                            setSelectedCustomer(c);
+                            setShowForm(true);
+                        }}
+                    />
+                </div>
+
+                {/* ——— Desktop ——— */}
+                <div className="hidden md:flex md:flex-col md:gap-6">
                 {/* Page Header */}
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                     <div>
@@ -928,64 +1031,6 @@ export function CustomersPage() {
                             </table>
                         </div>
 
-                        {/* Mobile Card View */}
-                        <div className="md:hidden p-4 space-y-4">
-                            {filteredCustomers.map((customer) => (
-                                <div key={customer.id} className="p-4 rounded-lg border bg-card">
-                                    <div className="flex items-start justify-between mb-3">
-                                        <div className="flex items-center gap-3">
-                                            <Avatar className="h-12 w-12">
-                                                <AvatarFallback className={customer.type === 'company' ? 'bg-blue-100 text-blue-600' : ''}>
-                                                    {customer.type === 'company' ? <Building2 className="h-6 w-6" /> : customer.name.charAt(0)}
-                                                </AvatarFallback>
-                                            </Avatar>
-                                            <div>
-                                                <p className="font-semibold">{customer.name}</p>
-                                                <p className="text-xs text-muted-foreground">{customer.code || '-'}</p>
-                                            </div>
-                                        </div>
-                                        <Badge variant={customer.status === 'active' ? 'success' : 'secondary'}>
-                                            {customer.status === 'active' ? 'Hoạt động' : 'Không hoạt động'}
-                                        </Badge>
-                                    </div>
-
-                                    <div className="space-y-2 text-sm mb-3">
-                                        <p className="flex items-center gap-2 text-muted-foreground">
-                                            <Mail className="h-4 w-4" />
-                                            {customer.email || '-'}
-                                        </p>
-                                        <p className="flex items-center gap-2 text-muted-foreground">
-                                            <Phone className="h-4 w-4" />
-                                            {customer.phone}
-                                        </p>
-                                    </div>
-
-                                    <div className="flex items-center justify-between pt-3 border-t">
-                                        <div>
-                                            <p className="text-xs text-muted-foreground">{customer.total_orders || 0} đơn hàng</p>
-                                            <p className="font-bold text-emerald-600">{formatCurrency(customer.total_spent || 0)}</p>
-                                        </div>
-                                        <div className="flex gap-1">
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                onClick={() => navigate(`/customers/${customer.id}`)}
-                                            >
-                                                <Eye className="h-4 w-4" />
-                                            </Button>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                onClick={() => { setSelectedCustomer(customer); setShowForm(true); }}
-                                            >
-                                                <Edit className="h-4 w-4" />
-                                            </Button>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
                         {filteredCustomers.length === 0 && (
                             <div className="p-8 text-center text-muted-foreground">
                                 Không tìm thấy khách hàng nào
@@ -993,6 +1038,7 @@ export function CustomersPage() {
                         )}
                     </CardContent>
                 </Card>
+                </div>
 
                 {/* Dialogs */}
                 <CreateCustomerDialog

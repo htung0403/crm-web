@@ -87,6 +87,7 @@ import { FailDialog } from '@/components/orders/workflow/FailDialog';
 import { ConfirmDoneDialog } from '@/components/orders/workflow/ConfirmDoneDialog';
 import { ProductDetailDialog } from './OrderDetailPage/dialogs/ProductDetailDialog';
 import { UpsellDialog } from '@/components/orders/UpsellDialog';
+import { OrderDetailMobileHeader } from './OrderDetailPage/components/OrderDetailMobileHeader';
 
 export function PhotoUpload({ label, value, onChange, disabled }: { label: string; value: string[]; onChange: (urls: string[]) => void; disabled?: boolean }) {
     const [uploading, setUploading] = useState(false);
@@ -560,10 +561,25 @@ export function OrderDetailPage() {
         );
     }
 
+    const canApproveOrder =
+        (user?.role === 'manager' || user?.role === 'admin') &&
+        !!order.items?.some((item) => (item as { status?: string }).status === 'step4');
+
     return (
-        <div className="space-y-4 sm:space-y-6 animate-fade-in">
-            {/* Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="animate-fade-in w-full min-w-0 max-w-full space-y-0 overflow-x-hidden bg-muted/30 md:space-y-6 md:bg-transparent">
+            <OrderDetailMobileHeader
+                order={order}
+                canApprove={!!canApproveOrder}
+                onUpsell={() => setShowUpsellDialog(true)}
+                onPrintQr={() => setShowPrintDialog(true)}
+                onPrintInvoice={() => setShowInvoicePrintDialog(true)}
+                onEdit={() => navigate(`/orders/${order.id}/edit`)}
+                onPayment={() => setShowPaymentRecordDialog(true)}
+                onApprove={() => handleApproveOrder(order)}
+            />
+
+            {/* Header — desktop */}
+            <div className="hidden md:flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="flex items-start sm:items-center gap-4">
                     <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="-ml-2 shrink-0">
                         <ArrowLeft className="h-5 w-5" />
@@ -619,8 +635,7 @@ export function OrderDetailPage() {
                             </>
                         )}
                     </Button>
-                    {(user?.role === 'manager' || user?.role === 'admin') &&
-                        order.items?.some(item => (item as any).status === 'step4') && (
+                    {canApproveOrder && (
                             <Button
                                 className="bg-red-600 hover:bg-red-700 flex-1 sm:flex-none"
                                 onClick={() => handleApproveOrder(order)}
@@ -632,51 +647,54 @@ export function OrderDetailPage() {
                 </div>
             </div>
 
-            {isPhoneView && (
-                <div className="grid grid-cols-2 gap-2">
-                    <div className="rounded-xl border bg-card p-3">
-                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Tong tien</p>
-                        <p className="text-base font-bold mt-1">
-                            {(order.total_amount || 0).toLocaleString('vi-VN')}d
-                        </p>
-                    </div>
-                    <div className="rounded-xl border bg-card p-3">
-                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground font-semibold">Con lai</p>
-                        <p className="text-base font-bold mt-1">
-                            {(order.remaining_debt ?? (order.total_amount - (order.paid_amount || 0))).toLocaleString('vi-VN')}d
-                        </p>
-                    </div>
-                </div>
-            )}
-
             {/* Tabs */}
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className={`mb-4 w-full justify-start overflow-x-auto no-scrollbar ${isPhoneView ? '' : 'md:w-auto md:overflow-visible'}`}>
-                    <TabsTrigger value="detail" className="gap-2 shrink-0">
-                        <FileText className="h-4 w-4" />
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full min-w-0 max-w-full md:space-y-0">
+                <TabsList className="mb-0 flex h-auto w-full min-w-0 max-w-full justify-start gap-0 overflow-x-auto rounded-none border-b bg-white px-1 no-scrollbar md:mb-4 md:mt-0 md:h-10 md:w-auto md:gap-1 md:rounded-lg md:border-0 md:bg-muted/50 md:p-1">
+                    <TabsTrigger
+                        value="detail"
+                        className="shrink-0 gap-1 rounded-none border-b-2 border-transparent px-3 py-2.5 text-xs font-medium text-muted-foreground data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:font-bold data-[state=active]:text-foreground data-[state=active]:shadow-none md:rounded-md md:border-0 md:px-2.5 md:py-1.5 md:data-[state=active]:bg-white md:gap-2 md:text-sm"
+                    >
+                        <FileText className="h-3.5 w-3.5 md:h-4 md:w-4" />
                         Chi tiết
                     </TabsTrigger>
-                    <TabsTrigger value="sales" className="gap-2 shrink-0">
-                        <ShoppingBag className="h-4 w-4" />
-                        Lên đơn (Sales)
+                    <TabsTrigger
+                        value="sales"
+                        className="shrink-0 gap-1 rounded-none border-b-2 border-transparent px-3 py-2.5 text-xs font-medium text-muted-foreground data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:font-bold data-[state=active]:text-foreground data-[state=active]:shadow-none md:rounded-md md:border-0 md:px-2.5 md:py-1.5 md:data-[state=active]:bg-white md:gap-2 md:text-sm"
+                    >
+                        <ShoppingBag className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                        <span className="md:hidden">Sales</span>
+                        <span className="hidden md:inline">Lên đơn (Sales)</span>
                     </TabsTrigger>
-                    <TabsTrigger value="workflow" className="gap-2 shrink-0">
-                        <Layers className="h-4 w-4" />
-                        Tiến trình / Quy trình
+                    <TabsTrigger
+                        value="workflow"
+                        className="shrink-0 gap-1 rounded-none border-b-2 border-transparent px-3 py-2.5 text-xs font-medium text-muted-foreground data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:font-bold data-[state=active]:text-foreground data-[state=active]:shadow-none md:rounded-md md:border-0 md:px-2.5 md:py-1.5 md:data-[state=active]:bg-white md:gap-2 md:text-sm"
+                    >
+                        <Layers className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                        <span className="md:hidden">Quy trình</span>
+                        <span className="hidden md:inline">Tiến trình / Quy trình</span>
                     </TabsTrigger>
-                    <TabsTrigger value="aftersale" className="gap-2 shrink-0">
-                        <RefreshCcw className="h-4 w-4" />
-                        After sale
+                    <TabsTrigger
+                        value="aftersale"
+                        className="shrink-0 gap-1 rounded-none border-b-2 border-transparent px-3 py-2.5 text-xs font-medium text-muted-foreground data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:font-bold data-[state=active]:text-foreground data-[state=active]:shadow-none md:rounded-md md:border-0 md:px-2.5 md:py-1.5 md:data-[state=active]:bg-white md:gap-2 md:text-sm"
+                    >
+                        <RefreshCcw className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                        <span className="md:hidden">After</span>
+                        <span className="hidden md:inline">After sale</span>
                     </TabsTrigger>
-                    <TabsTrigger value="care" className="gap-2 shrink-0">
-                        <Heart className="h-4 w-4" />
-                        Chăm sóc / Bảo hành
+                    <TabsTrigger
+                        value="care"
+                        className="shrink-0 gap-1 rounded-none border-b-2 border-transparent px-3 py-2.5 text-xs font-medium text-muted-foreground data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:font-bold data-[state=active]:text-foreground data-[state=active]:shadow-none md:rounded-md md:border-0 md:px-2.5 md:py-1.5 md:data-[state=active]:bg-white md:gap-2 md:text-sm"
+                    >
+                        <Heart className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                        <span className="md:hidden">CS/BH</span>
+                        <span className="hidden md:inline">Chăm sóc / Bảo hành</span>
                     </TabsTrigger>
                 </TabsList>
 
                 <DetailTab
                     order={order}
                     productStatusSummary={productStatusSummary}
+                    isPhoneView={isPhoneView}
                     onShowPrintDialog={() => setShowPrintDialog(true)}
                     onShowInvoicePrintDialog={() => setShowInvoicePrintDialog(true)}
                     onShowPaymentDialog={() => setShowPaymentDialog(true)}
@@ -684,6 +702,7 @@ export function OrderDetailPage() {
 
                 <SalesTab
                     order={order}
+                    isPhoneView={isPhoneView}
                     salesLogs={salesLogs}
                     updateOrderItemStatus={updateOrderItemStatus}
                     updateOrderStatus={updateOrderStatus}
@@ -697,6 +716,7 @@ export function OrderDetailPage() {
 
                 <WorkflowTab
                     order={order}
+                    isPhoneView={isPhoneView}
                     stepsLoading={stepsLoading}
                     allWorkflowSteps={allWorkflowSteps}
                     workflowKanbanGroups={workflowKanbanGroups}

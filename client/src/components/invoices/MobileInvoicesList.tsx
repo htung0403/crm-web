@@ -1,53 +1,54 @@
-import React from 'react';
-import { Eye, Trash2, Download, MoreHorizontal } from 'lucide-react';
+import { Eye, FileText, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { formatCurrency, formatDate } from '@/lib/utils';
+import { formatCurrency, formatDate, cn } from '@/lib/utils';
 
-interface Invoice {
+export interface MobileInvoice {
     id: string;
     invoice_code?: string;
     order_id: string;
-    order?: { order_code: string; customer?: { name: string; phone: string } };
-    amount?: number;
+    customer?: { name?: string; phone?: string };
+    order?: { order_code?: string; customer?: { name?: string; phone?: string } };
     total_amount?: number;
-    paid_amount?: number;
+    amount?: number;
     payment_method?: string;
     status?: string;
     created_at: string;
-    notes?: string;
 }
 
 interface MobileInvoicesListProps {
-    invoices: Invoice[];
+    invoices: MobileInvoice[];
     loading: boolean;
-    onView?: (invoice: Invoice) => void;
+    onView?: (invoice: MobileInvoice) => void;
+    onEdit?: (invoice: MobileInvoice) => void;
     onDelete?: (invoiceId: string) => void;
 }
 
-const statusBadgeColor: Record<string, string> = {
-    pending: 'bg-yellow-100 text-yellow-800',
-    paid: 'bg-green-100 text-green-800',
-    partial: 'bg-blue-100 text-blue-800',
-    cancelled: 'bg-red-100 text-red-800',
+const statusConfig: Record<string, { label: string; className: string }> = {
+    draft: { label: 'Nháp', className: 'bg-slate-100 text-slate-700 border-slate-200' },
+    pending: { label: 'Chờ TT', className: 'bg-amber-100 text-amber-800 border-amber-200' },
+    paid: { label: 'Đã TT', className: 'bg-green-100 text-green-800 border-green-200' },
+    cancelled: { label: 'Đã hủy', className: 'bg-red-100 text-red-800 border-red-200' },
 };
 
 const paymentMethodLabel: Record<string, string> = {
     cash: 'Tiền mặt',
     transfer: 'Chuyển khoản',
-    zalopay: 'ZaloPay',
-    other: 'Khác',
+    zalopay: 'Zalo Pay',
 };
 
-export function MobileInvoicesList({ invoices, loading, onView, onDelete }: MobileInvoicesListProps) {
+function getCustomer(invoice: MobileInvoice) {
+    return invoice.customer ?? invoice.order?.customer;
+}
+
+export function MobileInvoicesList({ invoices, loading, onView, onEdit, onDelete }: MobileInvoicesListProps) {
     if (loading) {
         return (
-            <div className="space-y-3">
-                {[...Array(3)].map((_, i) => (
-                    <Card key={i} className="animate-pulse">
-                        <CardContent className="p-3 h-24 bg-muted rounded" />
+            <div className="space-y-1.5">
+                {[...Array(4)].map((_, i) => (
+                    <Card key={i} className="animate-pulse border-0 shadow-sm">
+                        <CardContent className="h-[72px] rounded-lg bg-muted px-2.5 py-2" />
                     </Card>
                 ))}
             </div>
@@ -56,86 +57,108 @@ export function MobileInvoicesList({ invoices, loading, onView, onDelete }: Mobi
 
     if (invoices.length === 0) {
         return (
-            <div className="flex items-center justify-center py-12">
-                <div className="text-center">
-                    <p className="text-muted-foreground">Không có hóa đơn</p>
-                </div>
+            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed bg-muted/30 px-4 py-10">
+                <FileText className="mb-2 h-8 w-8 text-muted-foreground/40" />
+                <p className="text-sm font-medium text-muted-foreground">Không có hóa đơn</p>
             </div>
         );
     }
 
+    const hasActions = onView || onEdit || onDelete;
+
     return (
-        <div className="space-y-3">
-            {invoices.map((invoice) => (
-                <Card key={invoice.id} className="overflow-hidden hover:shadow-md transition-shadow">
-                    <CardContent className="p-3">
-                        {/* Header */}
-                        <div className="flex items-start justify-between gap-2 mb-2">
-                            <div className="flex-1 min-w-0">
-                                <p className="font-semibold text-sm text-foreground truncate">
-                                    {invoice.invoice_code || `HĐ-${invoice.id.slice(0, 8)}`}
+        <div className="space-y-1.5">
+            {invoices.map((invoice) => {
+                const customer = getCustomer(invoice);
+                const status = statusConfig[invoice.status || 'pending'] ?? statusConfig.pending;
+                const canModify = invoice.status !== 'paid' && invoice.status !== 'cancelled';
+                const amount = invoice.total_amount ?? invoice.amount ?? 0;
+                const code = invoice.invoice_code || `HĐ-${invoice.id.slice(0, 8)}`;
+                const orderRef = invoice.order?.order_code;
+                const customerName = customer?.name || 'Khách lẻ';
+                const payLabel = paymentMethodLabel[invoice.payment_method || 'cash'] || 'Tiền mặt';
+
+                return (
+                    <Card
+                        key={invoice.id}
+                        className="overflow-hidden border shadow-sm transition-shadow active:scale-[0.99]"
+                        onClick={() => onView?.(invoice)}
+                    >
+                        <CardContent className="space-y-1 px-2.5 py-2">
+                            <div className="flex h-[17px] items-center gap-1.5">
+                                <p className="min-w-0 truncate text-[13px] font-bold leading-none text-foreground">
+                                    {code}
                                 </p>
-                                <p className="text-xs text-muted-foreground">
-                                    {invoice.order?.order_code}
+                                <Badge
+                                    variant="outline"
+                                    className={cn(
+                                        'ml-auto h-4 shrink-0 px-1 py-0 text-[9px] font-semibold leading-none',
+                                        status.className,
+                                    )}
+                                >
+                                    {status.label}
+                                </Badge>
+                            </div>
+
+                            <p className="h-[15px] truncate text-[11px] leading-none text-muted-foreground">
+                                {orderRef && <span>ĐH {orderRef} · </span>}
+                                <span className="font-medium text-foreground">{customerName}</span>
+                            </p>
+
+                            <div className="flex h-[20px] items-center gap-1">
+                                <p className="min-w-0 flex-1 truncate text-[10px] leading-none text-muted-foreground">
+                                    {customer?.phone && <span>{customer.phone} · </span>}
+                                    {payLabel} · {formatDate(invoice.created_at)}
+                                </p>
+                                <p className="shrink-0 text-[13px] font-bold leading-none text-primary">
+                                    {formatCurrency(amount)}
                                 </p>
                             </div>
-                            <DropdownMenu>
-                                <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
-                                        <MoreHorizontal className="h-4 w-4" />
-                                    </Button>
-                                </DropdownMenuTrigger>
-                                <DropdownMenuContent align="end">
-                                    {onView && (
-                                        <DropdownMenuItem onClick={() => onView(invoice)}>
-                                            <Eye className="h-4 w-4 mr-2" />
-                                            Xem
-                                        </DropdownMenuItem>
-                                    )}
-                                    {onDelete && (
-                                        <DropdownMenuItem
-                                            onClick={() => onDelete(invoice.id)}
-                                            className="text-destructive"
-                                        >
-                                            <Trash2 className="h-4 w-4 mr-2" />
-                                            Xóa
-                                        </DropdownMenuItem>
-                                    )}
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                        </div>
 
-                        {/* Customer Info */}
-                        <div className="mb-2">
-                            <p className="text-xs font-medium text-foreground">
-                                {invoice.order?.customer?.name || 'N/A'}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                                {invoice.order?.customer?.phone || ''}
-                            </p>
-                        </div>
-
-                        {/* Amount & Status */}
-                        <div className="flex items-center justify-between mb-2">
-                            <div>
-                                <p className="text-xs text-muted-foreground">Tổng tiền</p>
-                                <p className="font-bold text-primary">
-                                    {formatCurrency(invoice.total_amount ?? invoice.amount ?? 0)}
-                                </p>
-                            </div>
-                            <Badge className={statusBadgeColor[invoice.status || 'pending']}>
-                                {invoice.status === 'paid' ? 'Đã thanh toán' : 'Chờ thanh toán'}
-                            </Badge>
-                        </div>
-
-                        {/* Footer */}
-                        <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t">
-                            <span>{paymentMethodLabel[invoice.payment_method || 'cash']}</span>
-                            <span>{formatDate(invoice.created_at)}</span>
-                        </div>
-                    </CardContent>
-                </Card>
-            ))}
+                            {hasActions && (
+                                <div
+                                    className="flex items-center justify-end gap-1 border-t border-border/60 pt-1.5"
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                        {onView && (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-7 gap-1 px-2.5 text-xs"
+                                                onClick={() => onView(invoice)}
+                                            >
+                                                <Eye className="h-3.5 w-3.5" />
+                                                Xem
+                                            </Button>
+                                        )}
+                                        {onEdit && canModify && (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-7 gap-1 border-blue-100 px-2.5 text-xs text-blue-600 hover:bg-blue-50"
+                                                onClick={() => onEdit(invoice)}
+                                            >
+                                                <Pencil className="h-3.5 w-3.5" />
+                                                Sửa
+                                            </Button>
+                                        )}
+                                        {onDelete && invoice.status !== 'paid' && (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-7 gap-1 border-red-100 px-2.5 text-xs text-destructive hover:bg-red-50"
+                                                onClick={() => onDelete(invoice.id)}
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                                Xóa
+                                            </Button>
+                                        )}
+                                    </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                );
+            })}
         </div>
     );
 }

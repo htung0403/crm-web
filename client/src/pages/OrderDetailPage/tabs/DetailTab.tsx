@@ -21,10 +21,12 @@ import {
     getCustomerProductTypeLabel,
     getStatusVariant,
 } from '../utils';
+import { OrderDetailMobileDetail } from '../components/OrderDetailMobileDetail';
 
 interface DetailTabProps {
     order: Order;
     productStatusSummary: any;
+    isPhoneView?: boolean;
     onShowPrintDialog: () => void;
     onShowInvoicePrintDialog: () => void;
     onShowPaymentDialog: () => void;
@@ -33,6 +35,7 @@ interface DetailTabProps {
 export function DetailTab({
     order,
     productStatusSummary,
+    isPhoneView = false,
     onShowPrintDialog,
     onShowInvoicePrintDialog,
     onShowPaymentDialog,
@@ -41,22 +44,35 @@ export function DetailTab({
     const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
 
     return (
-        <TabsContent value="detail">
-            {/* Main Content - 2 Column Layout */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <TabsContent value="detail" className="mt-0 min-w-0 max-w-full px-3 pb-4 pt-3 md:px-0 md:pb-0 md:pt-4">
+            {isPhoneView && (
+                <OrderDetailMobileDetail
+                    order={order}
+                    onShowPrintDialog={onShowPrintDialog}
+                    onShowInvoicePrintDialog={onShowInvoicePrintDialog}
+                    onShowPaymentDialog={onShowPaymentDialog}
+                />
+            )}
+
+            <div
+                className={cn(
+                    'grid grid-cols-1 gap-4 md:gap-6',
+                    isPhoneView ? 'hidden md:grid' : 'lg:grid-cols-3',
+                )}
+            >
                 {/* Left Column - Order Items (2/3) */}
-                <div className="lg:col-span-2 space-y-6">
+                <div className={cn('space-y-4 md:space-y-6', !isPhoneView && 'lg:col-span-2')}>
                     {/* Customer Info */}
                     <Card>
-                        <CardHeader className="pb-3">
-                            <CardTitle className="text-base flex items-center gap-2">
+                        <CardHeader className="pb-2 md:pb-3">
+                            <CardTitle className="text-sm md:text-base flex items-center gap-2">
                                 <UserIcon className="h-4 w-4 text-primary" />
                                 Thông tin khách hàng
                             </CardTitle>
                         </CardHeader>
-                        <CardContent>
-                            <div className="flex items-center gap-4">
-                                <Avatar className="h-14 w-14">
+                        <CardContent className="pt-0 md:pt-6">
+                            <div className="flex items-center gap-3 md:gap-4">
+                                <Avatar className={cn(isPhoneView ? 'h-10 w-10' : 'h-14 w-14')}>
                                     <AvatarFallback className="bg-primary text-white text-lg">
                                         {order.customer?.name?.charAt(0) || 'C'}
                                     </AvatarFallback>
@@ -107,7 +123,30 @@ export function DetailTab({
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="p-0">
-                                    <div className="overflow-x-auto">
+                                    {isPhoneView && (
+                                        <div className="space-y-2 p-3 md:hidden">
+                                            {order.items!.map((item) => (
+                                                <div
+                                                    key={item.id}
+                                                    className="rounded-lg border bg-muted/20 p-2.5"
+                                                >
+                                                    <div className="flex items-start justify-between gap-2">
+                                                        <p className="text-sm font-semibold leading-tight">{item.item_name}</p>
+                                                        <Badge className={cn('shrink-0 text-[10px]', getItemTypeColor(item.item_type))}>
+                                                            {getItemTypeLabel(item.item_type)}
+                                                        </Badge>
+                                                    </div>
+                                                    <div className="mt-1.5 flex items-center justify-between text-xs text-muted-foreground">
+                                                        <span>SL: {item.quantity}</span>
+                                                        <span className="font-semibold text-foreground">
+                                                            {formatCurrency((item.total_price || 0) + (item.surcharge_amount || 0))}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    <div className="hidden overflow-x-auto md:block">
                                         <table className="w-full text-sm table-fixed">
                                             <thead className="bg-muted/50">
                                                 <tr>
@@ -375,7 +414,7 @@ export function DetailTab({
                 </div>
 
                 {/* Right Column - Summary (1/3) */}
-                <div className="lg:col-span-1 space-y-4">
+                <div className={cn('space-y-3 md:space-y-4', !isPhoneView && 'lg:col-span-1')}>
                     {/* Order Summary */}
                     <Card className="border-primary/20">
                         <CardHeader className="pb-3 bg-gradient-to-r from-primary/5 to-primary/10">

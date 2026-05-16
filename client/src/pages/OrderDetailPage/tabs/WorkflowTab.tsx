@@ -376,6 +376,7 @@ const WorkflowColumn = ({
 
 interface WorkflowTabProps {
     order: Order | null;
+    isPhoneView?: boolean;
     stepsLoading: boolean;
     allWorkflowSteps: any[];
     workflowKanbanGroups: { product: OrderItem | null; services: OrderItem[] }[];
@@ -397,6 +398,7 @@ interface WorkflowTabProps {
 
 export function WorkflowTab({
     order,
+    isPhoneView = false,
     stepsLoading,
     allWorkflowSteps,
     workflowKanbanGroups,
@@ -420,6 +422,7 @@ export function WorkflowTab({
     const [showBackwardMoveDialog, setShowBackwardMoveDialog] = useState(false);
     const [backwardMoveGroup, setBackwardMoveGroup] = useState<any>(null);
     const [viewLogData, setViewLogData] = useState<any>(null);
+    const [mobileRoomId, setMobileRoomId] = useState('waiting');
 
     const handleOpenBackwardMove = (group: any) => {
         setBackwardMoveGroup(group);
@@ -494,11 +497,12 @@ export function WorkflowTab({
             <div className="space-y-6">
                 <Card>
                     <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                            <Layers className="h-5 w-5 text-primary" />
-                            Tiến trình / Quy trình – 3 phòng
+                        <CardTitle className="flex items-center gap-2 text-sm md:text-base">
+                            <Layers className="h-4 w-4 text-primary md:h-5 md:w-5" />
+                            <span className="md:hidden">Quy trình</span>
+                            <span className="hidden md:inline">Tiến trình / Quy trình – 3 phòng</span>
                         </CardTitle>
-                        <p className="text-sm text-muted-foreground">
+                        <p className="hidden text-sm text-muted-foreground md:block">
                             Dịch vụ theo quy trình gồm các phòng Mạ, Dán đế, Da. Sau khi KTV xác nhận hoàn thành bước, dịch vụ sẽ được chuyển sang phòng tiếp theo.
                         </p>
                     </CardHeader>
@@ -515,8 +519,34 @@ export function WorkflowTab({
                             </div>
                         ) : (
                             <div className="pb-4">
+                                {isPhoneView && (
+                                    <div className="mb-4 space-y-3 md:hidden">
+                                        <div className="flex gap-1 overflow-x-auto pb-1 no-scrollbar">
+                                            {rooms.map((room) => {
+                                                const count = (groupsByRoom[room.id] || []).length;
+                                                return (
+                                                    <button key={room.id} type="button" onClick={() => setMobileRoomId(room.id)} className={cn('shrink-0 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium', mobileRoomId === room.id ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background')}>
+                                                        {room.title} ({count})
+                                                    </button>
+                                                );
+                                            })}
+                                        </div>
+                                        <DragDropContext onDragEnd={onWorkflowDragEnd}>
+                                            <Droppable droppableId={mobileRoomId}>
+                                                {(provided, snapshot) => (
+                                                    <div ref={provided.innerRef} {...provided.droppableProps} className={cn('min-h-[100px] space-y-2 rounded-xl border-2 border-dashed p-2', snapshot.isDraggingOver && 'border-primary/40 bg-primary/5')}>
+                                                        {(groupsByRoom[mobileRoomId] || []).map((group, index) => (
+                                                            <WorkflowCard key={group.product?.id ?? group.services.map((s) => s.id).join('-')} group={group} index={index} roomId={mobileRoomId} orderCode={order?.order_code} getItemCurrentStep={getItemCurrentStep} getStepDeadlineDisplay={getStepDeadlineDisplay} handleOpenAccessory={handleOpenAccessory} handleOpenPartner={handleOpenPartner} handleOpenExtension={handleOpenExtension} handleOpenAssignDialog={handleOpenAssignDialog} handleOpenSaleAssignDialog={handleOpenSaleAssignDialog} onCardClick={onProductCardClick} handleOpenBackwardMove={handleOpenBackwardMove} orderExtensionRequest={order?.extension_request} />
+                                                        ))}
+                                                        {provided.placeholder}
+                                                    </div>
+                                                )}
+                                            </Droppable>
+                                        </DragDropContext>
+                                    </div>
+                                )}
                                 <DragDropContext onDragEnd={onWorkflowDragEnd}>
-                                    <div className="grid grid-cols-1 md:grid-cols-6 gap-4 overflow-x-auto min-w-[1200px] pb-4">
+                                    <div className="hidden gap-4 overflow-x-auto pb-4 md:grid md:grid-cols-6 md:min-w-[1200px]">
                                         {rooms.map((room) => (
                                             <WorkflowColumn
                                                 key={room.id}

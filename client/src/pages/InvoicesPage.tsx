@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, Trash2, Search, AlertCircle, FileText, X, Calculator, Loader2, Eye, CheckCircle, XCircle, Clock, Package, Gift, CreditCard } from 'lucide-react';
+import { Plus, Trash2, Search, AlertCircle, FileText, X, Calculator, Loader2, Eye, Pencil, CheckCircle, XCircle, Clock, Package, Gift, CreditCard } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -336,19 +336,59 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
     return (
         <>
             <Toaster position="top-right" richColors />
-            <div className="space-y-6 animate-fade-in">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="w-full max-w-full space-y-2 overflow-x-hidden animate-fade-in lg:space-y-6">
+                <div className="flex items-center gap-2 lg:hidden">
+                    <h1 className="min-w-0 flex-1 text-lg font-bold leading-tight text-foreground">Hóa đơn</h1>
+                    {canEdit && (
+                        <Button
+                            size="icon"
+                            className="h-8 w-8 shrink-0 rounded-lg"
+                            onClick={() => setShowCreateDialog(true)}
+                            title="Tạo hóa đơn"
+                        >
+                            <Plus className="h-4 w-4" />
+                        </Button>
+                    )}
+                </div>
+
+                <div className="hidden flex-col gap-4 sm:flex-row sm:items-center sm:justify-between lg:flex">
                     <div>
                         <h1 className="text-2xl font-bold text-foreground">Hóa đơn</h1>
                         <p className="text-muted-foreground">Quản lý hóa đơn bán hàng</p>
                     </div>
-                    <Button onClick={() => setShowCreateDialog(true)} className="w-full sm:w-auto shadow-sm">
-                        <Plus className="h-4 w-4 mr-2" />
-                        Tạo hóa đơn
-                    </Button>
+                    {canEdit && (
+                        <Button onClick={() => setShowCreateDialog(true)} className="w-full sm:w-auto shadow-sm">
+                            <Plus className="h-4 w-4 mr-2" />
+                            Tạo hóa đơn
+                        </Button>
+                    )}
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+                <div className="rounded-lg border bg-white px-2.5 py-2 shadow-sm lg:hidden">
+                    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[11px] leading-tight">
+                        <span className="text-muted-foreground">
+                            Tổng <span className="font-bold text-blue-600">{stats.total}</span>
+                        </span>
+                        <span className="text-muted-foreground/40">·</span>
+                        <span className="text-muted-foreground">
+                            Chờ <span className="font-bold text-amber-600">{stats.pending + stats.draft}</span>
+                        </span>
+                        <span className="text-muted-foreground/40">·</span>
+                        <span className="text-muted-foreground">
+                            TT <span className="font-bold text-green-600">{stats.paid}</span>
+                        </span>
+                        <span className="text-muted-foreground/40">·</span>
+                        <span className="text-muted-foreground">
+                            Hủy <span className="font-bold text-red-600">{stats.cancelled}</span>
+                        </span>
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-between border-t border-border/60 pt-1.5 text-[11px]">
+                        <span className="font-medium text-muted-foreground">Doanh thu</span>
+                        <span className="font-bold text-primary">{formatCurrency(stats.totalAmount)}</span>
+                    </div>
+                </div>
+
+                <div className="hidden grid-cols-2 gap-3 sm:grid-cols-4 lg:grid lg:grid-cols-5 sm:gap-4">
                     <Card className="bg-gradient-to-br from-blue-50 to-blue-100/50 border-blue-200">
                         <CardContent className="p-4 flex items-center justify-between">
                             <div>
@@ -393,9 +433,42 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
                     </Card>
                 </div>
 
-                <Card>
+                <div className="space-y-2 lg:hidden">
+                    <div className="flex gap-2">
+                        <div className="relative min-w-0 flex-1">
+                            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                                placeholder="Tìm HĐ, khách..."
+                                className="h-8 rounded-lg border-slate-200 pl-8 text-xs"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                            />
+                        </div>
+                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="h-8 w-[108px] shrink-0 rounded-lg text-xs">
+                                <SelectValue placeholder="TT" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tất cả</SelectItem>
+                                <SelectItem value="draft">Nháp</SelectItem>
+                                <SelectItem value="pending">Chờ TT</SelectItem>
+                                <SelectItem value="paid">Đã TT</SelectItem>
+                                <SelectItem value="cancelled">Đã hủy</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <MobileInvoicesList
+                        invoices={filteredInvoices}
+                        loading={false}
+                        onView={(inv) => fetchInvoiceDetail(inv.id)}
+                        onEdit={canEdit ? (inv) => fetchInvoiceDetail(inv.id) : undefined}
+                        onDelete={canDelete ? handleDeleteInvoice : undefined}
+                    />
+                </div>
+
+                <Card className="hidden lg:block">
                     <CardContent className="p-4">
-                        <div className="flex flex-col sm:flex-row gap-4 mb-4">
+                        <div className="mb-4 flex flex-col gap-4 sm:flex-row">
                             <div className="relative flex-1">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                                 <Input
@@ -419,18 +492,7 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
                             </Select>
                         </div>
 
-                        {/* Mobile view */}
-                        <div className="lg:hidden">
-                            <MobileInvoicesList
-                                invoices={filteredInvoices}
-                                loading={false}
-                                onView={(inv) => fetchInvoiceDetail(inv.id)}
-                                onDelete={canDelete ? handleDeleteInvoice : undefined}
-                            />
-                        </div>
-
-                        {/* Desktop view - Table */}
-                        <div className="hidden lg:block rounded-md border overflow-x-auto">
+                        <div className="rounded-md border overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead className="bg-muted/50">
                                     <tr className="border-b">
@@ -477,7 +539,18 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
                                                         <Button variant="ghost" size="sm" onClick={() => fetchInvoiceDetail(inv.id)} title="Xem chi tiết">
                                                             <Eye className="h-4 w-4" />
                                                         </Button>
-                                                        {canEdit && inv.status !== 'paid' && (
+                                                        {canEdit && inv.status !== 'paid' && inv.status !== 'cancelled' && (
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                                                onClick={() => fetchInvoiceDetail(inv.id)}
+                                                                title="Sửa hóa đơn"
+                                                            >
+                                                                <Pencil className="h-4 w-4" />
+                                                            </Button>
+                                                        )}
+                                                        {canDelete && inv.status !== 'paid' && (
                                                             <Button
                                                                 variant="ghost"
                                                                 size="sm"
@@ -515,6 +588,7 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
                 onPayButtonClick={handlePayButtonClick}
                 onDelete={canDelete ? handleDeleteInvoice : undefined}
                 canEdit={canEdit}
+                canDelete={canDelete}
             />
 
             {paymentRecordData && (

@@ -1,11 +1,17 @@
 import React from 'react';
-import { Calendar, ChevronRight, Circle, MoreVertical, UserRound } from 'lucide-react';
+import {
+    Calendar,
+    CheckCircle2,
+    Circle,
+    Eye,
+    Pencil,
+    User,
+    Wrench,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { formatDate } from '@/lib/utils';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { cn, formatDate } from '@/lib/utils';
 import type { KanbanColumn } from './constants';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 
@@ -17,15 +23,27 @@ interface ProductGroup {
 interface MobileOrdersKanbanProps {
     columns: KanbanColumn[];
     getCardsByStatus: (status: string) => Array<{ order: Order; group: ProductGroup; groupIndex: number }>;
+    activeColumnIndex?: number;
+    onActiveColumnChange?: (index: number) => void;
     onCardClick: (order: Order, group: ProductGroup) => void;
     onViewOrder: (order: Order, group: ProductGroup) => void;
     onEditOrder?: (order: Order) => void;
+    onMarkDone?: (order: Order, group: ProductGroup) => void;
     onDeleteOrder?: (order: Order) => void;
 }
 
+const TAB_SHORT_LABELS: Record<string, string> = {
+    before_sale: 'Before Sale',
+    in_progress: 'Đang TH',
+    done: 'Đã HT',
+    after_sale: 'After',
+    cancelled: 'Hủy',
+};
+
+const DONE_HIDDEN_COLUMNS = new Set(['done', 'after_sale', 'cancelled']);
+
 function getTechnicianNames(services: OrderItem[]) {
     const names = new Set<string>();
-
     for (const service of services) {
         if (service.technicians?.length) {
             for (const tech of service.technicians) {
@@ -35,8 +53,17 @@ function getTechnicianNames(services: OrderItem[]) {
             names.add(service.technician.name);
         }
     }
+    return [...names].join(', ') || 'N/A';
+}
 
-    return [...names].join(', ');
+function shortenName(name: string, maxLen = 14) {
+    if (name.length <= maxLen) return name;
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) {
+        const short = `${parts[0]} ${parts[parts.length - 1].charAt(0)}.`;
+        return short.length <= maxLen ? short : `${parts[0].slice(0, maxLen - 2)}…`;
+    }
+    return `${name.slice(0, maxLen - 1)}…`;
 }
 
 function getDeadlineStatus(dueAt?: string) {
@@ -51,30 +78,27 @@ function getDeadlineStatus(dueAt?: string) {
     if (diffDays < 0) {
         return {
             dateClassName: 'text-red-600 font-semibold',
-            badgeClassName: 'bg-red-100 text-red-600',
+            badgeClassName: 'bg-red-100 text-red-600 border-red-200',
             label: `Quá ${Math.abs(diffDays)} ngày`,
         };
     }
-
     if (diffDays === 0) {
         return {
             dateClassName: 'text-red-600 font-semibold',
-            badgeClassName: 'bg-red-100 text-red-600',
+            badgeClassName: 'bg-red-100 text-red-600 border-red-200',
             label: 'Hôm nay',
         };
     }
-
     if (diffDays <= 2) {
         return {
             dateClassName: 'text-amber-600 font-semibold',
-            badgeClassName: 'bg-amber-100 text-amber-700',
+            badgeClassName: 'bg-amber-100 text-amber-700 border-amber-200',
             label: `Còn ${diffDays} ngày`,
         };
     }
-
     return {
         dateClassName: 'text-emerald-600 font-semibold',
-        badgeClassName: 'bg-emerald-100 text-emerald-700',
+        badgeClassName: 'bg-emerald-100 text-emerald-700 border-emerald-200',
         label: `Còn ${diffDays} ngày`,
     };
 }
@@ -82,23 +106,21 @@ function getDeadlineStatus(dueAt?: string) {
 function MobileOrderCard({
     order,
     group,
-    onClick,
+    columnId,
     onView,
     onEdit,
-    onDelete,
+    onMarkDone,
 }: {
     order: Order;
     group: ProductGroup;
-    onClick: () => void;
+    columnId: string;
     onView: () => void;
     onEdit?: () => void;
-    onDelete?: () => void;
+    onMarkDone?: () => void;
 }) {
     const product = group.product;
     const services = group.services || [];
-    const primaryService = services.find((service) => service.item_name !== product?.item_name) || services[0];
     const displayName = product?.item_name || services[0]?.item_name || 'N/A';
-    const serviceName = primaryService?.item_name || primaryService?.service?.name;
     const productCode =
         product?.item_code ||
         product?.product?.code ||
@@ -106,95 +128,155 @@ function MobileOrderCard({
         services[0]?.item_code ||
         services[0]?.service?.code ||
         order.order_code;
+
+    const productImage =
+        product?.product?.image ||
+        product?.service?.image ||
+        services[0]?.product?.image ||
+        services[0]?.service?.image;
+
+    const customerName = order.customer?.name || 'Khách lẻ';
+    const customerInitial = customerName.charAt(0).toUpperCase();
+
+    const extraServices = services
+        .filter(s => s.item_name && s.item_name !== displayName)
+        .map(s => s.item_name.replace(/\s*\(.*?\)\s*/g, ' ').trim());
+    const description =
+        extraServices.length > 0
+            ? `${displayName} (${extraServices.slice(0, 2).join(', ')}${extraServices.length > 2 ? '…' : ''})`
+            : displayName;
+
     const receiveDate = order.confirmed_at || order.created_at;
     const dueAt = product?.due_at || services[0]?.due_at;
     const deadline = getDeadlineStatus(dueAt);
-    const responsibleName = getTechnicianNames(services) || order.sales_user?.name || 'N/A';
-    const salesName = order.sales_user?.name || 'N/A';
-    const avatarLabel = displayName.trim().charAt(0).toUpperCase() || 'SP';
+    const technicianName = shortenName(getTechnicianNames(services));
+    const saleName = shortenName(order.sales_user?.name || 'N/A');
+    const showMarkDone = onMarkDone && !DONE_HIDDEN_COLUMNS.has(columnId);
+    const isCompletedColumn = order.status === 'done' || order.status === 'after_sale';
 
     return (
-        <div
-            role="button"
-            tabIndex={0}
-            onClick={onClick}
-            onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    onClick();
-                }
-            }}
-            className="block w-full overflow-hidden rounded-2xl border border-slate-100 bg-white text-left shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition active:scale-[0.99]"
-        >
-            <div className="flex gap-3 p-3">
-                <Avatar className="h-12 w-12 shrink-0 rounded-xl bg-blue-50">
-                    <AvatarFallback className="rounded-xl bg-blue-50 text-sm font-semibold text-blue-600">
-                        {avatarLabel}
-                    </AvatarFallback>
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            {/* Header */}
+            <div className="flex gap-2.5 border-b border-slate-100 px-3 py-2.5">
+                <Avatar className="h-10 w-10 shrink-0 rounded-lg">
+                    {productImage ? (
+                        <img src={productImage} alt="" className="h-full w-full rounded-lg object-cover" />
+                    ) : (
+                        <AvatarFallback className="rounded-lg bg-blue-100 text-sm font-semibold text-blue-700">
+                            {customerInitial}
+                        </AvatarFallback>
+                    )}
                 </Avatar>
-
                 <div className="min-w-0 flex-1">
-                    <div className="mb-1.5 flex items-center gap-2 text-xs text-slate-500">
-                        <span className="shrink-0 font-medium">{productCode}</span>
-                        <span className="h-4 w-px bg-slate-200" />
-                        <span className="truncate font-semibold text-blue-600">{order.customer?.name || 'N/A'}</span>
+                    <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+                        <span className="text-sm font-bold text-foreground">{productCode}</span>
+                        <span className="truncate text-sm font-medium text-blue-600">{customerName}</span>
                     </div>
+                    <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground">{description}</p>
+                </div>
+            </div>
 
-                    <div className="flex min-w-0 items-center gap-1.5">
-                        <h3 className="min-w-0 truncate text-base font-bold text-slate-950">{displayName}</h3>
-                        {serviceName && serviceName !== displayName && (
-                            <Badge className="shrink-0 rounded-lg bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-slate-900 hover:bg-blue-50">
-                                {serviceName}
-                            </Badge>
-                        )}
-                    </div>
+            {/* Timeline & personnel */}
+            <div className="space-y-2 px-3 py-2.5">
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                    <Calendar className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    {isCompletedColumn ? (
+                        <span className="text-muted-foreground">
+                            Hoàn thành:{' '}
+                            {order.completed_at ? formatDate(order.completed_at) : '—'}
+                        </span>
+                    ) : (
+                        <>
+                            <span className="text-muted-foreground">
+                                {receiveDate ? formatDate(receiveDate) : '—'}
+                            </span>
+                            <span className="text-muted-foreground">→</span>
+                            <span className={deadline?.dateClassName ?? 'text-muted-foreground'}>
+                                {dueAt ? formatDate(dueAt) : '—'}
+                            </span>
+                            {deadline && (
+                                <Badge
+                                    variant="outline"
+                                    className={cn(
+                                        'h-5 border px-1.5 text-[10px] font-medium',
+                                        deadline.badgeClassName,
+                                    )}
+                                >
+                                    {deadline.label}
+                                </Badge>
+                            )}
+                        </>
+                    )}
                 </div>
 
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                        <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="mt-0.5 h-6 w-6 shrink-0 text-slate-500"
-                        >
-                            <MoreVertical className="h-4 w-4" />
-                        </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onView(); }}>Xem</DropdownMenuItem>
-                        {onEdit && <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit(); }}>Sửa</DropdownMenuItem>}
-                        {onDelete && (
-                            <DropdownMenuItem className="text-red-600 focus:text-red-600" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
-                                Xóa
-                            </DropdownMenuItem>
-                        )}
-                    </DropdownMenuContent>
-                </DropdownMenu>
+                <div className="grid grid-cols-2 divide-x divide-slate-200 text-xs text-muted-foreground">
+                    <div className="flex min-w-0 items-center gap-1 pr-2">
+                        <Wrench className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">
+                            <span className="font-medium text-foreground/80">PT:</span> {technicianName}
+                        </span>
+                    </div>
+                    <div className="flex min-w-0 items-center gap-1 pl-2">
+                        <User className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">
+                            <span className="font-medium text-foreground/80">Sale:</span> {saleName}
+                        </span>
+                    </div>
+                </div>
             </div>
 
-            <div className="flex items-center gap-2.5 border-t border-slate-100 px-3 py-2.5 text-sm">
-                <Calendar className="h-4 w-4 shrink-0 text-slate-500" />
-                <span className="text-slate-500">{receiveDate ? formatDate(receiveDate) : 'N/A'}</span>
-                <span className="text-slate-400">-</span>
-                <span className={deadline?.dateClassName || 'text-slate-500'}>{dueAt ? formatDate(dueAt) : 'N/A'}</span>
-                {deadline && (
-                    <Badge className={`ml-auto shrink-0 rounded-lg px-2 py-0.5 text-[11px] font-semibold ${deadline.badgeClassName}`}>
-                        {deadline.label}
-                    </Badge>
+            {/* Actions */}
+            <div className="grid grid-cols-3 gap-1.5 border-t border-slate-100 p-2">
+                <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1 px-0 text-xs"
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onView();
+                    }}
+                >
+                    <Eye className="h-3.5 w-3.5" />
+                    Xem
+                </Button>
+                {onEdit ? (
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1 px-0 text-xs"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onEdit();
+                        }}
+                    >
+                        <Pencil className="h-3.5 w-3.5" />
+                        Sửa
+                    </Button>
+                ) : (
+                    <Button variant="outline" size="sm" className="h-8 gap-1 px-0 text-xs" disabled>
+                        <Pencil className="h-3.5 w-3.5" />
+                        Sửa
+                    </Button>
                 )}
-            </div>
-
-            <div className="flex items-center gap-2.5 border-t border-slate-100 px-3 py-2.5 text-sm">
-                <UserRound className="h-4 w-4 shrink-0 text-slate-500" />
-                <span className="shrink-0 text-slate-500">Người phụ trách:</span>
-                <span className="min-w-0 flex-1 truncate font-semibold text-slate-950">{responsibleName}</span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
-            </div>
-
-            <div className="flex items-center gap-2.5 border-t border-slate-100 px-3 py-2.5 text-sm">
-                <span className="shrink-0 text-slate-500">Sale:</span>
-                <span className="min-w-0 flex-1 truncate font-semibold text-slate-950">{salesName}</span>
+                {showMarkDone ? (
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1 px-0 text-xs text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onMarkDone();
+                        }}
+                    >
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Xong
+                    </Button>
+                ) : (
+                    <Button variant="outline" size="sm" className="h-8 gap-1 px-0 text-xs" disabled>
+                        <CheckCircle2 className="h-3.5 w-3.5" />
+                        Xong
+                    </Button>
+                )}
             </div>
         </div>
     );
@@ -203,104 +285,79 @@ function MobileOrderCard({
 export function MobileOrdersKanban({
     columns: columnsList,
     getCardsByStatus,
-    onCardClick,
+    activeColumnIndex: controlledIndex,
+    onActiveColumnChange,
     onViewOrder,
     onEditOrder,
-    onDeleteOrder,
+    onMarkDone,
 }: MobileOrdersKanbanProps) {
-    const [activeColumnIndex, setActiveColumnIndex] = React.useState(0);
+    const [internalIndex, setInternalIndex] = React.useState(0);
+    const activeColumnIndex = controlledIndex ?? internalIndex;
+    const setActiveColumnIndex = onActiveColumnChange ?? setInternalIndex;
 
-    React.useEffect(() => {
-        const container = document.getElementById('mobile-orders-kanban-scroll');
-        if (!container) return;
-
-        const handleScroll = () => {
-            const scrollLeft = container.scrollLeft;
-            const columnWidth = container.offsetWidth;
-            const index = Math.round(scrollLeft / columnWidth);
-            setActiveColumnIndex(Math.min(index, columnsList.length - 1));
-        };
-
-        container.addEventListener('scroll', handleScroll);
-        return () => container.removeEventListener('scroll', handleScroll);
-    }, [columnsList.length]);
-
-    const scrollToColumn = (index: number) => {
-        const container = document.getElementById('mobile-orders-kanban-scroll');
-        if (container) {
-            container.scrollTo({
-                left: container.offsetWidth * index,
-                behavior: 'smooth',
-            });
-        }
-    };
+    const activeColumn = columnsList[activeColumnIndex];
+    const cards = activeColumn ? getCardsByStatus(activeColumn.id) : [];
 
     return (
-        <div className="space-y-3">
-            <div className="flex gap-1 overflow-x-auto pb-2">
+        <div className="space-y-2">
+            <div className="mobile-kanban-tabs">
                 {columnsList.map((column, index) => {
                     const count = getCardsByStatus(column.id).length;
                     const isActive = index === activeColumnIndex;
                     const ColumnIcon = column.icon ?? Circle;
+                    const shortLabel = TAB_SHORT_LABELS[column.id] ?? column.title;
 
                     return (
                         <button
                             key={column.id}
-                            onClick={() => scrollToColumn(index)}
-                            className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 transition-all ${
-                                isActive ? `${column.bgColor} border-2 border-primary` : 'border border-slate-200 bg-white hover:bg-slate-50'
+                            type="button"
+                            onClick={() => setActiveColumnIndex(index)}
+                            className={`mobile-kanban-tab ${column.color} ${
+                                isActive ? `active ${column.bgColor}` : 'border-slate-200 bg-white'
                             }`}
                         >
-                            <div className={`rounded p-1.5 ${column.color}`}>
-                                <ColumnIcon className="h-3 w-3" />
-                            </div>
-                            <div className="text-left">
-                                <p className="text-xs font-semibold text-foreground">{column.title}</p>
-                                <p className="text-xs text-muted-foreground">{count}</p>
-                            </div>
+                            <ColumnIcon className="h-3.5 w-3.5" />
+                            <span>{shortLabel}</span>
+                            <span
+                                className={`inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1 text-[10px] font-bold text-white ${
+                                    column.id === 'before_sale'
+                                        ? 'bg-blue-600'
+                                        : column.id === 'in_progress'
+                                          ? 'bg-orange-500'
+                                          : column.id === 'done'
+                                            ? 'bg-emerald-600'
+                                            : column.id === 'after_sale'
+                                              ? 'bg-teal-600'
+                                              : 'bg-rose-500'
+                                }`}
+                            >
+                                {count}
+                            </span>
                         </button>
                     );
                 })}
             </div>
 
-            <div id="mobile-orders-kanban-scroll" className="-mx-2 snap-x snap-mandatory overflow-x-auto px-2 pb-4 scroll-smooth">
-                <div className="flex w-fit gap-4">
-                    {columnsList.map((column) => {
-                        const cards = getCardsByStatus(column.id);
-
-                        return (
-                            <div key={column.id} className="w-[100vw] shrink-0 snap-center sm:w-96">
-                                <Card className={`${column.bgColor} ${column.borderColor} h-full border`}>
-                                    <CardHeader className="p-3 pb-2">
-                                        <CardTitle className={`flex items-center justify-between text-sm font-semibold ${column.color}`}>
-                                            <span>{column.title}</span>
-                                            <Badge variant="secondary" className="bg-white/80 text-xs">
-                                                {cards.length}
-                                            </Badge>
-                                        </CardTitle>
-                                    </CardHeader>
-                                    <CardContent className="max-h-[70vh] space-y-2 overflow-y-auto p-2">
-                                        {cards.length === 0 ? (
-                                            <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">Không có đơn hàng</div>
-                                        ) : (
-                                            cards.map((item, idx) => (
-                                                <MobileOrderCard
-                                                    key={`${item.order.id}-${idx}`}
-                                                    order={item.order}
-                                                    group={item.group}
-                                                    onClick={() => onCardClick(item.order, item.group)}
-                                                    onView={() => onViewOrder(item.order, item.group)}
-                                                    onEdit={onEditOrder ? () => onEditOrder(item.order) : undefined}
-                                                    onDelete={onDeleteOrder ? () => onDeleteOrder(item.order) : undefined}
-                                                />
-                                            ))
-                                        )}
-                                    </CardContent>
-                                </Card>
-                            </div>
-                        );
-                    })}
-                </div>
+            <div className="min-h-[120px] space-y-2">
+                {cards.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed bg-muted/20 py-12 text-center">
+                        <p className="text-sm text-muted-foreground">Không có đơn hàng</p>
+                    </div>
+                ) : (
+                    cards.map((item, idx) => (
+                        <MobileOrderCard
+                            key={`${item.order.id}-${item.groupIndex}-${idx}`}
+                            order={item.order}
+                            group={item.group}
+                            columnId={activeColumn?.id ?? ''}
+                            onView={() => onViewOrder(item.order, item.group)}
+                            onEdit={onEditOrder ? () => onEditOrder(item.order) : undefined}
+                            onMarkDone={
+                                onMarkDone ? () => onMarkDone(item.order, item.group) : undefined
+                            }
+                        />
+                    ))
+                )}
             </div>
         </div>
     );

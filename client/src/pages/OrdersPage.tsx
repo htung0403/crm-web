@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { DragDropContext, Droppable, type DropResult } from '@hello-pangea/dnd';
-import { Plus, Loader2, Search } from 'lucide-react';
+import { Plus, Loader2, Search, ListFilter } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -36,6 +36,14 @@ import { normalizeSearchText } from '@/lib/utils';
 import { ConfirmDoneDialog } from '@/components/orders/workflow/ConfirmDoneDialog';
 import { useViewActionForRoles } from '@/hooks/useViewAction';
 
+const MOBILE_ORDER_STAT_STYLES: Record<string, { bg: string; label: string }> = {
+    before_sale: { bg: 'bg-blue-600', label: 'Before Sale' },
+    in_progress: { bg: 'bg-orange-500', label: 'Đang thực hiện' },
+    done: { bg: 'bg-emerald-600', label: 'Đã hoàn thiện' },
+    after_sale: { bg: 'bg-teal-600', label: 'After sale' },
+    cancelled: { bg: 'bg-rose-500', label: 'Đã huỷ' },
+};
+
 export function OrdersPage() {
     const location = useLocation();
     const navigate = useNavigate();
@@ -54,6 +62,7 @@ export function OrdersPage() {
     const [columnSearch, setColumnSearch] = useState<{ [key: string]: string }>({});
     const [globalSearch, setGlobalSearch] = useState('');
     const [selectedStaffId, setSelectedStaffId] = useState<string>('all');
+    const [mobileColumnIndex, setMobileColumnIndex] = useState(0);
 
     // Confirm done dialog states
     const [showConfirmDoneDialog, setShowConfirmDoneDialog] = useState(false);
@@ -146,6 +155,22 @@ export function OrdersPage() {
             const message = error instanceof Error ? error.message : 'Lỗi khi cập nhật trạng thái';
             toast.error(message);
         }
+    };
+
+    const handleMarkGroupDone = (
+        order: Order,
+        group: { product: OrderItem | null; services: OrderItem[] },
+    ) => {
+        const itemIds: string[] = [];
+        if (group.product) itemIds.push(group.product.id);
+        group.services.forEach(s => itemIds.push(s.id));
+
+        setConfirmDoneItemIds(itemIds);
+        setIsV2ServiceForDone(
+            group.services.some(s => s.item_type === 'service' || s.item_type === 'package'),
+        );
+        setOrderToCheckStatus(order.id);
+        setShowConfirmDoneDialog(true);
     };
 
     const getGroupStatus = (group: { product: OrderItem | null; services: OrderItem[] }, fallbackOrder: Order): string => {
@@ -385,11 +410,111 @@ export function OrdersPage() {
     return (
         <>
             <Toaster position="top-right" richColors />
-            <div className="space-y-6 animate-fade-in w-full px-2" style={{ contain: 'inline-size' }}>
-                {/* Page Header + Stats Container - Contained width */}
-                <div className="space-y-6">
-                    {/* Page Header */}
-                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="animate-fade-in w-full space-y-3 px-2 lg:space-y-6" style={{ contain: 'inline-size' }}>
+                {/* ——— Mobile ——— */}
+                <div className="space-y-3 lg:hidden">
+                    <div className="flex items-center gap-2">
+                        <h1 className="min-w-0 flex-1 text-lg font-bold text-foreground">Quản lý đơn hàng</h1>
+                        <Select value={selectedStaffId} onValueChange={setSelectedStaffId}>
+                            <SelectTrigger className="h-9 w-[min(148px,42vw)] shrink-0 border-slate-200 bg-white text-xs shadow-sm">
+                                <SelectValue placeholder="Nhân viên" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Tất cả nhân viên</SelectItem>
+                                {salesPersons.length > 0 && (
+                                    <>
+                                        <div className="bg-muted/50 px-2 py-1.5 text-xs font-bold uppercase text-muted-foreground">Sales</div>
+                                        {salesPersons.map(s => (
+                                            <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                                        ))}
+                                    </>
+                                )}
+                                {technicians.length > 0 && (
+                                    <>
+                                        <div className="bg-muted/50 px-2 py-1.5 text-xs font-bold uppercase text-muted-foreground">Kỹ thuật</div>
+                                        {technicians.map(t => (
+                                            <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                                        ))}
+                                    </>
+                                )}
+                            </SelectContent>
+                        </Select>
+                    </div>
+
+                    <div className="rounded-xl bg-muted/60 p-2">
+                        <div className="flex items-center gap-2">
+                            <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-10 w-10 shrink-0 border-slate-200 bg-white shadow-sm"
+                                title="Bộ lọc"
+                                type="button"
+                            >
+                                <ListFilter className="h-4 w-4 text-muted-foreground" />
+                            </Button>
+                            <div className="relative min-w-0 flex-1">
+                                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                <Input
+                                    placeholder="Số HĐ, tên NV"
+                                    className="h-10 border-slate-200 bg-white pl-9 shadow-sm"
+                                    value={globalSearch}
+                                    onChange={(e) => setGlobalSearch(e.target.value)}
+                                />
+                            </div>
+                            <Button
+                                size="icon"
+                                className="h-10 w-10 shrink-0 shadow-sm"
+                                onClick={() => navigate('/orders/new')}
+                                title="Tạo đơn"
+                            >
+                                <Plus className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                        {columns.map((column, index) => {
+                            const statStyle = MOBILE_ORDER_STAT_STYLES[column.id];
+                            const count = getCardsByStatus(column.id).length;
+                            const isActive = mobileColumnIndex === index;
+                            return (
+                                <button
+                                    key={column.id}
+                                    type="button"
+                                    onClick={() => setMobileColumnIndex(index)}
+                                    className={`rounded-xl p-3 text-left text-white shadow-sm transition-transform active:scale-[0.98] ${statStyle?.bg ?? 'bg-slate-600'} ${
+                                        isActive ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-200' : ''
+                                    } ${index === columns.length - 1 && columns.length % 2 === 1 ? 'col-span-2 max-w-[calc(50%-4px)]' : ''}`}
+                                >
+                                    <p className="text-[11px] font-medium opacity-90">{statStyle?.label ?? column.title}</p>
+                                    <p className="text-2xl font-bold">{count}</p>
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {error && (
+                        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-600">
+                            {error}
+                        </div>
+                    )}
+
+                    <MobileOrdersKanban
+                        columns={columns}
+                        getCardsByStatus={getCardsByStatus}
+                        activeColumnIndex={mobileColumnIndex}
+                        onActiveColumnChange={setMobileColumnIndex}
+                        onCardClick={(order) => navigate(`/orders/${order.id}`)}
+                        onViewOrder={(order) => navigate(`/orders/${order.id}`)}
+                        onEditOrder={canEdit ? (order) => navigate(`/orders/${order.id}/edit`) : undefined}
+                        onMarkDone={canEdit ? handleMarkGroupDone : undefined}
+                        onDeleteOrder={canDelete ? handleDeleteOrder : undefined}
+                    />
+                </div>
+
+                {/* ——— Desktop ——— */}
+                <div className="hidden space-y-6 lg:block">
+                    <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
                         <div className="min-w-0 flex-1">
                             <h1 className="text-2xl font-bold text-foreground">Quản lý đơn hàng</h1>
                             <p className="text-muted-foreground">Theo dõi và xử lý đơn hàng theo trạng thái</p>
@@ -460,24 +585,8 @@ export function OrdersPage() {
                             );
                         })}
                     </div>
-                </div>
 
-                {/* Kanban Board - Mobile: scrollable tabs, Desktop: grid layout */}
-                <div className="pb-6">
-                    {/* Mobile view (< lg) */}
-                    <div className="lg:hidden">
-                        <MobileOrdersKanban
-                            columns={columns}
-                            getCardsByStatus={getCardsByStatus}
-                            onCardClick={(order) => navigate(`/orders/${order.id}`)}
-                            onViewOrder={(order) => navigate(`/orders/${order.id}`)}
-                            onEditOrder={canEdit ? (order) => navigate(`/orders/${order.id}/edit`) : undefined}
-                            onDeleteOrder={canDelete ? handleDeleteOrder : undefined}
-                        />
-                    </div>
-
-                    {/* Desktop view (>= lg) - Grid Kanban Board */}
-                    <div className="hidden lg:block">
+                    <div className="pb-6">
                         <DragDropContext onDragEnd={handleDragEnd}>
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                                 {columns.map((column) => (
