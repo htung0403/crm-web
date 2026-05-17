@@ -219,6 +219,9 @@ export const orderProductsApi = {
     getById: (id: string) =>
         api.get<ApiResponse<any>>(`/order-products/${id}`),
 
+    update: (id: string, data: { images?: string[] }) =>
+        api.patch<ApiResponse<any>>(`/order-products/${id}`, data),
+
     // Update product status
     updateStatus: (id: string, status: string, reason?: string, warranty_code?: string) =>
         api.patch<ApiResponse<any>>(`/order-products/${id}/status`, { status, ...(reason !== undefined && { reason }), ...(warranty_code !== undefined && { warranty_code }) }),

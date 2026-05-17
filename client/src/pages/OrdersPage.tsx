@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { DragDropContext, Droppable, type DropResult } from '@hello-pangea/dnd';
-import { Plus, Loader2, Search, ListFilter } from 'lucide-react';
+import { Plus, Loader2, Search, ListFilter, QrCode } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -29,8 +29,9 @@ import {
     OrderConfirmationDialog,
     PaymentDialog,
     columns,
-    MobileOrdersKanban
+    MobileOrdersKanban,
 } from '@/components/orders';
+import { OrderQrScanDialog } from '@/components/orders/OrderQrScanDialog';
 import { orderItemsApi, ordersApi } from '@/lib/api';
 import { normalizeSearchText } from '@/lib/utils';
 import { ConfirmDoneDialog } from '@/components/orders/workflow/ConfirmDoneDialog';
@@ -61,6 +62,7 @@ export function OrdersPage() {
     const [newlyCreatedOrder, setNewlyCreatedOrder] = useState<Order | null>(null);
     const [columnSearch, setColumnSearch] = useState<{ [key: string]: string }>({});
     const [globalSearch, setGlobalSearch] = useState('');
+    const [showQrScan, setShowQrScan] = useState(false);
     const [selectedStaffId, setSelectedStaffId] = useState<string>('all');
     const [mobileColumnIndex, setMobileColumnIndex] = useState(0);
 
@@ -203,6 +205,57 @@ export function OrdersPage() {
         return fallbackOrder.status;
     };
 
+    const matchesGlobalSearch = (
+        order: Order,
+        group: { product: OrderItem | null; services: OrderItem[] },
+        term: string,
+    ) => {
+        const gTerm = normalizeSearchText(term);
+        const groupItems = [group.product, ...group.services].filter(Boolean) as OrderItem[];
+        const allItems = (order.items || []) as OrderItem[];
+
+        return (
+            normalizeSearchText(order.order_code || '').includes(gTerm) ||
+            normalizeSearchText(order.customer?.name || '').includes(gTerm) ||
+            (order.customer?.phone || '').includes(term.trim()) ||
+            normalizeSearchText(order.sales_user?.name || '').includes(gTerm) ||
+            groupItems.some((it) => normalizeSearchText(it.item_code || '').includes(gTerm)) ||
+            allItems.some((it) => normalizeSearchText(it.item_code || '').includes(gTerm))
+        );
+    };
+
+    const findOrderByScannedCode = (code: string) => {
+        const trimmed = code.trim();
+        if (!trimmed) return undefined;
+
+        const norm = normalizeSearchText(trimmed);
+        const byOrderCode = orders.find(
+            (o) =>
+                normalizeSearchText(o.order_code || '') === norm ||
+                (o.order_code || '').toLowerCase() === trimmed.toLowerCase(),
+        );
+        if (byOrderCode) return byOrderCode;
+
+        return orders.find((o) =>
+            (o.items || []).some(
+                (it) =>
+                    (it.item_code || '').toLowerCase() === trimmed.toLowerCase() ||
+                    normalizeSearchText(it.item_code || '') === norm,
+            ),
+        );
+    };
+
+    const handleQrScan = (code: string) => {
+        const order = findOrderByScannedCode(code);
+        if (order) {
+            navigate(`/orders/${order.id}`);
+            toast.success(`Đã tìm thấy đơn ${order.order_code}`);
+            return;
+        }
+        setGlobalSearch(code);
+        toast.error('Không tìm thấy đơn hàng với mã này');
+    };
+
     const getCardsByStatus = (status: string) => {
         let result: { order: Order; group: { product: OrderItem | null; services: OrderItem[] }; groupIndex: number }[] = [];
         orders.forEach(order => {
@@ -228,15 +281,9 @@ export function OrdersPage() {
             });
         }
 
-        // Apply global search
-        if (globalSearch) {
-            const gTerm = normalizeSearchText(globalSearch);
-            return result.filter(v => 
-                normalizeSearchText(v.order.order_code || '').includes(gTerm) ||
-                normalizeSearchText(v.order.customer?.name || '').includes(gTerm) ||
-                (v.order.customer?.phone || '').includes(gTerm) ||
-                normalizeSearchText(v.order.sales_user?.name || '').includes(gTerm)
-            );
+        // Apply global search (mã đơn, mã HĐ, khách, NV, SĐT)
+        if (globalSearch.trim()) {
+            return result.filter((v) => matchesGlobalSearch(v.order, v.group, globalSearch));
         }
 
         return result;
@@ -455,12 +502,22 @@ export function OrdersPage() {
                             <div className="relative min-w-0 flex-1">
                                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                                 <Input
-                                    placeholder="Số HĐ, tên NV"
+                                    placeholder="Mã đơn, mã HĐ, khách..."
                                     className="h-10 border-slate-200 bg-white pl-9 shadow-sm"
                                     value={globalSearch}
                                     onChange={(e) => setGlobalSearch(e.target.value)}
                                 />
                             </div>
+                            <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-10 w-10 shrink-0 border-slate-200 bg-white shadow-sm"
+                                onClick={() => setShowQrScan(true)}
+                                title="Quét QR"
+                                type="button"
+                            >
+                                <QrCode className="h-4 w-4 text-muted-foreground" />
+                            </Button>
                             <Button
                                 size="icon"
                                 className="h-10 w-10 shrink-0 shadow-sm"
@@ -549,12 +606,20 @@ export function OrdersPage() {
                             <div className="relative flex-1 sm:min-w-[250px]">
                                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                                 <Input
-                                    placeholder="Số HĐ, tên NV, SĐT khách..."
+                                    placeholder="Mã đơn, mã HĐ, khách, NV..."
                                     className="pl-10 h-10 w-full bg-white"
                                     value={globalSearch}
                                     onChange={(e) => setGlobalSearch(e.target.value)}
                                 />
                             </div>
+                            <Button
+                                variant="outline"
+                                className="shrink-0 h-10 px-4"
+                                onClick={() => setShowQrScan(true)}
+                            >
+                                <QrCode className="h-4 w-4 mr-2" />
+                                Quét QR
+                            </Button>
                             <Button onClick={() => navigate('/orders/new')} className="shrink-0 h-10 px-6">
                                 <Plus className="h-4 w-4 mr-2" />
                                 Tạo đơn
@@ -600,11 +665,8 @@ export function OrdersPage() {
                                                             const searchText = normalizeSearchText(columnSearch[column.id] || '');
                                                             const statusCards = getCardsByStatus(column.id);
                                                             if (!searchText) return statusCards.length;
-                                                            return statusCards.filter(c =>
-                                                                normalizeSearchText(c.order.customer?.name || '').includes(searchText) ||
-                                                                (c.order.customer?.phone || '').includes(searchText) ||
-                                                                normalizeSearchText(c.order.order_code || '').includes(searchText) ||
-                                                                normalizeSearchText(c.order.sales_user?.name || '').includes(searchText)
+                                                            return statusCards.filter((c) =>
+                                                                matchesGlobalSearch(c.order, c.group, columnSearch[column.id] || ''),
                                                             ).length;
                                                         })()}
                                                     </Badge>
@@ -612,7 +674,7 @@ export function OrdersPage() {
                                                 <div className="relative mt-1.5 px-0.5">
                                                     <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
                                                     <Input
-                                                        placeholder="Khách hàng, SĐT..."
+                                                        placeholder="Mã đơn, mã HĐ, khách..."
                                                         value={columnSearch[column.id] || ''}
                                                         onChange={(e) => setColumnSearch({ ...columnSearch, [column.id]: e.target.value })}
                                                         className="h-7 pl-6.5 text-[11px] bg-white/40 border-0 focus-visible:ring-1 focus-visible:ring-primary/20 placeholder:text-muted-foreground/60"
@@ -625,11 +687,12 @@ export function OrdersPage() {
                                                         const cardsByStatus = getCardsByStatus(column.id);
                                                         const searchText = normalizeSearchText(columnSearch[column.id] || '');
                                                         const filteredCards = searchText
-                                                            ? cardsByStatus.filter(c =>
-                                                                normalizeSearchText(c.order.customer?.name || '').includes(searchText) ||
-                                                                (c.order.customer?.phone || '').includes(searchText) ||
-                                                                normalizeSearchText(c.order.order_code || '').includes(searchText) ||
-                                                                normalizeSearchText(c.order.sales_user?.name || '').includes(searchText)
+                                                            ? cardsByStatus.filter((c) =>
+                                                                matchesGlobalSearch(
+                                                                    c.order,
+                                                                    c.group,
+                                                                    columnSearch[column.id] || '',
+                                                                ),
                                                             )
                                                             : cardsByStatus;
                                                         return (
@@ -689,6 +752,12 @@ export function OrdersPage() {
                     await fetchOrders();
                     setNewlyCreatedOrder(null);
                 }}
+            />
+
+            <OrderQrScanDialog
+                open={showQrScan}
+                onOpenChange={setShowQrScan}
+                onScan={handleQrScan}
             />
 
             <ConfirmDoneDialog 

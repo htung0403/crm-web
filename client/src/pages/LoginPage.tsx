@@ -58,31 +58,6 @@ export function LoginPage() {
         }
     };
 
-    const handleDemoLogin = async (demoEmail: string) => {
-        setEmail(demoEmail);
-        setPassword('123456');
-        setIsLoading(true);
-        setError('');
-
-        try {
-            await login(demoEmail, '123456');
-        } catch (err: unknown) {
-            const message =
-                (err as { response?: { data?: { message?: string } } })?.response?.data?.message ||
-                'Đăng nhập thất bại. Vui lòng thử lại.';
-            setError(message);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const demoAccounts = [
-        { email: 'manager@demo.com', role: 'Quản lý', name: 'Nguyễn Thị Hương' },
-        { email: 'accountant@demo.com', role: 'Kế toán', name: 'Lê Văn Tài' },
-        { email: 'sale@demo.com', role: 'Sale', name: 'Trần Văn Minh' },
-        { email: 'tech@demo.com', role: 'Kỹ thuật', name: 'Phạm Văn Đức' },
-    ];
-
     const loading = isLoading || authLoading;
 
     return (
@@ -185,26 +160,6 @@ export function LoginPage() {
                             )}
                         </Button>
                     </form>
-
-                    <div className="mt-8 pt-6 border-t">
-                        <p className="text-sm text-muted-foreground mb-3">
-                            <span className="font-medium text-foreground">Tài khoản demo:</span> Click để đăng nhập nhanh (mật khẩu: 123456)
-                        </p>
-                        <div className="grid grid-cols-2 gap-2">
-                            {demoAccounts.map((account) => (
-                                <button
-                                    key={account.email}
-                                    type="button"
-                                    onClick={() => handleDemoLogin(account.email)}
-                                    disabled={loading}
-                                    className="p-3 text-left rounded-lg border hover:border-amber-700 hover:bg-amber-50 transition-colors group cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    <p className="font-medium text-sm group-hover:text-amber-800">{account.name}</p>
-                                    <p className="text-xs text-muted-foreground">{account.role}</p>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
                 </div>
             </div>
 

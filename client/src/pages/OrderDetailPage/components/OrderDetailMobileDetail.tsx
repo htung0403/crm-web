@@ -15,12 +15,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatCurrency, cn } from '@/lib/utils';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import { columns } from '@/components/orders/constants';
+import { MobileProductPhotos } from './MobileProductPhotos';
 
 interface OrderDetailMobileDetailProps {
     order: Order;
+    canEdit: boolean;
     onShowPrintDialog: () => void;
     onShowInvoicePrintDialog: () => void;
     onShowPaymentDialog: () => void;
+    onReload: () => void;
 }
 
 function MobileCard({
@@ -152,8 +155,10 @@ function ProductLine({
 
 export function OrderDetailMobileDetail({
     order,
+    canEdit,
     onShowPrintDialog,
     onShowInvoicePrintDialog,
+    onReload,
 }: OrderDetailMobileDetailProps) {
     const navigate = useNavigate();
     const remaining =
@@ -169,7 +174,9 @@ export function OrderDetailMobileDetail({
               ? 'TT một phần'
               : 'Chưa TT';
 
-    const canEdit = order.status !== 'after_sale' && order.status !== 'cancelled';
+    const canEditOrder =
+        canEdit && order.status !== 'after_sale' && order.status !== 'cancelled';
+    const canEditPhotos = canEdit && order.status !== 'cancelled';
 
     return (
         <div className="w-full min-w-0 max-w-full space-y-3">
@@ -237,17 +244,17 @@ export function OrderDetailMobileDetail({
                     </button>
                     <button
                         type="button"
-                        disabled={!canEdit}
-                        onClick={() => canEdit && navigate(`/orders/${order.id}/edit`)}
+                        disabled={!canEditOrder}
+                        onClick={() => canEditOrder && navigate(`/orders/${order.id}/edit`)}
                         className={cn(
                             'flex flex-col items-center gap-1.5 rounded-xl px-1 py-2.5 active:scale-[0.98]',
-                            canEdit ? 'bg-violet-50' : 'bg-muted/50 opacity-50',
+                            canEditOrder ? 'bg-violet-50' : 'bg-muted/50 opacity-50',
                         )}
                     >
                         <span
                             className={cn(
                                 'flex h-9 w-9 items-center justify-center rounded-lg',
-                                canEdit ? 'bg-violet-100 text-violet-700' : 'bg-muted text-muted-foreground',
+                                canEditOrder ? 'bg-violet-100 text-violet-700' : 'bg-muted text-muted-foreground',
                             )}
                         >
                             <Pencil className="h-4 w-4" />
@@ -255,7 +262,7 @@ export function OrderDetailMobileDetail({
                         <span
                             className={cn(
                                 'text-center text-[10px] font-medium leading-tight',
-                                canEdit ? 'text-violet-900' : 'text-muted-foreground',
+                                canEditOrder ? 'text-violet-900' : 'text-muted-foreground',
                             )}
                         >
                             Chỉnh sửa đơn
@@ -314,13 +321,23 @@ export function OrderDetailMobileDetail({
                     <div className="mt-2">
                         {groups.map((group, gi) => {
                             if (group.product) {
+                                const product = group.product;
+                                const isCustomerProduct = !!(product as OrderItem & { is_customer_item?: boolean })
+                                    .is_customer_item;
                                 return (
                                     <div key={gi}>
                                         <ProductLine
-                                            name={group.product.item_name}
-                                            quantity={group.product.quantity}
+                                            name={product.item_name}
+                                            quantity={product.quantity}
                                             dotColor="blue"
                                         />
+                                        {isCustomerProduct && (
+                                            <MobileProductPhotos
+                                                item={product}
+                                                canEdit={canEditPhotos}
+                                                onUpdated={onReload}
+                                            />
+                                        )}
                                         {group.services.map((svc, si) => (
                                             <ProductLine
                                                 key={si}

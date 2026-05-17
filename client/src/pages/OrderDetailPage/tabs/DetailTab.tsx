@@ -22,11 +22,14 @@ import {
     getStatusVariant,
 } from '../utils';
 import { OrderDetailMobileDetail } from '../components/OrderDetailMobileDetail';
+import { OrderItemPhotos, isCustomerProductItem } from '../components/OrderItemPhotos';
 
 interface DetailTabProps {
     order: Order;
     productStatusSummary: any;
     isPhoneView?: boolean;
+    canEdit?: boolean;
+    onReload?: () => void;
     onShowPrintDialog: () => void;
     onShowInvoicePrintDialog: () => void;
     onShowPaymentDialog: () => void;
@@ -36,18 +39,23 @@ export function DetailTab({
     order,
     productStatusSummary,
     isPhoneView = false,
+    canEdit = true,
+    onReload,
     onShowPrintDialog,
     onShowInvoicePrintDialog,
     onShowPaymentDialog,
 }: DetailTabProps) {
     const navigate = useNavigate();
     const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+    const canEditPhotos = canEdit && order.status !== 'cancelled';
 
     return (
         <TabsContent value="detail" className="mt-0 min-w-0 max-w-full px-3 pb-4 pt-3 md:px-0 md:pb-0 md:pt-4">
             {isPhoneView && (
                 <OrderDetailMobileDetail
                     order={order}
+                    canEdit={canEdit}
+                    onReload={() => onReload?.()}
                     onShowPrintDialog={onShowPrintDialog}
                     onShowInvoicePrintDialog={onShowInvoicePrintDialog}
                     onShowPaymentDialog={onShowPaymentDialog}
@@ -150,7 +158,7 @@ export function DetailTab({
                                         <table className="w-full text-sm table-fixed">
                                             <thead className="bg-muted/50">
                                                 <tr>
-                                                    <th className="text-left p-4 font-medium w-[72px] min-w-[72px]">Ảnh</th>
+                                                    <th className="text-left p-4 font-medium w-[128px] min-w-[128px]">Ảnh</th>
                                                     <th className="text-left p-4 font-medium">Loại</th>
                                                     <th className="text-left p-4 font-medium">Tên</th>
                                                     <th className="text-center p-4 font-medium">SL</th>
@@ -168,8 +176,15 @@ export function DetailTab({
                                                         return (
                                                             <React.Fragment key={gi}>
                                                                 <tr className="bg-muted/20 hover:bg-muted/30 border-l-2 border-l-primary">
-                                                                    <td className="p-4 align-top w-[72px]">
-                                                                        {(product.product?.image || (product as any).product?.image) ? (
+                                                                    <td className="p-4 align-top w-[128px] min-w-[128px]">
+                                                                        {isCustomerProductItem(product) ? (
+                                                                            <OrderItemPhotos
+                                                                                item={product}
+                                                                                canEdit={canEditPhotos}
+                                                                                onUpdated={() => onReload?.()}
+                                                                                variant="table"
+                                                                            />
+                                                                        ) : (product.product?.image || (product as any).product?.image) ? (
                                                                             <button
                                                                                 type="button"
                                                                                 onClick={() => setImagePreviewUrl((product.product?.image || (product as any).product?.image) as string)}
@@ -306,8 +321,15 @@ export function DetailTab({
                                                     const item = group.services[0];
                                                     return (
                                                         <tr key={gi} className="hover:bg-muted/30">
-                                                            <td className="p-4 w-[72px]">
-                                                                {(item.product?.image || item.service?.image) ? (
+                                                            <td className="p-4 w-[128px] min-w-[128px] align-top">
+                                                                {isCustomerProductItem(item) ? (
+                                                                    <OrderItemPhotos
+                                                                        item={item}
+                                                                        canEdit={canEditPhotos}
+                                                                        onUpdated={() => onReload?.()}
+                                                                        variant="table"
+                                                                    />
+                                                                ) : (item.product?.image || item.service?.image) ? (
                                                                     <button
                                                                         type="button"
                                                                         onClick={() => setImagePreviewUrl((item.product?.image || item.service?.image) as string)}

@@ -73,6 +73,41 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
     }
 });
 
+// Update order product fields (e.g. intake images)
+router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { images } = req.body;
+
+        if (images === undefined) {
+            throw new ApiError('Không có dữ liệu cập nhật', 400);
+        }
+
+        const imageList = Array.isArray(images) ? images.filter((u: unknown) => typeof u === 'string' && u) : [];
+
+        const { data: product, error } = await supabaseAdmin
+            .from('order_products')
+            .update({
+                images: imageList,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('id', id)
+            .select('id, name, product_code, images, order_id')
+            .single();
+
+        if (error || !product) {
+            throw new ApiError('Không tìm thấy sản phẩm hoặc lỗi cập nhật', 404);
+        }
+
+        res.json({
+            status: 'success',
+            data: product,
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 // Update order product status
 router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {

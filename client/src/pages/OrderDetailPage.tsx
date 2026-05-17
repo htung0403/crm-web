@@ -57,6 +57,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrders } from '@/hooks/useOrders';
+import { useViewActionForRoles } from '@/hooks/useViewAction';
 import type { OrderItem } from '@/hooks/useOrders';
 import { useDepartments } from '@/hooks/useDepartments';
 import { useUsers } from '@/hooks/useUsers';
@@ -246,6 +247,12 @@ export function OrderDetailPage() {
     // Departments and Technicians/Sales
     const { departments, fetchDepartments } = useDepartments();
     const { technicians, salesPersons, fetchTechnicians, fetchSales } = useUsers();
+    const { canEdit: canEditOrder } = useViewActionForRoles('orders', [
+        'admin',
+        'manager',
+        'accountant',
+        'sale',
+    ]);
 
     useEffect(() => {
         if (!id) {
@@ -569,6 +576,7 @@ export function OrderDetailPage() {
         <div className="animate-fade-in w-full min-w-0 max-w-full space-y-0 overflow-x-hidden bg-muted/30 md:space-y-6 md:bg-transparent">
             <OrderDetailMobileHeader
                 order={order}
+                canEdit={canEditOrder}
                 canApprove={!!canApproveOrder}
                 onUpsell={() => setShowUpsellDialog(true)}
                 onPrintQr={() => setShowPrintDialog(true)}
@@ -695,6 +703,8 @@ export function OrderDetailPage() {
                     order={order}
                     productStatusSummary={productStatusSummary}
                     isPhoneView={isPhoneView}
+                    canEdit={canEditOrder}
+                    onReload={reloadOrder}
                     onShowPrintDialog={() => setShowPrintDialog(true)}
                     onShowInvoicePrintDialog={() => setShowInvoicePrintDialog(true)}
                     onShowPaymentDialog={() => setShowPaymentDialog(true)}

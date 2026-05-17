@@ -24,6 +24,7 @@ import { columns } from '../constants';
 
 interface OrderDetailMobileHeaderProps {
     order: Order;
+    canEdit: boolean;
     canApprove: boolean;
     onUpsell: () => void;
     onPrintQr: () => void;
@@ -54,6 +55,7 @@ function StatCard({
 
 export function OrderDetailMobileHeader({
     order,
+    canEdit,
     canApprove,
     onUpsell,
     onPrintQr,
@@ -121,7 +123,9 @@ export function OrderDetailMobileHeader({
                                 <FileText className="mr-2 h-4 w-4" />
                                 In hóa đơn
                             </DropdownMenuItem>
-                            {order.status !== 'after_sale' && order.status !== 'cancelled' && (
+                            {canEdit &&
+                                order.status !== 'after_sale' &&
+                                order.status !== 'cancelled' && (
                                 <DropdownMenuItem onClick={onEdit}>
                                     <Edit className="mr-2 h-4 w-4" />
                                     Sửa đơn
