@@ -68,7 +68,7 @@ export function PrintQRDialog({ order, open, onClose }: PrintQRDialogProps) {
         if (!printWindow) return;
 
         const qrCodes = itemsToPrint.map((item: any) => {
-            const qrUrl = item.item_code ? `${window.location.origin}/task/${item.item_code}` : '';
+            const qrUrl = item.item_code ? `${window.location.origin}/task/${encodeURIComponent(item.item_code)}` : '';
             return `
                 <div class="qr-item">
                     <div class="qr-header">
@@ -95,7 +95,7 @@ export function PrintQRDialog({ order, open, onClose }: PrintQRDialogProps) {
         const qrScripts = itemsToPrint
             .filter((item: any) => item.item_code)
             .map((item: any) => {
-                const qrUrl = `${window.location.origin}/task/${item.item_code}`;
+                const qrUrl = `${window.location.origin}/task/${encodeURIComponent(item.item_code)}`;
                 return `new QRCode(document.getElementById("qr-${item.id}"), { text: "${qrUrl}", width: 120, height: 120, correctLevel: QRCode.CorrectLevel.M });`;
             }).join('\n');
 
@@ -293,7 +293,7 @@ export function PrintQRDialog({ order, open, onClose }: PrintQRDialogProps) {
                     {/* Items List with QR Codes */}
                     <div className="space-y-3" ref={printRef}>
                         {items.map((item: any, index: number) => {
-                            const qrUrl = item.item_code ? `${window.location.origin}/task/${item.item_code}` : null;
+                            const qrUrl = item.item_code ? `${window.location.origin}/task/${encodeURIComponent(item.item_code)}` : null;
                             const isSelected = selectedItems.includes(item.id);
 
                             return (

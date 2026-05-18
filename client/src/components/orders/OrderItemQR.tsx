@@ -13,7 +13,7 @@ interface OrderItemQRProps {
 
 export function OrderItemQRDialog({ itemCode, itemName, orderCode, open, onClose }: OrderItemQRProps) {
     // Generate the full URL for the QR code
-    const qrUrl = `${window.location.origin}/task/${itemCode}`;
+    const qrUrl = `${window.location.origin}/task/${encodeURIComponent(itemCode)}`;
 
     const handlePrint = () => {
         const printWindow = window.open('', '_blank');
@@ -146,7 +146,7 @@ export function OrderItemQRDialog({ itemCode, itemName, orderCode, open, onClose
 
 // Simple QR code display for inline use
 export function OrderItemQR({ itemCode, size = 80 }: { itemCode: string; size?: number }) {
-    const qrUrl = `${window.location.origin}/task/${itemCode}`;
+    const qrUrl = `${window.location.origin}/task/${encodeURIComponent(itemCode)}`;
 
     return (
         <div className="inline-block p-1 bg-white rounded border">

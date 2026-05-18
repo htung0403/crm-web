@@ -85,13 +85,22 @@ export function QRScannerPage() {
     const handleScanSuccess = (decodedText: string) => {
         // Stop scanner
         stopScanner();
-        setScannedCode(decodedText);
+        
+        // Loại bỏ BOM (\uFEFF), ký tự thay thế (\uFFFD), ký tự NUL và các ký tự điều khiển non-printable
+        const cleanText = decodedText.replace(/[\uFEFF\uFFFD\x00-\x1F\x7F-\x9F]/g, '').trim();
+        setScannedCode(cleanText);
 
         // Extract the code from URL if it's a full URL
-        let code = decodedText;
-        if (decodedText.includes('/task/')) {
-            const parts = decodedText.split('/task/');
+        let code = cleanText;
+        if (cleanText.includes('/task/')) {
+            const parts = cleanText.split('/task/');
             code = parts[parts.length - 1];
+        }
+
+        try {
+            code = decodeURIComponent(code);
+        } catch {
+            // ignore
         }
 
         toast.success('Đã quét mã QR thành công!');
