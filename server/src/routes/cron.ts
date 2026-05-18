@@ -313,103 +313,195 @@ router.get('/check-return-due-reminders', verifyCronSecret, async (req: Request,
         const endIso = dayAfterTomorrow.toISOString();
 
         const firedEvents: any[] = [];
+        const warnings: string[] = [];
         let productReminders = 0;
         let itemReminders = 0;
 
-        const { data: dueProducts, error: productsError } = await supabaseAdmin
+        let dueProducts: any[] = [];
+        let dueItems: any[] = [];
+
+        const productRes = await supabaseAdmin
             .from('order_products')
             .select('id, order_id, product_code, name, due_at, after_sale_stage')
             .gte('due_at', startIso)
             .lt('due_at', endIso)
             .not('after_sale_stage', 'eq', 'after4');
-
-        if (productsError) {
-            throw new ApiError('Error fetching order_products due reminders: ' + productsError.message, 500);
+        if (productRes.error) {
+            warnings.push(`order_products primary query failed: ${productRes.error.message}`);
+            const fallbackProductRes = await supabaseAdmin
+                .from('order_products')
+                .select('id, order_id, product_code, name, due_at')
+                .gte('due_at', startIso)
+                .lt('due_at', endIso);
+            if (fallbackProductRes.error) {
+                warnings.push(`order_products fallback query failed: ${fallbackProductRes.error.message}`);
+            } else {
+                dueProducts = fallbackProductRes.data || [];
+            }
+        } else {
+            dueProducts = productRes.data || [];
         }
 
-        const orderIdsFromProducts = [...new Set((dueProducts || []).map((product: any) => product.order_id).filter(Boolean))];
-        const { data: ordersForProducts, error: ordersForProductsError } = orderIdsFromProducts.length > 0
+        const itemRes = await supabaseAdmin
+            .from('order_items')
+            .select('id, order_id, item_name, item_code, due_at, status, technician_id')
+            .gte('due_at', startIso)
+            .lt('due_at', endIso)
+            .neq('status', 'cancelled');
+        if (itemRes.error) {
+            warnings.push(`order_items primary query failed: ${itemRes.error.message}`);
+            const fallbackItemRes = await supabaseAdmin
+                .from('order_items')
+                .select('id, order_id, item_name, item_code, due_at, status')
+                .gte('due_at', startIso)
+                .lt('due_at', endIso)
+                .neq('status', 'cancelled');
+            if (fallbackItemRes.error) {
+                warnings.push(`order_items fallback query failed: ${fallbackItemRes.error.message}`);
+            } else {
+                dueItems = (fallbackItemRes.data || []).map((row: any) => ({ ...row, technician_id: null }));
+            }
+        } else {
+            dueItems = itemRes.data || [];
+        }
+
+        const allOrderIds = [...new Set([
+            ...dueProducts.map((product: any) => product.order_id),
+            ...dueItems.map((item: any) => item.order_id)
+        ].filter(Boolean))];
+
+        const { data: orders, error: ordersError } = allOrderIds.length > 0
             ? await supabaseAdmin
                 .from('orders')
                 .select('id, order_code, sales_id')
-                .in('id', orderIdsFromProducts)
+                .in('id', allOrderIds)
             : { data: [], error: null as any };
 
-        if (ordersForProductsError) {
-            throw new ApiError('Error fetching orders for product reminders: ' + ordersForProductsError.message, 500);
+        if (ordersError) {
+            throw new ApiError('Error fetching orders for return due reminders: ' + ordersError.message, 500);
         }
 
-        const orderById = new Map<string, any>((ordersForProducts || []).map((order: any) => [order.id, order]));
-        const saleIds = [...new Set((ordersForProducts || []).map((order: any) => order.sales_id).filter(Boolean))];
+        const orderById = new Map<string, any>((orders || []).map((order: any) => [order.id, order]));
 
-        const { data: salesUsers, error: salesUsersError } = saleIds.length > 0
+        const saleIds = [...new Set((orders || []).map((order: any) => order.sales_id).filter(Boolean))];
+        const { data: saleUsers, error: saleUsersError } = saleIds.length > 0
             ? await supabaseAdmin
                 .from('users')
                 .select('id, name, telegram_chat_id')
                 .in('id', saleIds)
             : { data: [], error: null as any };
 
-        if (salesUsersError) {
-            throw new ApiError('Error fetching sale users for product reminders: ' + salesUsersError.message, 500);
+        if (saleUsersError) {
+            warnings.push(`sale users query failed: ${saleUsersError.message}`);
         }
+        const saleById = new Map<string, any>(((saleUsers || []) as any[]).map((user: any) => [user.id, user]));
 
-        const saleById = new Map<string, any>((salesUsers || []).map((user: any) => [user.id, user]));
-
-        const productIds = (dueProducts || []).map((product: any) => product.id);
-        const { data: productServices, error: servicesError } = productIds.length > 0
+        const productIds = dueProducts.map((product: any) => product.id).filter(Boolean);
+        const { data: productServices, error: productServicesError } = productIds.length > 0
             ? await supabaseAdmin
                 .from('order_product_services')
-                .select('id, order_product_id, technician_id')
+                .select('id, order_product_id')
                 .in('order_product_id', productIds)
             : { data: [], error: null as any };
 
-        if (servicesError) {
-            throw new ApiError('Error fetching services for product reminders: ' + servicesError.message, 500);
+        if (productServicesError) {
+            warnings.push(`order_product_services query failed: ${productServicesError.message}`);
         }
 
-        const techIdsFromServices = [...new Set((productServices || []).map((service: any) => service.technician_id).filter(Boolean))];
-        const { data: serviceTechUsers, error: serviceTechUsersError } = techIdsFromServices.length > 0
-            ? await supabaseAdmin
-                .from('users')
-                .select('id, name, telegram_chat_id')
-                .in('id', techIdsFromServices)
-            : { data: [], error: null as any };
-
-        if (serviceTechUsersError) {
-            throw new ApiError('Error fetching technician users for product reminders: ' + serviceTechUsersError.message, 500);
-        }
-
-        const serviceTechById = new Map<string, any>((serviceTechUsers || []).map((user: any) => [user.id, user]));
+        const serviceRows = (productServices || []) as any[];
+        const serviceIds = serviceRows.map((service: any) => service.id).filter(Boolean);
         const servicesByProductId = new Map<string, any[]>();
-        for (const service of (productServices || [])) {
+        for (const service of serviceRows) {
             const bucket = servicesByProductId.get(service.order_product_id) || [];
             bucket.push(service);
             servicesByProductId.set(service.order_product_id, bucket);
         }
 
-        for (const product of (dueProducts || [])) {
-            const orderObj = orderById.get((product as any).order_id);
+        const legacyTechByServiceId = new Map<string, string>();
+        if (serviceIds.length > 0) {
+            const legacyTechRes = await supabaseAdmin
+                .from('order_product_services')
+                .select('id, technician_id')
+                .in('id', serviceIds);
+            if (!legacyTechRes.error) {
+                for (const row of (legacyTechRes.data || [])) {
+                    if ((row as any).technician_id) {
+                        legacyTechByServiceId.set((row as any).id, (row as any).technician_id);
+                    }
+                }
+            } else {
+                warnings.push(`legacy service technician_id query failed: ${legacyTechRes.error.message}`);
+            }
+        }
+
+        const junctionTechByServiceId = new Map<string, string[]>();
+        if (serviceIds.length > 0) {
+            const junctionRes = await supabaseAdmin
+                .from('order_product_service_technicians')
+                .select('order_product_service_id, technician_id')
+                .in('order_product_service_id', serviceIds);
+            if (!junctionRes.error) {
+                for (const row of (junctionRes.data || [])) {
+                    const key = (row as any).order_product_service_id;
+                    const techId = (row as any).technician_id;
+                    if (!key || !techId) continue;
+                    const bucket = junctionTechByServiceId.get(key) || [];
+                    bucket.push(techId);
+                    junctionTechByServiceId.set(key, bucket);
+                }
+            } else {
+                warnings.push(`service technicians junction query failed: ${junctionRes.error.message}`);
+            }
+        }
+
+        const itemTechIds = dueItems.map((item: any) => item.technician_id).filter(Boolean);
+        const junctionTechIds = Array.from(junctionTechByServiceId.values()).reduce<string[]>((acc, techIds) => {
+            acc.push(...techIds);
+            return acc;
+        }, []);
+        const serviceTechIds = [
+            ...Array.from(legacyTechByServiceId.values()),
+            ...junctionTechIds
+        ];
+        const allTechIds = [...new Set([...itemTechIds, ...serviceTechIds].filter(Boolean))];
+        const { data: techUsers, error: techUsersError } = allTechIds.length > 0
+            ? await supabaseAdmin
+                .from('users')
+                .select('id, name, telegram_chat_id')
+                .in('id', allTechIds)
+            : { data: [], error: null as any };
+        if (techUsersError) {
+            warnings.push(`technician users query failed: ${techUsersError.message}`);
+        }
+        const techById = new Map<string, any>(((techUsers || []) as any[]).map((user: any) => [user.id, user]));
+
+        for (const product of dueProducts) {
+            const orderObj = orderById.get(product.order_id);
             const saleUser = orderObj?.sales_id ? saleById.get(orderObj.sales_id) : null;
-            const services = servicesByProductId.get((product as any).id) || [];
+            const services = servicesByProductId.get(product.id) || [];
 
-            const technicians = services
-                .map((service: any) => {
-                    const tech = service.technician_id ? serviceTechById.get(service.technician_id) : null;
-                    return tech ? { id: tech.id, name: tech.name, telegram_chat_id: tech.telegram_chat_id } : null;
-                })
-                .filter(Boolean);
-
-            const uniqueTechnicians = Array.from(
-                new Map(technicians.map((tech: any) => [tech.id, tech])).values()
-            );
+            const technicianMap = new Map<string, any>();
+            for (const service of services) {
+                const techIds = new Set<string>();
+                const legacyId = legacyTechByServiceId.get(service.id);
+                if (legacyId) techIds.add(legacyId);
+                for (const junctionId of (junctionTechByServiceId.get(service.id) || [])) {
+                    if (junctionId) techIds.add(junctionId);
+                }
+                for (const techId of techIds) {
+                    const tech = techById.get(techId);
+                    if (tech) technicianMap.set(tech.id, { id: tech.id, name: tech.name, telegram_chat_id: tech.telegram_chat_id });
+                }
+            }
+            const uniqueTechnicians = Array.from(technicianMap.values());
 
             const payload = {
                 order_id: orderObj?.id || product.order_id,
                 order_code: orderObj?.order_code || 'N/A',
                 order_product_id: product.id,
-                product_code: (product as any).product_code || null,
-                product_name: (product as any).name || 'N/A',
-                due_at: (product as any).due_at,
+                product_code: product.product_code || null,
+                product_name: product.name || 'N/A',
+                due_at: product.due_at,
                 reminder_type: '1_day_before_return',
                 sale_id: saleUser?.id || null,
                 sale_name: saleUser?.name || null,
@@ -430,59 +522,18 @@ router.get('/check-return-due-reminders', verifyCronSecret, async (req: Request,
             });
         }
 
-        const { data: dueItems, error: itemsError } = await supabaseAdmin
-            .from('order_items')
-            .select('id, order_id, item_name, item_code, due_at, status, technician_id')
-            .gte('due_at', startIso)
-            .lt('due_at', endIso)
-            .neq('status', 'cancelled');
-
-        if (itemsError) {
-            throw new ApiError('Error fetching order_items due reminders: ' + itemsError.message, 500);
-        }
-
-        const orderIdsFromItems = [...new Set((dueItems || []).map((item: any) => item.order_id).filter(Boolean))];
-        const missingOrderIds = orderIdsFromItems.filter((orderId: string) => !orderById.has(orderId));
-        if (missingOrderIds.length > 0) {
-            const { data: moreOrders, error: moreOrdersError } = await supabaseAdmin
-                .from('orders')
-                .select('id, order_code, sales_id')
-                .in('id', missingOrderIds);
-            if (moreOrdersError) {
-                throw new ApiError('Error fetching orders for item reminders: ' + moreOrdersError.message, 500);
-            }
-            for (const order of (moreOrders || [])) {
-                orderById.set(order.id, order);
-            }
-        }
-
-        const itemTechIds = [...new Set((dueItems || []).map((item: any) => item.technician_id).filter(Boolean))];
-        const missingTechIds = itemTechIds.filter((techId: string) => !serviceTechById.has(techId));
-        if (missingTechIds.length > 0) {
-            const { data: moreTechUsers, error: moreTechUsersError } = await supabaseAdmin
-                .from('users')
-                .select('id, name, telegram_chat_id')
-                .in('id', missingTechIds);
-            if (moreTechUsersError) {
-                throw new ApiError('Error fetching technicians for item reminders: ' + moreTechUsersError.message, 500);
-            }
-            for (const user of (moreTechUsers || [])) {
-                serviceTechById.set(user.id, user);
-            }
-        }
-
-        for (const item of (dueItems || [])) {
-            const orderObj = orderById.get((item as any).order_id);
+        for (const item of dueItems) {
+            const orderObj = orderById.get(item.order_id);
             const saleUser = orderObj?.sales_id ? saleById.get(orderObj.sales_id) : null;
-            const techUser = (item as any).technician_id ? serviceTechById.get((item as any).technician_id) : null;
+            const techUser = item.technician_id ? techById.get(item.technician_id) : null;
 
             const payload = {
                 order_id: orderObj?.id || item.order_id,
                 order_code: orderObj?.order_code || 'N/A',
                 order_item_id: item.id,
-                item_code: (item as any).item_code || null,
-                item_name: (item as any).item_name || 'N/A',
-                due_at: (item as any).due_at,
+                item_code: item.item_code || null,
+                item_name: item.item_name || 'N/A',
+                due_at: item.due_at,
                 reminder_type: '1_day_before_return',
                 sale_id: saleUser?.id || null,
                 sale_name: saleUser?.name || null,
@@ -513,6 +564,7 @@ router.get('/check-return-due-reminders', verifyCronSecret, async (req: Request,
                 item_reminders: itemReminders,
                 total_events: firedEvents.length,
                 events: firedEvents,
+                warnings,
             },
             timestamp: now.toISOString(),
         });
