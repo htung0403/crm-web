@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/dialog';
 import {
     ShoppingBag, Tag, FileText, Package, Truck, Wrench, Camera,
-    User as UserIcon, CheckCircle2, MessageSquare, BookOpen,
+    User as UserIcon, MessageSquare, BookOpen,
     History, Save, Loader2, Heart, ShieldCheck, ClipboardList, Sparkles,
     ThumbsUp, ThumbsDown, Calendar, XCircle, Maximize2
 } from 'lucide-react';
@@ -35,6 +35,7 @@ import { ImageUpload } from '@/components/products/ImageUpload';
 import { useUsers } from '@/hooks/useUsers';
 import { uploadFile } from '@/lib/supabase';
 import { DELIVERY_CARRIER_OPTIONS } from '@/constants/deliveryCarriers';
+import { useAuth } from '@/contexts/AuthContext';
 
 
 interface ProductDetailDialogProps {
@@ -181,6 +182,7 @@ export function ProductDetailDialog({
     const [saving, setSaving] = useState(false);
     const [showUpsellDialog, setShowUpsellDialog] = useState(false);
     const { users, fetchUsers } = useUsers();
+    const { user } = useAuth();
 
     const [mentionSearch, setMentionSearch] = useState('');
     const [showMentionList, setShowMentionList] = useState(false);
@@ -207,6 +209,11 @@ export function ProductDetailDialog({
         itemName?: string;
     } | null>(null);
     const [mainPreviewUrl, setMainPreviewUrl] = useState<string | null>(null);
+
+    // Extension Request dialog states
+    const [showExtensionRequestDialog, setShowExtensionRequestDialog] = useState(false);
+    const [extensionReasonInput, setExtensionReasonInput] = useState('');
+    const [proposedDueDate, setProposedDueDate] = useState<string>('');
 
     // Initialize form data when the dialog is opened or order ID changes
     useEffect(() => {
@@ -277,6 +284,23 @@ export function ProductDetailDialog({
     const isAftersale = roomId.startsWith('after');
     const isCareFlow = roomId.startsWith('care') || roomId.startsWith('war');
     const isSalesStep = roomId.startsWith('step');
+
+    const isAssignedTech = 
+        productItem?.technician_id === user?.id ||
+        productItem?.technician?.id === user?.id ||
+        services.some(s => (s as any).technician_id === user?.id || (s as any).technician?.id === user?.id);
+
+    const isSaleOfOrder = 
+        (order?.sales_id && order.sales_id === user?.id) ||
+        (order?.sales_user?.id && order.sales_user.id === user?.id);
+
+    const isAdminOrManager = user?.role === 'admin' || user?.role === 'manager';
+
+    const canEditDueDate = isAdminOrManager || isSaleOfOrder || isAssignedTech;
+
+    const currentExtensionRequest = (product as any)?.extension_request || (services[0] as any)?.extension_request;
+    const hasPendingRequest = currentExtensionRequest?.status === 'requested';
+    const isInputDisabled = !canEditDueDate || hasPendingRequest;
 
     // Build image lists
     const originalImages = [...(productItem?.product_images ?? (productItem?.product?.image ? [productItem.product.image] : []))];
@@ -400,7 +424,66 @@ export function ProductDetailDialog({
         }
     };
 
-    // Removed handleSavePickupDate - Logic unified in the Due Date block onClick handler
+    const handleSaveDueDate = async () => {
+        const itemId = product?.id || services[0]?.id;
+        if (!itemId) return;
+
+        // Check if the date actually changed
+        const item = (group?.product || group?.services?.[0]) as any;
+        const existingPickupAt = item?.sales_step_data?.pickup_appointment_at;
+        const existingDueAt = item?.due_at;
+        const initialDate = existingDueAt || existingPickupAt;
+        const currentDbDateStr = initialDate ? new Date(initialDate).toISOString().slice(0, 16) : '';
+        const isDateChanged = dueAt !== currentDbDateStr;
+
+        if (!isDateChanged) {
+            toast.info('Lịch hẹn không thay đổi');
+            return;
+        }
+
+        if (!canEditDueDate) {
+            toast.error('Bạn không có quyền chỉnh sửa ngày hẹn trả sản phẩm.');
+            return;
+        }
+
+        // Everyone must submit an extension request
+        if (!dueAt) {
+            toast.error('Không thể bỏ trống ngày hẹn trả khi gửi yêu cầu gia hạn.');
+            return;
+        }
+        setProposedDueDate(dueAt);
+        setExtensionReasonInput('');
+        setShowExtensionRequestDialog(true);
+    };
+
+    const handleSubmitExtensionRequest = async () => {
+        // For V2 products, the request must be bound to the order_product_services ID (services[0]?.id)
+        // rather than the order_products ID (product?.id), to match backend V2 routing.
+        const itemId = services[0]?.id;
+        if (!itemId) return;
+
+        if (!extensionReasonInput.trim()) {
+            toast.error('Vui lòng nhập lý do gia hạn.');
+            return;
+        }
+
+        setSaving(true);
+        try {
+            const extensionData = {
+                reason: extensionReasonInput.trim(),
+                new_due_at: new Date(proposedDueDate).toISOString()
+            };
+
+            await orderItemsApi.createExtensionRequest(itemId, extensionData);
+            toast.success('Đã gửi yêu cầu gia hạn và đang chờ quản lý duyệt.');
+            setShowExtensionRequestDialog(false);
+            if (onReloadOrder) onReloadOrder();
+        } catch (error: any) {
+            toast.error(error?.response?.data?.message || 'Lỗi gửi yêu cầu gia hạn');
+        } finally {
+            setSaving(false);
+        }
+    };
 
     const handleSave = async () => {
         // Validation: If debt_checked is true, require names and at least one image in completion_photos (in Aftersale steps)
@@ -452,7 +535,9 @@ export function ProductDetailDialog({
             // Also update the general order data (debt, receiver, etc)
             // But exclude photos from order-level update to keep them strictly at item-level
             if (onUpdateOrder) {
-                const { completion_photos, packaging_photos, ...orderData } = formData;
+                const orderData = Object.fromEntries(
+                    Object.entries(formData).filter(([key]) => key !== 'completion_photos' && key !== 'packaging_photos')
+                );
                 await onUpdateOrder(orderData);
             }
 
@@ -1077,6 +1162,7 @@ export function ProductDetailDialog({
                                         )}
                                         value={dueAt}
                                         onChange={(e) => setDueAt(e.target.value)}
+                                        disabled={isInputDisabled}
                                     />
                                     <Button
                                         size="sm"
@@ -1084,40 +1170,34 @@ export function ProductDetailDialog({
                                             "h-9 px-3 rounded-xl gap-2 font-bold",
                                             isAftersale ? "bg-blue-600 hover:bg-blue-700 text-white" : "border-slate-200"
                                         )}
-                                        onClick={async () => {
-                                            const itemId = product?.id || services[0]?.id;
-                                            if (!itemId || !onUpdateItemAfterSaleData) return;
-                                            setSaving(true);
-                                            try {
-                                                const payload: any = {
-                                                    due_at: dueAt ? new Date(dueAt).toISOString() : null
-                                                };
-                                                
-                                                if (isAftersale) {
-                                                    payload.sales_step_data = {
-                                                        ...(formData.sales_step_data || {}),
-                                                        pickup_appointment_at: dueAt ? new Date(dueAt).toISOString() : null
-                                                    };
-                                                }
-                                                
-                                                await onUpdateItemAfterSaleData(itemId, !!product, payload);
-                                                
-                                                if (isAftersale) {
-                                                    setFormData(prev => ({ ...prev, sales_step_data: payload.sales_step_data }));
-                                                }
-                                                
-                                                toast.success('Đã cập nhật lịch hẹn');
-                                            } catch (error) {
-                                                toast.error('Lỗi cập nhật lịch hẹn');
-                                            } finally {
-                                                setSaving(false);
-                                            }
-                                        }}
-                                        disabled={saving}
+                                        onClick={handleSaveDueDate}
+                                        disabled={saving || isInputDisabled}
                                     >
                                         {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : (isAftersale ? 'LƯU' : <Save className="h-4 w-4" />)}
                                     </Button>
                                 </div>
+                                {hasPendingRequest && currentExtensionRequest && (
+                                    <div className="bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-xl text-xs space-y-1.5 mt-2 shadow-sm">
+                                        <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                                            <span className="relative flex h-2 w-2">
+                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-450 opacity-75"></span>
+                                                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                                            </span>
+                                            Yêu cầu gia hạn đang chờ duyệt
+                                        </div>
+                                        <p className="text-[11px] text-amber-800">
+                                            <strong>Hạn mới đề xuất:</strong> {formatDateTime(currentExtensionRequest.new_due_at)}
+                                        </p>
+                                        <p className="text-[11px] text-amber-700 leading-tight">
+                                            <strong>Lý do:</strong> {currentExtensionRequest.reason}
+                                        </p>
+                                    </div>
+                                )}
+                                {!canEditDueDate && (
+                                    <p className="text-[10px] text-rose-500 italic pl-1 leading-normal">
+                                        * Bạn không có quyền chỉnh sửa ngày hẹn trả sản phẩm này.
+                                    </p>
+                                )}
                                 {isAftersale ? (
                                     <p className="text-[10px] text-blue-500 italic leading-tight">
                                         * Hệ thống sẽ gửi tin nhắn nhắc nhở tự động 1 lần/ngày nếu khách quá hẹn chưa qua lấy đồ.
@@ -2406,6 +2486,60 @@ export function ProductDetailDialog({
                             <img src={mainPreviewUrl} alt="" className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl bg-white" />
                         )
                     )}
+                </DialogContent>
+            </Dialog>
+
+            {/* Extension Request Reason Dialog */}
+            <Dialog open={showExtensionRequestDialog} onOpenChange={setShowExtensionRequestDialog}>
+                <DialogContent className="max-w-md p-6 rounded-2xl border-none shadow-2xl space-y-4">
+                    <DialogHeader>
+                        <DialogTitle className="text-lg font-bold flex items-center gap-2">
+                            <Calendar className="w-5 h-5 text-blue-600" />
+                            Gửi yêu cầu gia hạn ngày hẹn trả
+                        </DialogTitle>
+                        <DialogDescription className="text-xs text-muted-foreground">
+                            Bạn đang đề xuất thay đổi ngày hẹn trả sang ngày mới. Vui lòng nhập lý do để Admin/Quản lý phê duyệt.
+                        </DialogDescription>
+                    </DialogHeader>
+                    
+                    <div className="space-y-4">
+                        <div className="bg-blue-50/50 border border-blue-100 p-3 rounded-xl space-y-1">
+                            <span className="text-[10px] font-bold text-blue-900 uppercase">Ngày hẹn trả mới đề xuất</span>
+                            <p className="text-sm font-black text-blue-800">
+                                {proposedDueDate ? formatDateTime(new Date(proposedDueDate).toISOString()) : '—'}
+                            </p>
+                        </div>
+                        
+                        <div className="space-y-1.5">
+                            <Label className="text-xs font-bold text-gray-500 uppercase">Lý do gia hạn *</Label>
+                            <Textarea
+                                value={extensionReasonInput}
+                                onChange={(e) => setExtensionReasonInput(e.target.value)}
+                                placeholder="Ví dụ: Đang đợi phụ kiện về, Sản phẩm phát sinh lỗi trong quá trình xử lý,..."
+                                className="min-h-[80px] rounded-xl text-xs bg-slate-50/30"
+                            />
+                        </div>
+                    </div>
+                    
+                    <div className="flex gap-2 justify-end pt-2">
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-9 px-4 rounded-xl text-xs font-bold"
+                            onClick={() => setShowExtensionRequestDialog(false)}
+                            disabled={saving}
+                        >
+                            HỦY
+                        </Button>
+                        <Button
+                            size="sm"
+                            className="h-9 px-4 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white"
+                            onClick={handleSubmitExtensionRequest}
+                            disabled={saving}
+                        >
+                            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'GỬI YÊU CẦU'}
+                        </Button>
+                    </div>
                 </DialogContent>
             </Dialog>
         </DialogContent>

@@ -1,7 +1,7 @@
 import React, { memo, useMemo, useState } from 'react';
 import {
     Layers, Loader2, ShoppingBag, Tag, FileText, Wrench, User as UserIcon,
-    Package, Truck, History, Clock, Maximize2, ExternalLink
+    History, Clock, Maximize2, ExternalLink
 } from 'lucide-react';
 import { WorkflowLogDetailDialog } from '@/components/orders/workflow/WorkflowLogDetailDialog';
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +10,7 @@ import { TabsContent } from '@/components/ui/tabs';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
 import { cn } from '@/lib/utils';
 import { formatDateTime } from '@/lib/utils';
-import { TECH_ROOMS, ACCESSORY_LABELS, PARTNER_LABELS } from '@/components/orders/constants';
+import { TECH_ROOMS } from '@/components/orders/constants';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import { Button } from '@/components/ui/button';
 import { BackwardMoveDialog } from '@/components/orders/BackwardMoveDialog';
@@ -58,7 +58,7 @@ const WorkflowCard = memo(({
 
     const leadItem = group.services.find((s) => getItemCurrentStep(s.id)) ?? group.services[0];
     // Isolation logic: only use orderExtensionRequest if it's truly global (no item IDs)
-    const extensionRequest = productItem?.extension_request || (leadItem as any)?.extension_request;
+    const extensionRequest = productItem?.extension_request || (leadItem as any)?.extension_request || orderExtensionRequest;
     const stepDeadline = leadItem ? getStepDeadlineDisplay(leadItem.id) : { label: 'N/A', dueAt: null };
     const itemLate = stepDeadline.dueAt ? stepDeadline.dueAt < new Date() : false;
     const currentStep = leadItem ? getItemCurrentStep(leadItem.id) : null;
@@ -202,7 +202,9 @@ const WorkflowCard = memo(({
                                             toast.error(`Yêu cầu phụ kiện bị từ chối: ${(leadItem as any).accessory.notes || 'Không có lý do'}`);
                                             return;
                                         }
-                                        leadItem && handleOpenAccessory(leadItem);
+                                        if (leadItem) {
+                                            handleOpenAccessory(leadItem);
+                                        }
                                     }}
                                     className={cn(
                                         "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",
@@ -224,7 +226,9 @@ const WorkflowCard = memo(({
                                             toast.error(`Yêu cầu đối tác bị từ chối: ${(leadItem as any).partner.notes || 'Không có lý do'}`);
                                             return;
                                         }
-                                        leadItem && handleOpenPartner(leadItem);
+                                        if (leadItem) {
+                                            handleOpenPartner(leadItem);
+                                        }
                                     }}
                                     className={cn(
                                         "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",
@@ -246,7 +250,9 @@ const WorkflowCard = memo(({
                                             toast.error(`Yêu cầu gia hạn bị từ chối: ${extensionRequest.customer_result || 'Không có lý do'}`);
                                             return;
                                         }
-                                        leadItem && handleOpenExtension(leadItem);
+                                        if (leadItem) {
+                                            handleOpenExtension(leadItem);
+                                        }
                                     }}
                                     className={cn(
                                         "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",
@@ -462,8 +468,50 @@ export function WorkflowTab({
                 };
             })
         ];
-        return logs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    }, [workflowLogs, salesLogs]);
+        const sorted = logs.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+        // Annotate each _requested log with its outcome
+        // Strategy 1: find corresponding _approved/_rejected log in the list (new data)
+        // Strategy 2: fall back to current item.accessory/partner.status from order.items (old data)
+        const REQUEST_TYPE_MAP: Record<string, string> = {
+            'accessory_requested': 'accessory',
+            'partner_requested': 'partner',
+            'extension_requested': 'extension',
+        };
+        return sorted.map((log: any) => {
+            if (log.action && log.action.endsWith('_requested') && REQUEST_TYPE_MAP[log.action]) {
+                const type = REQUEST_TYPE_MAP[log.action];
+                // Strategy 1: look for a matching log entry
+                const approvedLog = sorted.find((l: any) => l.action === `${type}_approved` && l.entity_id === log.entity_id);
+                const rejectedLog = sorted.find((l: any) => l.action === `${type}_rejected` && l.entity_id === log.entity_id);
+                if (approvedLog || rejectedLog) {
+                    return {
+                        ...log,
+                        _outcome: rejectedLog ? 'rejected' : 'approved'
+                    };
+                }
+                // Strategy 2: look at current accessory/partner status on the order item
+                const item = order?.items?.find((i: any) => i.id === log.entity_id);
+                if (item) {
+                    if (type === 'accessory') {
+                        const accStatus = (item as any).accessory?.status;
+                        if (accStatus === 'rejected' || accStatus === 'cancelled') return { ...log, _outcome: 'rejected' };
+                        if (accStatus && accStatus !== 'requested') return { ...log, _outcome: 'approved' };
+                    } else if (type === 'partner') {
+                        const partnerStatus = (item as any).partner?.status;
+                        if (partnerStatus === 'rejected' || partnerStatus === 'cancelled') return { ...log, _outcome: 'rejected' };
+                        if (partnerStatus && partnerStatus !== 'requested') return { ...log, _outcome: 'approved' };
+                    } else if (type === 'extension') {
+                        const extStatus = (item as any).extension_request?.status;
+                        if (extStatus === 'rejected') return { ...log, _outcome: 'rejected' };
+                        if (extStatus === 'manager_approved' || extStatus === 'notified_tech') return { ...log, _outcome: 'approved' };
+                    }
+                }
+                return { ...log, _outcome: 'pending' };
+            }
+            return log;
+        });
+    }, [workflowLogs, salesLogs, order]);
 
     // if (order?.status === 'done') return null;
     // We now allow viewing workflow history even for completed orders.
@@ -610,10 +658,21 @@ export function WorkflowTab({
                                                                     const display = getWorkflowRequestLogDisplay(log.action);
                                                                     if (!display) return null;
                                                                     const detail = log.reason || log.notes;
+                                                                    const isRequested = log.action.endsWith('_requested');
+                                                                    const outcome = log._outcome as 'approved' | 'rejected' | 'pending' | undefined;
                                                                     return (
-                                                                        <span className={cn('font-medium', display.listClass)}>
-                                                                            {display.emoji} {display.label}
+                                                                    <span className={cn('font-medium inline-flex items-center gap-1.5 flex-wrap', display.listClass)}>
+                                                                            {display.label}
                                                                             {detail ? `: ${detail}` : ''}
+                                                                            {isRequested && outcome === 'approved' && (
+                                                                                <span className="inline-flex items-center text-[10px] font-semibold bg-green-100 text-green-700 border border-green-200 rounded px-1.5 py-0">Đã duyệt</span>
+                                                                            )}
+                                                                            {isRequested && outcome === 'rejected' && (
+                                                                                <span className="inline-flex items-center text-[10px] font-semibold bg-red-100 text-red-700 border border-red-200 rounded px-1.5 py-0">Bị từ chối</span>
+                                                                            )}
+                                                                            {isRequested && outcome === 'pending' && (
+                                                                                <span className="inline-flex items-center text-[10px] font-semibold bg-amber-100 text-amber-700 border border-amber-200 rounded px-1.5 py-0">Đang chờ</span>
+                                                                            )}
                                                                         </span>
                                                                     );
                                                                 })()
@@ -699,6 +758,19 @@ export function WorkflowTab({
                                                                             <img src={url} alt={`Evidence ${idx}`} className="h-8 w-8 object-cover rounded shadow-sm border border-red-200" />
                                                                         </a>
                                                                     ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                    {isWorkflowRequestLogAction(log.action) && log.action.endsWith('_rejected') && (
+                                                        <div className="mt-1.5 ml-1 bg-red-50 p-2 rounded-lg border border-red-200 flex flex-col gap-1">
+                                                            <div className="flex items-center gap-1.5 font-semibold text-red-700 text-[11px]">
+                                                                <span>Không được duyệt</span>
+                                                            </div>
+                                                            {(log.reason || log.notes) && (
+                                                                <div className="flex gap-2 text-[11px]">
+                                                                    <span className="font-semibold text-gray-500 min-w-[50px]">Lý do:</span>
+                                                                    <span className="text-red-700 italic">{log.reason || log.notes}</span>
                                                                 </div>
                                                             )}
                                                         </div>

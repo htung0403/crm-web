@@ -87,6 +87,8 @@ router.post('/accessories', authenticate, async (req: AuthenticatedRequest, res,
         const entityId = order_item_id || order_product_id || order_product_service_id;
         console.log('[Accessory] entityId:', entityId, 'order_item_id:', order_item_id, 'order_product_id:', order_product_id, 'order_product_service_id:', order_product_service_id);
         const itemName = metadata?.item_name || 'Phụ kiện';
+        let orderCode = metadata?.order_code || 'N/A';
+        let contextItemName = itemName;
         if (entityId) {
             try {
                 const insertResult = await supabaseAdmin.from('order_workflow_step_log').insert({
@@ -103,6 +105,46 @@ router.post('/accessories', authenticate, async (req: AuthenticatedRequest, res,
                 console.error('[Accessory] workflow log insert error:', logErr);
             }
         }
+
+        if (order_item_id) {
+            const { data: ctx } = await supabaseAdmin
+                .from('order_items')
+                .select('item_name, order:orders(order_code)')
+                .eq('id', order_item_id)
+                .maybeSingle();
+            const orderObj = Array.isArray((ctx as any)?.order) ? (ctx as any).order[0] : (ctx as any)?.order;
+            orderCode = orderObj?.order_code || orderCode;
+            contextItemName = (ctx as any)?.item_name || contextItemName;
+        } else if (order_product_id) {
+            const { data: ctx } = await supabaseAdmin
+                .from('order_products')
+                .select('name, order:orders(order_code)')
+                .eq('id', order_product_id)
+                .maybeSingle();
+            const orderObj = Array.isArray((ctx as any)?.order) ? (ctx as any).order[0] : (ctx as any)?.order;
+            orderCode = orderObj?.order_code || orderCode;
+            contextItemName = (ctx as any)?.name || contextItemName;
+        } else if (order_product_service_id) {
+            const { data: ctx } = await supabaseAdmin
+                .from('order_product_services')
+                .select('item_name, order_product:order_products(name, order:orders(order_code))')
+                .eq('id', order_product_service_id)
+                .maybeSingle();
+            const orderProduct = Array.isArray((ctx as any)?.order_product) ? (ctx as any).order_product[0] : (ctx as any)?.order_product;
+            const orderObj = Array.isArray(orderProduct?.order) ? orderProduct.order[0] : orderProduct?.order;
+            orderCode = orderObj?.order_code || orderCode;
+            contextItemName = (ctx as any)?.item_name || orderProduct?.name || contextItemName;
+        }
+
+        fireWebhook('accessory.requested', {
+            accessory_id: data.id,
+            order_code: orderCode,
+            item_name: contextItemName,
+            accessory_name: itemName,
+            notes: notes || null,
+            metadata: metadata || {},
+            requested_by: userId || null,
+        });
 
         res.status(201).json({ status: 'success', data });
     } catch (e) {
@@ -1483,7 +1525,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
 
         const existingQuery = supabaseAdmin
             .from('order_item_accessories')
-            .select('id, metadata')
+            .select('id, status, metadata')
             .order('updated_at', { ascending: false })
             .limit(1);
         const existingResult = isV1
@@ -1515,6 +1557,27 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
                     notes,
                     req.user?.id
                 );
+
+                fireWebhook('accessory.status_changed', {
+                    accessory_id: existing.id,
+                    old_status: oldStatus || null,
+                    new_status: status,
+                    notes: notes || null,
+                    order_item_id: isV1 ? id : null,
+                    order_product_service_id: isV2 ? id : null,
+                });
+            }
+
+            if (status === 'requested' && oldStatus !== 'requested') {
+                fireWebhook('accessory.requested', {
+                    accessory_id: existing.id,
+                    order_item_id: isV1 ? id : null,
+                    order_product_service_id: isV2 ? id : null,
+                    accessory_name: metadata?.item_name || (existing.metadata as any)?.item_name || 'Phụ kiện',
+                    notes: notes || null,
+                    metadata: metadata || existing.metadata || {},
+                    requested_by: req.user?.id || null,
+                });
             }
 
             return res.json({ status: 'success', data: updated, message: 'Đã cập nhật trạng thái mua phụ kiện' });
@@ -1536,6 +1599,16 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
                 `${itemName}${notes ? ': ' + notes : ''}`,
                 req.user?.id
             );
+
+            fireWebhook('accessory.requested', {
+                accessory_id: inserted.id,
+                order_item_id: isV1 ? id : null,
+                order_product_service_id: isV2 ? id : null,
+                accessory_name: itemName,
+                notes: notes || null,
+                metadata: metadata || {},
+                requested_by: req.user?.id || null,
+            });
         }
 
         res.json({
@@ -1614,6 +1687,26 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
                     notes,
                     req.user?.id
                 );
+
+                fireWebhook('partner.status_changed', {
+                    partner_id: existing.id,
+                    old_status: oldStatus || null,
+                    new_status: status,
+                    notes: notes || null,
+                    order_item_id: isV1 ? id : null,
+                    order_product_service_id: isV2 ? id : null,
+                });
+            }
+
+            if (status === 'requested' && oldStatus !== 'requested') {
+                fireWebhook('partner.requested', {
+                    partner_id: existing.id,
+                    order_item_id: isV1 ? id : null,
+                    order_product_service_id: isV2 ? id : null,
+                    notes: notes || null,
+                    metadata: metadata || existing.metadata || {},
+                    requested_by: req.user?.id || null,
+                });
             }
 
             return res.json({ status: 'success', data: updated, message: 'Đã cập nhật trạng thái gửi đối tác' });
@@ -1634,6 +1727,15 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
                 notes,
                 req.user?.id
             );
+
+            fireWebhook('partner.requested', {
+                partner_id: inserted.id,
+                order_item_id: isV1 ? id : null,
+                order_product_service_id: isV2 ? id : null,
+                notes: notes || null,
+                metadata: metadata || {},
+                requested_by: req.user?.id || null,
+            });
         }
 
         res.json({
@@ -2048,6 +2150,30 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
                 }
             } catch (debtErr) {
                 console.error('Error setting debt_start_at on parent order:', debtErr);
+            }
+        }
+
+        if (stage === 'after1_debt' && oldStage !== 'after1_debt' && item.order_id) {
+            try {
+                const { data: orderCtx } = await supabaseAdmin
+                    .from('orders')
+                    .select('order_code, sales_user:users!orders_sales_id_fkey(id, name, telegram_chat_id)')
+                    .eq('id', item.order_id)
+                    .maybeSingle();
+                const salesUser = Array.isArray((orderCtx as any)?.sales_user) ? (orderCtx as any).sales_user[0] : (orderCtx as any)?.sales_user;
+
+                fireWebhook('sale.commission_ready', {
+                    order_id: item.order_id,
+                    order_code: (orderCtx as any)?.order_code || 'N/A',
+                    item_id: item.id,
+                    item_name: item.item_name || item.item_code || 'N/A',
+                    stage: 'after1_debt',
+                    sale_id: salesUser?.id || null,
+                    sale_name: salesUser?.name || null,
+                    tele_id_sale: salesUser?.telegram_chat_id || null,
+                });
+            } catch (commissionWhErr) {
+                console.error('Error firing sale.commission_ready webhook for order item:', commissionWhErr);
             }
         }
 

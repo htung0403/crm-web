@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
     ArrowLeft,
@@ -13,11 +13,8 @@ import {
     ThumbsUp,
     Loader2,
     XCircle,
-    UserPlus,
-    Trash2,
     Plus,
     Calendar,
-    Pencil,
     Clock,
     Hash,
     Search,
@@ -31,7 +28,7 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 import type { DropResult } from '@hello-pangea/dnd';
 
-import { ordersApi, orderItemsApi, requestsApi } from '@/lib/api';
+import { orderItemsApi, requestsApi } from '@/lib/api';
 import { uploadFile } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -53,7 +50,6 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useOrders } from '@/hooks/useOrders';
@@ -73,8 +69,8 @@ import { AftersaleTab } from './OrderDetailPage/tabs/AftersaleTab';
 import { CareTab } from './OrderDetailPage/tabs/CareTab';
 import { TECH_ROOMS } from '@/components/orders/constants';
 import { columns, getAfterSaleStageLabel, getCareWarrantyStageLabel } from './OrderDetailPage/constants';
-import { getStatusVariant, getItemTypeLabel, getSLADisplay } from './OrderDetailPage/utils';
-import { formatDate } from '@/lib/utils';
+import { getStatusVariant, getSLADisplay } from './OrderDetailPage/utils';
+import { cn } from '@/lib/utils';
 
 // Specific Dialogs
 import { PrintQRDialog } from '@/components/orders/PrintQRDialog';
@@ -158,7 +154,6 @@ export function OrderDetailPage() {
     // Custom Hooks
     const {
         order,
-        setOrder,
         loading,
         allWorkflowSteps,
         stepsLoading,
@@ -183,11 +178,42 @@ export function OrderDetailPage() {
 
     const {
         getItemCurrentStep,
-        getItemCurrentTechRoom,
         getGroupCurrentTechRoom,
         workflowKanbanGroups,
         getStepDeadlineDisplay,
     } = useWorkflowKanban(order, allWorkflowSteps, salesLogs);
+
+    const totalCount = React.useMemo(() => {
+        return workflowKanbanGroups?.length || 0;
+    }, [workflowKanbanGroups]);
+
+    const salesCount = React.useMemo(() => {
+        return workflowKanbanGroups?.filter(g => {
+            const leadItem = g.product || g.services?.[0];
+            return (leadItem as any)?.current_phase === 'sales';
+        }).length || 0;
+    }, [workflowKanbanGroups]);
+
+    const workflowCount = React.useMemo(() => {
+        return workflowKanbanGroups?.filter(g => {
+            const leadItem = g.product || g.services?.[0];
+            return (leadItem as any)?.current_phase === 'workflow';
+        }).length || 0;
+    }, [workflowKanbanGroups]);
+
+    const aftersaleCount = React.useMemo(() => {
+        return workflowKanbanGroups?.filter(g => {
+            const leadItem = g.product || g.services?.[0];
+            return (leadItem as any)?.current_phase === 'after_sale';
+        }).length || 0;
+    }, [workflowKanbanGroups]);
+
+    const careCount = React.useMemo(() => {
+        return workflowKanbanGroups?.filter(g => {
+            const leadItem = g.product || g.services?.[0];
+            return (leadItem as any)?.current_phase === 'care' || (leadItem as any)?.current_phase === 'warranty';
+        }).length || 0;
+    }, [workflowKanbanGroups]);
 
     // Dialog & UI States
     const [activeTab, setActiveTab] = useState('detail');
@@ -212,16 +238,16 @@ export function OrderDetailPage() {
 
     const [showPartnerDialog, setShowPartnerDialog] = useState(false);
     const [partnerItem, setPartnerItem] = useState<OrderItem | null>(null);
-    const [partnerStatus, setPartnerStatus] = useState('');
+    const [, setPartnerStatus] = useState('');
     const [partnerNotes, setPartnerNotes] = useState('');
     const [partnerLoading, setPartnerLoading] = useState(false);
 
     const [showExtensionDialog, setShowExtensionDialog] = useState(false);
     const [extensionItem, setExtensionItem] = useState<OrderItem | null>(null);
     const [extensionReason, setExtensionReason] = useState('');
-    const [extensionCustomerResult, setExtensionCustomerResult] = useState('');
+    const [extensionCustomerResult] = useState('');
     const [extensionNewDueAt, setExtensionNewDueAt] = useState('');
-    const [extensionValidReason, setExtensionValidReason] = useState(false);
+    const [extensionValidReason] = useState(false);
     const [extensionLoading, setExtensionLoading] = useState(false);
 
     // Step confirm states
@@ -245,7 +271,7 @@ export function OrderDetailPage() {
     const [isPhoneView, setIsPhoneView] = useState<boolean>(() => window.innerWidth < 768);
 
     // Departments and Technicians/Sales
-    const { departments, fetchDepartments } = useDepartments();
+    const { fetchDepartments } = useDepartments();
     const { technicians, salesPersons, fetchTechnicians, fetchSales } = useUsers();
     const { canEdit: canEditOrder } = useViewActionForRoles('orders', [
         'admin',
@@ -664,6 +690,16 @@ export function OrderDetailPage() {
                     >
                         <FileText className="h-3.5 w-3.5 md:h-4 md:w-4" />
                         Chi tiết
+                        {totalCount > 0 && (
+                            <Badge className={cn(
+                                "ml-1.5 px-1.5 py-0 text-[10px] font-bold rounded-full min-w-[18px] h-4.5 flex items-center justify-center transition-colors border-none",
+                                activeTab === 'detail'
+                                    ? "bg-primary text-primary-foreground"
+                                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                            )}>
+                                {totalCount}
+                            </Badge>
+                        )}
                     </TabsTrigger>
                     <TabsTrigger
                         value="sales"
@@ -672,6 +708,16 @@ export function OrderDetailPage() {
                         <ShoppingBag className="h-3.5 w-3.5 md:h-4 md:w-4" />
                         <span className="md:hidden">Sales</span>
                         <span className="hidden md:inline">Lên đơn (Sales)</span>
+                        {salesCount > 0 && (
+                            <Badge className={cn(
+                                "ml-1.5 px-1.5 py-0 text-[10px] font-bold rounded-full min-w-[18px] h-4.5 flex items-center justify-center transition-colors border-none",
+                                activeTab === 'sales'
+                                    ? "bg-primary text-primary-foreground"
+                                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                            )}>
+                                {salesCount}
+                            </Badge>
+                        )}
                     </TabsTrigger>
                     <TabsTrigger
                         value="workflow"
@@ -680,6 +726,16 @@ export function OrderDetailPage() {
                         <Layers className="h-3.5 w-3.5 md:h-4 md:w-4" />
                         <span className="md:hidden">Quy trình</span>
                         <span className="hidden md:inline">Tiến trình / Quy trình</span>
+                        {workflowCount > 0 && (
+                            <Badge className={cn(
+                                "ml-1.5 px-1.5 py-0 text-[10px] font-bold rounded-full min-w-[18px] h-4.5 flex items-center justify-center transition-colors border-none",
+                                activeTab === 'workflow'
+                                    ? "bg-primary text-primary-foreground"
+                                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                            )}>
+                                {workflowCount}
+                            </Badge>
+                        )}
                     </TabsTrigger>
                     <TabsTrigger
                         value="aftersale"
@@ -688,6 +744,16 @@ export function OrderDetailPage() {
                         <RefreshCcw className="h-3.5 w-3.5 md:h-4 md:w-4" />
                         <span className="md:hidden">After</span>
                         <span className="hidden md:inline">After sale</span>
+                        {aftersaleCount > 0 && (
+                            <Badge className={cn(
+                                "ml-1.5 px-1.5 py-0 text-[10px] font-bold rounded-full min-w-[18px] h-4.5 flex items-center justify-center transition-colors border-none",
+                                activeTab === 'aftersale'
+                                    ? "bg-primary text-primary-foreground"
+                                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                            )}>
+                                {aftersaleCount}
+                            </Badge>
+                        )}
                     </TabsTrigger>
                     <TabsTrigger
                         value="care"
@@ -696,6 +762,16 @@ export function OrderDetailPage() {
                         <Heart className="h-3.5 w-3.5 md:h-4 md:w-4" />
                         <span className="md:hidden">CS/BH</span>
                         <span className="hidden md:inline">Chăm sóc / Bảo hành</span>
+                        {careCount > 0 && (
+                            <Badge className={cn(
+                                "ml-1.5 px-1.5 py-0 text-[10px] font-bold rounded-full min-w-[18px] h-4.5 flex items-center justify-center transition-colors border-none",
+                                activeTab === 'care'
+                                    ? "bg-primary text-primary-foreground"
+                                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                            )}>
+                                {careCount}
+                            </Badge>
+                        )}
                     </TabsTrigger>
                 </TabsList>
 

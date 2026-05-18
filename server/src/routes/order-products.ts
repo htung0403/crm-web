@@ -680,6 +680,31 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
             }
         }
 
+        if (stage === 'after1_debt' && oldStage !== 'after1_debt' && product.order_id) {
+            try {
+                const { data: orderCtx } = await supabaseAdmin
+                    .from('orders')
+                    .select('order_code, sales_user:users!orders_sales_id_fkey(id, name, telegram_chat_id)')
+                    .eq('id', product.order_id)
+                    .maybeSingle();
+                const salesUser = Array.isArray((orderCtx as any)?.sales_user) ? (orderCtx as any).sales_user[0] : (orderCtx as any)?.sales_user;
+
+                fireWebhook('sale.commission_ready', {
+                    order_id: product.order_id,
+                    order_code: (orderCtx as any)?.order_code || 'N/A',
+                    order_product_id: product.id,
+                    product_code: product.product_code || null,
+                    product_name: product.name || 'N/A',
+                    stage: 'after1_debt',
+                    sale_id: salesUser?.id || null,
+                    sale_name: salesUser?.name || null,
+                    tele_id_sale: salesUser?.telegram_chat_id || null,
+                });
+            } catch (commissionWhErr) {
+                console.error('Error firing sale.commission_ready webhook for order product:', commissionWhErr);
+            }
+        }
+
         res.json({
             status: 'success',
             data: product,

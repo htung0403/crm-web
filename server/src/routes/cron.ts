@@ -3,6 +3,7 @@ import { checkAllSLA } from '../utils/slaManager.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { supabaseAdmin } from '../config/supabase.js';
 import { autoLogKpiViolation } from '../utils/kpiViolationLogger.js';
+import { fireWebhook } from '../utils/webhookNotifier.js';
 
 const router = Router();
 
@@ -285,6 +286,175 @@ router.get('/check-partner-appointments', verifyCronSecret, async (req: Request,
                 })
             },
             timestamp: now.toISOString()
+        });
+    } catch (err) {
+        next(err);
+    }
+});
+
+/**
+ * GET /api/cron/check-return-due-reminders
+ * Fire webhook reminders 1 day before return due date for technician(s) and sale.
+ * Should be called daily via external cron.
+ */
+router.get('/check-return-due-reminders', verifyCronSecret, async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        console.log('[Cron] Return Due Reminder Check Triggered');
+
+        const now = new Date();
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        tomorrow.setHours(0, 0, 0, 0);
+
+        const dayAfterTomorrow = new Date(tomorrow);
+        dayAfterTomorrow.setDate(dayAfterTomorrow.getDate() + 1);
+
+        const startIso = tomorrow.toISOString();
+        const endIso = dayAfterTomorrow.toISOString();
+
+        const firedEvents: any[] = [];
+        let productReminders = 0;
+        let itemReminders = 0;
+
+        const { data: dueProducts, error: productsError } = await supabaseAdmin
+            .from('order_products')
+            .select(`
+                id,
+                order_id,
+                product_code,
+                name,
+                due_at,
+                after_sale_stage,
+                order:orders(
+                    id,
+                    order_code,
+                    sales_user:users!orders_sales_id_fkey(id, name, telegram_chat_id)
+                ),
+                services:order_product_services(
+                    id,
+                    technician_id,
+                    technician:users!order_product_services_technician_id_fkey(id, name, telegram_chat_id)
+                )
+            `)
+            .gte('due_at', startIso)
+            .lt('due_at', endIso)
+            .not('after_sale_stage', 'eq', 'after4');
+
+        if (productsError) {
+            throw new ApiError('Error fetching order_products due reminders: ' + productsError.message, 500);
+        }
+
+        for (const product of (dueProducts || [])) {
+            const orderObj = Array.isArray((product as any).order) ? (product as any).order[0] : (product as any).order;
+            const saleUser = Array.isArray(orderObj?.sales_user) ? orderObj.sales_user[0] : orderObj?.sales_user;
+            const services = Array.isArray((product as any).services) ? (product as any).services : [];
+
+            const technicians = services
+                .map((service: any) => {
+                    const tech = Array.isArray(service.technician) ? service.technician[0] : service.technician;
+                    return tech ? { id: tech.id, name: tech.name, telegram_chat_id: tech.telegram_chat_id } : null;
+                })
+                .filter(Boolean);
+
+            const uniqueTechnicians = Array.from(
+                new Map(technicians.map((tech: any) => [tech.id, tech])).values()
+            );
+
+            const payload = {
+                order_id: orderObj?.id || product.order_id,
+                order_code: orderObj?.order_code || 'N/A',
+                order_product_id: product.id,
+                product_code: (product as any).product_code || null,
+                product_name: (product as any).name || 'N/A',
+                due_at: (product as any).due_at,
+                reminder_type: '1_day_before_return',
+                sale_id: saleUser?.id || null,
+                sale_name: saleUser?.name || null,
+                tele_id_sale: saleUser?.telegram_chat_id || null,
+                technicians: uniqueTechnicians,
+                tele_ids_technician: uniqueTechnicians.map((tech: any) => tech.telegram_chat_id).filter(Boolean),
+            };
+
+            fireWebhook('return_due.reminder_tomorrow', payload);
+            productReminders++;
+            firedEvents.push({
+                entity_type: 'order_product',
+                entity_id: product.id,
+                order_code: payload.order_code,
+                due_at: payload.due_at,
+                sale_tele: payload.tele_id_sale,
+                technician_count: payload.tele_ids_technician.length,
+            });
+        }
+
+        const { data: dueItems, error: itemsError } = await supabaseAdmin
+            .from('order_items')
+            .select(`
+                id,
+                order_id,
+                item_name,
+                item_code,
+                due_at,
+                status,
+                technician:users!order_items_technician_id_fkey(id, name, telegram_chat_id),
+                order:orders(
+                    id,
+                    order_code,
+                    sales_user:users!orders_sales_id_fkey(id, name, telegram_chat_id)
+                )
+            `)
+            .gte('due_at', startIso)
+            .lt('due_at', endIso)
+            .neq('status', 'cancelled');
+
+        if (itemsError) {
+            throw new ApiError('Error fetching order_items due reminders: ' + itemsError.message, 500);
+        }
+
+        for (const item of (dueItems || [])) {
+            const orderObj = Array.isArray((item as any).order) ? (item as any).order[0] : (item as any).order;
+            const saleUser = Array.isArray(orderObj?.sales_user) ? orderObj.sales_user[0] : orderObj?.sales_user;
+            const techUser = Array.isArray((item as any).technician) ? (item as any).technician[0] : (item as any).technician;
+
+            const payload = {
+                order_id: orderObj?.id || item.order_id,
+                order_code: orderObj?.order_code || 'N/A',
+                order_item_id: item.id,
+                item_code: (item as any).item_code || null,
+                item_name: (item as any).item_name || 'N/A',
+                due_at: (item as any).due_at,
+                reminder_type: '1_day_before_return',
+                sale_id: saleUser?.id || null,
+                sale_name: saleUser?.name || null,
+                tele_id_sale: saleUser?.telegram_chat_id || null,
+                technicians: techUser ? [{ id: techUser.id, name: techUser.name, telegram_chat_id: techUser.telegram_chat_id }] : [],
+                tele_ids_technician: techUser?.telegram_chat_id ? [techUser.telegram_chat_id] : [],
+            };
+
+            fireWebhook('return_due.reminder_tomorrow', payload);
+            itemReminders++;
+            firedEvents.push({
+                entity_type: 'order_item',
+                entity_id: item.id,
+                order_code: payload.order_code,
+                due_at: payload.due_at,
+                sale_tele: payload.tele_id_sale,
+                technician_count: payload.tele_ids_technician.length,
+            });
+        }
+
+        res.json({
+            status: 'success',
+            message: 'Return due reminders webhook check completed',
+            data: {
+                window_start: startIso,
+                window_end: endIso,
+                product_reminders: productReminders,
+                item_reminders: itemReminders,
+                total_events: firedEvents.length,
+                events: firedEvents,
+            },
+            timestamp: now.toISOString(),
         });
     } catch (err) {
         next(err);

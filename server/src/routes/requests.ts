@@ -345,7 +345,7 @@ router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, 
             );
         }
 
-        // When extension approved, propagate new_due_at to orders.due_at
+        // When extension approved, propagate new_due_at to orders.due_at and respective item/product
         if (data && new_due_at && status && !['rejected', 'declined'].includes(status)) {
             const orderId = data.order_id;
             if (orderId) {
@@ -353,6 +353,25 @@ router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, 
                     .from('orders')
                     .update({ due_at: new_due_at })
                     .eq('id', orderId);
+            }
+            // Propagate due_at to order_items or order_products
+            if (data.order_item_id) {
+                await supabaseAdmin
+                    .from('order_items')
+                    .update({ due_at: new_due_at })
+                    .eq('id', data.order_item_id);
+            } else if (data.order_product_service_id) {
+                const { data: svc } = await supabaseAdmin
+                    .from('order_product_services')
+                    .select('order_product_id')
+                    .eq('id', data.order_product_service_id)
+                    .single();
+                if (svc?.order_product_id) {
+                    await supabaseAdmin
+                        .from('order_products')
+                        .update({ due_at: new_due_at })
+                        .eq('id', svc.order_product_id);
+                }
             }
         }
 
