@@ -5,6 +5,7 @@ import { authenticate, AuthenticatedRequest, requireAccountant, requireManager }
 import { resolveEmployeeKpiForPayroll } from '../utils/kpiPayrollResolver.js';
 
 const router = Router();
+const TECH_KPI_COMMISSION_POLICY_MARKER = '[TECH_KPI_COMMISSION_POLICY_V1]';
 
 // ========== Helper: Get last Sunday of a given month ==========
 function getLastSundayOfMonth(year: number, month: number): Date {
@@ -14,6 +15,141 @@ function getLastSundayOfMonth(year: number, month: number): Date {
     const lastSunday = new Date(lastDay);
     lastSunday.setDate(lastDay.getDate() - (dayOfWeek === 0 ? 0 : dayOfWeek));
     return lastSunday;
+}
+
+function parseMoneyValue(value: unknown): number {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string') {
+        const cleaned = value.replace(/[^\d]/g, '');
+        if (!cleaned) return 0;
+        const parsed = Number(cleaned);
+        return Number.isFinite(parsed) ? parsed : 0;
+    }
+    return 0;
+}
+
+function setTechKpiPolicyMarker(notes: string | null | undefined, enabled: boolean): string | null {
+    const lines = String(notes || '')
+        .split('\n')
+        .map(s => s.trim())
+        .filter(s => s.length > 0 && s !== TECH_KPI_COMMISSION_POLICY_MARKER);
+
+    if (enabled) lines.unshift(TECH_KPI_COMMISSION_POLICY_MARKER);
+    if (lines.length === 0) return null;
+    return lines.join('\n');
+}
+
+function hasTechKpiPolicyMarker(notes: string | null | undefined): boolean {
+    return String(notes || '').includes(TECH_KPI_COMMISSION_POLICY_MARKER);
+}
+
+function getValidOrderFilter(onlyFullyPaid: boolean): string {
+    return onlyFullyPaid
+        ? 'payment_status.eq.paid'
+        : 'payment_status.eq.paid,status.in.(done,completed,delivered,after_sale)';
+}
+
+async function calculateTechnicianCommissionByKpiPolicy(params: {
+    userId: string;
+    validOrderIds: string[];
+    kpiFactor: number;
+}) {
+    const { userId, validOrderIds, kpiFactor } = params;
+    if (!validOrderIds.length) {
+        return {
+            totalServiceFee: 0,
+            totalAccessoryCost: 0,
+            commissionAmount: 0,
+        };
+    }
+
+    let totalServiceFee = 0;
+    let totalAccessoryCost = 0;
+    const v1ServiceItemIds: string[] = [];
+    const v2ServiceIds: string[] = [];
+
+    try {
+        const { data: v1TechServices } = await supabaseAdmin
+            .from('order_items')
+            .select('id, total_price, item_type, order_id')
+            .eq('technician_id', userId)
+            .in('order_id', validOrderIds);
+
+        if (v1TechServices) {
+            for (const service of v1TechServices) {
+                if ((service.item_type || '').toLowerCase() === 'product') continue;
+                totalServiceFee += Number(service.total_price || 0);
+                v1ServiceItemIds.push(service.id);
+            }
+        }
+    } catch (error) {
+        console.error('[PayrollBatch] V1 tech service commission policy error:', error);
+    }
+
+    try {
+        const { data: v2TechServices } = await supabaseAdmin
+            .from('order_product_service_technicians')
+            .select('service:order_product_service_id ( id, unit_price, order_product:order_product_id ( order_id ) )')
+            .eq('technician_id', userId);
+
+        if (v2TechServices) {
+            for (const row of v2TechServices) {
+                const service = (row as any).service;
+                const orderId = service?.order_product?.order_id;
+                if (!orderId || !validOrderIds.includes(orderId)) continue;
+
+                totalServiceFee += Number(service.unit_price || 0);
+                if (service.id) v2ServiceIds.push(service.id);
+            }
+        }
+    } catch (error) {
+        console.error('[PayrollBatch] V2 tech service commission policy error:', error);
+    }
+
+    try {
+        if (v1ServiceItemIds.length > 0) {
+            const { data: v1Accessories } = await supabaseAdmin
+                .from('order_item_accessories')
+                .select('status, metadata')
+                .in('order_item_id', v1ServiceItemIds);
+
+            if (v1Accessories) {
+                for (const accessory of v1Accessories) {
+                    if (accessory.status === 'rejected') continue;
+                    totalAccessoryCost += parseMoneyValue((accessory as any)?.metadata?.price_estimate);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('[PayrollBatch] V1 accessory policy error:', error);
+    }
+
+    try {
+        if (v2ServiceIds.length > 0) {
+            const { data: v2Accessories } = await supabaseAdmin
+                .from('order_item_accessories')
+                .select('status, metadata')
+                .in('order_product_service_id', v2ServiceIds);
+
+            if (v2Accessories) {
+                for (const accessory of v2Accessories) {
+                    if (accessory.status === 'rejected') continue;
+                    totalAccessoryCost += parseMoneyValue((accessory as any)?.metadata?.price_estimate);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('[PayrollBatch] V2 accessory policy error:', error);
+    }
+
+    const commissionBase = Math.max(0, totalServiceFee - totalAccessoryCost);
+    const commissionAmount = Math.floor(commissionBase * (kpiFactor / 100));
+
+    return {
+        totalServiceFee,
+        totalAccessoryCost,
+        commissionAmount,
+    };
 }
 
 // ========== Helper: Create or get payroll batch for a month ==========
@@ -159,11 +295,22 @@ router.get('/:id', authenticate, requireAccountant, async (req: AuthenticatedReq
 // This calculates salary for ALL active employees and creates/updates the batch
 router.post('/generate', authenticate, requireAccountant, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { month, year } = req.body;
+        const { month, year, apply_technician_kpi_commission_policy: applyTechKpiPolicyRaw } = req.body;
         if (!month || !year) throw new ApiError('Thiếu tháng hoặc năm', 400);
+        const applyTechKpiPolicy = Boolean(applyTechKpiPolicyRaw);
 
         // Create or get the batch
-        const batch = await getOrCreatePayrollBatch(month, year, req.user!.id);
+        let batch = await getOrCreatePayrollBatch(month, year, req.user!.id);
+        const desiredNotes = setTechKpiPolicyMarker((batch as any)?.notes, applyTechKpiPolicy);
+        if (((batch as any)?.notes || null) !== desiredNotes) {
+            const { data: updatedBatch } = await supabaseAdmin
+                .from('payroll_batches')
+                .update({ notes: desiredNotes, updated_at: new Date().toISOString() })
+                .eq('id', batch.id)
+                .select('*')
+                .single();
+            if (updatedBatch) batch = updatedBatch;
+        }
 
         // Get all active employees
         const { data: users } = await supabaseAdmin
@@ -218,7 +365,7 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
                     const { data: validOrders } = await supabaseAdmin
                         .from('orders')
                         .select('id')
-                        .or('payment_status.eq.paid,status.in.(done,completed,delivered,after_sale)')
+                        .or(getValidOrderFilter(applyTechKpiPolicy))
                         .gte('created_at', startDate)
                         .lte('created_at', endDate + 'T23:59:59');
                     if (validOrders && validOrders.length > 0) {
@@ -355,6 +502,25 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
                 let kpiFactor = kpiPayroll.primary.commissionFactor;
                 const kpiTeamleadBonus = kpiPayroll.teamleadBonus;
                 const kpiManagementBonus = kpiPayroll.managementBonus;
+                let techServiceFeeTotal: number | null = null;
+                let techAccessoryCostTotal: number | null = null;
+                let techCommissionFinal: number | null = null;
+                let techCommissionPolicyApplied = false;
+
+                if (applyTechKpiPolicy && userData.role === 'technician') {
+                    const policyResult = await calculateTechnicianCommissionByKpiPolicy({
+                        userId: user.id,
+                        validOrderIds,
+                        kpiFactor,
+                    });
+                    serviceCommission = policyResult.commissionAmount;
+                    productCommission = 0;
+                    referralCommission = 0;
+                    techServiceFeeTotal = policyResult.totalServiceFee;
+                    techAccessoryCostTotal = policyResult.totalAccessoryCost;
+                    techCommissionFinal = policyResult.commissionAmount;
+                    techCommissionPolicyApplied = true;
+                }
 
                 // ── Violations / Rewards ──
                 let totalRewards = 0, totalViolationAmount = 0;
@@ -387,7 +553,10 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
                 } catch (e) { /* ignore */ }
 
                 // ── Final calculation (aligned with salary.ts formula) ──
-                totalCommission = Math.floor(totalCommission * (kpiFactor / 100));
+                totalCommission = serviceCommission + productCommission + referralCommission;
+                if (!(applyTechKpiPolicy && userData.role === 'technician')) {
+                    totalCommission = Math.floor(totalCommission * (kpiFactor / 100));
+                }
                 const totalBonus = kpiBonus + totalRewards + kpiTeamleadBonus + kpiManagementBonus;
                 const grossSalary = baseSalary + overtimePay + totalCommission + totalBonus;
                 const socialInsurance = Math.floor(baseSalary * 0.08);
@@ -411,6 +580,10 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
                     product_commission: productCommission,
                     referral_commission: referralCommission,
                     commission: totalCommission,
+                    tech_service_fee_total: techServiceFeeTotal,
+                    tech_accessory_cost_total: techAccessoryCostTotal,
+                    tech_commission_final: techCommissionFinal,
+                    tech_commission_policy_applied: techCommissionPolicyApplied,
                     kpi_achievement: kpiAchievement,
                     kpi_primary_score: kpiAchievement,
                     kpi_primary_rank: kpiPayroll.primary.rank,
@@ -560,6 +733,7 @@ router.post('/auto-create', async (req, res, next) => {
 router.post('/:id/recalculate', authenticate, requireAccountant, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
+        const { apply_technician_kpi_commission_policy: applyTechKpiPolicyRaw } = req.body || {};
 
         const { data: batch, error: batchErr } = await supabaseAdmin
             .from('payroll_batches')
@@ -569,6 +743,18 @@ router.post('/:id/recalculate', authenticate, requireAccountant, async (req: Aut
 
         if (batchErr || !batch) throw new ApiError('Không tìm thấy bảng lương', 404);
         if (batch.status === 'locked') throw new ApiError('Bảng lương đã khóa, không thể tính lại', 400);
+        const applyTechKpiPolicy = (applyTechKpiPolicyRaw === undefined || applyTechKpiPolicyRaw === null)
+            ? hasTechKpiPolicyMarker((batch as any)?.notes)
+            : Boolean(applyTechKpiPolicyRaw);
+        if (!(applyTechKpiPolicyRaw === undefined || applyTechKpiPolicyRaw === null)) {
+            const desiredNotes = setTechKpiPolicyMarker((batch as any)?.notes, applyTechKpiPolicy);
+            if (((batch as any)?.notes || null) !== desiredNotes) {
+                await supabaseAdmin
+                    .from('payroll_batches')
+                    .update({ notes: desiredNotes, updated_at: new Date().toISOString() })
+                    .eq('id', id);
+            }
+        }
 
         const { month, year } = batch;
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
@@ -632,7 +818,7 @@ router.post('/:id/recalculate', authenticate, requireAccountant, async (req: Aut
                     const { data: validOrders } = await supabaseAdmin
                         .from('orders')
                         .select('id')
-                        .or('payment_status.eq.paid,status.in.(done,completed,delivered,after_sale)')
+                        .or(getValidOrderFilter(applyTechKpiPolicy))
                         .gte('created_at', startDate)
                         .lte('created_at', endDate + 'T23:59:59');
                     if (validOrders && validOrders.length > 0) {
@@ -743,6 +929,10 @@ router.post('/:id/recalculate', authenticate, requireAccountant, async (req: Aut
                 let kpiPrimaryRank: string | null = null;
                 let kpiTeamleadBonus = 0, kpiManagementBonus = 0;
                 let kpiSecondaryDetails: any[] = [];
+                let techServiceFeeTotal: number | null = null;
+                let techAccessoryCostTotal: number | null = null;
+                let techCommissionFinal: number | null = null;
+                let techCommissionPolicyApplied = false;
                 try {
                     const monthKey = `${year}-${String(month).padStart(2, '0')}`;
                     const kpiPayrollRec = await resolveEmployeeKpiForPayroll(userId, monthKey);
@@ -755,6 +945,21 @@ router.post('/:id/recalculate', authenticate, requireAccountant, async (req: Aut
                     kpiManagementBonus = kpiPayrollRec.managementBonus;
                     kpiSecondaryDetails = kpiPayrollRec.secondaryDetails;
                 } catch (e) { /* ignore */ }
+
+                if (applyTechKpiPolicy && userData.role === 'technician') {
+                    const policyResult = await calculateTechnicianCommissionByKpiPolicy({
+                        userId,
+                        validOrderIds,
+                        kpiFactor,
+                    });
+                    serviceCommission = policyResult.commissionAmount;
+                    productCommission = 0;
+                    referralCommission = 0;
+                    techServiceFeeTotal = policyResult.totalServiceFee;
+                    techAccessoryCostTotal = policyResult.totalAccessoryCost;
+                    techCommissionFinal = policyResult.commissionAmount;
+                    techCommissionPolicyApplied = true;
+                }
 
                 // ── Violations / Rewards ──
                 let totalRewards = 0, totalViolationAmount = 0;
@@ -813,7 +1018,10 @@ router.post('/:id/recalculate', authenticate, requireAccountant, async (req: Aut
                 } catch (e) { /* ignore */ }
 
                 // ── Final calculation ──
-                totalCommission = Math.floor(totalCommission * (kpiFactor / 100));
+                totalCommission = serviceCommission + productCommission + referralCommission;
+                if (!(applyTechKpiPolicy && userData.role === 'technician')) {
+                    totalCommission = Math.floor(totalCommission * (kpiFactor / 100));
+                }
                 const totalBonus = kpiBonus + totalRewards + manualBonus;
                 const grossSalary = baseSalary + overtimePay + totalCommission + totalBonus;
                 const socialInsurance = Math.floor(baseSalary * 0.08);
@@ -834,6 +1042,10 @@ router.post('/:id/recalculate', authenticate, requireAccountant, async (req: Aut
                     product_commission: productCommission,
                     referral_commission: referralCommission,
                     commission: totalCommission,
+                    tech_service_fee_total: techServiceFeeTotal,
+                    tech_accessory_cost_total: techAccessoryCostTotal,
+                    tech_commission_final: techCommissionFinal,
+                    tech_commission_policy_applied: techCommissionPolicyApplied,
                     kpi_achievement: kpiAchievement,
                     kpi_primary_score: kpiAchievement,
                     kpi_primary_rank: kpiPrimaryRank,

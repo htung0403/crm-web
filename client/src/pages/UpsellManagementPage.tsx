@@ -18,7 +18,8 @@ import {
     AlertCircle,
     ChevronRight,
     Search,
-    Banknote
+    Banknote,
+    Pencil
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -61,7 +62,7 @@ export function UpsellManagementPage() {
     // UI States
     const [selectedTicket, setSelectedTicket] = useState<any>(null);
     const [showRejectDialog, setShowRejectDialog] = useState(false);
-    const [rejectItem, setRejectItem] = useState<{ id: string; type: 'upsell' | 'accessory' | 'partner' | 'extension' | 'leave' | 'voucher' } | null>(null);
+    const [rejectItem, setRejectItem] = useState<{ id: string; type: 'upsell' | 'order_edit' | 'accessory' | 'partner' | 'extension' | 'leave' | 'voucher' } | null>(null);
     const [rejectionReason, setRejectionReason] = useState('');
 
     const loadData = async () => {
@@ -116,6 +117,34 @@ export function UpsellManagementPage() {
             req.metadata?.order_id;
     };
 
+    const getTicketType = (ticket: any) => {
+        const type = ticket?.ticket_type ||
+            ticket?.type ||
+            ticket?.request_type ||
+            ticket?.data?.ticket_type ||
+            ticket?.data?.request_type ||
+            ticket?.data?.flow_type ||
+            ticket?.data?.flow;
+        return typeof type === 'string' ? type : '';
+    };
+
+    const isOrderEditTicket = (ticket: any) => {
+        const normalizedType = getTicketType(ticket).toLowerCase();
+        return normalizedType === 'order_edit' ||
+            normalizedType === 'edit_order' ||
+            normalizedType === 'order_update';
+    };
+
+    const orderEditTickets = upsellTickets.filter((ticket) => isOrderEditTicket(ticket));
+    const upsellOnlyTickets = upsellTickets.filter((ticket) => !isOrderEditTicket(ticket));
+    const totalPendingCount =
+        upsellOnlyTickets.length +
+        orderEditTickets.length +
+        accessoryRequests.length +
+        partnerRequests.length +
+        extensionRequests.length +
+        pendingVouchers.length;
+
     useEffect(() => {
         loadData();
     }, []);
@@ -126,6 +155,19 @@ export function UpsellManagementPage() {
         try {
             await upsellTicketsApi.approve(id);
             toast.success('Đã duyệt yêu cầu Upsell');
+            loadData();
+        } catch (error: any) {
+            toast.error(error.response?.data?.message || 'Lỗi khi duyệt');
+        } finally {
+            setProcessing(false);
+        }
+    };
+
+    const handleApproveOrderEdit = async (id: string) => {
+        setProcessing(true);
+        try {
+            await upsellTicketsApi.approve(id);
+            toast.success('Đã duyệt yêu cầu Sửa đơn');
             loadData();
         } catch (error: any) {
             toast.error(error.response?.data?.message || 'Lỗi khi duyệt');
@@ -204,7 +246,7 @@ export function UpsellManagementPage() {
         }
     };
 
-    const onRejectClick = (id: string, type: 'upsell' | 'accessory' | 'partner' | 'extension' | 'leave' | 'voucher') => {
+    const onRejectClick = (id: string, type: 'upsell' | 'order_edit' | 'accessory' | 'partner' | 'extension' | 'leave' | 'voucher') => {
         setRejectItem({ id, type });
         setRejectionReason('');
         setShowRejectDialog(true);
@@ -221,6 +263,7 @@ export function UpsellManagementPage() {
         try {
             switch (rejectItem.type) {
                 case 'upsell':
+                case 'order_edit':
                     await upsellTicketsApi.reject(rejectItem.id);
                     break;
                 case 'accessory':
@@ -302,12 +345,12 @@ export function UpsellManagementPage() {
                         Mục phê duyệt
                     </h1>
                     <p className="text-muted-foreground text-sm mt-1">
-                        Trung tâm phê duyệt tập trung cho các yêu cầu Upsell, Phụ kiện, Đối tác, Gia hạn và Nghỉ/Muộn.
+                        Trung tâm phê duyệt tập trung cho các yêu cầu Upsell, Sửa đơn, Phụ kiện, Đối tác, Gia hạn và Nghỉ/Muộn.
                     </p>
                 </div>
                 <Button variant="outline" size="sm" onClick={loadData} disabled={loading}>
                     <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                    Tải lại ({upsellTickets.length + accessoryRequests.length + partnerRequests.length + extensionRequests.length + pendingVouchers.length})
+                    Tải lại ({totalPendingCount})
                 </Button>
             </div>
 
@@ -316,7 +359,12 @@ export function UpsellManagementPage() {
                     <TabsTrigger value="upsell" className="gap-2 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
                         <Sparkles className="h-4 w-4" />
                         Duyệt Upsell
-                        {upsellTickets.length > 0 && <Badge variant="secondary" className="ml-1 bg-indigo-100 text-indigo-700">{upsellTickets.length}</Badge>}
+                        {upsellOnlyTickets.length > 0 && <Badge variant="secondary" className="ml-1 bg-indigo-100 text-indigo-700">{upsellOnlyTickets.length}</Badge>}
+                    </TabsTrigger>
+                    <TabsTrigger value="order-edit" className="gap-2 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                        <Pencil className="h-4 w-4" />
+                        Sửa đơn
+                        {orderEditTickets.length > 0 && <Badge variant="secondary" className="ml-1 bg-fuchsia-100 text-fuchsia-700">{orderEditTickets.length}</Badge>}
                     </TabsTrigger>
                     <TabsTrigger value="accessory" className="gap-2 px-6 rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
                         <Package className="h-4 w-4" />
@@ -350,10 +398,10 @@ export function UpsellManagementPage() {
                     <div className="grid gap-4">
                         {loading ? (
                             <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-indigo-600" /></div>
-                        ) : upsellTickets.length === 0 ? (
+                        ) : upsellOnlyTickets.length === 0 ? (
                             emptyState("Chưa có yêu cầu Upsell", "Tất cả các yêu cầu thêm dịch vụ/sản phẩm mới sẽ hiện ở đây.", <Sparkles className="h-8 w-8 text-slate-400" />)
                         ) : (
-                            upsellTickets.map((ticket) => (
+                            upsellOnlyTickets.map((ticket) => (
                                 <Card key={ticket.id} className="overflow-hidden hover:shadow-md transition-shadow border-indigo-100">
                                     <div className="flex flex-col md:flex-row">
                                         <div className="flex-1 p-5">
@@ -382,6 +430,74 @@ export function UpsellManagementPage() {
                                         <div className="bg-slate-50 md:w-32 border-l border-slate-100 p-4 flex flex-col justify-center gap-2">
                                             <Button className="w-full bg-emerald-600 hover:bg-emerald-700 h-9 text-xs font-bold" onClick={() => handleApproveUpsell(ticket.id)} disabled={processing}>Duyệt</Button>
                                             <Button variant="outline" className="w-full text-red-600 border-red-200 h-9 text-xs font-bold" onClick={() => onRejectClick(ticket.id, 'upsell')} disabled={processing}>Từ chối</Button>
+                                        </div>
+                                    </div>
+                                </Card>
+                            ))
+                        )}
+                    </div>
+                </TabsContent>
+
+                {/* Order Edit Tab */}
+                <TabsContent value="order-edit" className="mt-0">
+                    <div className="grid gap-4">
+                        {loading ? (
+                            <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-fuchsia-600" /></div>
+                        ) : orderEditTickets.length === 0 ? (
+                            emptyState("Chưa có yêu cầu Sửa đơn", "Các ticket chỉnh sửa đơn hàng cần quản lý duyệt sẽ hiển thị tại đây.", <Pencil className="h-8 w-8 text-slate-400" />)
+                        ) : (
+                            orderEditTickets.map((ticket) => (
+                                <Card key={ticket.id} className="overflow-hidden hover:shadow-md transition-shadow border-fuchsia-100">
+                                    <div className="flex flex-col md:flex-row">
+                                        <div className="flex-1 p-5">
+                                            <div className="flex items-start justify-between mb-4">
+                                                <div className="space-y-1">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-bold text-lg text-fuchsia-700 text-sm">Ticket #{ticket.id.slice(0, 8)}</span>
+                                                        <Badge className="bg-amber-50 text-amber-600 border-amber-200 uppercase text-[10px]">Chờ duyệt</Badge>
+                                                    </div>
+                                                    <div className="flex items-center gap-4 text-xs text-slate-500">
+                                                        <div className="flex items-center gap-1"><Calendar className="h-3 w-3" /> {formatDateTime(ticket.created_at)}</div>
+                                                        <div className="flex items-center gap-1"><User className="h-3 w-3" /> Sale: {ticket.sales_user?.name || '—'}</div>
+                                                    </div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">Giá trị mới</span>
+                                                    <span className="text-xl font-black text-fuchsia-600">
+                                                        {formatCurrency(
+                                                            Number(ticket.data?.total_amount_after) ||
+                                                            Number(ticket.data?.preview?.total_amount_after) ||
+                                                            Number(ticket.data?.total_amount) ||
+                                                            Number(ticket.total_amount) ||
+                                                            0
+                                                        )}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <div className="space-y-2 py-3 bg-slate-50/60 px-3 rounded-lg border border-slate-100 mb-4">
+                                                <div className="flex items-center gap-2">
+                                                    <Package className="h-3.5 w-3.5 text-slate-400" />
+                                                    <span className="text-xs font-medium">Đơn hàng: </span>
+                                                    <Button variant="link" className="p-0 h-auto text-fuchsia-600 font-bold text-xs" onClick={() => navigate(`/orders/${getOrderId(ticket)}`)}>
+                                                        {getOrderCode(ticket)}
+                                                    </Button>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <User className="h-3.5 w-3.5 text-slate-400" />
+                                                    <span className="text-xs font-medium">Khách hàng: </span>
+                                                    <span className="text-xs font-bold">{ticket.customer?.name || '—'}</span>
+                                                </div>
+                                                <div className="flex items-start gap-2">
+                                                    <MessageSquare className="h-3.5 w-3.5 text-slate-400 mt-0.5" />
+                                                    <div className="text-xs text-slate-600 italic line-clamp-2">
+                                                        {ticket.notes || ticket.data?.notes || ticket.data?.reason || 'Yêu cầu sửa nội dung đơn hàng'}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="bg-slate-50 md:w-32 border-l border-slate-100 p-4 flex flex-col justify-center gap-2">
+                                            <Button className="w-full bg-fuchsia-600 hover:bg-fuchsia-700 h-9 text-xs font-bold" onClick={() => handleApproveOrderEdit(ticket.id)} disabled={processing}>Duyệt</Button>
+                                            <Button variant="outline" className="w-full text-red-600 border-red-200 h-9 text-xs font-bold" onClick={() => onRejectClick(ticket.id, 'order_edit')} disabled={processing}>Từ chối</Button>
                                         </div>
                                     </div>
                                 </Card>

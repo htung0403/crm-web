@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 import {
     ArrowLeft, ArrowRight, Plus, Trash2, Camera, Package, Sparkles,
     Loader2, User, Search, CheckCircle, ShoppingBag, QrCode, Image as ImageIcon,
-    Tag, Palette, Layers, FileText, Check, Wrench, UserCheck, X, UserPlus,
+    Tag, Palette, Layers, Check, Wrench, UserCheck, X, UserPlus,
     Percent, DollarSign, ChevronDown, CreditCard, Calendar, Pencil, Wallet, Smartphone
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -1146,6 +1146,24 @@ export function CreateOrderPage() {
 
             };
 
+            if (isEditMode && id) {
+                await ordersApi.createOrderEditTicket(id, {
+                    update_payload: {
+                        ...payload,
+                        total_amount: total,
+                        request_type: 'order_edit'
+                    },
+                    notes: notes || 'Yêu cầu sửa đơn'
+                });
+                toast.success('Đã gửi yêu cầu sửa đơn. Vui lòng chờ quản lý duyệt.');
+                navigate(`/orders/${id}`, {
+                    state: {
+                        pendingEditApproval: true
+                    }
+                });
+                return;
+            }
+
             const response = isEditMode && id
                 ? await ordersApi.updateFull(id, payload)
                 : await ordersApi.create(payload);
@@ -1555,16 +1573,6 @@ export function CreateOrderPage() {
                                                     />
                                                 </div>
 
-
-                                                <div className="space-y-2">
-                                                    <Label>Ghi chú</Label>
-                                                    <Textarea
-                                                        placeholder="Ghi chú thêm về sản phẩm này..."
-                                                        value={product.notes}
-                                                        onChange={(e) => handleUpdateProduct(index, 'notes', e.target.value)}
-                                                        rows={2}
-                                                    />
-                                                </div>
 
                                                 {/* Confirm Button */}
                                                 <div className="flex justify-end pt-2 border-t">
@@ -2229,24 +2237,6 @@ export function CreateOrderPage() {
                             </CardContent>
                         </Card>
 
-                        {/* Notes */}
-                        <Card>
-                            <CardHeader className="pb-2">
-                                <CardTitle className="text-sm flex items-center gap-2">
-                                    <FileText className="h-4 w-4" />
-                                    Ghi chú đơn hàng
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <Textarea
-                                    placeholder="Nhập ghi chú cho đơn hàng..."
-                                    value={notes}
-                                    onChange={(e) => setNotes(e.target.value)}
-                                    rows={3}
-                                    className="resize-none"
-                                />
-                            </CardContent>
-                        </Card>
                     </div>
 
                     {/* Right Column - Summary & Payment */}
@@ -2789,4 +2779,3 @@ export function CreateOrderPage() {
         </div >
     );
 }
-

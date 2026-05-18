@@ -27,6 +27,10 @@ export interface SalaryRecord {
     product_commission?: number;
     referral_commission?: number;
     commission: number;
+    tech_service_fee_total?: number | null;
+    tech_accessory_cost_total?: number | null;
+    tech_commission_final?: number | null;
+    tech_commission_policy_applied?: boolean;
 
     // KPI
     kpi_achievement?: number;
@@ -92,6 +96,27 @@ export const roleLabels: Record<string, string> = {
     technician: 'Kỹ thuật'
 };
 
+function extractErrorMessage(error: unknown, fallback: string): string {
+    if (typeof error === 'object' && error !== null && 'response' in error) {
+        const response = (error as { response?: unknown }).response;
+        if (typeof response === 'object' && response !== null && 'data' in response) {
+            const data = (response as { data?: unknown }).data;
+            if (typeof data === 'object' && data !== null && 'message' in data) {
+                const message = (data as { message?: unknown }).message;
+                if (typeof message === 'string' && message.trim()) {
+                    return message;
+                }
+            }
+        }
+    }
+
+    if (error instanceof Error && error.message.trim()) {
+        return error.message;
+    }
+
+    return fallback;
+}
+
 export function useSalary() {
     const [salaries, setSalaries] = useState<SalaryRecord[]>([]);
     const [summary, setSummary] = useState<SalarySummary | null>(null);
@@ -105,8 +130,8 @@ export function useSalary() {
             const response = await salaryApi.getAll(params);
             setSalaries(response.data.data?.salaries || []);
             setSummary(response.data.data?.summary || null);
-        } catch (err: any) {
-            setError(err.response?.data?.message || 'Lỗi khi tải bảng lương');
+        } catch (err: unknown) {
+            setError(extractErrorMessage(err, 'Lỗi khi tải bảng lương'));
         } finally {
             setLoading(false);
         }
@@ -117,8 +142,8 @@ export function useSalary() {
         try {
             const response = await salaryApi.getByUser(userId, year);
             return response.data.data?.salaries || [];
-        } catch (err: any) {
-            setError(err.response?.data?.message || 'Lỗi khi tải lương');
+        } catch (err: unknown) {
+            setError(extractErrorMessage(err, 'Lỗi khi tải lương'));
             return [];
         } finally {
             setLoading(false);
@@ -159,8 +184,8 @@ export function useSalary() {
 
             // Refresh salaries list
             await fetchSalaries({ month, year });
-        } catch (err: any) {
-            setError(err.response?.data?.message || 'Lỗi khi tính lương');
+        } catch (err: unknown) {
+            setError(extractErrorMessage(err, 'Lỗi khi tính lương'));
         } finally {
             setLoading(false);
         }
@@ -184,8 +209,8 @@ export function useSalary() {
             if (firstSalary) {
                 await fetchSalaries({ month: firstSalary.month, year: firstSalary.year });
             }
-        } catch (err: any) {
-            setError(err.response?.data?.message || 'Lỗi khi duyệt lương');
+        } catch (err: unknown) {
+            setError(extractErrorMessage(err, 'Lỗi khi duyệt lương'));
         } finally {
             setLoading(false);
         }

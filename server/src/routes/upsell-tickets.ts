@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
+import { applyFullOrderUpdate } from '../utils/orderFullUpdate.js';
 
 const router = Router();
 
@@ -60,7 +61,39 @@ router.post('/:id/approve', requireAdminOrManager, async (req: AuthenticatedRequ
         }
 
         const { order_id: id, data: upsellData } = ticket;
+        const ticketType = (
+            upsellData?.request_type ||
+            upsellData?.ticket_type ||
+            upsellData?.flow_type ||
+            ''
+        ).toLowerCase();
+        const isOrderEditTicket = ['order_edit', 'edit_order', 'order_update'].includes(ticketType);
         const { customer_items, sale_items } = upsellData;
+
+        if (isOrderEditTicket) {
+            const updatePayload = upsellData?.update_payload;
+            if (!updatePayload || typeof updatePayload !== 'object') {
+                throw new ApiError('Ticket sửa đơn không có dữ liệu cập nhật hợp lệ', 400);
+            }
+
+            await applyFullOrderUpdate(id, updatePayload, userId);
+
+            await supabaseAdmin
+                .from('upsell_tickets')
+                .update({
+                    status: 'approved',
+                    approved_by: userId,
+                    approved_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', ticketId);
+
+            res.json({
+                status: 'success',
+                message: 'Đã duyệt yêu cầu sửa đơn và cập nhật đơn hàng.'
+            });
+            return;
+        }
 
         // 2. Fetch Order
         const { data: order, error: orderFetchError } = await supabaseAdmin

@@ -598,6 +598,58 @@ export function OrderDetailPage() {
         (user?.role === 'manager' || user?.role === 'admin') &&
         !!order.items?.some((item) => (item as { status?: string }).status === 'step4');
 
+    const pendingEditApprovalFromState = Boolean((location.state as any)?.pendingEditApproval);
+
+    const hasPendingOrderEditApproval = (() => {
+        if (pendingEditApprovalFromState) return true;
+
+        const editStatus =
+            (order as any)?.edit_request_status ||
+            (order as any)?.edit_status ||
+            (order as any)?.metadata?.edit_request_status ||
+            (order as any)?.metadata?.order_edit_status;
+
+        if (typeof editStatus === 'string') {
+            const normalizedStatus = editStatus.toLowerCase();
+            if (['pending', 'requested', 'waiting_approval', 'waiting_manager_approval'].includes(normalizedStatus)) {
+                return true;
+            }
+        }
+
+        const pendingTickets = (order as any)?.pending_tickets || (order as any)?.upsell_tickets || (order as any)?.tickets;
+        if (!Array.isArray(pendingTickets)) return false;
+
+        return pendingTickets.some((ticket: any) => {
+            const status = (ticket?.status || ticket?.ticket_status || '').toLowerCase();
+            const type = (
+                ticket?.ticket_type ||
+                ticket?.type ||
+                ticket?.request_type ||
+                ticket?.data?.ticket_type ||
+                ticket?.data?.request_type ||
+                ticket?.data?.flow_type ||
+                ticket?.data?.flow ||
+                ''
+            ).toLowerCase();
+
+            return status === 'pending' && ['order_edit', 'edit_order', 'order_update'].includes(type);
+        });
+    })();
+
+    const handleOpenOrderEdit = () => {
+        if (hasPendingOrderEditApproval) {
+            toast.warning('Đơn đang chờ quản lý duyệt sửa. Vui lòng liên hệ quản lý để tiếp tục.');
+            return;
+        }
+
+        navigate(`/orders/${order.id}/edit`, {
+            state: {
+                requireManagerApprovalAfterEdit: true,
+                requestType: 'order_edit'
+            }
+        });
+    };
+
     return (
         <div className="animate-fade-in w-full min-w-0 max-w-full space-y-0 overflow-x-hidden bg-muted/30 md:space-y-6 md:bg-transparent">
             <OrderDetailMobileHeader
@@ -607,7 +659,7 @@ export function OrderDetailPage() {
                 onUpsell={() => setShowUpsellDialog(true)}
                 onPrintQr={() => setShowPrintDialog(true)}
                 onPrintInvoice={() => setShowInvoicePrintDialog(true)}
-                onEdit={() => navigate(`/orders/${order.id}/edit`)}
+                onEdit={handleOpenOrderEdit}
                 onPayment={() => setShowPaymentRecordDialog(true)}
                 onApprove={() => handleApproveOrder(order)}
             />
@@ -629,6 +681,12 @@ export function OrderDetailPage() {
                         <div className="text-muted-foreground text-sm flex items-center gap-2">
                             <span>Chi tiết đơn hàng</span>
                         </div>
+                        {hasPendingOrderEditApproval && (
+                            <div className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700">
+                                <Clock className="h-3.5 w-3.5" />
+                                Đơn đang chờ quản lý duyệt yêu cầu sửa
+                            </div>
+                        )}
                     </div>
                 </div>
                 <div className="flex flex-wrap gap-2 w-full sm:w-auto">
@@ -645,9 +703,14 @@ export function OrderDetailPage() {
                         In hóa đơn
                     </Button>
                     {order.status !== 'after_sale' && order.status !== 'cancelled' && (
-                        <Button variant="outline" onClick={() => navigate(`/orders/${order.id}/edit`)} className="flex-1 sm:flex-none">
+                        <Button
+                            variant="outline"
+                            onClick={handleOpenOrderEdit}
+                            disabled={hasPendingOrderEditApproval}
+                            className="flex-1 sm:flex-none"
+                        >
                             <Sparkles className="h-4 w-4 mr-2" />
-                            Sửa đơn
+                            {hasPendingOrderEditApproval ? 'Chờ duyệt sửa đơn' : 'Sửa đơn'}
                         </Button>
                     )}
                     <Button
@@ -780,10 +843,12 @@ export function OrderDetailPage() {
                     productStatusSummary={productStatusSummary}
                     isPhoneView={isPhoneView}
                     canEdit={canEditOrder}
+                    hasPendingEditApproval={hasPendingOrderEditApproval}
                     onReload={reloadOrder}
                     onShowPrintDialog={() => setShowPrintDialog(true)}
                     onShowInvoicePrintDialog={() => setShowInvoicePrintDialog(true)}
                     onShowPaymentDialog={() => setShowPaymentDialog(true)}
+                    onEditOrder={handleOpenOrderEdit}
                 />
 
                 <SalesTab

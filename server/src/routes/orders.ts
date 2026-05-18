@@ -639,6 +639,14 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             }
         }
 
+        const { data: pendingTickets } = await supabaseAdmin
+            .from('upsell_tickets')
+            .select('id, status, data, notes, created_at, sales_id')
+            .eq('order_id', order.id)
+            .eq('status', 'pending')
+            .order('created_at', { ascending: false });
+        (order as any).pending_tickets = pendingTickets || [];
+
         res.json({
             status: 'success',
             data: { order },
@@ -1145,7 +1153,12 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
 router.post('/:id/upsell-ticket', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id: orderId } = req.params;
-        const { customer_items, sale_items, notes } = req.body;
+        const { customer_items, sale_items, notes, request_type, update_payload } = req.body;
+        const normalizedType = typeof request_type === 'string' ? request_type.toLowerCase() : 'upsell';
+        const isOrderEditRequest =
+            normalizedType === 'order_edit' ||
+            normalizedType === 'edit_order' ||
+            normalizedType === 'order_update';
 
         // 1. Get order details to get customer_id
         const { data: order, error: orderError } = await supabaseAdmin
@@ -1158,21 +1171,47 @@ router.post('/:id/upsell-ticket', authenticate, async (req: AuthenticatedRequest
             throw new ApiError('Không tìm thấy đơn hàng', 404);
         }
 
+        if (isOrderEditRequest) {
+            const { data: pendingTickets } = await supabaseAdmin
+                .from('upsell_tickets')
+                .select('id, data')
+                .eq('order_id', orderId)
+                .eq('status', 'pending');
+
+            const hasPendingEditTicket = (pendingTickets || []).some((ticket: any) => {
+                const ticketType = ticket?.data?.request_type || ticket?.data?.ticket_type || ticket?.data?.flow_type || '';
+                return ['order_edit', 'edit_order', 'order_update'].includes(String(ticketType).toLowerCase());
+            });
+
+            if (hasPendingEditTicket) {
+                throw new ApiError('Đơn hàng đang có yêu cầu sửa chờ duyệt', 400);
+            }
+        }
+
         // Calculate total amount for the ticket
         let totalAmount = 0;
-        if (customer_items) {
-            customer_items.forEach((item: any) => {
-                if (item.services) {
-                    item.services.forEach((svc: any) => {
-                        totalAmount += Number(svc.price) || 0;
-                    });
-                }
-            });
-        }
-        if (sale_items) {
-            sale_items.forEach((item: any) => {
-                totalAmount += (Number(item.quantity) || 1) * (Number(item.unit_price) || 0);
-            });
+        if (isOrderEditRequest) {
+            const editTotal =
+                Number(update_payload?.total_amount) ||
+                Number(update_payload?.preview?.total_amount_after) ||
+                Number(update_payload?.preview?.total_amount) ||
+                0;
+            totalAmount = editTotal;
+        } else {
+            if (customer_items) {
+                customer_items.forEach((item: any) => {
+                    if (item.services) {
+                        item.services.forEach((svc: any) => {
+                            totalAmount += Number(svc.price) || 0;
+                        });
+                    }
+                });
+            }
+            if (sale_items) {
+                sale_items.forEach((item: any) => {
+                    totalAmount += (Number(item.quantity) || 1) * (Number(item.unit_price) || 0);
+                });
+            }
         }
 
         // 2. Create ticket
@@ -1183,7 +1222,9 @@ router.post('/:id/upsell-ticket', authenticate, async (req: AuthenticatedRequest
                 sales_id: req.user!.id,
                 customer_id: order.customer_id,
                 status: 'pending',
-                data: { customer_items, sale_items },
+                data: isOrderEditRequest
+                    ? { request_type: 'order_edit', update_payload }
+                    : { customer_items, sale_items },
                 total_amount: totalAmount,
                 notes: notes || ''
             })
@@ -1197,7 +1238,9 @@ router.post('/:id/upsell-ticket', authenticate, async (req: AuthenticatedRequest
         res.json({
             status: 'success',
             data: ticket,
-            message: 'Đã gửi yêu cầu upsell thành công. Vui lòng chờ quản lý duyệt.'
+            message: isOrderEditRequest
+                ? 'Đã gửi yêu cầu sửa đơn thành công. Vui lòng chờ quản lý duyệt.'
+                : 'Đã gửi yêu cầu upsell thành công. Vui lòng chờ quản lý duyệt.'
         });
     } catch (error) {
         next(error);
@@ -1640,302 +1683,84 @@ router.put('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, 
 router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { customer_id, customer_items, sale_items, notes, discount, discount_type, discount_value, surcharges, paid_amount, payment_method, due_at } = req.body;
+        const { customer_items, sale_items, notes } = req.body;
 
-        // 1. Check if order exists
-        const { data: existingOrder } = await supabaseAdmin
+        const { data: order, error: orderError } = await supabaseAdmin
             .from('orders')
-            .select('*')
+            .select('id, customer_id')
             .eq('id', id)
             .single();
 
-        if (!existingOrder) {
+        if (orderError || !order) {
             throw new ApiError('Không tìm thấy đơn hàng', 404);
         }
 
-        // Fetch old sale items for stock restoration
-        const { data: oldItems } = await supabaseAdmin
-            .from('order_items')
-            .select('product_id, quantity, item_type')
-            .eq('order_id', id);
+        const { data: pendingTickets } = await supabaseAdmin
+            .from('upsell_tickets')
+            .select('id, data')
+            .eq('order_id', id)
+            .eq('status', 'pending');
 
-        // 2. Calculate totals
-        let subtotal = 0;
-        if (customer_items && Array.isArray(customer_items)) {
-            for (const item of customer_items) {
-                if (item.services && Array.isArray(item.services)) {
-                    for (const svc of item.services) {
-                        subtotal += Number(svc.price) || 0;
+        const hasPendingEditTicket = (pendingTickets || []).some((ticket: any) => {
+            const ticketType = ticket?.data?.request_type || ticket?.data?.ticket_type || ticket?.data?.flow_type || '';
+            return ['order_edit', 'edit_order', 'order_update'].includes(String(ticketType).toLowerCase());
+        });
+
+        if (hasPendingEditTicket) {
+            throw new ApiError('Đơn hàng đang có yêu cầu sửa chờ duyệt', 400);
+        }
+
+        let totalAmount = Number(req.body?.total_amount) || 0;
+        if (!totalAmount) {
+            let subtotal = 0;
+            if (customer_items && Array.isArray(customer_items)) {
+                for (const item of customer_items) {
+                    if (item.services && Array.isArray(item.services)) {
+                        for (const svc of item.services) {
+                            subtotal += Number(svc.price) || 0;
+                        }
                     }
+                    subtotal += Number(item.surcharge_amount) || 0;
                 }
-                // Add per-product surcharge
-                subtotal += Number(item.surcharge_amount) || 0;
             }
-        }
-        if (sale_items && Array.isArray(sale_items)) {
-            for (const item of sale_items) {
-                subtotal += (Number(item.quantity) || 1) * (Number(item.unit_price) || 0);
-                // Add per-item surcharge
-                subtotal += Number(item.surcharge_amount) || 0;
+            if (sale_items && Array.isArray(sale_items)) {
+                for (const item of sale_items) {
+                    subtotal += (Number(item.quantity) || 1) * (Number(item.unit_price) || 0);
+                    subtotal += Number(item.surcharge_amount) || 0;
+                }
             }
+            const discountAmount = Number(req.body?.discount) || 0;
+            const topLevelSurchargeAmount = Array.isArray(req.body?.surcharges)
+                ? req.body.surcharges.reduce((sum: number, s: any) => sum + (Number(s?.amount) || 0), 0)
+                : 0;
+            totalAmount = Math.max(0, subtotal - discountAmount + topLevelSurchargeAmount);
         }
 
-        const discountAmount = Number(discount) || 0;
-        const totalAmount = subtotal - discountAmount;
-
-        // 3. Update main order record
-        const { data: order, error: orderError } = await supabaseAdmin
-            .from('orders')
-            .update({
-                customer_id,
-                subtotal,
-                discount: discountAmount,
-                discount_type,
-                discount_value,
+        const { data: ticket, error: ticketError } = await supabaseAdmin
+            .from('upsell_tickets')
+            .insert({
+                order_id: id,
+                sales_id: req.user!.id,
+                customer_id: order.customer_id,
+                status: 'pending',
+                data: {
+                    request_type: 'order_edit',
+                    update_payload: req.body
+                },
                 total_amount: totalAmount,
-                notes,
-                paid_amount: Number(paid_amount) || 0,
-                remaining_debt: totalAmount - (Number(paid_amount) || 0),
-                surcharges: surcharges || [],
-                updated_at: new Date().toISOString(),
+                notes: notes || 'Yêu cầu sửa đơn'
             })
-            .eq('id', id)
             .select()
             .single();
 
-        if (orderError) {
-            throw new ApiError('Lỗi khi cập nhật đơn hàng: ' + orderError.message, 500);
+        if (ticketError) {
+            throw new ApiError('Lỗi khi tạo yêu cầu sửa đơn: ' + ticketError.message, 500);
         }
 
-        // 4. Clean up old highly-dependent data
-        // Restore stock for old product items before deleting
-        if (oldItems) {
-            for (const item of oldItems) {
-                if (item.product_id && item.item_type === 'product') {
-                    try {
-                        const { data: prod } = await supabaseAdmin.from('products').select('stock').eq('id', item.product_id).single();
-                        if (prod) {
-                            const newStock = (prod.stock || 0) + (Number(item.quantity) || 0);
-                            await supabaseAdmin.from('products').update({ stock: newStock }).eq('id', item.product_id);
-                        }
-                    } catch (err) {
-                        console.error('Error restoring stock during update:', err);
-                    }
-                }
-            }
-        }
-
-        // Order of deletion to respect FKs
-        const { data: oldProducts } = await supabaseAdmin.from('order_products').select('id').eq('order_id', id);
-        if (oldProducts && oldProducts.length > 0) {
-            const productIds = oldProducts.map(p => p.id);
-            const { data: oldSvcs } = await supabaseAdmin.from('order_product_services').select('id').in('order_product_id', productIds);
-            if (oldSvcs && oldSvcs.length > 0) {
-                const svcIds = oldSvcs.map(s => s.id);
-                await supabaseAdmin.from('order_product_service_technicians').delete().in('order_product_service_id', svcIds);
-                await supabaseAdmin.from('order_item_steps').delete().in('order_product_service_id', svcIds);
-                await supabaseAdmin.from('order_product_services').delete().in('id', svcIds);
-            }
-            await supabaseAdmin.from('order_products').delete().eq('order_id', id);
-        }
-        await supabaseAdmin.from('order_items').delete().eq('order_id', id);
-
-        // 5. Re-insert Customer Items (logic similar to POST /orders)
-        if (customer_items && Array.isArray(customer_items)) {
-            const orderCode = order.order_code;
-            for (let i = 0; i < customer_items.length; i++) {
-                const item = customer_items[i];
-                const productCode = `${orderCode}-${i + 1}`;
-
-                const { data: orderProduct, error: pError } = await supabaseAdmin
-                    .from('order_products')
-                    .insert({
-                        order_id: id,
-                        product_code: productCode,
-                        name: item.name,
-                        type: item.type,
-                        brand: item.brand,
-                        color: item.color,
-                        size: item.size,
-                        material: item.material,
-                        condition_before: item.condition_before,
-                        images: item.images || [],
-                        notes: item.notes,
-                        due_at: item.due_at || null,
-                        status: 'pending',
-                        surcharges: item.surcharges || [],
-                        surcharge_amount: Number(item.surcharge_amount) || 0
-                    })
-                    .select()
-                    .single();
-
-                if (pError || !orderProduct) continue;
-
-                if (item.services && Array.isArray(item.services)) {
-                    for (const svc of item.services) {
-                        const hasTechs = svc.technicians && svc.technicians.length > 0;
-                        const techId = hasTechs ? svc.technicians[0].technician_id : null;
-
-                        const { data: createdSvc, error: sError } = await supabaseAdmin
-                            .from('order_product_services')
-                            .insert({
-                                order_product_id: orderProduct.id,
-                                service_id: svc.type === 'service' ? svc.id : null,
-                                package_id: svc.type === 'package' ? svc.id : null,
-                                item_name: svc.name,
-                                item_type: svc.type,
-                                unit_price: Number(svc.price) || 0,
-                                technician_id: techId,
-                                status: hasTechs ? 'assigned' : 'pending',
-                                assigned_at: hasTechs ? new Date().toISOString() : null,
-                            })
-                            .select()
-                            .single();
-
-                        if (!sError && createdSvc) {
-                            // Technicians
-                            if (hasTechs) {
-                                const techPayload = svc.technicians.map((t: any) => ({
-                                    order_product_service_id: createdSvc.id,
-                                    technician_id: t.technician_id,
-                                    commission: t.commission || 0,
-                                    assigned_by: req.user!.id,
-                                    assigned_at: new Date().toISOString(),
-                                    status: 'assigned'
-                                }));
-                                await supabaseAdmin.from('order_product_service_technicians').insert(techPayload);
-                            }
-
-                            // Sales
-                            const hasSales = svc.sales && svc.sales.length > 0;
-                            if (hasSales) {
-                                const salePayload = svc.sales.map((s: any) => ({
-                                    order_product_service_id: createdSvc.id,
-                                    sale_id: s.sale_id || s.id,
-                                    commission: s.commission || 0,
-                                    assigned_by: req.user!.id,
-                                    assigned_at: new Date().toISOString()
-                                }));
-                                await supabaseAdmin.from('order_product_service_sales').insert(salePayload);
-                            }
-
-                            // Workflow steps
-                            if (svc.type === 'service' && svc.id) {
-                                const { data: sData } = await supabaseAdmin.from('services').select('workflow_id').eq('id', svc.id).single();
-                                if (sData?.workflow_id) {
-                                    const { data: wSteps } = await supabaseAdmin.from('workflow_steps').select('*').eq('workflow_id', sData.workflow_id).order('step_order', { ascending: true });
-                                    if (wSteps) {
-                                        const itemSteps = wSteps.map(ws => ({
-                                            order_product_service_id: createdSvc.id,
-                                            workflow_step_id: ws.id,
-                                            step_order: ws.step_order,
-                                            step_name: ws.name || `Bước ${ws.step_order}`,
-                                            department_id: ws.department_id,
-                                            status: 'pending',
-                                            estimated_duration: ws.estimated_duration
-                                        }));
-                                        await supabaseAdmin.from('order_item_steps').insert(itemSteps);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 6. Re-insert Sale Items
-        if (sale_items && Array.isArray(sale_items) && sale_items.length > 0) {
-            const saleItemsPayload = sale_items.map(a => ({
-                order_id: id,
-                product_id: a.product_id,
-                item_type: 'product',
-                item_name: a.name,
-                quantity: Number(a.quantity) || 1,
-                unit_price: Number(a.unit_price) || 0,
-                total_price: (Number(a.quantity) || 1) * (Number(a.unit_price) || 0),
-                item_code: a.item_code || `IT${Date.now().toString().slice(-8)}${Math.floor(Math.random() * 100).toString().padStart(2, '0')}`,
-                surcharges: a.surcharges || [],
-                surcharge_amount: Number(a.surcharge_amount) || 0,
-                current_phase: 'sales',
-                phase_stage: 'step1'
-            }));
-            const { data: createdItems, error: itemsError } = await supabaseAdmin.from('order_items').insert(saleItemsPayload).select();
-
-            if (!itemsError && createdItems) {
-                const saleItemAssignments: any[] = [];
-                for (let idx = 0; idx < createdItems.length; idx++) {
-                    const createdItem = createdItems[idx];
-                    const originalItem = sale_items[idx];
-                    const sales = originalItem.sales || [];
-                    for (const s of sales) {
-                        saleItemAssignments.push({
-                            order_item_id: createdItem.id,
-                            sale_id: s.sale_id || s.id,
-                            commission: s.commission || 0,
-                            assigned_by: req.user!.id,
-                            assigned_at: new Date().toISOString()
-                        });
-                    }
-
-                    // Deduct stock for new items
-                    if (createdItem.product_id && createdItem.item_type === 'product') {
-                        try {
-                            const { data: prod } = await supabaseAdmin.from('products').select('stock').eq('id', createdItem.product_id).single();
-                            if (prod) {
-                                const newStock = Math.max(0, (prod.stock || 0) - (Number(createdItem.quantity) || 0));
-                                await supabaseAdmin.from('products').update({ stock: newStock }).eq('id', createdItem.product_id);
-                            }
-                        } catch (err) {
-                            console.error('Error deducting stock during update:', err);
-                        }
-                    }
-                }
-                if (saleItemAssignments.length > 0) {
-                    await supabaseAdmin.from('order_item_sales').insert(saleItemAssignments);
-                }
-            }
-        }
-
-        // 7. Create Transaction record for payment if paid_amount > 0
-        const paidAmountValue = Number(paid_amount) || 0;
-        if (paidAmountValue > 0) {
-            const { data: lastTrans } = await supabaseAdmin
-                .from('transactions')
-                .select('code')
-                .like('code', 'PT%')
-                .order('created_at', { ascending: false })
-                .limit(1);
-            let tCodeValue = 'PT000001';
-            if (lastTrans && lastTrans.length > 0) {
-                const lNum = parseInt(lastTrans[0].code.replace('PT', ''), 10);
-                tCodeValue = `PT${String(lNum + 1).padStart(6, '0')}`;
-            }
-
-            const { error: tError } = await supabaseAdmin.from('transactions').insert({
-                code: tCodeValue,
-                type: 'income',
-                category: 'Thanh toán đơn hàng',
-                amount: paidAmountValue,
-                payment_method: payment_method || 'cash',
-                notes: `Thanh toán khi cập nhật đơn - ${order.order_code}`,
-                date: new Date().toISOString().split('T')[0],
-                order_id: order.id,
-                order_code: order.order_code,
-                status: 'approved',
-                created_by: req.user!.id,
-                approved_by: req.user!.id,
-                approved_at: new Date().toISOString(),
-            });
-            if (tError) console.error('[OrderUpdateFull] Transaction recording failed:', tError);
-        }
-
-        // 8. Sync associated invoices (updates totals/items and marks as paid if settled)
-        syncInvoiceWithOrder(id, payment_method).catch(err => console.error('[OrderUpdate] Failed to sync invoice:', err));
-
-        res.json({
+        res.status(202).json({
             status: 'success',
-            data: { order },
+            data: ticket,
+            message: 'Đã gửi yêu cầu sửa đơn. Vui lòng chờ admin/quản lý duyệt trước khi áp dụng.'
         });
     } catch (error) {
         next(error);

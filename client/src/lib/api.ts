@@ -205,8 +205,15 @@ export const ordersApi = {
     upsell: (id: string, data: { customer_items?: any[]; sale_items?: any[] }) =>
         api.post<ApiResponse<any>>(`/orders/${id}/upsell`, data),
 
-    createUpsellTicket: (id: string, data: { customer_items?: any[]; sale_items?: any[]; notes?: string }) =>
+    createUpsellTicket: (id: string, data: { customer_items?: any[]; sale_items?: any[]; notes?: string; request_type?: string; update_payload?: any }) =>
         api.post<ApiResponse<any>>(`/orders/${id}/upsell-ticket`, data),
+
+    createOrderEditTicket: (id: string, data: { update_payload: any; notes?: string }) =>
+        api.post<ApiResponse<any>>(`/orders/${id}/upsell-ticket`, {
+            request_type: 'order_edit',
+            update_payload: data.update_payload,
+            notes: data.notes
+        }),
 };
 
 // Order Products API (Customer's products: shoes, bags, etc.)
@@ -679,7 +686,7 @@ export const payrollBatchesApi = {
     getById: (id: string) =>
         api.get<ApiResponse<{ batch: any; records: any[] }>>(`/payroll-batches/${id}`),
 
-    generate: (data: { month: number; year: number }) =>
+    generate: (data: { month: number; year: number; apply_technician_kpi_commission_policy?: boolean }) =>
         api.post<ApiResponse<{ batch: any }>>('/payroll-batches/generate', data),
 
     updateStatus: (id: string, status: string) =>
@@ -688,8 +695,8 @@ export const payrollBatchesApi = {
     cancel: (id: string) =>
         api.delete<ApiResponse<null>>(`/payroll-batches/${id}`),
 
-    recalculate: (id: string) =>
-        api.post<ApiResponse<{ batch: any; records: any[] }>>(`/payroll-batches/${id}/recalculate`),
+    recalculate: (id: string, data?: { apply_technician_kpi_commission_policy?: boolean }) =>
+        api.post<ApiResponse<{ batch: any; records: any[] }>>(`/payroll-batches/${id}/recalculate`, data),
 };
 
 // Reports API

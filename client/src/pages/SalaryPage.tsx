@@ -223,6 +223,7 @@ function GeneratePayrollDialog({ open, onOpenChange, onGenerate }: { open: boole
     const [customEndDate, setCustomEndDate] = useState(todayStr);
     const [scope, setScope] = useState('all');
     const [generating, setGenerating] = useState(false);
+    const [applyTechKpiPolicy, setApplyTechKpiPolicy] = useState(false);
 
     // Departments for name lookup
     const { departments, fetchDepartments } = useDepartments();
@@ -272,6 +273,12 @@ function GeneratePayrollDialog({ open, onOpenChange, onGenerate }: { open: boole
             setWorkPeriod(workPeriodOptions[0].value);
         }
     }, [workPeriodOptions, workPeriod]);
+
+    useEffect(() => {
+        if (open) {
+            setApplyTechKpiPolicy(false);
+        }
+    }, [open]);
 
     // Search employees
     useEffect(() => {
@@ -333,10 +340,18 @@ function GeneratePayrollDialog({ open, onOpenChange, onGenerate }: { open: boole
                 const [monthStr, yearStr] = workPeriod.split('/');
                 const month = parseInt(monthStr, 10);
                 const year = parseInt(yearStr, 10);
-                await payrollBatchesApi.generate({ month, year });
+                await payrollBatchesApi.generate({
+                    month,
+                    year,
+                    apply_technician_kpi_commission_policy: applyTechKpiPolicy,
+                });
             } else {
                 // Custom date range — pass as-is or convert
-                await payrollBatchesApi.generate({ start_date: customStartDate, end_date: customEndDate } as any);
+                await payrollBatchesApi.generate({
+                    start_date: customStartDate,
+                    end_date: customEndDate,
+                    apply_technician_kpi_commission_policy: applyTechKpiPolicy,
+                } as any);
             }
             onGenerate();
             onOpenChange(false);
@@ -537,6 +552,30 @@ function GeneratePayrollDialog({ open, onOpenChange, onGenerate }: { open: boole
                                 )}
                             </div>
                         </div>
+
+                        {/* Chính sách hoa hồng KTV */}
+                        <div className="flex items-start">
+                            <div className="w-[180px] text-[13px] font-medium text-gray-700 pt-1">Hoa hồng kỹ thuật</div>
+                            <div className="flex-1 rounded-md border border-blue-100 bg-blue-50/50 px-3 py-2.5">
+                                <div className="flex items-start gap-2">
+                                    <Checkbox
+                                        id="apply-tech-kpi-policy"
+                                        checked={applyTechKpiPolicy}
+                                        onCheckedChange={(checked) => setApplyTechKpiPolicy(Boolean(checked))}
+                                        className="mt-0.5"
+                                    />
+                                    <div className="space-y-0.5">
+                                        <Label htmlFor="apply-tech-kpi-policy" className="text-[13px] font-medium text-gray-800 cursor-pointer">
+                                            Áp dụng chính sách mới
+                                        </Label>
+                                        <p className="text-[12px] text-gray-600">
+                                            Chỉ tính hoa hồng khi đơn đã thanh toán đủ. Công thức KTV:
+                                            (Phí dịch vụ - Mua phụ kiện) × KPI ÷ 100.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <DialogFooter className="p-4 border-t gap-2 sm:justify-end bg-gray-50/50">
                         <DialogClose asChild>
@@ -630,6 +669,10 @@ function PayslipTable({ batchId }: { batchId: string }) {
                         </th>
                         <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide">MÃ PHIẾU</th>
                         <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide">TÊN NHÂN VIÊN</th>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide text-right">TỔNG PHÍ DỊCH VỤ</th>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide text-right">PHỤ KIỆN</th>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide text-right">KPI%</th>
+                        <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide text-right">HOA HỒNG CUỐI</th>
                         <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide text-right">TỔNG LƯƠNG</th>
                         <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide text-right">ĐÃ TRẢ NV</th>
                         <th className="px-4 py-2.5 font-bold text-[11px] text-gray-900 tracking-wide text-right">CÒN CẦN TRẢ</th>
@@ -639,7 +682,7 @@ function PayslipTable({ batchId }: { batchId: string }) {
                     {/* Summary */}
                     {records.length > 0 && (
                         <tr className="bg-white border-b border-gray-200">
-                            <td className="px-4 py-2.5" colSpan={3}></td>
+                            <td className="px-4 py-2.5" colSpan={7}></td>
                             <td className="px-4 py-2.5 text-right font-bold text-[13px] text-gray-900">{formatCurrency(totalSalary)}</td>
                             <td className="px-4 py-2.5 text-right font-bold text-[13px] text-gray-900">{formatCurrency(totalPaidEmp)}</td>
                             <td className="px-4 py-2.5 text-right font-bold text-[13px] text-gray-900">{formatCurrency(totalRemaining)}</td>
@@ -647,7 +690,7 @@ function PayslipTable({ batchId }: { batchId: string }) {
                     )}
                     {paginated.length === 0 ? (
                         <tr>
-                            <td colSpan={6} className="px-4 py-8 text-center text-[13px] text-gray-400">
+                            <td colSpan={10} className="px-4 py-8 text-center text-[13px] text-gray-400">
                                 Không có phiếu lương
                             </td>
                         </tr>
@@ -657,6 +700,15 @@ function PayslipTable({ batchId }: { batchId: string }) {
                             const paid = record.status === 'paid' ? record.net_salary : 0;
                             const remaining = gross - paid;
                             const plCode = `PL${String(totalItems - ((page - 1) * pageSize + idx) + 140).padStart(6, '0')}`;
+                            const hasTechAudit = Boolean(record.tech_commission_policy_applied);
+                            const serviceFeeText = hasTechAudit ? formatCurrency(Number(record.tech_service_fee_total || 0)) : '--';
+                            const accessoryText = hasTechAudit ? formatCurrency(Number(record.tech_accessory_cost_total || 0)) : '--';
+                            const kpiText = record.kpi_primary_commission_factor !== undefined && record.kpi_primary_commission_factor !== null
+                                ? `${Number(record.kpi_primary_commission_factor).toFixed(2)}%`
+                                : '--';
+                            const finalCommission = hasTechAudit
+                                ? Number(record.tech_commission_final || 0)
+                                : Number(record.commission || 0);
 
                             return (
                                 <tr key={record.id} className="hover:bg-blue-50/30 transition-colors">
@@ -680,6 +732,10 @@ function PayslipTable({ batchId }: { batchId: string }) {
                                             {record.user?.name || 'N/A'}
                                         </button>
                                     </td>
+                                    <td className="px-4 py-2.5 text-right text-gray-800 text-[13px] font-medium">{serviceFeeText}</td>
+                                    <td className="px-4 py-2.5 text-right text-gray-800 text-[13px] font-medium">{accessoryText}</td>
+                                    <td className="px-4 py-2.5 text-right text-gray-800 text-[13px] font-medium">{kpiText}</td>
+                                    <td className="px-4 py-2.5 text-right text-blue-700 text-[13px] font-semibold">{formatCurrency(finalCommission)}</td>
                                     <td className="px-4 py-2.5 text-right text-gray-800 text-[13px] font-medium">{formatCurrency(gross)}</td>
                                     <td className="px-4 py-2.5 text-right text-gray-800 text-[13px] font-medium">{formatCurrency(paid)}</td>
                                     <td className="px-4 py-2.5 text-right text-gray-800 text-[13px] font-medium">{formatCurrency(remaining)}</td>

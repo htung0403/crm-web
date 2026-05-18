@@ -29,10 +29,12 @@ interface DetailTabProps {
     productStatusSummary: any;
     isPhoneView?: boolean;
     canEdit?: boolean;
+    hasPendingEditApproval?: boolean;
     onReload?: () => void;
     onShowPrintDialog: () => void;
     onShowInvoicePrintDialog: () => void;
     onShowPaymentDialog: () => void;
+    onEditOrder?: () => void;
 }
 
 export function DetailTab({
@@ -40,10 +42,12 @@ export function DetailTab({
     productStatusSummary,
     isPhoneView = false,
     canEdit = true,
+    hasPendingEditApproval = false,
     onReload,
     onShowPrintDialog,
     onShowInvoicePrintDialog,
     onShowPaymentDialog,
+    onEditOrder,
 }: DetailTabProps) {
     const navigate = useNavigate();
     const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
@@ -55,10 +59,12 @@ export function DetailTab({
                 <OrderDetailMobileDetail
                     order={order}
                     canEdit={canEdit}
+                    hasPendingEditApproval={hasPendingEditApproval}
                     onReload={() => onReload?.()}
                     onShowPrintDialog={onShowPrintDialog}
                     onShowInvoicePrintDialog={onShowInvoicePrintDialog}
                     onShowPaymentDialog={onShowPaymentDialog}
+                    onEditOrder={onEditOrder}
                 />
             )}
 
@@ -150,6 +156,24 @@ export function DetailTab({
                                                             {formatCurrency((item.total_price || 0) + (item.surcharge_amount || 0))}
                                                         </span>
                                                     </div>
+                                                    {(((item as any).due_at) || ((item as any).condition_before) || ((item as any).product_condition_before)) && (
+                                                        <div className="mt-1.5 space-y-1">
+                                                            {(item as any).due_at && (
+                                                                <div className="flex items-center gap-1 text-[11px] text-blue-700">
+                                                                    <Calendar className="h-3 w-3 shrink-0" />
+                                                                    <span>Hạn trả đồ: {formatDateTime((item as any).due_at)}</span>
+                                                                </div>
+                                                            )}
+                                                            {((item as any).condition_before || (item as any).product_condition_before) && (
+                                                                <div className="flex items-start gap-1 text-[11px] text-muted-foreground">
+                                                                    <FileText className="h-3 w-3 shrink-0 mt-0.5" />
+                                                                    <span className="leading-tight">
+                                                                        Tình trạng ban đầu: {(item as any).condition_before || (item as any).product_condition_before}
+                                                                    </span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                 </div>
                                             ))}
                                         </div>
@@ -588,6 +612,11 @@ export function DetailTab({
                             <CardTitle className="text-base">Thao tác nhanh</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-2">
+                            {hasPendingEditApproval && (
+                                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                                    Đơn hàng đang chờ quản lý/admin duyệt yêu cầu sửa.
+                                </div>
+                            )}
                             <Button
                                 variant="outline"
                                 className="w-full justify-start"
@@ -608,10 +637,17 @@ export function DetailTab({
                                 <Button
                                     variant="outline"
                                     className="w-full justify-start"
-                                    onClick={() => navigate(`/orders/${order.id}/edit`)}
+                                    disabled={hasPendingEditApproval}
+                                    onClick={() => {
+                                        if (onEditOrder) {
+                                            onEditOrder();
+                                            return;
+                                        }
+                                        navigate(`/orders/${order.id}/edit`);
+                                    }}
                                 >
                                     <Sparkles className="h-4 w-4 mr-2" />
-                                    Chỉnh sửa đơn hàng
+                                    {hasPendingEditApproval ? 'Đang chờ duyệt sửa đơn' : 'Chỉnh sửa đơn hàng'}
                                 </Button>
                             )}
                             {order.status === 'in_progress' && (

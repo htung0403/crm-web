@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import {
+    Calendar,
     ClipboardList,
     FileText,
     List,
@@ -20,10 +21,12 @@ import { MobileProductPhotos } from './MobileProductPhotos';
 interface OrderDetailMobileDetailProps {
     order: Order;
     canEdit: boolean;
+    hasPendingEditApproval?: boolean;
     onShowPrintDialog: () => void;
     onShowInvoicePrintDialog: () => void;
     onShowPaymentDialog: () => void;
     onReload: () => void;
+    onEditOrder?: () => void;
 }
 
 function MobileCard({
@@ -127,11 +130,17 @@ function ProductLine({
     name,
     quantity,
     dotColor,
+    dueAt,
+    conditionBefore,
+    showProductMeta = false,
     indent = false,
 }: {
     name: string;
     quantity: number;
     dotColor: 'blue' | 'purple';
+    dueAt?: string;
+    conditionBefore?: string;
+    showProductMeta?: boolean;
     indent?: boolean;
 }) {
     return (
@@ -147,7 +156,21 @@ function ProductLine({
                     dotColor === 'blue' ? 'bg-blue-600' : 'bg-purple-600',
                 )}
             />
-            <p className="min-w-0 flex-1 truncate text-sm font-medium">{name}</p>
+            <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{name}</p>
+                {showProductMeta && (
+                    <div className="mt-1 flex items-center gap-1 text-[11px] text-blue-700">
+                        <Calendar className="h-3 w-3 shrink-0" />
+                        <span>Hạn trả đồ: {dueAt ? new Date(dueAt).toLocaleDateString('vi-VN') : '—'}</span>
+                    </div>
+                )}
+                {showProductMeta && (
+                    <div className="mt-0.5 flex items-start gap-1 text-[11px] text-muted-foreground">
+                        <FileText className="mt-0.5 h-3 w-3 shrink-0" />
+                        <span className="line-clamp-2 leading-tight">Tình trạng ban đầu: {conditionBefore || '—'}</span>
+                    </div>
+                )}
+            </div>
             <span className="shrink-0 text-xs text-muted-foreground">SL: {quantity}</span>
         </div>
     );
@@ -156,9 +179,12 @@ function ProductLine({
 export function OrderDetailMobileDetail({
     order,
     canEdit,
+    hasPendingEditApproval = false,
     onShowPrintDialog,
     onShowInvoicePrintDialog,
+    onShowPaymentDialog,
     onReload,
+    onEditOrder,
 }: OrderDetailMobileDetailProps) {
     const navigate = useNavigate();
     const remaining =
@@ -175,7 +201,7 @@ export function OrderDetailMobileDetail({
               : 'Chưa TT';
 
     const canEditOrder =
-        canEdit && order.status !== 'after_sale' && order.status !== 'cancelled';
+        canEdit && order.status !== 'after_sale' && order.status !== 'cancelled' && !hasPendingEditApproval;
     const canEditPhotos = canEdit && order.status !== 'cancelled';
 
     return (
@@ -245,7 +271,14 @@ export function OrderDetailMobileDetail({
                     <button
                         type="button"
                         disabled={!canEditOrder}
-                        onClick={() => canEditOrder && navigate(`/orders/${order.id}/edit`)}
+                        onClick={() => {
+                            if (!canEditOrder) return;
+                            if (onEditOrder) {
+                                onEditOrder();
+                                return;
+                            }
+                            navigate(`/orders/${order.id}/edit`);
+                        }}
                         className={cn(
                             'flex flex-col items-center gap-1.5 rounded-xl px-1 py-2.5 active:scale-[0.98]',
                             canEditOrder ? 'bg-violet-50' : 'bg-muted/50 opacity-50',
@@ -265,11 +298,19 @@ export function OrderDetailMobileDetail({
                                 canEditOrder ? 'text-violet-900' : 'text-muted-foreground',
                             )}
                         >
-                            Chỉnh sửa đơn
+                            {hasPendingEditApproval ? 'Chờ duyệt sửa' : 'Chỉnh sửa đơn'}
                         </span>
                     </button>
                 </div>
             </MobileCard>
+
+            {hasPendingEditApproval && (
+                <MobileCard icon={Receipt} title="Trạng thái duyệt sửa">
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                        Đơn hàng đang chờ admin/quản lý duyệt yêu cầu sửa.
+                    </div>
+                </MobileCard>
+            )}
 
             <MobileCard icon={List} title="Chi tiết đơn hàng">
                 <div className="grid min-w-0 grid-cols-2 gap-x-2 gap-y-3">
@@ -330,6 +371,9 @@ export function OrderDetailMobileDetail({
                                             name={product.item_name}
                                             quantity={product.quantity}
                                             dotColor="blue"
+                                            dueAt={(product as any).due_at}
+                                            conditionBefore={(product as any).condition_before || (product as any).product_condition_before}
+                                            showProductMeta
                                         />
                                         {isCustomerProduct && (
                                             <MobileProductPhotos
@@ -357,6 +401,9 @@ export function OrderDetailMobileDetail({
                                     name={item.item_name}
                                     quantity={item.quantity}
                                     dotColor={item.item_type === 'product' ? 'blue' : 'purple'}
+                                    dueAt={(item as any).due_at}
+                                    conditionBefore={(item as any).condition_before || (item as any).product_condition_before}
+                                    showProductMeta={item.item_type === 'product'}
                                 />
                             );
                         })}
