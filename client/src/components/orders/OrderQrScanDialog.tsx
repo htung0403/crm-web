@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
-import { Html5Qrcode } from 'html5-qrcode';
-import { AlertCircle, Camera, CameraOff, Loader2, QrCode } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Html5Qrcode, type CameraDevice } from 'html5-qrcode';
+import { AlertCircle, Camera, CameraOff, QrCode } from 'lucide-react';
 import {
     Dialog,
     DialogContent,
@@ -14,6 +14,21 @@ import { parseScannedCode } from '@/lib/parseQrCode';
 
 const SCANNER_ELEMENT_ID = 'orders-qr-scanner';
 
+async function pickCameraId(): Promise<string | { facingMode: string }> {
+    try {
+        const cameras: CameraDevice[] = await Html5Qrcode.getCameras();
+        if (cameras.length === 0) {
+            return { facingMode: 'user' };
+        }
+        const back = cameras.find((c) => /back|rear|environment|sau/i.test(c.label));
+        if (back) return back.id;
+        if (cameras.length === 1) return cameras[0].id;
+        return cameras[cameras.length - 1].id;
+    } catch {
+        return { facingMode: 'environment' };
+    }
+}
+
 interface OrderQrScanDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -22,15 +37,20 @@ interface OrderQrScanDialogProps {
 
 export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDialogProps) {
     const scannerRef = useRef<Html5Qrcode | null>(null);
+    const handledRef = useRef(false);
     const [isScanning, setIsScanning] = useState(false);
     const [hasCamera, setHasCamera] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [manualCode, setManualCode] = useState('');
 
-    const stopScanner = async () => {
+    const stopScanner = useCallback(async () => {
         if (scannerRef.current) {
             try {
                 await scannerRef.current.stop();
+            } catch {
+                // ignore
+            }
+            try {
                 scannerRef.current.clear();
             } catch {
                 // ignore
@@ -38,55 +58,117 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
             scannerRef.current = null;
         }
         setIsScanning(false);
-    };
+    }, []);
+
+    const handleDecoded = useCallback(
+        (decodedText: string) => {
+            if (handledRef.current) return;
+            const code = parseScannedCode(decodedText);
+            if (!code) return;
+            handledRef.current = true;
+            void stopScanner();
+            onScan(code);
+            onOpenChange(false);
+        },
+        [onScan, onOpenChange, stopScanner],
+    );
+
+    const startScanner = useCallback(async () => {
+        if (scannerRef.current) return;
+
+        const el = document.getElementById(SCANNER_ELEMENT_ID);
+        if (!el) {
+            setError('Không tải được vùng quét. Thử đóng và mở lại.');
+            return;
+        }
+
+        try {
+            setError(null);
+            handledRef.current = false;
+            const cameraConfig = await pickCameraId();
+            const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, { verbose: false });
+            scannerRef.current = scanner;
+
+            await scanner.start(
+                cameraConfig,
+                {
+                    fps: 12,
+                    qrbox: (viewfinderWidth, viewfinderHeight) => {
+                        const edge = Math.min(viewfinderWidth, viewfinderHeight);
+                        const size = Math.max(180, Math.floor(edge * 0.75));
+                        return { width: size, height: size };
+                    },
+                    aspectRatio: 1,
+                },
+                (text) => handleDecoded(text),
+                () => {},
+            );
+            setIsScanning(true);
+        } catch (err) {
+            setIsScanning(false);
+            scannerRef.current = null;
+            const message = err instanceof Error ? err.message : 'Không thể bật camera';
+            if (/environment|not found|overconstrained/i.test(message)) {
+                try {
+                    const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, { verbose: false });
+                    scannerRef.current = scanner;
+                    await scanner.start(
+                        { facingMode: 'user' },
+                        {
+                            fps: 12,
+                            qrbox: { width: 220, height: 220 },
+                        },
+                        (text) => handleDecoded(text),
+                        () => {},
+                    );
+                    setIsScanning(true);
+                    setError(null);
+                    return;
+                } catch {
+                    // fall through
+                }
+            }
+            setError(message);
+        }
+    }, [handleDecoded]);
 
     useEffect(() => {
         if (!open) {
+            handledRef.current = false;
             void stopScanner();
             setError(null);
             setManualCode('');
             return;
         }
 
-        navigator.mediaDevices
-            ?.getUserMedia({ video: true })
-            .then(() => setHasCamera(true))
-            .catch(() => {
-                setHasCamera(false);
-                setError('Không truy cập được camera. Nhập mã thủ công bên dưới.');
-            });
+        let cancelled = false;
+
+        const boot = async () => {
+            try {
+                if (!navigator.mediaDevices?.getUserMedia) {
+                    throw new Error('Trình duyệt không hỗ trợ camera');
+                }
+                await navigator.mediaDevices.getUserMedia({ video: true });
+                if (cancelled) return;
+                setHasCamera(true);
+                await new Promise((r) => setTimeout(r, 400));
+                if (cancelled) return;
+                await startScanner();
+            } catch {
+                if (!cancelled) {
+                    setHasCamera(false);
+                    setError('Không truy cập được camera. Cho phép quyền camera hoặc nhập mã thủ công.');
+                }
+            }
+        };
+
+        void boot();
 
         return () => {
+            cancelled = true;
             void stopScanner();
         };
-    }, [open]);
-
-    const handleDecoded = (decodedText: string) => {
-        const code = parseScannedCode(decodedText);
-        if (!code) return;
-        void stopScanner();
-        onScan(code);
-        onOpenChange(false);
-    };
-
-    const startScanner = async () => {
-        try {
-            setError(null);
-            setIsScanning(true);
-            const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID);
-            scannerRef.current = scanner;
-            await scanner.start(
-                { facingMode: 'environment' },
-                { fps: 10, qrbox: { width: 220, height: 220 } },
-                (text) => handleDecoded(text),
-                () => {},
-            );
-        } catch (err) {
-            setIsScanning(false);
-            const message = err instanceof Error ? err.message : 'Không thể bật camera';
-            setError(message);
-        }
-    };
+    }, [open, startScanner, stopScanner]);
 
     const submitManual = () => {
         const code = parseScannedCode(manualCode);
@@ -96,10 +178,13 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
     };
 
     return (
-        <Dialog open={open} onOpenChange={(next) => {
-            if (!next) void stopScanner();
-            onOpenChange(next);
-        }}>
+        <Dialog
+            open={open}
+            onOpenChange={(next) => {
+                if (!next) void stopScanner();
+                onOpenChange(next);
+            }}
+        >
             <DialogContent className="max-w-sm gap-0 overflow-hidden p-0">
                 <DialogHeader className="px-4 pt-4 pb-2">
                     <DialogTitle className="flex items-center gap-2 text-base">
@@ -107,13 +192,14 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
                         Quét mã đơn hàng
                     </DialogTitle>
                     <DialogDescription>
-                        Quét mã QR trên phiếu (mã dịch vụ) hoặc nhập mã đơn / mã HĐ
+                        Đưa mã QR vào khung xanh. Hỗ trợ mã đơn, mã HĐ (/task/…)
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="px-4 pb-4 space-y-3">
-                    <div className="relative aspect-square w-full overflow-hidden rounded-xl bg-muted">
-                        <div id={SCANNER_ELEMENT_ID} className="h-full w-full" />
+                <div className="space-y-3 px-4 pb-4">
+                    <div className="relative aspect-square w-full min-h-[260px] overflow-hidden rounded-xl bg-black">
+                        <div id={SCANNER_ELEMENT_ID} className="h-full w-full [&_video]:object-cover" />
+
                         {!isScanning && (
                             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted/90 p-4 text-center">
                                 {hasCamera ? (
@@ -122,13 +208,19 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
                                     <CameraOff className="h-10 w-10 text-muted-foreground" />
                                 )}
                                 <p className="text-xs text-muted-foreground">
-                                    Đưa mã QR vào khung quét
+                                    {hasCamera ? 'Đang bật camera…' : 'Dùng ô nhập mã bên dưới'}
                                 </p>
                             </div>
                         )}
+
                         {isScanning && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-black/20">
-                                <Loader2 className="h-8 w-8 animate-spin text-white" />
+                            <div className="pointer-events-none absolute inset-0">
+                                <div className="absolute left-1/2 top-1/2 h-[220px] w-[220px] -translate-x-1/2 -translate-y-1/2">
+                                    <div className="absolute left-0 top-0 h-7 w-7 rounded-tl-lg border-l-4 border-t-4 border-emerald-400" />
+                                    <div className="absolute right-0 top-0 h-7 w-7 rounded-tr-lg border-r-4 border-t-4 border-emerald-400" />
+                                    <div className="absolute bottom-0 left-0 h-7 w-7 rounded-bl-lg border-b-4 border-l-4 border-emerald-400" />
+                                    <div className="absolute bottom-0 right-0 h-7 w-7 rounded-br-lg border-b-4 border-r-4 border-emerald-400" />
+                                </div>
                             </div>
                         )}
                     </div>
@@ -143,12 +235,16 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
                     <div className="flex gap-2">
                         {isScanning ? (
                             <Button variant="outline" className="flex-1" onClick={() => void stopScanner()}>
-                                Dừng
+                                Dừng camera
                             </Button>
                         ) : (
-                            <Button className="flex-1" onClick={() => void startScanner()} disabled={!hasCamera}>
+                            <Button
+                                className="flex-1"
+                                onClick={() => void startScanner()}
+                                disabled={!hasCamera}
+                            >
                                 <Camera className="mr-2 h-4 w-4" />
-                                Bật camera
+                                Bật lại camera
                             </Button>
                         )}
                     </div>

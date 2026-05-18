@@ -32,7 +32,7 @@ import {
     MobileOrdersKanban,
 } from '@/components/orders';
 import { OrderQrScanDialog } from '@/components/orders/OrderQrScanDialog';
-import { orderItemsApi, ordersApi } from '@/lib/api';
+import { orderItemsApi, orderProductsApi, ordersApi } from '@/lib/api';
 import { normalizeSearchText } from '@/lib/utils';
 import { ConfirmDoneDialog } from '@/components/orders/workflow/ConfirmDoneDialog';
 import { useViewActionForRoles } from '@/hooks/useViewAction';
@@ -245,13 +245,29 @@ export function OrdersPage() {
         );
     };
 
-    const handleQrScan = (code: string) => {
+    const handleQrScan = async (code: string) => {
         const order = findOrderByScannedCode(code);
         if (order) {
             navigate(`/orders/${order.id}`);
             toast.success(`Đã tìm thấy đơn ${order.order_code}`);
             return;
         }
+
+        try {
+            const response = await orderProductsApi.getByCode(code);
+            const product = response.data?.data;
+            const orderId = product?.order_id ?? product?.order?.id;
+            if (orderId) {
+                navigate(`/orders/${orderId}`);
+                toast.success(
+                    `Đã tìm thấy đơn ${product?.order?.order_code ?? ''}`.trim(),
+                );
+                return;
+            }
+        } catch {
+            // not a product_code on server
+        }
+
         setGlobalSearch(code);
         toast.error('Không tìm thấy đơn hàng với mã này');
     };

@@ -10,8 +10,12 @@ export function parseScannedCode(raw: string): string {
             for (const prefix of ['/task/', '/product/', '/orders/']) {
                 const idx = path.indexOf(prefix);
                 if (idx !== -1) {
-                    const segment = path.slice(idx + prefix.length).split('/')[0];
-                    if (segment) return segment;
+                    const segment = path
+                        .slice(idx + prefix.length)
+                        .split('/')[0]
+                        ?.split('?')[0]
+                        ?.split('#')[0];
+                    if (segment) return decodeURIComponent(segment);
                 }
             }
         }
