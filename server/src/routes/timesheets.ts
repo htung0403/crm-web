@@ -20,6 +20,19 @@ const timesheetSelect = `
     user:users!timesheets_user_id_fkey(id, name, email, role, avatar, employee_code)
 `;
 
+type ShiftSummary = { id: string; name: string; start_time: string; end_time: string };
+
+function isShiftSummary(value: unknown): value is ShiftSummary {
+    if (!value || typeof value !== 'object') return false;
+    const candidate = value as Record<string, unknown>;
+    return (
+        typeof candidate.id === 'string'
+        && typeof candidate.name === 'string'
+        && typeof candidate.start_time === 'string'
+        && typeof candidate.end_time === 'string'
+    );
+}
+
 async function resolveTodayShift(userId: string, scheduleDate: string): Promise<{ shift_id: string; shift: { id: string; name: string; start_time: string; end_time: string } } | null> {
     const { data: schedules } = await supabase
         .from('work_schedules')
@@ -29,8 +42,9 @@ async function resolveTodayShift(userId: string, scheduleDate: string): Promise<
         .limit(1);
 
     const row = schedules?.[0];
-    if (row?.shift_id && row.shift) {
-        const shift = row.shift as { id: string; name: string; start_time: string; end_time: string };
+    const shiftCandidate = Array.isArray(row?.shift) ? row.shift[0] : row?.shift;
+    if (row?.shift_id && isShiftSummary(shiftCandidate)) {
+        const shift = shiftCandidate;
         return { shift_id: row.shift_id, shift };
     }
 
