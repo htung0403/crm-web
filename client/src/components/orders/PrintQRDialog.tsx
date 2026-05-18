@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Printer, Download, Package, X, QrCode } from 'lucide-react';
+import { Printer, X, QrCode } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +13,8 @@ interface PrintQRDialogProps {
     open: boolean;
     onClose: () => void;
 }
+
+type OrderItemWithCode = OrderItem & { item_code: string };
 
 const getItemTypeLabel = (type: string) => {
     switch (type) {
@@ -41,7 +43,8 @@ export function PrintQRDialog({ order, open, onClose }: PrintQRDialogProps) {
     if (!order) return null;
 
     const items = order.items || [];
-    const hasItemCodes = items.some((item: any) => item.item_code);
+    const productQRItems = items.filter((item: OrderItem) => item.item_type === 'product');
+    const hasItemCodes = productQRItems.some((item: OrderItem) => item.item_code);
 
     const toggleItem = (itemId: string) => {
         setSelectedItems(prev =>
@@ -52,23 +55,22 @@ export function PrintQRDialog({ order, open, onClose }: PrintQRDialogProps) {
     };
 
     const toggleAll = () => {
-        if (selectedItems.length === items.length) {
+        if (selectedItems.length === productQRItems.length) {
             setSelectedItems([]);
         } else {
-            setSelectedItems(items.map((item: any) => item.id));
+            setSelectedItems(productQRItems.map((item: OrderItem) => item.id));
         }
     };
 
     const handlePrint = () => {
         const itemsToPrint = selectedItems.length > 0
-            ? items.filter((item: any) => selectedItems.includes(item.id))
-            : items;
+            ? productQRItems.filter((item: OrderItem) => selectedItems.includes(item.id))
+            : productQRItems;
 
         const printWindow = window.open('', '_blank');
         if (!printWindow) return;
 
-        const qrCodes = itemsToPrint.map((item: any) => {
-            const qrUrl = item.item_code ? `${window.location.origin}/task/${encodeURIComponent(item.item_code)}` : '';
+        const qrCodes = itemsToPrint.map((item: OrderItem) => {
             return `
                 <div class="qr-item">
                     <div class="qr-header">
@@ -93,8 +95,8 @@ export function PrintQRDialog({ order, open, onClose }: PrintQRDialogProps) {
         }).join('');
 
         const qrScripts = itemsToPrint
-            .filter((item: any) => item.item_code)
-            .map((item: any) => {
+            .filter((item: OrderItem): item is OrderItemWithCode => Boolean(item.item_code))
+            .map((item: OrderItemWithCode) => {
                 const qrUrl = `${window.location.origin}/task/${encodeURIComponent(item.item_code)}`;
                 return `new QRCode(document.getElementById("qr-${item.id}"), { text: "${qrUrl}", width: 120, height: 120, correctLevel: QRCode.CorrectLevel.M });`;
             }).join('\n');
@@ -278,11 +280,11 @@ export function PrintQRDialog({ order, open, onClose }: PrintQRDialogProps) {
                     <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
                             <Checkbox
-                                checked={selectedItems.length === items.length && items.length > 0}
+                                checked={selectedItems.length === productQRItems.length && productQRItems.length > 0}
                                 onCheckedChange={toggleAll}
                             />
                             <span className="text-sm font-medium">
-                                Chọn tất cả ({items.length} sản phẩm)
+                                Chọn tất cả ({productQRItems.length} sản phẩm)
                             </span>
                         </div>
                         {selectedItems.length > 0 && (
@@ -292,7 +294,7 @@ export function PrintQRDialog({ order, open, onClose }: PrintQRDialogProps) {
 
                     {/* Items List with QR Codes */}
                     <div className="space-y-3" ref={printRef}>
-                        {items.map((item: any, index: number) => {
+                        {productQRItems.map((item: OrderItem, index: number) => {
                             const qrUrl = item.item_code ? `${window.location.origin}/task/${encodeURIComponent(item.item_code)}` : null;
                             const isSelected = selectedItems.includes(item.id);
 

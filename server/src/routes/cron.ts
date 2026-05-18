@@ -318,7 +318,6 @@ router.get('/check-return-due-reminders', verifyCronSecret, async (req: Request,
         let itemReminders = 0;
 
         let dueProducts: any[] = [];
-        let dueItems: any[] = [];
 
         const productRes = await supabaseAdmin
             .from('order_products')
@@ -342,32 +341,8 @@ router.get('/check-return-due-reminders', verifyCronSecret, async (req: Request,
             dueProducts = productRes.data || [];
         }
 
-        const itemRes = await supabaseAdmin
-            .from('order_items')
-            .select('id, order_id, item_name, item_code, due_at, status, technician_id')
-            .gte('due_at', startIso)
-            .lt('due_at', endIso)
-            .neq('status', 'cancelled');
-        if (itemRes.error) {
-            warnings.push(`order_items primary query failed: ${itemRes.error.message}`);
-            const fallbackItemRes = await supabaseAdmin
-                .from('order_items')
-                .select('id, order_id, item_name, item_code, due_at, status')
-                .gte('due_at', startIso)
-                .lt('due_at', endIso)
-                .neq('status', 'cancelled');
-            if (fallbackItemRes.error) {
-                warnings.push(`order_items fallback query failed: ${fallbackItemRes.error.message}`);
-            } else {
-                dueItems = (fallbackItemRes.data || []).map((row: any) => ({ ...row, technician_id: null }));
-            }
-        } else {
-            dueItems = itemRes.data || [];
-        }
-
         const allOrderIds = [...new Set([
-            ...dueProducts.map((product: any) => product.order_id),
-            ...dueItems.map((item: any) => item.order_id)
+            ...dueProducts.map((product: any) => product.order_id)
         ].filter(Boolean))];
 
         const { data: orders, error: ordersError } = allOrderIds.length > 0
@@ -454,7 +429,6 @@ router.get('/check-return-due-reminders', verifyCronSecret, async (req: Request,
             }
         }
 
-        const itemTechIds = dueItems.map((item: any) => item.technician_id).filter(Boolean);
         const junctionTechIds = Array.from(junctionTechByServiceId.values()).reduce<string[]>((acc, techIds) => {
             acc.push(...techIds);
             return acc;
@@ -463,7 +437,7 @@ router.get('/check-return-due-reminders', verifyCronSecret, async (req: Request,
             ...Array.from(legacyTechByServiceId.values()),
             ...junctionTechIds
         ];
-        const allTechIds = [...new Set([...itemTechIds, ...serviceTechIds].filter(Boolean))];
+        const allTechIds = [...new Set(serviceTechIds.filter(Boolean))];
         const { data: techUsers, error: techUsersError } = allTechIds.length > 0
             ? await supabaseAdmin
                 .from('users')
@@ -515,38 +489,6 @@ router.get('/check-return-due-reminders', verifyCronSecret, async (req: Request,
             firedEvents.push({
                 entity_type: 'order_product',
                 entity_id: product.id,
-                order_code: payload.order_code,
-                due_at: payload.due_at,
-                sale_tele: payload.tele_id_sale,
-                technician_count: payload.tele_ids_technician.length,
-            });
-        }
-
-        for (const item of dueItems) {
-            const orderObj = orderById.get(item.order_id);
-            const saleUser = orderObj?.sales_id ? saleById.get(orderObj.sales_id) : null;
-            const techUser = item.technician_id ? techById.get(item.technician_id) : null;
-
-            const payload = {
-                order_id: orderObj?.id || item.order_id,
-                order_code: orderObj?.order_code || 'N/A',
-                order_item_id: item.id,
-                item_code: item.item_code || null,
-                item_name: item.item_name || 'N/A',
-                due_at: item.due_at,
-                reminder_type: '1_day_before_return',
-                sale_id: saleUser?.id || null,
-                sale_name: saleUser?.name || null,
-                tele_id_sale: saleUser?.telegram_chat_id || null,
-                technicians: techUser ? [{ id: techUser.id, name: techUser.name, telegram_chat_id: techUser.telegram_chat_id }] : [],
-                tele_ids_technician: techUser?.telegram_chat_id ? [techUser.telegram_chat_id] : [],
-            };
-
-            fireWebhook('return_due.reminder_tomorrow', payload);
-            itemReminders++;
-            firedEvents.push({
-                entity_type: 'order_item',
-                entity_id: item.id,
                 order_code: payload.order_code,
                 due_at: payload.due_at,
                 sale_tele: payload.tele_id_sale,
