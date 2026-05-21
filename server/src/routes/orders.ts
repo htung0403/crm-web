@@ -4,6 +4,7 @@ import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireSale } from '../middleware/auth.js';
 import { checkAndCompleteOrder } from '../utils/orderHelper.js';
 import { autoCreateInvoice, syncInvoiceWithOrder } from '../utils/billingHelper.js';
+import { notifyFinanceEvent } from '../utils/financeNotifications.js';
 
 
 const router = Router();
@@ -2133,7 +2134,6 @@ router.post('/:id/payments', authenticate, async (req: AuthenticatedRequest, res
             .select('id, total_amount, order_item_ids, order_product_service_ids')
             .eq('order_id', order.id)
             .neq('status', 'cancelled')
-            .neq('status', 'paid')
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();
@@ -2161,6 +2161,25 @@ router.post('/:id/payments', authenticate, async (req: AuthenticatedRequest, res
             console.error('Error creating transaction for payment:', transError);
         } else {
             console.log(`Created transaction ${transCode} for order ${order.order_code} payment`);
+            await notifyFinanceEvent({
+                event: 'transaction.created',
+                title: 'Phiếu thu mới',
+                message: `${req.user!.name} đã tạo phiếu thu ${transCode}`,
+                actor: req.user!,
+                recipientUserIds: [req.user!.id],
+                data: {
+                    code: transCode,
+                    type: 'income',
+                    category: 'Thanh toán đơn hàng',
+                    amount,
+                    payment_method: payment_method || 'cash',
+                    status: 'approved',
+                    order_id: order.id,
+                    order_code: order.order_code,
+                    invoice_id: invoice?.id,
+                    notes: `${content} - ${order.order_code}`,
+                },
+            });
         }
 
         // 3. Create a record in finance_transactions for consistent tracking and Invoices view

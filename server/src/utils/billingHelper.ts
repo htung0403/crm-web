@@ -243,19 +243,19 @@ export async function syncInvoiceWithOrder(orderId: string, paymentMethod?: stri
             return;
         }
 
-        // 2. Find the latest draft or pending invoice for this order
+        // 2. Find the latest active invoice for this order
         const { id: invoiceId, status: invStatus } = await supabaseAdmin
             .from('invoices')
             .select('id, status')
             .eq('order_id', orderId)
-            .in('status', ['draft', 'pending'])
+            .neq('status', 'cancelled')
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle()
             .then(res => res.data || { id: null, status: null });
 
         if (!invoiceId) {
-            console.log(`[BillingHelper] No draft/pending invoice found to sync for order ${order.order_code}`);
+            console.log(`[BillingHelper] No active invoice found to sync for order ${order.order_code}`);
             return;
         }
 

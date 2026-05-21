@@ -301,3 +301,4 @@ server/scripts/run-migration.ts
 server/scripts/simulate-sla.js
 server/.env.example
 .sisyphus/
+.omx/

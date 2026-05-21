@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireAccountant, requireManager } from '../middleware/auth.js';
+import { notifyFinanceEvent } from '../utils/financeNotifications.js';
 
 const router = Router();
 
@@ -81,6 +82,26 @@ router.post('/income', authenticate, async (req: AuthenticatedRequest, res, next
             throw new ApiError('Lỗi khi tạo phiếu thu: ' + error.message, 500);
         }
 
+        notifyFinanceEvent({
+            event: 'finance.transaction.created',
+            title: 'Phiếu thu mới',
+            message: `${req.user!.name} đã tạo phiếu thu ${transaction.code}`,
+            actor: req.user!,
+            recipientUserIds: [transaction.created_by],
+            data: {
+                transaction_id: transaction.id,
+                code: transaction.code,
+                type: transaction.type,
+                category: transaction.category,
+                amount: transaction.amount,
+                payment_method: transaction.payment_method,
+                status: transaction.status,
+                customer_id: transaction.customer_id,
+                invoice_id: transaction.invoice_id,
+                description: transaction.description,
+            },
+        });
+
         res.status(201).json({
             status: 'success',
             data: { transaction },
@@ -121,6 +142,25 @@ router.post('/expense', authenticate, async (req: AuthenticatedRequest, res, nex
             throw new ApiError('Lỗi khi tạo phiếu chi: ' + error.message, 500);
         }
 
+        notifyFinanceEvent({
+            event: 'finance.transaction.created',
+            title: 'Phiếu chi mới',
+            message: `${req.user!.name} đã tạo phiếu chi ${transaction.code}`,
+            actor: req.user!,
+            recipientUserIds: [transaction.created_by],
+            data: {
+                transaction_id: transaction.id,
+                code: transaction.code,
+                type: transaction.type,
+                category: transaction.category,
+                amount: transaction.amount,
+                payment_method: transaction.payment_method,
+                status: transaction.status,
+                supplier: transaction.supplier,
+                description: transaction.description,
+            },
+        });
+
         res.status(201).json({
             status: 'success',
             data: { transaction },
@@ -149,6 +189,23 @@ router.patch('/transactions/:id/approve', authenticate, requireAccountant, async
         if (error) {
             throw new ApiError('Lỗi khi duyệt giao dịch', 500);
         }
+
+        notifyFinanceEvent({
+            event: 'finance.transaction.approved',
+            title: 'Phiếu thu/chi đã duyệt',
+            message: `${req.user!.name} đã duyệt ${transaction.type === 'income' ? 'phiếu thu' : 'phiếu chi'} ${transaction.code}`,
+            actor: req.user!,
+            recipientUserIds: [transaction.created_by, transaction.approved_by],
+            data: {
+                transaction_id: transaction.id,
+                code: transaction.code,
+                type: transaction.type,
+                category: transaction.category,
+                amount: transaction.amount,
+                payment_method: transaction.payment_method,
+                status: transaction.status,
+            },
+        });
 
         res.json({
             status: 'success',
@@ -180,6 +237,24 @@ router.patch('/transactions/:id/reject', authenticate, requireAccountant, async 
         if (error) {
             throw new ApiError('Lỗi khi từ chối giao dịch', 500);
         }
+
+        notifyFinanceEvent({
+            event: 'finance.transaction.rejected',
+            title: 'Phiếu thu/chi bị từ chối',
+            message: `${req.user!.name} đã từ chối ${transaction.type === 'income' ? 'phiếu thu' : 'phiếu chi'} ${transaction.code}`,
+            actor: req.user!,
+            recipientUserIds: [transaction.created_by, transaction.approved_by],
+            data: {
+                transaction_id: transaction.id,
+                code: transaction.code,
+                type: transaction.type,
+                category: transaction.category,
+                amount: transaction.amount,
+                payment_method: transaction.payment_method,
+                status: transaction.status,
+                reason,
+            },
+        });
 
         res.json({
             status: 'success',

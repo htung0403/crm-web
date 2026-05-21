@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
-import { fireWebhook } from '../utils/webhookNotifier.js';
+import { notifyFinanceEvent } from '../utils/financeNotifications.js';
 
 const router = Router();
 
@@ -270,6 +270,27 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
             throw new ApiError('Lỗi khi tạo giao dịch: ' + error.message, 500);
         }
 
+        const transactionLabel = type === 'income' ? 'phiếu thu' : 'phiếu chi';
+        notifyFinanceEvent({
+            event: 'transaction.created',
+            title: type === 'income' ? 'Phiếu thu mới' : 'Phiếu chi mới',
+            message: `${req.user!.name} đã tạo ${transactionLabel} ${transaction.code}`,
+            actor: req.user!,
+            recipientUserIds: [transaction.created_by],
+            data: {
+                transaction_id: transaction.id,
+                code: transaction.code,
+                type: transaction.type,
+                category: transaction.category,
+                amount: transaction.amount,
+                payment_method: transaction.payment_method,
+                status: transaction.status,
+                order_id: transaction.order_id,
+                order_code: transaction.order_code,
+                notes: transaction.notes,
+            },
+        });
+
         res.status(201).json({
             status: 'success',
             data: { transaction },
@@ -311,13 +332,26 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
             throw new ApiError('Lỗi khi cập nhật trạng thái', 500);
         }
 
-        // 🔔 WH7: Fire webhook — Duyệt phiếu Thu/Chi
-        if (status === 'approved' && transaction) {
-            fireWebhook('transaction.approved', {
-                code: transaction.code,
-                type: transaction.type === 'income' ? 'Thu' : 'Chi',
-                amount: transaction.amount,
-                payment_method: transaction.payment_method,
+        if ((status === 'approved' || status === 'cancelled') && transaction) {
+            const transactionLabel = transaction.type === 'income' ? 'phiếu thu' : 'phiếu chi';
+            notifyFinanceEvent({
+                event: status === 'approved' ? 'transaction.approved' : 'transaction.cancelled',
+                title: status === 'approved' ? 'Phiếu thu/chi đã duyệt' : 'Phiếu thu/chi đã hủy',
+                message: `${req.user!.name} đã ${status === 'approved' ? 'duyệt' : 'hủy'} ${transactionLabel} ${transaction.code}`,
+                actor: req.user!,
+                recipientUserIds: [transaction.created_by, transaction.approved_by],
+                data: {
+                    transaction_id: transaction.id,
+                    code: transaction.code,
+                    type: transaction.type,
+                    category: transaction.category,
+                    amount: transaction.amount,
+                    payment_method: transaction.payment_method,
+                    status: transaction.status,
+                    order_id: transaction.order_id,
+                    order_code: transaction.order_code,
+                    notes: transaction.notes,
+                },
             });
         }
 

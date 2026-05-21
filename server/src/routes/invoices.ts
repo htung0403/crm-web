@@ -4,6 +4,7 @@ import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireAccountant } from '../middleware/auth.js';
 import { syncOrderPayment } from '../utils/orderHelper.js';
 import { processInvoicePayment } from '../utils/billingHelper.js';
+import { notifyFinanceEvent } from '../utils/financeNotifications.js';
 
 
 const router = Router();
@@ -216,6 +217,25 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
             throw new ApiError('Lỗi khi tạo hóa đơn: ' + error.message, 500);
         }
 
+        notifyFinanceEvent({
+            event: 'invoice.created',
+            title: 'Hóa đơn mới',
+            message: `${req.user!.name} đã tạo hóa đơn ${invoice.invoice_code}`,
+            actor: req.user!,
+            recipientUserIds: [invoice.created_by],
+            data: {
+                invoice_id: invoice.id,
+                invoice_code: invoice.invoice_code,
+                order_id: invoice.order_id,
+                customer_id: invoice.customer_id,
+                customer_name: order.customer?.name,
+                total_amount: invoice.total_amount,
+                payment_method: invoice.payment_method,
+                status: invoice.status,
+                notes: invoice.notes,
+            },
+        });
+
         res.status(201).json({
             status: 'success',
             data: { invoice },
@@ -263,6 +283,25 @@ router.patch('/:id/status', authenticate, requireAccountant, async (req: Authent
             await processInvoicePayment(id);
         }
 
+        if (status === 'cancelled' && invoice) {
+            notifyFinanceEvent({
+                event: 'invoice.cancelled',
+                title: 'Hóa đơn đã hủy',
+                message: `${req.user!.name} đã hủy hóa đơn ${invoice.invoice_code}`,
+                actor: req.user!,
+                recipientUserIds: [invoice.created_by],
+                data: {
+                    invoice_id: invoice.id,
+                    invoice_code: invoice.invoice_code,
+                    order_id: invoice.order_id,
+                    customer_id: invoice.customer_id,
+                    total_amount: invoice.total_amount,
+                    payment_method: invoice.payment_method,
+                    status: invoice.status,
+                },
+            });
+        }
+
 
         res.json({
             status: 'success',
@@ -297,6 +336,18 @@ router.delete('/:id', authenticate, requireAccountant, async (req: Authenticated
         if (error) {
             throw new ApiError('Lỗi khi xóa hóa đơn: ' + error.message, 500);
         }
+
+        notifyFinanceEvent({
+            event: 'invoice.deleted',
+            title: 'Hóa đơn đã xóa',
+            message: `${req.user!.name} đã xóa hóa đơn ${invoice.invoice_code}`,
+            actor: req.user!,
+            data: {
+                invoice_id: invoice.id,
+                invoice_code: invoice.invoice_code,
+                status: invoice.status,
+            },
+        });
 
         res.json({
             status: 'success',

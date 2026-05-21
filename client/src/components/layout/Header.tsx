@@ -1,14 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Bell, Search, Menu, LogOut, Clock, User, CheckCheck, X, Package } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import type { User as UserType, UserRole } from '@/types';
 import { useLeadNotifications } from '@/hooks/useLeadNotifications';
-import { useOrderNotifications } from '@/hooks/useOrderNotifications';
+import { useOrderNotifications, type OrderNotification } from '@/hooks/useOrderNotifications';
 
 const roleLabels: Record<UserRole, string> = {
     admin: 'Quản trị viên',
@@ -37,10 +37,22 @@ export function Header({ onMenuToggle, isMobile, currentUser, onLogout }: Header
     const navigate = useNavigate();
     const [showNotifications, setShowNotifications] = useState(false);
     const [notificationTab, setNotificationTab] = useState<'leads' | 'orders'>('leads');
-    const { notifications: leadNotifications, unreadCount: leadUnreadCount, markAsRead: markLeadAsRead, markAllAsRead: markAllLeadsAsRead, loading: leadLoading } = useLeadNotifications();
-    const { notifications: orderNotifications, unreadCount: orderUnreadCount, markAsRead: markOrderAsRead, markAllAsRead: markAllOrdersAsRead, loading: orderLoading } = useOrderNotifications();
+    const [currentTime, setCurrentTime] = useState(() => Date.now());
+    const { notifications: leadNotifications, unreadCount: leadUnreadCount, markAsRead: markLeadAsRead, loading: leadLoading } = useLeadNotifications();
+    const { notifications: orderNotifications, unreadCount: orderUnreadCount, markAsRead: markOrderAsRead, loading: orderLoading, refresh: refreshOrderNotifications } = useOrderNotifications();
 
     const totalUnreadCount = leadUnreadCount + orderUnreadCount;
+
+    useEffect(() => {
+        if (showNotifications) {
+            refreshOrderNotifications();
+        }
+    }, [refreshOrderNotifications, showNotifications]);
+
+    useEffect(() => {
+        const interval = setInterval(() => setCurrentTime(Date.now()), 60 * 1000);
+        return () => clearInterval(interval);
+    }, []);
 
     const handleLeadNotificationClick = (leadId: string, notificationId: string) => {
         markLeadAsRead(notificationId);
@@ -48,9 +60,19 @@ export function Header({ onMenuToggle, isMobile, currentUser, onLogout }: Header
         navigate(`/leads/${leadId}`);
     };
 
-    const handleOrderNotificationClick = (notification: any) => {
+    const handleOrderNotificationClick = (notification: OrderNotification) => {
         markOrderAsRead(notification.id);
         setShowNotifications(false);
+
+        if (notification.data?.invoice_id || notification.type?.startsWith('invoice.')) {
+            navigate('/invoices');
+            return;
+        }
+
+        if (notification.data?.transaction_id || notification.type === 'transaction.created' || notification.type === 'finance.transaction.created') {
+            navigate('/income');
+            return;
+        }
 
         const orderId = notification.data?.order_id || notification.data?.entity_id;
         if (orderId) {
@@ -72,7 +94,7 @@ export function Header({ onMenuToggle, isMobile, currentUser, onLogout }: Header
     };
 
     const formatTimeAgo = (dateStr: string): string => {
-        const diff = Date.now() - new Date(dateStr).getTime();
+        const diff = currentTime - new Date(dateStr).getTime();
         const hours = Math.floor(diff / (1000 * 60 * 60));
         const days = Math.floor(hours / 24);
 
@@ -163,7 +185,7 @@ export function Header({ onMenuToggle, isMobile, currentUser, onLogout }: Header
                                                     onClick={() => setNotificationTab('orders')}
                                                 >
                                                     <Package className="h-3 w-3 mr-1" />
-                                                    Đơn hàng {orderUnreadCount > 0 && `(${orderUnreadCount})`}
+                                                    Đơn hàng/TC {orderUnreadCount > 0 && `(${orderUnreadCount})`}
                                                 </Button>
                                             </div>
                                             <Button
@@ -226,7 +248,7 @@ export function Header({ onMenuToggle, isMobile, currentUser, onLogout }: Header
                                                 ) : orderNotifications.length === 0 ? (
                                                     <div className="flex flex-col items-center justify-center py-8 text-center px-4">
                                                         <Package className="h-10 w-10 text-muted-foreground/50 mb-2" />
-                                                        <p className="text-sm text-muted-foreground">Không có thông báo đơn hàng</p>
+                                                        <p className="text-sm text-muted-foreground">Không có thông báo đơn hàng/tài chính</p>
                                                     </div>
                                                 ) : (
                                                     <div className="divide-y">

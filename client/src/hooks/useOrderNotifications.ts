@@ -10,6 +10,11 @@ export interface OrderNotification {
     data: {
         order_id?: string;
         order_code?: string;
+        invoice_id?: string;
+        transaction_id?: string;
+        entity_id?: string;
+        room_id?: string;
+        message_id?: string;
     };
     is_read: boolean;
     created_at: string;
