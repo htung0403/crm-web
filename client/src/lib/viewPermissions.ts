@@ -17,6 +17,18 @@ export const VIEW_DEFINITIONS: ViewDefinition[] = [
     { id: 'interactions', label: 'Tương tác', group: 'CRM', pathPrefixes: ['interactions'] },
     { id: 'orders', label: 'Đơn hàng', group: 'Bán hàng', pathPrefixes: ['orders'] },
     { id: 'orders/upsell-tickets', label: 'Mục phê duyệt (Upsell)', group: 'Bán hàng', pathPrefixes: ['orders/upsell-tickets'] },
+    {
+        id: 'orders/upsell-tickets/accessory-price',
+        label: 'Xem giá mua phụ kiện (Upsell)',
+        group: 'Bán hàng',
+        pathPrefixes: [],
+    },
+    {
+        id: 'orders/upsell-tickets/partner-price',
+        label: 'Xem giá nhờ đối tác làm (Upsell)',
+        group: 'Bán hàng',
+        pathPrefixes: [],
+    },
     { id: 'requests', label: 'Yêu cầu', group: 'Bán hàng', pathPrefixes: ['requests'] },
     { id: 'invoices', label: 'Hóa đơn', group: 'Bán hàng', pathPrefixes: ['invoices'] },
     { id: 'income', label: 'Phiếu thu', group: 'Sổ quỹ', pathPrefixes: ['income'] },
@@ -45,8 +57,10 @@ export const VIEW_DEFINITIONS: ViewDefinition[] = [
     { id: 'employee-settings', label: 'Thiết lập nhân viên', group: 'Nhân sự', pathPrefixes: ['employee-settings'] },
 ];
 
+const getMaxPrefixLength = (prefixes: string[]) => Math.max(0, ...prefixes.map((p) => p.length));
+
 const SORTED_BY_PREFIX = [...VIEW_DEFINITIONS].sort(
-    (a, b) => Math.max(...b.pathPrefixes.map((p) => p.length)) - Math.max(...a.pathPrefixes.map((p) => p.length)),
+    (a, b) => getMaxPrefixLength(b.pathPrefixes) - getMaxPrefixLength(a.pathPrefixes),
 );
 
 export function resolveViewKeyFromPath(pathname: string): string | null {
@@ -65,7 +79,7 @@ export function resolveViewKeyFromPath(pathname: string): string | null {
 }
 
 export function bypassesCustomViewPermissions(role: UserRole): boolean {
-    return role === 'admin' || role === 'manager';
+    return role === 'admin';
 }
 
 export function canAccessView(
@@ -85,7 +99,7 @@ export function getDefaultHomePath(user: Pick<User, 'role' | 'allowed_views'>): 
     if (bypassesCustomViewPermissions(user.role) || user.allowed_views == null) {
         return '/dashboard';
     }
-    const first = VIEW_DEFINITIONS.find((v) => user.allowed_views!.includes(v.id));
+    const first = VIEW_DEFINITIONS.find((v) => user.allowed_views!.includes(v.id) && v.pathPrefixes.length > 0);
     return first ? `/${first.pathPrefixes[0]}` : '/login';
 }
 

@@ -182,7 +182,7 @@ export function ProductDetailDialog({
     const [saving, setSaving] = useState(false);
     const [showUpsellDialog, setShowUpsellDialog] = useState(false);
     const [optimisticAfterSaleStages, setOptimisticAfterSaleStages] = useState<Record<string, string>>({});
-    const { users, fetchUsers } = useUsers();
+    const { users, fetchUsers, fetchSales, fetchTechnicians } = useUsers();
     const { user } = useAuth();
 
     const [mentionSearch, setMentionSearch] = useState('');
@@ -192,11 +192,13 @@ export function ProductDetailDialog({
     useEffect(() => {
         if (open) {
             fetchUsers();
+            fetchSales();
+            fetchTechnicians();
             // Reset scroll position to top when dialog opens or room changes
             const viewport = document.querySelector('.product-detail-scroll-area [data-radix-scroll-area-viewport]');
             if (viewport) viewport.scrollTop = 0;
         }
-    }, [open, fetchUsers, roomId]);
+    }, [open, fetchUsers, fetchSales, fetchTechnicians, roomId]);
 
     // Local form state
     const [formData, setFormData] = useState<Partial<Order>>({});

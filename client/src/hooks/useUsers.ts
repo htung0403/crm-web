@@ -8,7 +8,8 @@ interface CreateUserData {
     name: string;
     phone?: string;
     role: string;
-    department?: string;
+    department?: string | null;
+    departmentId?: string | null;
     avatar?: string;
     salary?: number;
     commission?: number;
@@ -21,7 +22,8 @@ interface UpdateUserData {
     name?: string;
     phone?: string;
     role?: string;
-    department?: string;
+    department?: string | null;
+    departmentId?: string | null;
     status?: string;
     avatar?: string;
     salary?: number;
@@ -208,3 +210,4 @@ export function useUsers(): UseUsersReturn {
         deleteUser
     };
 }
+

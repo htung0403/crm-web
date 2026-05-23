@@ -109,7 +109,7 @@ router.get('/', authenticate, requireManager, async (req: AuthenticatedRequest, 
 router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { 
-            email, password, name, phone, role, department, avatar, salary, commission, bankAccount, bankName, telegramChatId,
+            email, password, name, phone, role, department, departmentId, avatar, salary, commission, bankAccount, bankName, telegramChatId,
             dob, gender, identityCard, jobTitleId, joinDate, payrollBranchId, workingBranchId, kiotvietAccount, facebook, address, mobileDevice, notes 
         } = req.body;
 
@@ -160,6 +160,7 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
                 phone: phone || null,
                 role: role || 'sale',
                 department: department || null,
+                department_id: departmentId || null,
                 avatar: avatar || null,
                 salary: salary || 0,
                 commission: commission || 0,
@@ -392,3 +393,4 @@ router.delete('/:id', authenticate, requireManager, async (req: AuthenticatedReq
 });
 
 export { router as usersRouter };
+

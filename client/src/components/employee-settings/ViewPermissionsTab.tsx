@@ -114,8 +114,8 @@ export function ViewPermissionsPanel({ embedded = false }: { embedded?: boolean 
 
     const handleSave = async () => {
         if (!selectedUserId || !selected) return;
-        if (selected.role === 'admin' || selected.role === 'manager') {
-            toast.error('Không cấu hình quyền cho admin/manager');
+        if (selected.role === 'admin') {
+            toast.error('Không cấu hình quyền cho admin');
             return;
         }
         if (draftViews.length === 0) {
@@ -225,7 +225,7 @@ export function ViewPermissionsPanel({ embedded = false }: { embedded?: boolean 
                 <div className="flex-1 border border-gray-200 rounded-xl p-5">
                     {!selected ? (
                         <p className="text-sm text-gray-500 text-center py-16">Chọn nhân viên để cấu hình phân quyền</p>
-                    ) : selected.role === 'admin' || selected.role === 'manager' ? (
+                    ) : selected.role === 'admin' ? (
                         <p className="text-sm text-gray-600 text-center py-16">
                             Tài khoản <strong>{selected.role}</strong> có toàn quyền.
                         </p>

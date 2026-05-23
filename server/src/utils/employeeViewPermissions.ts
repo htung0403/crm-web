@@ -32,7 +32,7 @@ export async function getUserViewPermissionProfile(
     userId: string,
     role: string,
 ): Promise<UserViewPermissionProfile> {
-    if (role === 'admin' || role === 'manager') {
+    if (role === 'admin') {
         return { allowed_views: null, view_actions: null, uses_role_defaults: true };
     }
 

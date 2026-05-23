@@ -18,11 +18,17 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
             .order('created_at', { ascending: false })
             .range(offset, offset + Number(limit) - 1);
 
-        // Nếu không phải manager, chỉ xem lead của mình
-        if (req.user!.role !== 'manager' && req.user!.role !== 'admin') {
+        const userRole = req.user!.role;
+
+        // Sale: chỉ xem lead chưa phân công hoặc lead do chính mình phụ trách
+        if (userRole === 'sale') {
+            query = query.or(`assigned_to.eq.${req.user!.id},assigned_to.is.null`);
+        } else if (userRole === 'admin' || userRole === 'manager') {
+            if (assigned_to) {
+                query = query.eq('assigned_to', assigned_to);
+            }
+        } else {
             query = query.eq('assigned_to', req.user!.id);
-        } else if (assigned_to) {
-            query = query.eq('assigned_to', assigned_to);
         }
 
         if (status) query = query.eq('status', status);

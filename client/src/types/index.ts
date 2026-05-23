@@ -8,6 +8,8 @@ export interface User {
     role: UserRole;
     phone?: string;
     department?: string;
+    departmentId?: string;
+    department_id?: string;
     status?: 'active' | 'inactive' | 'onleave';
     created_at?: string;
     last_login?: string;
@@ -247,3 +249,4 @@ export interface MenuItem {
     children?: MenuItem[];
     roles?: UserRole[];
 }
+

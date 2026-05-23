@@ -1,5 +1,5 @@
 import type { Order, OrderItem } from '@/hooks/useOrders';
-import { formatDateTime } from '@/lib/utils';
+import { formatDate, formatDateTime } from '@/lib/utils';
 import { getPaymentConfig, isPaymentConfigured, type PaymentConfig } from '@/lib/paymentConfig';
 import { buildVietQrPayload } from '@/lib/vietqr';
 
@@ -19,23 +19,17 @@ const UNIT_SUFFIX: Record<string, string> = {
     account_card: '',
 };
 
-interface PrintSubLine {
-    index: number;
-    code: string;
+interface PrintServiceLine {
     name: string;
-    qty: string | number;
-    unit: string;
+    amount: number;
+    noteLines: string[];
 }
 
-interface PrintLine {
+interface PrintProductGroup {
     name: string;
-    unitSuffix?: string;
-    noteLines: string[];
-    unitPrice: number;
-    listPrice?: number;
-    quantity: number;
-    total: number;
-    subLines: PrintSubLine[];
+    dueAt?: string;
+    servicesTotal: number;
+    services: PrintServiceLine[];
 }
 
 function escapeHtml(text: string): string {
@@ -57,14 +51,6 @@ export function formatThermalMoney(amount: number): string {
         return `${Math.round(n / 1000)}n`;
     }
     return String(n);
-}
-
-function formatPriceCell(unitPrice: number, listPrice?: number): string {
-    const unit = formatThermalMoney(unitPrice);
-    if (listPrice != null && listPrice > 0 && listPrice !== unitPrice) {
-        return `<span class="price-main">${unit}</span><span class="price-old">${formatThermalMoney(listPrice)}</span>`;
-    }
-    return unit;
 }
 
 function extractNoteLines(item: OrderItem): string[] {
@@ -93,133 +79,157 @@ function extractNoteLines(item: OrderItem): string[] {
     return lines;
 }
 
-function extractPackageSubLines(item: OrderItem): PrintSubLine[] {
-    const sd = ((item as { sales_step_data?: Record<string, unknown> }).sales_step_data || {}) as Record<
-        string,
-        unknown
-    >;
-    const raw =
-        sd.package_services ||
-        sd.package_items ||
-        (item as { package_services?: unknown[] }).package_services ||
-        [];
-
-    if (!Array.isArray(raw)) return [];
-
-    return raw.map((ps: Record<string, unknown>, idx) => ({
-        index: idx + 1,
-        code: String(ps.service_code || ps.code || ps.item_code || ''),
-        name: String(ps.service_name || ps.name || ps.item_name || ''),
-        qty: (ps.quantity ?? ps.remaining ?? ps.qty ?? '') as string | number,
-        unit: String(ps.unit || 'Buổi'),
-    }));
+function getItemAmount(item: OrderItem): number {
+    const qty = Number(item.quantity) || 1;
+    const unitPrice = Number(item.unit_price) || 0;
+    const total = Number(item.total_price) || qty * unitPrice;
+    const surcharge = Number((item as { surcharge_amount?: number }).surcharge_amount) || 0;
+    return total + surcharge;
 }
 
-export function collectPrintLineItems(order: Order): PrintLine[] {
-    const lines: PrintLine[] = [];
+function isCustomerProduct(item: OrderItem | undefined): item is OrderItem & { is_customer_item: true; item_type: 'product' } {
+    return !!item && item.is_customer_item === true && item.item_type === 'product';
+}
 
-    for (const item of order.items || []) {
-        if (!item.item_name?.trim()) continue;
+function normalizeServiceName(item: OrderItem, productName?: string): string {
+    const suffix = UNIT_SUFFIX[item.item_type];
+    let name = item.item_name || 'Dịch vụ';
 
-        const isCustomerProductHeader =
-            item.is_customer_item && item.item_type === 'product' && !item.unit_price && !item.total_price;
-        if (isCustomerProductHeader) continue;
-
-        const qty = item.quantity ?? 1;
-        const unitPrice = Number(item.unit_price) || 0;
-        const total = Number(item.total_price) || qty * unitPrice;
-
-        if (total <= 0 && unitPrice <= 0 && item.item_type !== 'package') continue;
-
-        const sd = ((item as { sales_step_data?: Record<string, unknown> }).sales_step_data || {}) as Record<
-            string,
-            unknown
-        >;
-        const noteLines = extractNoteLines(item);
-        const subLines = item.item_type === 'package' ? extractPackageSubLines(item) : [];
-
-        const suffix = UNIT_SUFFIX[item.item_type];
-        let displayName = item.item_name;
-        if (suffix && !displayName.toLowerCase().includes(`(${suffix})`)) {
-            displayName = `${displayName} (${suffix.charAt(0).toUpperCase() + suffix.slice(1)})`;
-        }
-
-        if (item.item_type === 'voucher' || item.item_type === 'account_card') {
-            const denom = Number(sd.face_value ?? sd.denomination ?? unitPrice);
-            noteLines.push(
-                `Mệnh giá: ${denom.toLocaleString('vi-VN')} đ - áp dụng: ${
-                    (sd.apply_scope as string) || 'Một số sản phẩm, dịch vụ, gói dịch vụ'
-                }`
-            );
-        }
-
-        const listPrice = Number(sd.list_price ?? sd.original_price ?? 0);
-
-        lines.push({
-            name: displayName,
-            unitSuffix: suffix,
-            noteLines,
-            unitPrice,
-            listPrice: listPrice > 0 && listPrice !== unitPrice ? listPrice : undefined,
-            quantity: qty,
-            total,
-            subLines,
-        });
+    if (productName && name.includes(` (${productName})`)) {
+        name = name.replace(` (${productName})`, '');
     }
 
-    return lines;
+    if (suffix && !name.toLowerCase().includes(`(${suffix})`)) {
+        name = `${name} (${suffix.charAt(0).toUpperCase() + suffix.slice(1)})`;
+    }
+
+    const qty = Number(item.quantity) || 1;
+    if (qty > 1) {
+        name = `${name} x${qty}`;
+    }
+
+    return name;
+}
+
+function toServiceLine(item: OrderItem, productName?: string): PrintServiceLine {
+    return {
+        name: normalizeServiceName(item, productName),
+        amount: getItemAmount(item),
+        noteLines: extractNoteLines(item),
+    };
+}
+
+export function collectPrintLineItems(order: Order): PrintProductGroup[] {
+    const items = order.items || [];
+    const groups: PrintProductGroup[] = [];
+
+    let index = 0;
+    while (index < items.length) {
+        const item = items[index];
+        if (!item?.item_name?.trim()) {
+            index += 1;
+            continue;
+        }
+
+        if (isCustomerProduct(item)) {
+            const services: PrintServiceLine[] = [];
+            let cursor = index + 1;
+
+            while (cursor < items.length) {
+                const next = items[cursor];
+                if (isCustomerProduct(next)) break;
+                if (next?.item_name?.trim()) {
+                    const amount = getItemAmount(next);
+                    if (amount > 0 || next.item_type === 'package') {
+                        services.push(toServiceLine(next, item.item_name));
+                    }
+                }
+                cursor += 1;
+            }
+
+            const servicesTotal = services.reduce((sum, service) => sum + service.amount, 0);
+            groups.push({
+                name: item.item_name,
+                dueAt: item.due_at,
+                servicesTotal,
+                services,
+            });
+
+            index = cursor;
+            continue;
+        }
+
+        const amount = getItemAmount(item);
+        if (amount > 0 || item.item_type === 'package') {
+            const line = toServiceLine(item);
+            groups.push({
+                name: item.item_name,
+                dueAt: item.due_at,
+                servicesTotal: line.amount,
+                services: [line],
+            });
+        }
+
+        index += 1;
+    }
+
+    return groups;
 }
 
 export function getOrderPayAmount(order: Order): number {
+
     if (order.payment_status === 'paid') return 0;
     if (order.remaining_debt != null && order.remaining_debt > 0) return order.remaining_debt;
     const paid = order.paid_amount ?? 0;
     return Math.max(0, (order.total_amount ?? 0) - paid);
 }
 
-function buildItemsTableHtml(lines: PrintLine[]): string {
-    if (lines.length === 0) {
+function buildItemsTableHtml(groups: PrintProductGroup[]): string {
+    if (groups.length === 0) {
         return '<p class="empty-items">Không có dòng hàng</p>';
     }
 
-    const bodyRows = lines
-        .map((line) => {
-            const notesHtml = line.noteLines
-                .map((n) => `<tr><td colspan="3" class="item-note">${escapeHtml(n)}</td></tr>`)
-                .join('');
+    const bodyRows = groups
+        .map((group) => {
+            const dueText = group.dueAt ? `Hạn trả ${formatDate(group.dueAt)}` : 'Chưa có hạn trả';
+            const serviceRows =
+                group.services.length > 0
+                    ? group.services
+                          .map((service) => {
+                              const notes = service.noteLines
+                                  .map((note) => `<div class="svc-note">${escapeHtml(note)}</div>`)
+                                  .join('');
 
-            const subHtml = line.subLines
-                .map(
-                    (s) =>
-                        `<tr><td colspan="3" class="pkg-line">${s.index} ${escapeHtml(s.code)} ${escapeHtml(s.name)} ${escapeHtml(String(s.qty))} ${escapeHtml(s.unit)}</td></tr>`
-                )
-                .join('');
+                              return `<tr class="svc-row">
+                    <td class="svc-name">- ${escapeHtml(service.name)}${notes}</td>
+                    <td class="svc-amount">${formatThermalMoney(service.amount)}</td>
+                </tr>`;
+                          })
+                          .join('')
+                    : `<tr class="svc-row"><td class="svc-name svc-empty">- Chưa có dịch vụ</td><td class="svc-amount">0</td></tr>`;
 
             return `
-            <tr><td colspan="3" class="item-title">${escapeHtml(line.name)}</td></tr>
-            ${notesHtml}
-            ${subHtml}
-            <tr class="item-values">
-                <td class="col-price">${formatPriceCell(line.unitPrice, line.listPrice)}</td>
-                <td class="col-qty">${line.quantity}</td>
-                <td class="col-total">${formatThermalMoney(line.total)}</td>
+            <tr class="group-row">
+                <td class="group-name">
+                    ${escapeHtml(group.name)}
+                    <div class="group-due">(${escapeHtml(dueText)})</div>
+                </td>
+                <td class="group-total">${formatThermalMoney(group.servicesTotal)}</td>
             </tr>
-            <tr class="item-spacer"><td colspan="3"></td></tr>`;
+            ${serviceRows}`;
         })
         .join('');
 
     return `
-    <table class="items-table">
+    <table class="items-table grouped-table">
         <colgroup>
-            <col class="col-price-w" />
-            <col class="col-qty-w" />
-            <col class="col-total-w" />
+            <col class="col-group-name" />
+            <col class="col-group-total" />
         </colgroup>
         <thead>
             <tr>
-                <th class="col-price">Đơn giá</th>
-                <th class="col-qty">SL</th>
-                <th class="col-total">Thành tiền</th>
+                <th class="group-head-name">Sản phẩm / Dịch vụ</th>
+                <th class="group-head-total">Giá tiền</th>
             </tr>
         </thead>
         <tbody>${bodyRows}</tbody>
@@ -256,9 +266,9 @@ function buildTotalsTableHtml(subtotal: number, discount: number, total: number)
 }
 
 const THERMAL_STYLES = `
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        .thermal-doc, .thermal-doc * { margin: 0; padding: 0; box-sizing: border-box; }
         @page { size: 80mm auto; margin: 2mm; }
-        body, .thermal-preview, .invoice-sheet {
+        .thermal-doc, .thermal-doc .invoice-sheet {
             width: 72mm;
             max-width: 72mm;
             margin: 0 auto;
@@ -287,11 +297,10 @@ const THERMAL_STYLES = `
         .col-total-w { width: 48%; }
         .items-table, .totals-table {
             width: 100%;
-            table-layout: fixed;
             border-collapse: collapse;
             font-size: 10px;
         }
-        .items-table { margin: 4px 0; }
+        .items-table { margin: 6px 0 4px; table-layout: fixed; }
         .items-table thead th {
             font-weight: 700;
             font-size: 9px;
@@ -299,26 +308,60 @@ const THERMAL_STYLES = `
             border-bottom: 1px solid #000;
             vertical-align: bottom;
         }
-        .items-table td, .totals-table td { padding: 2px; vertical-align: top; word-break: break-word; }
-        .col-price { text-align: left; }
-        .col-qty { text-align: center; }
-        .col-total { text-align: right; font-weight: 600; white-space: nowrap; }
-        .item-title {
+        .grouped-table .col-group-name { width: 72%; }
+        .grouped-table .col-group-total { width: 28%; }
+        .group-head-name { text-align: left; }
+        .group-head-total { text-align: right; }
+        .group-row td {
+            border-top: 1px dashed #999;
+            padding: 5px 2px 3px;
+            vertical-align: top;
+        }
+        .group-name {
             font-weight: 700;
             font-size: 10px;
-            padding: 6px 2px 2px !important;
+            line-height: 1.35;
             text-align: left;
+        }
+        .group-due {
+            font-weight: 400;
+            font-size: 8.5px;
+            margin-top: 1px;
+            color: #444;
+        }
+        .group-total {
+            text-align: right;
+            font-weight: 700;
+            font-size: 10px;
+            white-space: nowrap;
+        }
+        .svc-row td {
+            padding: 2px;
+            vertical-align: top;
+            word-break: break-word;
+        }
+        .svc-name {
+            text-align: left;
+            padding-left: 8px !important;
+            font-size: 9.5px;
             line-height: 1.35;
         }
-        .item-note, .pkg-line {
-            font-size: 9px;
-            padding: 1px 2px 1px 6px !important;
-            text-align: left;
-            line-height: 1.35;
-            color: #222;
+        .svc-amount {
+            text-align: right;
+            font-weight: 600;
+            white-space: nowrap;
+            font-size: 9.5px;
         }
-        .item-values td { padding-top: 1px; padding-bottom: 4px; }
-        .item-spacer td { height: 4px; padding: 0 !important; border: none; }
+        .svc-note {
+            font-size: 8.5px;
+            color: #333;
+            margin-top: 1px;
+            font-style: italic;
+        }
+        .svc-empty {
+            color: #666;
+            font-style: italic;
+        }
         .price-main { display: block; line-height: 1.25; }
         .price-old { display: block; font-size: 8px; color: #555; text-decoration: line-through; line-height: 1.2; }
         .empty-items { text-align: center; font-size: 10px; color: #555; padding: 8px 0; }
@@ -338,17 +381,17 @@ const THERMAL_STYLES = `
         .qr-box canvas, .qr-box img { width: 38mm !important; height: 38mm !important; }
         .bank { font-size: 9px; margin: 1px 0; }
         .warn { text-align: center; font-size: 9px; color: #555; margin-top: 6px; }
-        @media print { body { width: 72mm; } }
+        @media print { .thermal-doc { width: 72mm; } }
 `;
 
 function buildInvoiceBody(order: Order, cfg: PaymentConfig): string {
     const customer = order.customer as { name?: string; phone?: string; address?: string; email?: string } | undefined;
     const saleDate = order.confirmed_at || order.created_at;
-    const lines = collectPrintLineItems(order);
-    const subtotal = order.subtotal ?? lines.reduce((s, l) => s + l.total, 0);
+    const groups = collectPrintLineItems(order);
+    const subtotal = order.subtotal ?? groups.reduce((sum, group) => sum + group.servicesTotal, 0);
     const discount = order.discount ?? 0;
 
-    const itemsTableHtml = buildItemsTableHtml(lines);
+    const itemsTableHtml = buildItemsTableHtml(groups);
     const totalsHtml = buildTotalsTableHtml(subtotal, discount, order.total_amount);
 
     const notesBlock = order.notes?.trim()
@@ -430,8 +473,10 @@ export function buildThermalInvoiceHtml(order: Order, config?: PaymentConfig): s
     <style>${THERMAL_STYLES}</style>
 </head>
 <body>
-    ${body}
-    ${qrBlock}
+    <div class="thermal-doc">
+        ${body}
+        ${qrBlock}
+    </div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"><\/script>
     <script>
         (function() {
@@ -464,7 +509,7 @@ export function buildThermalInvoicePreviewHtml(order: Order, config?: PaymentCon
             ? `<p class="warn" style="text-align:center;margin-top:8px;">Còn thanh toán: ${formatThermalMoney(payAmount)} (QR khi in)</p>`
             : '';
 
-    return `${body}${qrNote}<style>${THERMAL_STYLES}</style>`;
+    return `<div class="thermal-doc">${body}${qrNote}</div><style>${THERMAL_STYLES}</style>`;
 }
 
 export function printThermalInvoice(order: Order): void {
@@ -477,3 +522,8 @@ export function printThermalInvoice(order: Order): void {
     win.document.write(html);
     win.document.close();
 }
+
+
+
+
+

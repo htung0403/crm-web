@@ -130,6 +130,7 @@ const menuItems: MenuItem[] = [
         roles: ['admin', 'manager', 'accountant', 'sale', 'technician'],
         children: [
             { id: 'employees', label: 'Danh sách nhân viên', roles: ['admin', 'manager'] },
+            { id: 'employees/departments', label: 'Phòng ban', roles: ['admin', 'manager'] },
             { id: 'work-schedule', label: 'Lịch làm việc', roles: ['admin', 'manager', 'accountant', 'sale', 'technician'] },
             { id: 'attendance-mobile', label: 'Chấm công (Mobile)', roles: ['admin', 'manager', 'accountant', 'sale', 'technician'] },
             { id: 'timesheets', label: 'Bảng chấm công', roles: ['admin', 'manager', 'accountant'] },

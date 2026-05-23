@@ -16,11 +16,13 @@ import { Button } from '@/components/ui/button';
 import { BackwardMoveDialog } from '@/components/orders/BackwardMoveDialog';
 import { toast } from 'sonner';
 import { getWorkflowRequestLogDisplay, isWorkflowRequestLogAction } from '../workflowRequestLog';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface WorkflowCardProps {
     group: { product: OrderItem | null; services: OrderItem[] };
     index: number;
     roomId: string;
+    canDragWorkflow: boolean;
     orderCode: string | undefined;
     getItemCurrentStep: (itemId: string) => any;
     getStepDeadlineDisplay: (itemId: string) => { label: string; dueAt: Date | null };
@@ -38,6 +40,7 @@ const WorkflowCard = memo(({
     group,
     index,
     roomId,
+    canDragWorkflow,
     orderCode,
     getItemCurrentStep,
     getStepDeadlineDisplay,
@@ -64,8 +67,10 @@ const WorkflowCard = memo(({
     const currentStep = leadItem ? getItemCurrentStep(leadItem.id) : null;
     const isSlaPaused = stepDeadline.label === 'Đang chờ duyệt' || stepDeadline.label === '⏸ Đang tạm dừng';
 
+    const isCardDragDisabled = !canDragWorkflow || roomId === 'done' || roomId === 'fail' || isSlaPaused;
+
     return (
-        <Draggable key={cardKey} draggableId={cardKey} index={index} isDragDisabled={roomId === 'done' || roomId === 'fail' || isSlaPaused}>
+        <Draggable key={cardKey} draggableId={cardKey} index={index} isDragDisabled={isCardDragDisabled}>
             {(provided, snapshot) => (
                 <div
                     ref={provided.innerRef}
@@ -73,7 +78,7 @@ const WorkflowCard = memo(({
                     {...provided.dragHandleProps}
                     className={cn(
                         "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all",
-                        isSlaPaused ? "cursor-not-allowed opacity-75" : "cursor-grab active:cursor-grabbing",
+                        isCardDragDisabled ? "cursor-not-allowed opacity-75" : "cursor-grab active:cursor-grabbing",
                         snapshot.isDragging ? "shadow-lg ring-2 ring-primary/20 scale-105" : "",
                         itemLate && roomId !== 'done' ? (
                             (extensionRequest?.status === 'pending' || extensionRequest?.status === 'requested') ? "border-amber-400 bg-amber-50/50 border-dashed" : "border-red-500 bg-red-50/30"
@@ -280,6 +285,7 @@ WorkflowCard.displayName = 'WorkflowCard';
 interface WorkflowColumnProps {
     room: { id: string; title: string };
     groups: { product: OrderItem | null; services: OrderItem[] }[];
+    canDragWorkflow: boolean;
     orderCode: string | undefined;
     getItemCurrentStep: (itemId: string) => any;
     getStepDeadlineDisplay: (itemId: string) => { label: string; dueAt: Date | null };
@@ -296,6 +302,7 @@ interface WorkflowColumnProps {
 const WorkflowColumn = ({
     room,
     groups,
+    canDragWorkflow,
     orderCode,
     getItemCurrentStep,
     getStepDeadlineDisplay,
@@ -339,6 +346,7 @@ const WorkflowColumn = ({
                                 group={group}
                                 index={index}
                                 roomId={room.id}
+                                canDragWorkflow={canDragWorkflow}
                                 orderCode={orderCode}
                                 getItemCurrentStep={getItemCurrentStep}
                                 getStepDeadlineDisplay={getStepDeadlineDisplay}
@@ -408,12 +416,15 @@ export function WorkflowTab({
     updateOrderItemStatus,
     fetchKanbanLogs
 }: WorkflowTabProps) {
+    const { user } = useAuth();
     const [selectedLogDetail, setSelectedLogDetail] = useState<any>(null);
     const [showLogDetailDialog, setShowLogDetailDialog] = useState(false);
     const [showBackwardMoveDialog, setShowBackwardMoveDialog] = useState(false);
     const [backwardMoveGroup, setBackwardMoveGroup] = useState<any>(null);
     const [viewLogData, setViewLogData] = useState<any>(null);
     const [mobileRoomId, setMobileRoomId] = useState('waiting');
+
+    const canDragWorkflow = user?.role === 'admin' || user?.role === 'manager' || user?.role === 'sale';
 
     const handleOpenBackwardMove = (group: any) => {
         setBackwardMoveGroup(group);
@@ -564,12 +575,15 @@ export function WorkflowTab({
                                                 );
                                             })}
                                         </div>
-                                        <DragDropContext onDragEnd={onWorkflowDragEnd}>
+                                        <DragDropContext onDragEnd={(result) => {
+                                            if (!canDragWorkflow) return;
+                                            onWorkflowDragEnd(result);
+                                        }}>
                                             <Droppable droppableId={mobileRoomId}>
                                                 {(provided, snapshot) => (
                                                     <div ref={provided.innerRef} {...provided.droppableProps} className={cn('min-h-[100px] space-y-2 rounded-xl border-2 border-dashed p-2', snapshot.isDraggingOver && 'border-primary/40 bg-primary/5')}>
                                                         {(groupsByRoom[mobileRoomId] || []).map((group, index) => (
-                                                            <WorkflowCard key={group.product?.id ?? group.services.map((s) => s.id).join('-')} group={group} index={index} roomId={mobileRoomId} orderCode={order?.order_code} getItemCurrentStep={getItemCurrentStep} getStepDeadlineDisplay={getStepDeadlineDisplay} handleOpenAccessory={handleOpenAccessory} handleOpenPartner={handleOpenPartner} handleOpenExtension={handleOpenExtension} handleOpenAssignDialog={handleOpenAssignDialog} handleOpenSaleAssignDialog={handleOpenSaleAssignDialog} onCardClick={onProductCardClick} handleOpenBackwardMove={handleOpenBackwardMove} orderExtensionRequest={order?.extension_request} />
+                                                            <WorkflowCard key={group.product?.id ?? group.services.map((s) => s.id).join('-')} group={group} index={index} roomId={mobileRoomId} canDragWorkflow={canDragWorkflow} orderCode={order?.order_code} getItemCurrentStep={getItemCurrentStep} getStepDeadlineDisplay={getStepDeadlineDisplay} handleOpenAccessory={handleOpenAccessory} handleOpenPartner={handleOpenPartner} handleOpenExtension={handleOpenExtension} handleOpenAssignDialog={handleOpenAssignDialog} handleOpenSaleAssignDialog={handleOpenSaleAssignDialog} onCardClick={onProductCardClick} handleOpenBackwardMove={handleOpenBackwardMove} orderExtensionRequest={order?.extension_request} />
                                                         ))}
                                                         {provided.placeholder}
                                                     </div>
@@ -578,13 +592,17 @@ export function WorkflowTab({
                                         </DragDropContext>
                                     </div>
                                 )}
-                                <DragDropContext onDragEnd={onWorkflowDragEnd}>
+                                <DragDropContext onDragEnd={(result) => {
+                                    if (!canDragWorkflow) return;
+                                    onWorkflowDragEnd(result);
+                                }}>
                                     <div className="hidden gap-4 overflow-x-auto pb-4 md:grid md:grid-cols-6 md:min-w-[1200px]">
                                         {rooms.map((room) => (
                                             <WorkflowColumn
                                                 key={room.id}
                                                 room={room}
                                                 groups={groupsByRoom[room.id] || []}
+                                                canDragWorkflow={canDragWorkflow}
                                                 orderCode={order?.order_code}
                                                 getItemCurrentStep={getItemCurrentStep}
                                                 getStepDeadlineDisplay={getStepDeadlineDisplay}

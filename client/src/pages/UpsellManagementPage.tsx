@@ -42,6 +42,23 @@ import { upsellTicketsApi, requestsApi, leaveRequestsApi, transactionsApi, users
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 
+const ACCESSORY_PRICE_PERMISSION = 'orders/upsell-tickets/accessory-price';
+const PARTNER_PRICE_PERMISSION = 'orders/upsell-tickets/partner-price';
+
+const parseMoneyAmount = (value: unknown): number | null => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+    }
+    if (typeof value === 'string') {
+        const digits = value.replace(/\D/g, '');
+        if (!digits) return null;
+        return Number(digits);
+    }
+    return null;
+};
+
+const formatMoneyOrDash = (amount: number | null) => (amount != null ? formatCurrency(amount) : '—');
+
 export function UpsellManagementPage() {
     const navigate = useNavigate();
     const { user } = useAuth();
@@ -64,6 +81,15 @@ export function UpsellManagementPage() {
     const [showRejectDialog, setShowRejectDialog] = useState(false);
     const [rejectItem, setRejectItem] = useState<{ id: string; type: 'upsell' | 'order_edit' | 'accessory' | 'partner' | 'extension' | 'leave' | 'voucher' } | null>(null);
     const [rejectionReason, setRejectionReason] = useState('');
+
+    const hasExplicitPricePermission = (permissionId: string) => {
+        if (!user) return false;
+        if (user.role === 'admin') return true;
+        return Array.isArray(user.allowed_views) && user.allowed_views.includes(permissionId);
+    };
+
+    const canViewAccessoryPrice = hasExplicitPricePermission(ACCESSORY_PRICE_PERMISSION);
+    const canViewPartnerPrice = hasExplicitPricePermission(PARTNER_PRICE_PERMISSION);
 
     const loadData = async () => {
         setLoading(true);
@@ -115,6 +141,17 @@ export function UpsellManagementPage() {
             req.order_product?.order?.id ||
             req.order_product_service?.order_product?.order?.id ||
             req.metadata?.order_id;
+    };
+
+    const getAccessoryPrice = (req: any) => parseMoneyAmount(req?.metadata?.price_estimate);
+
+    const getPartnerPrice = (req: any) => {
+        return (
+            parseMoneyAmount(req?.metadata?.partner_fee_amount) ??
+            parseMoneyAmount(req?.metadata?.price_estimate) ??
+            parseMoneyAmount(req?.partner_fee_amount) ??
+            parseMoneyAmount(req?.price_estimate)
+        );
     };
 
     const getTicketType = (ticket: any) => {
@@ -569,7 +606,13 @@ export function UpsellManagementPage() {
                                                     </div>
                                                     <div className="text-right shrink-0">
                                                         <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Giá</span>
-                                                        <span className="text-lg font-black text-blue-600">{req.metadata?.price_estimate ? formatCurrency(Number(req.metadata.price_estimate.replace(/\D/g, ''))) : '—'}</span>
+                                                        {canViewAccessoryPrice ? (
+                                                            <span className="text-lg font-black text-blue-600">
+                                                                {formatMoneyOrDash(getAccessoryPrice(req))}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-sm font-bold text-slate-400">Không có quyền xem</span>
+                                                        )}
                                                     </div>
                                                 </div>
                                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4 py-2 bg-blue-50/30 px-3 rounded-lg border border-blue-50 mb-3">
@@ -620,9 +663,17 @@ export function UpsellManagementPage() {
                                                         <Badge className="bg-amber-50 text-amber-600 border-amber-200">Chờ duyệt</Badge>
                                                     </div>
                                                 </div>
-                                                <div className="grid grid-cols-2 gap-4 py-2 bg-amber-50/30 px-3 rounded-lg border border-amber-100 mb-3">
+                                                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 py-2 bg-amber-50/30 px-3 rounded-lg border border-amber-100 mb-3">
                                                     <div><p className="text-[10px] font-bold text-slate-400 uppercase">Đơn hàng</p><Button variant="link" className="p-0 h-auto text-amber-600 font-bold text-xs" onClick={() => navigate(`/orders/${getOrderId(req)}`)}>{getOrderCode(req)}</Button></div>
                                                     <div><p className="text-[10px] font-bold text-slate-400 uppercase">Lý do / Mô tả</p><p className="text-xs text-slate-600 italic line-clamp-2">{req.notes || 'Không có ghi chú'}</p></div>
+                                                    <div className="col-span-2 md:col-span-1">
+                                                        <p className="text-[10px] font-bold text-slate-400 uppercase">Giá tiền nhờ đối tác làm</p>
+                                                        {canViewPartnerPrice ? (
+                                                            <p className="text-sm font-black text-amber-600">{formatMoneyOrDash(getPartnerPrice(req))}</p>
+                                                        ) : (
+                                                            <p className="text-xs font-bold text-slate-400">Không có quyền xem</p>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </div>
                                         </div>

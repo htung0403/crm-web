@@ -12,6 +12,7 @@ import { InvoicesPage } from '@/pages/InvoicesPage';
 import { FinancePage } from '@/pages/FinancePage';
 import { ProductsPage } from '@/pages/ProductsPage';
 import { EmployeesPage } from '@/pages/EmployeesPage';
+import { EmployeeDepartmentsPage } from '@/pages/EmployeeDepartmentsPage';
 import { EmployeeDetailPage } from '@/pages/EmployeeDetailPage';
 import { KPIPage } from '@/pages/KPIPage';
 import { SalaryPage } from '@/pages/SalaryPage';
@@ -47,25 +48,10 @@ import { ViolationsPage } from '@/pages/ViolationsPage';
 import { TrainingPage } from '@/pages/TrainingPage';
 import { RecruitmentPage } from '@/pages/RecruitmentPage';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
-import { cn } from '@/lib/utils';
 import type { UserRole, User } from '@/types';
 import { Toaster } from 'sonner';
 import { canAccessView, getDefaultHomePath, resolveViewKeyFromPath } from '@/lib/viewPermissions';
 
-// Placeholder pages for routes not yet implemented
-function PlaceholderPage({ title }: { title: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
-      <div className="h-20 w-20 rounded-2xl bg-muted flex items-center justify-center mb-4">
-        <span className="text-4xl">🚧</span>
-      </div>
-      <h2 className="text-2xl font-bold text-foreground mb-2">{title}</h2>
-      <p className="text-muted-foreground max-w-md">
-        Trang này đang được phát triển. Vui lòng quay lại sau.
-      </p>
-    </div>
-  );
-}
 
 // Permission configuration
 const pagePermissions: Record<string, UserRole[]> = {
@@ -505,6 +491,12 @@ function AppContent() {
             <Route path="/employees" element={
               <ProtectedRoute allowedRoles={pagePermissions.employees}>
                 <EmployeesPage />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/employees/departments" element={
+              <ProtectedRoute allowedRoles={pagePermissions.departments}>
+                <EmployeeDepartmentsPage />
               </ProtectedRoute>
             } />
 

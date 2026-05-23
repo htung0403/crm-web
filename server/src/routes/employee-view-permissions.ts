@@ -83,8 +83,8 @@ router.put('/:userId', requireManager, async (req: AuthenticatedRequest, res: Re
         if (userError) throw userError;
         if (!targetUser) throw new ApiError('Không tìm thấy nhân viên', 404);
 
-        if (targetUser.role === 'admin' || targetUser.role === 'manager') {
-            throw new ApiError('Không cấu hình quyền xem cho tài khoản admin/manager', 400);
+        if (targetUser.role === 'admin') {
+            throw new ApiError('Không cấu hình quyền xem cho tài khoản admin', 400);
         }
 
         const now = new Date().toISOString();

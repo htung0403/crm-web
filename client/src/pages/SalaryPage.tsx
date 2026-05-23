@@ -625,7 +625,7 @@ function PayslipTable({ batchId }: { batchId: string }) {
     const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
     const paginated = records.slice((page - 1) * pageSize, page * pageSize);
 
-    const totalSalary = records.reduce((s, r) => s + (r.gross_salary || r.net_salary + r.deduction), 0);
+    const totalSalary = records.reduce((s, r) => s + (r.gross_salary ?? (r.net_salary + r.deduction)), 0);
     const totalPaidEmp = records.reduce((s, r) => s + (r.status === 'paid' ? r.net_salary : 0), 0);
     const totalRemaining = totalSalary - totalPaidEmp;
 
@@ -696,7 +696,7 @@ function PayslipTable({ batchId }: { batchId: string }) {
                         </tr>
                     ) : (
                         paginated.map((record, idx) => {
-                            const gross = record.gross_salary || (record.hourly_wage + record.commission + record.bonus);
+                            const gross = record.gross_salary ?? (record.hourly_wage + record.commission + record.bonus);
                             const paid = record.status === 'paid' ? record.net_salary : 0;
                             const remaining = gross - paid;
                             const plCode = `PL${String(totalItems - ((page - 1) * pageSize + idx) + 140).padStart(6, '0')}`;

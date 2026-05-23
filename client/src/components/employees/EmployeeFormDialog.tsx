@@ -20,6 +20,8 @@ interface Employee {
     phone?: string;
     role: UserRole;
     department?: string;
+    departmentId?: string;
+    department_id?: string;
     avatar?: string;
     status?: string;
     salary?: number;
@@ -188,7 +190,7 @@ export function EmployeeFormDialog({
             setAvatar(employee.avatar || '');
             setPhone(employee.phone || '');
             setRole(employee.role || 'sale');
-            setDepartment(employee.department || '');
+            setDepartment(employee.departmentId || employee.department_id || employee.department || '');
             setSalary(employee.salary || 0);
             setCommission(employee.commission || 0);
             setBankAccount(employee.bankAccount || '');
@@ -277,12 +279,15 @@ export function EmployeeFormDialog({
 
         setSubmitting(true);
         try {
+            const normalizedDepartment = department && department !== 'none' ? department : '';
+
             const submitData: any = {
                 name,
                 email,
                 phone,
                 role,
-                department: department || undefined,
+                department: normalizedDepartment || undefined,
+                departmentId: normalizedDepartment || undefined,
                 salary,
                 commission,
                 bankAccount,
@@ -1140,3 +1145,4 @@ export function EmployeeFormDialog({
         </>
     );
 }
+

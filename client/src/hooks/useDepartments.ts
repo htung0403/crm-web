@@ -6,7 +6,7 @@ export interface Department {
     code: string;
     name: string;
     description?: string;
-    manager_id?: string;
+    manager_id?: string | null;
     manager?: {
         id: string;
         name: string;
@@ -82,3 +82,4 @@ export function useDepartments(): UseDepartmentsReturn {
         deleteDepartment
     };
 }
+

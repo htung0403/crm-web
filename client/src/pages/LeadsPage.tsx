@@ -35,7 +35,7 @@ import type { CreateLeadFormData } from '@/components/leads';
 
 export function LeadsPage() {
     const navigate = useNavigate();
-    const { canEdit, canDelete } = useViewActionForRoles('leads', ['admin', 'manager', 'sale']);
+    const { canRead, canEdit, canDelete } = useViewActionForRoles('leads', ['admin', 'manager', 'sale']);
     const { leads, loading, error, fetchLeads, createLead, updateLead, deleteLead, convertLead } = useLeads();
     const { employees, fetchEmployees } = useEmployees();
     const { users: technicians, fetchTechnicians } = useUsers();
@@ -374,6 +374,20 @@ export function LeadsPage() {
         );
     }
 
+    if (!canRead) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
+                <div className="h-20 w-20 rounded-2xl bg-red-100 flex items-center justify-center mb-4">
+                    <span className="text-4xl">🔒</span>
+                </div>
+                <h2 className="text-2xl font-bold text-foreground mb-2">Không có quyền xem lead</h2>
+                <p className="text-muted-foreground max-w-md">
+                    Tài khoản của bạn chưa được cấp quyền xem danh sách lead.
+                </p>
+            </div>
+        );
+    }
+
     return (
         <>
             <Toaster position="top-right" richColors />
@@ -386,10 +400,12 @@ export function LeadsPage() {
                             <h1 className="text-2xl font-bold text-foreground">Quản lý Leads</h1>
                             <p className="text-muted-foreground">Theo dõi và chăm sóc khách hàng tiềm năng</p>
                         </div>
-                        <Button onClick={() => navigate('/leads/new')} className="shadow-md w-full sm:w-auto">
-                            <Plus className="h-4 w-4 mr-2" />
-                            Thêm Lead
-                        </Button>
+                        {canEdit && (
+                            <Button onClick={() => navigate('/leads/new')} className="shadow-md w-full sm:w-auto">
+                                <Plus className="h-4 w-4 mr-2" />
+                                Thêm Lead
+                            </Button>
+                        )}
                     </div>
 
                     {/* Stats Cards */}

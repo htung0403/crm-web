@@ -86,6 +86,50 @@ import { ProductDetailDialog } from './OrderDetailPage/dialogs/ProductDetailDial
 import { UpsellDialog } from '@/components/orders/UpsellDialog';
 import { OrderDetailMobileHeader } from './OrderDetailPage/components/OrderDetailMobileHeader';
 
+const toNumberOrNull = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === '') return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const getOrderPaymentRecords = (order: any): any[] => {
+    if (Array.isArray(order?.payments)) return order.payments;
+    if (Array.isArray(order?.payment_records)) return order.payment_records;
+    if (Array.isArray(order?.transactions)) return order.transactions;
+    return [];
+};
+
+const resolveOrderPaidAmount = (order: any): number => {
+    const paymentRecords = getOrderPaymentRecords(order);
+    const paidFromRecords = paymentRecords.reduce((sum: number, record: any) => {
+        const amount = toNumberOrNull(record?.amount ?? record?.payment_amount ?? record?.paid_amount);
+        return sum + (amount ?? 0);
+    }, 0);
+
+    const totalAmount = toNumberOrNull(order?.total_amount) ?? 0;
+    const remainingDebt = toNumberOrNull(order?.remaining_debt);
+    const paidFromRemaining = remainingDebt !== null ? Math.max(0, totalAmount - remainingDebt) : null;
+
+    const candidates = [
+        toNumberOrNull(order?.paid_amount),
+        toNumberOrNull(order?.total_paid),
+        toNumberOrNull(order?.amount_paid),
+        paidFromRemaining,
+        paidFromRecords,
+    ].filter((value): value is number => value !== null);
+
+    if (candidates.length === 0) return 0;
+    return Math.max(0, ...candidates);
+};
+
+const resolveOrderRemainingDebt = (order: any, paidAmount: number): number => {
+    const explicitRemainingDebt = toNumberOrNull(order?.remaining_debt);
+    if (explicitRemainingDebt !== null) return explicitRemainingDebt;
+
+    const totalAmount = toNumberOrNull(order?.total_amount) ?? 0;
+    return Math.max(0, totalAmount - paidAmount);
+};
+
 export function PhotoUpload({ label, value, onChange, disabled }: { label: string; value: string[]; onChange: (urls: string[]) => void; disabled?: boolean }) {
     const [uploading, setUploading] = useState(false);
 
@@ -599,6 +643,14 @@ export function OrderDetailPage() {
         (user?.role === 'manager' || user?.role === 'admin') &&
         !!order.items?.some((item) => (item as { status?: string }).status === 'step4');
 
+    const resolvedPaidAmount = resolveOrderPaidAmount(order);
+    const resolvedRemainingDebt = resolveOrderRemainingDebt(order, resolvedPaidAmount);
+    const resolvedPaymentStatus = resolvedRemainingDebt <= 0
+        ? 'paid'
+        : resolvedPaidAmount > 0
+            ? 'partial'
+            : 'unpaid';
+
     const pendingEditApprovalFromState = Boolean((location.state as any)?.pendingEditApproval);
 
     const accessoryRejectionReason =
@@ -661,7 +713,9 @@ export function OrderDetailPage() {
         navigate(`/orders/${order.id}/edit`, {
             state: {
                 requireManagerApprovalAfterEdit: true,
-                requestType: 'order_edit'
+                requestType: 'order_edit',
+                existingPaidAmount: resolvedPaidAmount,
+                existingPaymentMethod: (order as any)?.payment_method
             }
         });
     };
@@ -730,13 +784,13 @@ export function OrderDetailPage() {
                         </Button>
                     )}
                     <Button
-                        className={order.payment_status === 'paid' 
+                        className={resolvedPaymentStatus === 'paid' 
                             ? "bg-green-50 text-green-700 border-green-200 hover:bg-green-100 flex-1 sm:flex-none" 
                             : "bg-green-600 hover:bg-green-700 flex-1 sm:flex-none"
                         }
                         onClick={() => setShowPaymentRecordDialog(true)}
                     >
-                        {order.payment_status === 'paid' ? (
+                        {resolvedPaymentStatus === 'paid' ? (
                             <>
                                 <CheckCircle2 className="h-4 w-4 mr-2 text-green-600" />
                                 Đã thanh toán
@@ -956,7 +1010,7 @@ export function OrderDetailPage() {
                 onOpenChange={setShowPaymentRecordDialog}
                 orderId={order.id}
                 orderCode={order.order_code}
-                remainingDebt={order.remaining_debt ?? (order.total_amount - (order.paid_amount || 0))}
+                remainingDebt={resolvedRemainingDebt}
                 onSuccess={reloadOrder}
             />
 

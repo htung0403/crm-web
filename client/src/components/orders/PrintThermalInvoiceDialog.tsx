@@ -70,7 +70,7 @@ export function PrintThermalInvoiceDialog({ order, open, onClose }: PrintThermal
                     </div>
                 )}
 
-                <div className="mx-auto border rounded-lg bg-gray-50 shadow-inner overflow-hidden flex justify-center">
+                <div className="mx-auto border rounded-lg bg-gray-50 shadow-inner overflow-hidden flex flex-col items-center">
                     <div
                         className="overflow-y-auto max-h-[55vh] bg-white"
                         style={{ width: '72mm', maxWidth: '100%' }}
@@ -99,3 +99,4 @@ export function PrintThermalInvoiceDialog({ order, open, onClose }: PrintThermal
         </Dialog>
     );
 }
+

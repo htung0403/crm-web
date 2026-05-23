@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useParams, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
     ArrowLeft, ArrowRight, Plus, Trash2, Camera, Package, Sparkles,
@@ -88,8 +88,78 @@ interface CustomerProduct {
 
 const generateTempId = () => `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+const toNumberOrNull = (value: unknown): number | null => {
+    if (value === null || value === undefined || value === '') return null;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const resolveFirstCommission = (...values: Array<number | null | undefined>): number => {
+    for (const value of values) {
+        if (value !== null && value !== undefined) return value;
+    }
+    return 0;
+};
+
+const clampCommissionPercent = (value: unknown): number => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 0;
+    return Math.max(0, Math.min(100, parsed));
+};
+
+const getOrderPaymentRecords = (order: any): any[] => {
+    if (Array.isArray(order?.payments)) return order.payments;
+    if (Array.isArray(order?.payment_records)) return order.payment_records;
+    if (Array.isArray(order?.transactions)) return order.transactions;
+    return [];
+};
+
+const resolveOrderPaidAmount = (order: any): number => {
+    const paymentRecords = getOrderPaymentRecords(order);
+    const paidFromRecords = paymentRecords.reduce((sum: number, record: any) => {
+        const amount = toNumberOrNull(record?.amount ?? record?.payment_amount ?? record?.paid_amount);
+        return sum + (amount ?? 0);
+    }, 0);
+
+    const totalAmount = toNumberOrNull(order?.total_amount) ?? 0;
+    const remainingDebt = toNumberOrNull(order?.remaining_debt);
+    const paidFromRemaining = remainingDebt !== null ? Math.max(0, totalAmount - remainingDebt) : null;
+
+    const candidates = [
+        toNumberOrNull(order?.paid_amount),
+        toNumberOrNull(order?.total_paid),
+        toNumberOrNull(order?.amount_paid),
+        paidFromRemaining,
+        paidFromRecords,
+    ].filter((value): value is number => value !== null);
+
+    if (candidates.length === 0) return 0;
+    return Math.max(0, ...candidates);
+};
+
+const resolveOrderPaymentMethod = (order: any): 'cash' | 'transfer' | 'zalopay' | null => {
+    const normalize = (method: unknown): 'cash' | 'transfer' | 'zalopay' | null => {
+        if (typeof method !== 'string') return null;
+        const value = method.trim().toLowerCase();
+        if (value === 'cash' || value === 'transfer' || value === 'zalopay') return value;
+        return null;
+    };
+
+    const directMethod = normalize(order?.payment_method);
+    if (directMethod) return directMethod;
+
+    const paymentRecords = getOrderPaymentRecords(order);
+    for (let index = paymentRecords.length - 1; index >= 0; index -= 1) {
+        const method = normalize(paymentRecords[index]?.payment_method ?? paymentRecords[index]?.method);
+        if (method) return method;
+    }
+
+    return null;
+};
+
 export function CreateOrderPage() {
     const navigate = useNavigate();
+    const location = useLocation();
     const [searchParams] = useSearchParams();
     const { id } = useParams();
     const isEditMode = !!id;
@@ -222,6 +292,14 @@ export function CreateOrderPage() {
                 setNotes(order.notes || '');
                 setDiscount(order.discount_value || order.discount || 0);
                 setDiscountType(order.discount_type || 'amount');
+                const statePaidAmount = toNumberOrNull((location.state as any)?.existingPaidAmount) ?? 0;
+                setPaidAmount(Math.max(resolveOrderPaidAmount(order), statePaidAmount));
+
+                const resolvedPaymentMethod = resolveOrderPaymentMethod(order)
+                    || resolveOrderPaymentMethod({ payment_method: (location.state as any)?.existingPaymentMethod });
+                if (resolvedPaymentMethod) {
+                    setPaymentMethod(resolvedPaymentMethod);
+                }
 
 
                 // Map Customer Items (order_products + services)
@@ -245,12 +323,12 @@ export function CreateOrderPage() {
                         technicians: (s.technicians || []).map((t: any) => ({
                             id: t.technician_id,
                             name: t.technician?.name || 'Unknown',
-                            commission: t.commission || 0
+                            commission: t.commission ?? 0
                         })),
                         sales: (s.sales || []).map((sale: any) => ({
                             id: sale.sale_id || sale.id,
                             name: sale.sale?.name || 'Unknown',
-                            commission: sale.commission || 0
+                            commission: sale.commission ?? 0
                         }))
                     }))
                 }));
@@ -264,7 +342,7 @@ export function CreateOrderPage() {
                     sales: (item.sales || []).map((s: any) => ({
                         id: s.sale_id || s.id,
                         name: s.sale?.name || 'Unknown',
-                        commission: s.commission || 0
+                        commission: s.commission ?? 0
                     }))
                 }));
 
@@ -368,10 +446,14 @@ export function CreateOrderPage() {
     }, [searchParams, customers, createCustomer]);
 
     // List of users filtered by role for selection
-    const availableTechnicians = users.filter(t =>
-        t.role === 'technician'
-    );
-    const availableSales = users.filter(u => u.role === 'sale');
+    const availableTechnicians = users.filter(t => {
+        const role = String(t.role || '').toLowerCase();
+        return role === 'technician' || role === 'tech';
+    });
+    const availableSales = users.filter(u => {
+        const role = String(u.role || '').toLowerCase();
+        return role === 'sale' || role === 'sales';
+    });
 
     // Helpers
     const activeCustomers = customers.filter(c => c.status === 'active' || !c.status);
@@ -506,7 +588,7 @@ export function CreateOrderPage() {
 
         if (tableId === 'shared_table' || tableId === 'common') {
             if (itemCategoryType === 'service') {
-                return typeof catalogItem.commission_tech !== 'undefined' ? catalogItem.commission_tech : catalogItem.commission_rate;
+                return catalogItem.commission_tech ?? catalogItem.commission_rate;
             } else {
                 return catalogItem.commission_sale;
             }
@@ -520,7 +602,7 @@ export function CreateOrderPage() {
     };
 
     // Confirm adding service with technicians
-    const handleConfirmAddService = (selectedTechnicians: Array<{ id: string; name: string; commission: number }> = []) => {
+    const handleConfirmAddService = (selectedTechnicians: Array<{ id: string; name: string; commission?: number }> = []) => {
         if (!pendingService) return;
 
         const { productIndex, service } = pendingService;
@@ -535,7 +617,13 @@ export function CreateOrderPage() {
                         const dynamicRate = resolveCommissionRate(t.id, service.id, 'service', false);
                         return {
                             ...t,
-                            commission: t.commission || (dynamicRate !== undefined ? dynamicRate : (service.commission_tech || (availableTechnicians.find(at => at.id === t.id)?.commission || 0)))
+                            commission: resolveFirstCommission(
+                                t.commission,
+                                dynamicRate,
+                                service.commission_tech,
+                                availableTechnicians.find(at => at.id === t.id)?.commission,
+                                0
+                            )
                         };
                     }),
                     sales: [] // Initialize with empty sales
@@ -550,7 +638,7 @@ export function CreateOrderPage() {
     };
 
     // Add technician to a service
-    const handleAddTechnicianToService = (productIndex: number, serviceIndex: number, technicianId: string, commission: number = 0) => {
+    const handleAddTechnicianToService = (productIndex: number, serviceIndex: number, technicianId: string, commission?: number) => {
         const technician = availableTechnicians.find(t => t.id === technicianId);
         if (!technician) return;
 
@@ -576,7 +664,13 @@ export function CreateOrderPage() {
                         technicians: [...s.technicians, {
                             id: technician.id,
                             name: technician.name,
-                            commission: commission || (dynamicRate !== undefined ? dynamicRate : (service?.commission_tech || technician.commission || 0))
+                            commission: resolveFirstCommission(
+                                commission,
+                                dynamicRate,
+                                service?.commission_tech,
+                                technician.commission,
+                                0
+                            )
                         }]
                     };
                 })
@@ -642,7 +736,7 @@ export function CreateOrderPage() {
     };
 
     // Add sale to a service
-    const handleAddSaleToService = (productIndex: number, serviceIndex: number, saleId: string, commission: number = 0) => {
+    const handleAddSaleToService = (productIndex: number, serviceIndex: number, saleId: string, commission?: number) => {
         const sale = availableSales.find(s => s.id === saleId);
         if (!sale) return;
 
@@ -668,7 +762,13 @@ export function CreateOrderPage() {
                         sales: [...s.sales, {
                             id: sale.id,
                             name: sale.name,
-                            commission: commission || (dynamicRate !== undefined ? dynamicRate : (service?.commission_sale || sale.commission || 0))
+                            commission: resolveFirstCommission(
+                                commission,
+                                dynamicRate,
+                                service?.commission_sale,
+                                sale.commission,
+                                0
+                            )
                         }]
                     };
                 })
@@ -744,7 +844,7 @@ export function CreateOrderPage() {
     };
 
     // Add sale to an add-on product
-    const handleAddSaleToAddOn = (addOnId: string, saleId: string, commission: number = 0) => {
+    const handleAddSaleToAddOn = (addOnId: string, saleId: string, commission?: number) => {
         const sale = availableSales.find(s => s.id === saleId);
         if (!sale) return;
 
@@ -762,7 +862,13 @@ export function CreateOrderPage() {
                 sales: [...a.sales, {
                     id: sale.id,
                     name: sale.name,
-                    commission: commission || (dynamicRate !== undefined ? dynamicRate : (catalogProduct?.commission_sale || sale.commission || 0))
+                    commission: resolveFirstCommission(
+                        commission,
+                        dynamicRate,
+                        catalogProduct?.commission_sale,
+                        sale.commission,
+                        0
+                    )
                 }]
             };
         }));
@@ -1096,19 +1202,23 @@ export function CreateOrderPage() {
                         due_at: p.due_at ? new Date(p.due_at + 'T17:00:00').toISOString() : undefined,
                         surcharges: p.surcharges || [],
                         surcharge_amount: surchargeAmount,
-                        services: p.services.map(s => ({
-                            id: s.id.startsWith('temp_') ? undefined : s.id,
-                            type: s.type,
-                            name: s.name,
-                            price: s.price,
-                            technicians: s.technicians.map(t => ({
-                                technician_id: t.id,
-                                commission: t.commission
-                            })),
-                            sales: s.sales.map(sl => ({
-                                sale_id: sl.id,
-                                commission: sl.commission
-                            }))
+                            services: p.services.map(s => ({
+                                id: s.id.startsWith('temp_') ? undefined : s.id,
+                                type: s.type,
+                                name: s.name,
+                                price: s.price,
+                                technicians: s.technicians
+                                    .filter(t => Boolean(t.id))
+                                    .map(t => ({
+                                        technician_id: t.id,
+                                        commission: clampCommissionPercent(t.commission)
+                                    })),
+                                sales: s.sales
+                                    .filter(sl => Boolean(sl.id))
+                                    .map(sl => ({
+                                        sale_id: sl.id,
+                                        commission: clampCommissionPercent(sl.commission)
+                                    }))
                         }))
                     };
                 }),
@@ -1124,10 +1234,12 @@ export function CreateOrderPage() {
                         quantity: a.quantity,
                         surcharges: a.surcharges || [],
                         surcharge_amount: surchargeAmount,
-                        sales: a.sales.map(sl => ({
-                            sale_id: sl.id,
-                            commission: sl.commission
-                        }))
+                        sales: a.sales
+                            .filter(sl => Boolean(sl.id))
+                            .map(sl => ({
+                                sale_id: sl.id,
+                                commission: clampCommissionPercent(sl.commission)
+                            }))
                     };
                 }),
                 notes,
@@ -1768,7 +1880,7 @@ export function CreateOrderPage() {
                                                                             <Select
                                                                                 value=""
                                                                                 onValueChange={(techId) => {
-                                                                                    if (techId) handleAddTechnicianToService(index, si, techId, 0);
+                                                                                    if (techId) handleAddTechnicianToService(index, si, techId);
                                                                                 }}
                                                                             >
                                                                                 <SelectTrigger className="h-7 text-xs">
@@ -1835,7 +1947,7 @@ export function CreateOrderPage() {
                                                                             <Select
                                                                                 value=""
                                                                                 onValueChange={(saleId) => {
-                                                                                    if (saleId) handleAddSaleToService(index, si, saleId, 0);
+                                                                                    if (saleId) handleAddSaleToService(index, si, saleId);
                                                                                 }}
                                                                             >
                                                                                 <SelectTrigger className="h-7 text-xs">
@@ -1963,7 +2075,7 @@ export function CreateOrderPage() {
                                                         ))}
                                                     </div>
                                                 )}
-                                                <Select value="" onValueChange={(val) => handleAddSaleToAddOn(a.id, val, 0)}>
+                                                <Select value="" onValueChange={(val) => handleAddSaleToAddOn(a.id, val)}>
                                                     <SelectTrigger className="h-7 text-[10px] bg-white/40 border-amber-200/50">
                                                         <SelectValue placeholder="+ Thêm nhân viên sales" />
                                                     </SelectTrigger>
@@ -2676,7 +2788,7 @@ export function CreateOrderPage() {
                                 availableTechnicians.map(tech => (
                                     <button
                                         key={tech.id}
-                                        onClick={() => handleConfirmAddService([{ id: tech.id, name: tech.name, commission: 0 }])}
+                                        onClick={() => handleConfirmAddService([{ id: tech.id, name: tech.name }])}
                                         className="w-full flex items-center gap-3 p-3 border rounded-lg hover:border-primary hover:bg-primary/5 transition-colors group"
                                     >
                                         <Avatar className="h-10 w-10">
