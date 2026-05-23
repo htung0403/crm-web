@@ -119,6 +119,49 @@ function groupByStatus<T extends { status: string }>(items: T[], columnIds: stri
     return map;
 }
 
+function getFirstImage(value: any): string | null {
+    if (!value) return null;
+    if (Array.isArray(value)) return value.find(Boolean) || null;
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+            try {
+                const parsed = JSON.parse(trimmed);
+                return getFirstImage(parsed);
+            } catch {
+                return trimmed;
+            }
+        }
+        return trimmed;
+    }
+    if (typeof value === 'object') {
+        return getFirstImage(value.images) ||
+            getFirstImage(value.product_images) ||
+            getFirstImage(value.image) ||
+            getFirstImage(value.url) ||
+            getFirstImage(value.src);
+    }
+    return null;
+}
+
+function getRequestProductImage(row: any): string | null {
+    const orderProduct = row.order_product_service?.order_product || row.order_product;
+    const orderItem = row.order_item;
+    return getFirstImage(orderItem?.product_images) ||
+        getFirstImage(orderItem?.images) ||
+        getFirstImage(orderItem?.image) ||
+        getFirstImage(orderItem?.product?.image) ||
+        getFirstImage(orderItem?.product?.images) ||
+        getFirstImage(orderProduct?.product_images) ||
+        getFirstImage(orderProduct?.images) ||
+        getFirstImage(orderProduct?.image) ||
+        getFirstImage(row.order?.order_products?.[0]) ||
+        getFirstImage(row.metadata?.product_images) ||
+        getFirstImage(row.metadata?.photos) ||
+        null;
+}
+
 function PhotoUpload({ label, value, onChange, disabled }: { label: string; value: string[]; onChange: (urls: string[]) => void; disabled?: boolean }) {
     const [uploading, setUploading] = useState(false);
 
@@ -636,26 +679,7 @@ function AccessoryKanban({
                                                             getItemName={(r) => r.order_item?.item_name ??
                                                                 r.order_product_service?.order_product?.name ??
                                                                 r.order_product?.name ?? '—'}
-                                                            getProductImage={(r) => {
-                                                                const parseImages = (imgs: any) => {
-                                                                    if (!imgs) return null;
-                                                                    if (Array.isArray(imgs)) return imgs[0] || null;
-                                                                    if (typeof imgs === 'string') {
-                                                                        if (imgs.startsWith('[') || imgs.startsWith('{')) {
-                                                                            try {
-                                                                                const parsed = JSON.parse(imgs);
-                                                                                return Array.isArray(parsed) ? (parsed[0] || null) : (parsed || null);
-                                                                            } catch { return imgs; }
-                                                                        }
-                                                                        return imgs;
-                                                                    }
-                                                                    return null;
-                                                                };
-                                                                return r.order_item?.product?.image ||
-                                                                    r.metadata?.photos?.[0] ||
-                                                                    parseImages(r.order_product_service?.order_product?.images) ||
-                                                                    parseImages(r.order_product?.images);
-                                                            }}
+                                                            getProductImage={getRequestProductImage}
                                                         />
                                                     </div>
                                                 )}
@@ -735,26 +759,7 @@ function PartnerKanban({
                                                             getItemName={(r) => r.order_item?.item_name ??
                                                                 r.order_product_service?.order_product?.name ??
                                                                 r.order_product?.name ?? '—'}
-                                                            getProductImage={(r) => {
-                                                                const parseImages = (imgs: any) => {
-                                                                    if (!imgs) return null;
-                                                                    if (Array.isArray(imgs)) return imgs[0] || null;
-                                                                    if (typeof imgs === 'string') {
-                                                                        if (imgs.startsWith('[') || imgs.startsWith('{')) {
-                                                                            try {
-                                                                                const parsed = JSON.parse(imgs);
-                                                                                return Array.isArray(parsed) ? (parsed[0] || null) : (parsed || null);
-                                                                            } catch { return imgs; }
-                                                                        }
-                                                                        return imgs;
-                                                                    }
-                                                                    return null;
-                                                                };
-                                                                return r.order_item?.product?.image ||
-                                                                    r.metadata?.photos?.[0] ||
-                                                                    parseImages(r.order_product_service?.order_product?.images) ||
-                                                                    parseImages(r.order_product?.images);
-                                                            }}
+                                                            getProductImage={getRequestProductImage}
                                                         />
                                                     </div>
                                                 )}
@@ -827,29 +832,7 @@ function ExtensionKanban({
                                                             getItemName={(r) => r.order_item?.item_name ??
                                                                 r.order_product_service?.item_name ??
                                                                 r.order_product?.name ?? '—'}
-                                                            getProductImage={(r) => {
-                                                                const parseImages = (imgs: any) => {
-                                                                    if (!imgs) return null;
-                                                                    if (Array.isArray(imgs)) return imgs[0] || null;
-                                                                    if (typeof imgs === 'string') {
-                                                                        if (imgs.startsWith('[') || imgs.startsWith('{')) {
-                                                                            try {
-                                                                                const parsed = JSON.parse(imgs);
-                                                                                return Array.isArray(parsed) ? (parsed[0] || null) : (parsed || null);
-                                                                            } catch { return imgs; } // Fallback to raw string if it's not valid JSON
-                                                                        }
-                                                                        return imgs; // Probable direct URL
-                                                                    }
-                                                                    return null;
-                                                                };
-
-                                                                const img = r.order_item?.product?.image ||
-                                                                    parseImages(r.order_product_service?.order_product?.images) ||
-                                                                    parseImages(r.order_product?.images) ||
-                                                                    parseImages(r.order?.order_products?.[0]?.images);
-
-                                                                return img;
-                                                              }}
+                                                            getProductImage={getRequestProductImage}
                                                         />
                                                     </div>
                                                 )}

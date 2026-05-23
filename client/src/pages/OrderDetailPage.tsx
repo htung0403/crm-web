@@ -448,7 +448,7 @@ export function OrderDetailPage() {
     const handleOpenPartner = (item: OrderItem) => {
         setPartnerItem(item);
         setPartnerStatus((item as any).partner?.status || 'ship_to_partner');
-        setPartnerNotes((item as any).partner?.notes || '');
+        setPartnerNotes((item as any).partner?.status === 'rejected' ? '' : ((item as any).partner?.notes || ''));
         setShowPartnerDialog(true);
     };
 
@@ -468,9 +468,10 @@ export function OrderDetailPage() {
     };
 
     const handleOpenExtension = (item: OrderItem | any) => {
+        const currentRequest = (item as any).extension_request;
         setExtensionItem(item);
-        setExtensionReason((item as any).extension_request?.reason || '');
-        setExtensionNewDueAt((item as any).extension_request?.new_due_at ? (item as any).extension_request.new_due_at.slice(0, 16) : '');
+        setExtensionReason(currentRequest?.status === 'rejected' ? '' : (currentRequest?.reason || ''));
+        setExtensionNewDueAt(currentRequest?.status === 'rejected' ? '' : (currentRequest?.new_due_at ? currentRequest.new_due_at.slice(0, 16) : ''));
         setShowExtensionDialog(true);
     };
 
@@ -480,7 +481,7 @@ export function OrderDetailPage() {
         try {
             const currentRequest = (extensionItem as any).extension_request;
 
-            if (currentRequest?.id) {
+            if (currentRequest?.id && currentRequest.status !== 'rejected') {
                 const payload: any = {};
                 if (user?.role === 'sale' || user?.role === 'manager' || user?.role === 'admin') {
                     payload.customer_result = extensionCustomerResult;
@@ -599,6 +600,21 @@ export function OrderDetailPage() {
         !!order.items?.some((item) => (item as { status?: string }).status === 'step4');
 
     const pendingEditApprovalFromState = Boolean((location.state as any)?.pendingEditApproval);
+
+    const accessoryRejectionReason =
+        (accessoryItem as any)?.accessory?.status === 'rejected'
+            ? ((accessoryItem as any)?.accessory?.notes || 'Không có lý do')
+            : '';
+    const partnerRejectionReason =
+        (partnerItem as any)?.partner?.status === 'rejected'
+            ? ((partnerItem as any)?.partner?.notes || 'Không có lý do')
+            : '';
+    const activeExtensionRequest = (extensionItem as any)?.extension_request || order.extension_request;
+    const extensionRejected = activeExtensionRequest?.status === 'rejected';
+    const extensionRejectionReason = extensionRejected
+        ? (activeExtensionRequest?.customer_result || activeExtensionRequest?.reason || 'Không có lý do')
+        : '';
+    const canCreateExtensionRequest = !activeExtensionRequest || extensionRejected;
 
     const hasPendingOrderEditApproval = (() => {
         if (pendingEditApprovalFromState) return true;
@@ -976,6 +992,15 @@ export function OrderDetailPage() {
                         </DialogTitle>
                     </DialogHeader>
                     <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+                        {accessoryRejectionReason && (
+                            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                <div className="mb-1 flex items-center gap-2 font-bold">
+                                    <XCircle className="h-4 w-4" />
+                                    Yêu cầu trước bị từ chối
+                                </div>
+                                <p className="text-xs leading-relaxed">{accessoryRejectionReason}</p>
+                            </div>
+                        )}
                         <div className="space-y-1.5">
                             <Label className="text-xs font-bold text-slate-500">Tên phụ kiện *</Label>
                             <Input
@@ -1066,6 +1091,15 @@ export function OrderDetailPage() {
                     {partnerItem && (
                         <div className="space-y-4">
                             <div className="p-3 bg-muted rounded-lg"><p className="font-medium">{partnerItem.item_name}</p></div>
+                            {partnerRejectionReason && (
+                                <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                    <div className="mb-1 flex items-center gap-2 font-bold">
+                                        <XCircle className="h-4 w-4" />
+                                        Yêu cầu trước bị từ chối
+                                    </div>
+                                    <p className="text-xs leading-relaxed">{partnerRejectionReason}</p>
+                                </div>
+                            )}
                             <div className="space-y-2">
                                 <div className="p-2.5 border rounded-lg bg-amber-50 text-amber-800 font-medium text-sm">
                                     Xác nhận gửi đối tác
@@ -1092,13 +1126,13 @@ export function OrderDetailPage() {
                     <DialogHeader className="p-6 bg-slate-50 border-b">
                         <DialogTitle className="text-xl font-bold text-slate-800 flex items-center gap-2">
                             <Clock className="w-5 h-5 text-primary" />
-                            {(!order.extension_request && !(extensionItem as any)?.extension_request)
+                            {canCreateExtensionRequest
                                 ? 'Yêu cầu gia hạn sản phẩm'
                                 : 'Thông tin yêu cầu gia hạn'}
                         </DialogTitle>
                     </DialogHeader>
                     <div className="p-6 space-y-5">
-                        {(!order.extension_request && !(extensionItem as any)?.extension_request) ? (
+                        {canCreateExtensionRequest ? (
                             <>
                                 {extensionItem && (
                                     <div className="p-4 bg-primary/5 rounded-xl border border-primary/10">
@@ -1106,6 +1140,15 @@ export function OrderDetailPage() {
                                             <Layers className="h-4 w-4" />
                                             {extensionItem.item_name}
                                         </p>
+                                    </div>
+                                )}
+                                {extensionRejectionReason && (
+                                    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                                        <div className="mb-1 flex items-center gap-2 font-bold">
+                                            <XCircle className="h-4 w-4" />
+                                            Yêu cầu trước bị từ chối
+                                        </div>
+                                        <p className="text-xs leading-relaxed">{extensionRejectionReason}</p>
                                     </div>
                                 )}
                                 <div className="space-y-1.5">
@@ -1217,7 +1260,7 @@ export function OrderDetailPage() {
                         )}
                     </div>
                     <DialogFooter className="p-6 bg-slate-50/50 border-t flex items-center justify-between gap-3">
-                        {(!order.extension_request && !(extensionItem as any)?.extension_request) ? (
+                        {canCreateExtensionRequest ? (
                             <>
                                 <Button variant="ghost" onClick={() => setShowExtensionDialog(false)} className="rounded-xl px-6">Hủy</Button>
                                 <Button 

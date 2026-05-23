@@ -300,7 +300,7 @@ export function CareTab({
 
                     {/* History Section - Styled */}
                     {order && (
-                        <div className="mt-12 bg-gray-50/50 p-6 rounded-3xl border border-gray-100">
+                        <div className="hidden mt-12 bg-gray-50/50 p-6 rounded-3xl border border-gray-100">
                             <h3 className="text-xs font-black uppercase tracking-widest text-gray-400 flex items-center gap-2 mb-6">
                                 <History className="h-4 w-4" /> Lịch sử quy trình
                             </h3>
@@ -343,3 +343,4 @@ export function CareTab({
         </TabsContent>
     );
 }
+

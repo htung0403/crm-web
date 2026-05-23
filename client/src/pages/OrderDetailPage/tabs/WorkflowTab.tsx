@@ -198,10 +198,6 @@ const WorkflowCard = memo(({
                                     type="button"
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        if (leadItem && (leadItem as any).accessory?.status === 'rejected') {
-                                            toast.error(`Yêu cầu phụ kiện bị từ chối: ${(leadItem as any).accessory.notes || 'Không có lý do'}`);
-                                            return;
-                                        }
                                         if (leadItem) {
                                             handleOpenAccessory(leadItem);
                                         }
@@ -209,23 +205,18 @@ const WorkflowCard = memo(({
                                     className={cn(
                                         "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",
                                         (leadItem as any)?.accessory?.status === 'requested' ? "bg-amber-50 text-amber-600 border-amber-200 animate-pulse" :
-                                            (leadItem as any)?.accessory?.status === 'rejected' ? "bg-red-50 text-red-600 border-red-200" :
-                                                "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                                            "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
                                     )}
                                 >
                                     <span className="truncate">
                                         {(leadItem as any)?.accessory?.status === 'requested' ? 'Đang chờ PK' :
-                                            (leadItem as any)?.accessory?.status === 'rejected' ? 'Bị từ chối PK' : 'Mua PK'}
+                                            'Mua PK'}
                                     </span>
                                 </button>
                                 <button
                                     type="button"
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        if (leadItem && (leadItem as any).partner?.status === 'rejected') {
-                                            toast.error(`Yêu cầu đối tác bị từ chối: ${(leadItem as any).partner.notes || 'Không có lý do'}`);
-                                            return;
-                                        }
                                         if (leadItem) {
                                             handleOpenPartner(leadItem);
                                         }
@@ -233,23 +224,18 @@ const WorkflowCard = memo(({
                                     className={cn(
                                         "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",
                                         (leadItem as any)?.partner?.status === 'requested' ? "bg-amber-50 text-amber-600 border-amber-200 animate-pulse" :
-                                            (leadItem as any)?.partner?.status === 'rejected' ? "bg-red-50 text-red-600 border-red-200" :
-                                                "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
+                                            "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
                                     )}
                                 >
                                     <span className="truncate">
                                         {(leadItem as any)?.partner?.status === 'requested' ? 'Đang chờ ĐT' :
-                                            (leadItem as any)?.partner?.status === 'rejected' ? 'Bị từ chối ĐT' : 'Gửi ĐT'}
+                                            'Gửi ĐT'}
                                     </span>
                                 </button>
                                 <button
                                     type="button"
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        if (extensionRequest?.status === 'rejected') {
-                                            toast.error(`Yêu cầu gia hạn bị từ chối: ${extensionRequest.customer_result || 'Không có lý do'}`);
-                                            return;
-                                        }
                                         if (leadItem) {
                                             handleOpenExtension(leadItem);
                                         }
@@ -258,14 +244,13 @@ const WorkflowCard = memo(({
                                         "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",
                                         (extensionRequest?.status === 'pending' || extensionRequest?.status === 'requested') ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 animate-pulse" :
                                             extensionRequest?.status === 'manager_approved' ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" :
-                                                extensionRequest?.status === 'rejected' ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100" :
-                                                    "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+                                                "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
                                     )}
                                 >
                                     <span className="truncate">
                                         {(extensionRequest?.status === 'pending' || extensionRequest?.status === 'requested') ? 'Đang xin GH' :
                                             extensionRequest?.status === 'manager_approved' ? 'Xem hạn mới' :
-                                                extensionRequest?.status === 'rejected' ? 'Bị từ chối GH' : 'Gia hạn'}
+                                                'Gia hạn'}
                                     </span>
                                 </button>
                                 {roomId === 'waiting' && (
@@ -635,7 +620,7 @@ export function WorkflowTab({
                                     </div>
                                 )}
 
-                                <div className="mt-6 border-t pt-6">
+                                <div className="hidden mt-6 border-t pt-6">
                                     <h3 className="text-sm font-bold flex items-center gap-2 mb-3">
                                         <History className="h-4 w-4 text-primary" /> Lịch sử chuyển bước (Quy trình)
                                     </h3>
@@ -817,3 +802,4 @@ export function WorkflowTab({
         </TabsContent>
     );
 }
+

@@ -323,17 +323,48 @@ export function UpsellManagementPage() {
         );
     };
 
+    const getFirstImage = (value: any): string | undefined => {
+        if (!value) return undefined;
+        if (Array.isArray(value)) return value.find(Boolean) || undefined;
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            if (!trimmed) return undefined;
+            if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+                try {
+                    return getFirstImage(JSON.parse(trimmed));
+                } catch {
+                    return trimmed;
+                }
+            }
+            return trimmed;
+        }
+        if (typeof value === 'object') {
+            return getFirstImage(value.images) ||
+                getFirstImage(value.product_images) ||
+                getFirstImage(value.image) ||
+                getFirstImage(value.url) ||
+                getFirstImage(value.src);
+        }
+        return undefined;
+    };
+
     const getItemImage = (req: any) => {
         if (!req) return undefined;
-        const item = req.order_item || req.order_product;
-        if (!item) return undefined;
+        const orderProduct = req.order_product_service?.order_product || req.order_product;
+        const orderItem = req.order_item;
 
-        // Try various sources for images
-        return item.product_images?.[0] || 
-               item.image || 
-               item.product?.image || 
-               (Array.isArray(item.completion_photos) ? item.completion_photos[0] : 
-               (typeof item.completion_photos === 'string' && item.completion_photos.startsWith('[') ? JSON.parse(item.completion_photos)[0] : undefined));
+        return getFirstImage(orderItem?.product_images) ||
+            getFirstImage(orderItem?.images) ||
+            getFirstImage(orderItem?.image) ||
+            getFirstImage(orderItem?.product?.image) ||
+            getFirstImage(orderItem?.product?.images) ||
+            getFirstImage(orderItem?.completion_photos) ||
+            getFirstImage(orderProduct?.product_images) ||
+            getFirstImage(orderProduct?.images) ||
+            getFirstImage(orderProduct?.image) ||
+            getFirstImage(req.order?.order_products?.[0]) ||
+            getFirstImage(req.metadata?.product_images) ||
+            getFirstImage(req.metadata?.photos);
     };
 
     return (
@@ -520,7 +551,7 @@ export function UpsellManagementPage() {
                                         <div className="p-4 md:p-5 flex gap-4 flex-1">
                                             <div className="shrink-0">
                                                 <ProductImage 
-                                                    src={req.metadata?.photos?.[0]} 
+                                                    src={getItemImage(req)} 
                                                     className="h-24 w-24 md:h-28 md:w-28" 
                                                 />
                                                 {req.metadata?.photos?.length > 1 && (

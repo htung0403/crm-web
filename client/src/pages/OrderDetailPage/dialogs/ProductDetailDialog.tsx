@@ -10,7 +10,7 @@ import {
     ShoppingBag, Tag, FileText, Package, Truck, Wrench, Camera,
     User as UserIcon, MessageSquare, BookOpen,
     History, Save, Loader2, Heart, ShieldCheck, ClipboardList, Sparkles,
-    ThumbsUp, ThumbsDown, Calendar, XCircle, Maximize2
+    ThumbsUp, ThumbsDown, Calendar, XCircle, Maximize2, Clock
 } from 'lucide-react';
 import { WorkflowLogDetailDialog } from '@/components/orders/workflow/WorkflowLogDetailDialog';
 import { BackwardMoveDialog } from '@/components/orders/BackwardMoveDialog';
@@ -181,6 +181,7 @@ export function ProductDetailDialog({
     const [activeImageIdx, setActiveImageIdx] = useState(0);
     const [saving, setSaving] = useState(false);
     const [showUpsellDialog, setShowUpsellDialog] = useState(false);
+    const [optimisticAfterSaleStages, setOptimisticAfterSaleStages] = useState<Record<string, string>>({});
     const { users, fetchUsers } = useUsers();
     const { user } = useAuth();
 
@@ -260,6 +261,7 @@ export function ProductDetailDialog({
             } as any);
             
             setActiveImageIdx(0);
+            setOptimisticAfterSaleStages({});
         }
     }, [open, order?.id, group?.product?.id, group?.services?.[0]?.id]); // Only re-init when dialog opens or identity changes
 
@@ -280,6 +282,10 @@ export function ProductDetailDialog({
     const productItem = product as any;
 
     const entityId = product?.id ?? services[0]?.id;
+    const groupEntityIds = new Set([
+        product?.id,
+        ...services.map((service) => service.id),
+    ].filter(Boolean));
     const entityType = product ? 'order_product' : 'order_item';
     const isAftersale = roomId.startsWith('after');
     const isCareFlow = roomId.startsWith('care') || roomId.startsWith('war');
@@ -641,9 +647,53 @@ export function ProductDetailDialog({
             log.action === 'assigned' || log.action === 'failed' || isWorkflowRequestLogAction(log.action)
         );
         const allLogs = [...salesLogs, ...filteredWorkflowLogs, ...aftersaleLogs, ...careLogs];
-        return allLogs
-            .filter(log => log.entity_id === entityId || log.order_item_step_id) // simplified filter
+        const sortedLogs = allLogs
+            .filter(log => (log.entity_id && groupEntityIds.has(log.entity_id)) || log.order_item_step_id) // include product + service-bound workflow requests
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+        const requestTypeMap: Record<string, string> = {
+            accessory_requested: 'accessory',
+            partner_requested: 'partner',
+            extension_requested: 'extension',
+        };
+
+        return sortedLogs.map((log: any) => {
+            const requestType = requestTypeMap[log.action];
+            if (!requestType) return log;
+
+            const approvedLog = sortedLogs.find((candidate: any) => candidate.action === `${requestType}_approved` && candidate.entity_id === log.entity_id);
+            const rejectedLog = sortedLogs.find((candidate: any) => candidate.action === `${requestType}_rejected` && candidate.entity_id === log.entity_id);
+
+            if (approvedLog || rejectedLog) {
+                return {
+                    ...log,
+                    _outcome: rejectedLog ? 'rejected' : 'approved',
+                };
+            }
+
+            const relatedItem = [product, ...services].find((item: any) => item?.id === log.entity_id) as any;
+            if (relatedItem) {
+                if (requestType === 'accessory') {
+                    const status = relatedItem.accessory?.status;
+                    if (status === 'rejected' || status === 'cancelled') return { ...log, _outcome: 'rejected' };
+                    if (status && status !== 'requested') return { ...log, _outcome: 'approved' };
+                }
+
+                if (requestType === 'partner') {
+                    const status = relatedItem.partner?.status;
+                    if (status === 'rejected' || status === 'cancelled') return { ...log, _outcome: 'rejected' };
+                    if (status && status !== 'requested') return { ...log, _outcome: 'approved' };
+                }
+
+                if (requestType === 'extension') {
+                    const status = relatedItem.extension_request?.status;
+                    if (status === 'rejected') return { ...log, _outcome: 'rejected' };
+                    if (status === 'manager_approved' || status === 'notified_tech') return { ...log, _outcome: 'approved' };
+                }
+            }
+
+            return { ...log, _outcome: 'pending' };
+        });
     };
 
     const roomLogs = getRoomLogs();
@@ -656,31 +706,67 @@ export function ProductDetailDialog({
         return val;
     };
 
-    const renderLogItem = (log: any) => (
-        <div key={log.id} className="text-[11px] border-b border-gray-50 pb-2 last:border-0 relative">
-            <div className="flex justify-between items-start mb-1">
-                <span className="font-bold text-gray-700 uppercase">
-                    {log.order_item_step_id ? (
-                        <span className={log.action === 'failed' ? "text-red-500" : "text-blue-700"}>
-                            {log.action === 'failed' && <span className="mr-1">THẤT BẠI:</span>}
-                            {log.step_name}
-                        </span>
-                    ) : (
-                        <span className="text-gray-600">
-                            {getLogStepLabel(log.from_status || log.from_stage)} 
-                            <span className="mx-1 text-gray-300">→</span> 
-                            {getLogStepLabel(log.to_status || log.to_stage)}
-                        </span>
-                    )}
-                </span>
-                <span className="text-[9px] text-gray-400 tabular-nums">{formatDateTime(log.created_at)}</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-gray-500 mb-1">
-                <div className="h-3 w-3 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-[8px] font-bold">
-                    {log.created_by_user?.name?.charAt(0) || '?'}
+    const renderRequestOutcomeBadge = (log: any) => {
+        if (log._outcome === 'rejected') {
+            return <span className="inline-flex items-center rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700">Bị từ chối</span>;
+        }
+        if (log._outcome === 'approved') {
+            return <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Đã duyệt</span>;
+        }
+        return null;
+    };
+
+    const renderWorkflowRequestBox = (log: any, config: { icon: React.ReactNode; label: string; className: string }) => (
+        <div className={cn('mt-1.5 rounded-xl border p-3 shadow-sm', config.className)}>
+            <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/70 text-current shadow-sm ring-1 ring-black/5">
+                        {config.icon}
+                    </span>
+                    <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-bold leading-none">{config.label}</span>
+                            {renderRequestOutcomeBadge(log)}
+                        </div>
+                        {log.notes && <div className="mt-2 text-xs leading-relaxed text-slate-700">{log.notes}</div>}
+                    </div>
                 </div>
-                {log.created_by_user?.name || 'Hệ thống'}
             </div>
+        </div>
+    );
+
+    const renderLogItem = (log: any) => {
+        const isWorkflowRequestLog = isWorkflowRequestLogAction(log.action);
+
+        return (
+        <div key={log.id} className="text-[11px] border-b border-gray-50 pb-2 last:border-0 relative">
+            {!isWorkflowRequestLog && (
+                <div className="flex justify-between items-start mb-1">
+                    <span className="font-bold text-gray-700 uppercase">
+                        {log.order_item_step_id ? (
+                            <span className={log.action === 'failed' ? "text-red-500" : "text-blue-700"}>
+                                {log.action === 'failed' && <span className="mr-1">THẤT BẠI:</span>}
+                                {log.step_name}
+                            </span>
+                        ) : (
+                            <span className="text-gray-600">
+                                {getLogStepLabel(log.from_status || log.from_stage)} 
+                                <span className="mx-1 text-gray-300">→</span> 
+                                {getLogStepLabel(log.to_status || log.to_stage)}
+                            </span>
+                        )}
+                    </span>
+                    <span className="text-[9px] text-gray-400 tabular-nums">{formatDateTime(log.created_at)}</span>
+                </div>
+            )}
+            {!isWorkflowRequestLog && (
+                <div className="flex items-center gap-1.5 text-gray-500 mb-1">
+                    <div className="h-3 w-3 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-[8px] font-bold">
+                        {log.created_by_user?.name?.charAt(0) || '?'}
+                    </div>
+                    {log.created_by_user?.name || 'Hệ thống'}
+                </div>
+            )}
 
             {log.action === 'assigned' && (
                 <div className="mt-1.5 space-y-1 bg-blue-50/50 p-2 rounded-lg border border-blue-50">
@@ -734,33 +820,27 @@ export function ProductDetailDialog({
             )}
 
             {log.action === 'accessory_requested' && (
-                <div className="mt-1.5 bg-amber-50 p-2 rounded-lg border border-amber-100 text-amber-700">
-                    <div className="flex items-center gap-1.5 font-medium">
-                        <span>🛒</span>
-                        <span>Yêu cầu mua phụ kiện</span>
-                    </div>
-                    {log.notes && <div className="text-xs mt-1">{log.notes}</div>}
-                </div>
+                renderWorkflowRequestBox(log, {
+                    icon: <ShoppingBag className="h-3.5 w-3.5" />,
+                    label: 'Yêu cầu mua phụ kiện',
+                    className: 'border-amber-200 bg-amber-50/80 text-amber-800',
+                })
             )}
 
             {log.action === 'partner_requested' && (
-                <div className="mt-1.5 bg-purple-50 p-2 rounded-lg border border-purple-100 text-purple-700">
-                    <div className="flex items-center gap-1.5 font-medium">
-                        <span>📦</span>
-                        <span>Yêu cầu gửi đối tác</span>
-                    </div>
-                    {log.notes && <div className="text-xs mt-1">{log.notes}</div>}
-                </div>
+                renderWorkflowRequestBox(log, {
+                    icon: <Truck className="h-3.5 w-3.5" />,
+                    label: 'Yêu cầu gửi đối tác',
+                    className: 'border-violet-200 bg-violet-50/80 text-violet-800',
+                })
             )}
 
             {log.action === 'extension_requested' && (
-                <div className="mt-1.5 bg-blue-50 p-2 rounded-lg border border-blue-100 text-blue-700">
-                    <div className="flex items-center gap-1.5 font-medium">
-                        <span>⏰</span>
-                        <span>Xin gia hạn</span>
-                    </div>
-                    {log.notes && <div className="text-xs mt-1">{log.notes}</div>}
-                </div>
+                renderWorkflowRequestBox(log, {
+                    icon: <Clock className="h-3.5 w-3.5" />,
+                    label: 'Xin gia hạn',
+                    className: 'border-blue-200 bg-blue-50/80 text-blue-800',
+                })
             )}
 
             {['partner_approved', 'partner_rejected', 'accessory_approved', 'accessory_rejected', 'extension_approved', 'extension_rejected'].includes(log.action) && (() => {
@@ -804,7 +884,8 @@ export function ProductDetailDialog({
                 Xem chi tiết
             </Button>
         </div>
-    );
+        );
+    };
 
     const [timeLeft, setTimeLeft] = useState<string>('');
 
@@ -855,11 +936,68 @@ export function ProductDetailDialog({
 
     const uniqueItems = getAllUniqueItems();
 
+    const getItemAfterSaleStage = (item: any) => optimisticAfterSaleStages[item.id] ?? item.after_sale_stage;
+    const isItemReadyToReturn = (item: any) => ['after2', 'after3', 'after4'].includes(getItemAfterSaleStage(item));
+
+    const invoiceProductDetails = (() => {
+        if (!order) return [];
+
+        if (Array.isArray(order.customer_items) && order.customer_items.length > 0) {
+            return order.customer_items.map((item: any) => {
+                const services = Array.isArray(item.services) ? item.services : [];
+                const serviceTotal = services.reduce((sum: number, service: any) => {
+                    const quantity = Number(service.quantity || 1);
+                    const price = Number(service.total_price ?? service.unit_price ?? service.service?.price ?? service.package?.price ?? 0);
+                    return sum + price * quantity;
+                }, 0);
+                const surchargeTotal = Number(item.surcharge_amount || 0);
+
+                return {
+                    id: item.id,
+                    name: item.name || item.item_name || 'Sản phẩm',
+                    code: item.product_code || item.item_code,
+                    afterSaleStage: getItemAfterSaleStage(item),
+                    services: services.map((service: any) => ({
+                        id: service.id,
+                        name: service.item_name || service.service?.name || service.package?.name || 'Dịch vụ',
+                        amount: Number(service.total_price ?? service.unit_price ?? service.service?.price ?? service.package?.price ?? 0) * Number(service.quantity || 1),
+                    })),
+                    surchargeTotal,
+                    total: serviceTotal + surchargeTotal,
+                };
+            });
+        }
+
+        const customerProducts = uniqueItems.filter(item => (item as any).is_customer_item && item.item_type !== 'service');
+        return customerProducts.map((item: any) => {
+            const services = uniqueItems.filter((service: any) =>
+                service.item_type === 'service' &&
+                (service.product?.id === item.id || service.item_name?.includes(`(${item.item_name})`))
+            );
+            const serviceTotal = services.reduce((sum: number, service: any) => sum + Number(service.total_price ?? service.unit_price ?? 0), 0);
+            const surchargeTotal = Number(item.surcharge_amount || 0);
+
+            return {
+                id: item.id,
+                name: item.item_name || 'Sản phẩm',
+                code: item.item_code,
+                afterSaleStage: getItemAfterSaleStage(item),
+                services: services.map((service: any) => ({
+                    id: service.id,
+                    name: service.item_name?.replace(` (${item.item_name})`, '') || 'Dịch vụ',
+                    amount: Number(service.total_price ?? service.unit_price ?? 0),
+                })),
+                surchargeTotal,
+                total: serviceTotal + surchargeTotal,
+            };
+        });
+    })();
+
     const getRemainingItemsCount = () => {
         return uniqueItems.filter(item => 
             (item as any).is_customer_item &&
             item.item_type !== 'service' &&
-            !['after2', 'after3', 'after4'].includes((item as any).after_sale_stage) && 
+            !isItemReadyToReturn(item) && 
             item.status !== 'cancelled' &&
             item.status !== 'delivered'
         ).length;
@@ -1302,6 +1440,56 @@ export function ProductDetailDialog({
                                                         <span className="font-bold text-green-600">{formatCurrency(order.paid_amount || 0)}</span>
                                                     </div>
 
+                                                    <div className="space-y-2 pt-2 border-t border-purple-50">
+                                                        <Label className="text-[10px] font-black text-purple-700 uppercase">Chi tiết hóa đơn theo sản phẩm:</Label>
+                                                        <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1 custom-scrollbar">
+                                                            {invoiceProductDetails.length > 0 ? invoiceProductDetails.map(item => (
+                                                                <div key={item.id} className="rounded-xl border border-purple-100 bg-purple-50/20 p-2.5 space-y-2">
+                                                                    <div className="flex items-start justify-between gap-2">
+                                                                        <div className="min-w-0">
+                                                                            <div className="text-[11px] font-black text-gray-900 uppercase truncate">{item.name}</div>
+                                                                            {item.code && <div className="text-[9px] font-bold text-gray-400 uppercase">{item.code}</div>}
+                                                                        </div>
+                                                                        <div className="flex flex-col items-end gap-1 shrink-0">
+                                                                            <span className="text-xs font-black text-purple-700 tabular-nums">{formatCurrency(item.total)}</span>
+                                                                            <Badge className={cn(
+                                                                                "text-[9px] h-4 px-1 whitespace-nowrap",
+                                                                                ['after2', 'after3', 'after4'].includes(item.afterSaleStage) ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+                                                                            )}>
+                                                                                {['after2', 'after3', 'after4'].includes(item.afterSaleStage) ? 'Sắp trả' : 'Chờ trả'}
+                                                                            </Badge>
+                                                                        </div>
+                                                                    </div>
+
+                                                                    {item.services.length > 0 ? (
+                                                                        <div className="space-y-1 border-t border-purple-100 pt-1.5">
+                                                                            {item.services.map((service: { id: string; name: string; amount: number }) => (
+                                                                                <div key={service.id} className="flex justify-between gap-2 text-[11px]">
+                                                                                    <span className="text-gray-500 truncate">{service.name}</span>
+                                                                                    <span className="font-bold text-gray-800 tabular-nums whitespace-nowrap">{formatCurrency(service.amount)}</span>
+                                                                                </div>
+                                                                            ))}
+                                                                            {item.surchargeTotal > 0 && (
+                                                                                <div className="flex justify-between gap-2 text-[11px]">
+                                                                                    <span className="text-gray-500 truncate">Phụ thu</span>
+                                                                                    <span className="font-bold text-gray-800 tabular-nums whitespace-nowrap">{formatCurrency(item.surchargeTotal)}</span>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="text-[10px] font-semibold text-gray-400 italic border-t border-purple-100 pt-1.5">
+                                                                            Chưa có dịch vụ tính tiền cho sản phẩm này
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )) : (
+                                                                <div className="rounded-xl border border-dashed border-purple-100 bg-purple-50/20 p-3 text-center text-[11px] font-semibold text-gray-400">
+                                                                    Chưa có chi tiết hóa đơn theo sản phẩm
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+
                                                     <div className="flex justify-between items-center text-sm pt-1 pb-1">
                                                         <span className="text-red-500 font-bold uppercase text-[10px]">CÒN CHƯA TRẢ KHÁCH:</span>
                                                         <Badge variant="destructive" className="font-bold h-5 px-1.5 text-[10px]">{remainingItemsCount} sản phẩm</Badge>
@@ -1315,14 +1503,12 @@ export function ProductDetailDialog({
                                                                     <div className="flex items-center gap-2 min-w-0">
                                                                         <Checkbox 
                                                                             id={`item-sent-${item.id}`}
-                                                                            checked={['after2', 'after3', 'after4'].includes((item as any).after_sale_stage)}
+                                                                            checked={isItemReadyToReturn(item)}
                                                                             onCheckedChange={async (checked) => {
-                                                                                if (onUpdateItemAfterSaleData) {
-                                                                                    // Move to after2 (Delivery) if checked, back to after1_debt if unchecked
-                                                                                    await onUpdateItemAfterSaleData(item.id, !!(item as any).is_customer_item, {
-                                                                                        stage: checked ? 'after2' : 'after1_debt'
-                                                                                    });
-                                                                                }
+                                                                                const nextStage = checked ? 'after2' : 'after1_debt';
+                                                                                const previousStage = getItemAfterSaleStage(item) || 'after1_debt';
+
+                                                                                setOptimisticAfterSaleStages(prev => ({ ...prev, [item.id]: nextStage }));
 
                                                                                 // Cập nhật ghi chú kiểm nợ
                                                                                 const noteLine = `Đã trả ${item.item_name} cho khách`.toUpperCase();
@@ -1335,8 +1521,17 @@ export function ProductDetailDialog({
                                                                                     currentNotes = currentNotes.split('\n').filter((line: string) => line.trim().toUpperCase() !== noteLine).join('\n');
                                                                                 }
                                                                                 setFormData(prev => ({ ...prev, debt_checked_notes: currentNotes } as any));
-                                                                                
-                                                                                if (onReloadOrder) onReloadOrder();
+
+                                                                                if (!onUpdateItemAfterSaleData) return;
+
+                                                                                try {
+                                                                                    await onUpdateItemAfterSaleData(item.id, !!(item as any).is_customer_item, { stage: nextStage });
+                                                                                    onReloadOrder?.();
+                                                                                } catch (error) {
+                                                                                    console.error('Update handoff item error:', error);
+                                                                                    setOptimisticAfterSaleStages(prev => ({ ...prev, [item.id]: previousStage }));
+                                                                                    toast.error('Không cập nhật được trạng thái bàn giao');
+                                                                                }
                                                                             }}
                                                                         />
                                                                         <Label htmlFor={`item-sent-${item.id}`} className="text-[11px] font-bold truncate cursor-pointer uppercase">
@@ -1345,9 +1540,9 @@ export function ProductDetailDialog({
                                                                     </div>
                                                                     <Badge className={cn(
                                                                         "text-[9px] h-4 px-1 whitespace-nowrap",
-                                                                        ['after2', 'after3', 'after4'].includes((item as any).after_sale_stage) ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+                                                                        isItemReadyToReturn(item) ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
                                                                     )}>
-                                                                        {['after2', 'after3', 'after4'].includes((item as any).after_sale_stage) ? 'Sắp trả' : 'Chờ trả'}
+                                                                        {isItemReadyToReturn(item) ? 'Sắp trả' : 'Chờ trả'}
                                                                     </Badge>
                                                                 </div>
                                                             ))}
@@ -1493,25 +1688,7 @@ export function ProductDetailDialog({
 
                                                         {formData.delivery_type === 'pickup' ? (
                                                             <div className="space-y-4">
-                                                                <div className="grid grid-cols-2 gap-4">
-                                                                    <div className="space-y-2">
-                                                                        <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
-                                                                            NV TẠO ĐƠN <span className="text-red-500">*</span>
-                                                                        </Label>
-                                                                        <Select
-                                                                            value={formData.delivery_creator_name || ''}
-                                                                            onValueChange={(val) => setFormData(prev => ({ ...prev, delivery_creator_name: val }))}
-                                                                        >
-                                                                            <SelectTrigger className="h-9 bg-white">
-                                                                                <SelectValue placeholder="Chọn..." />
-                                                                            </SelectTrigger>
-                                                                            <SelectContent>
-                                                                                {users.map(u => (
-                                                                                    <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
-                                                                                ))}
-                                                                            </SelectContent>
-                                                                        </Select>
-                                                                    </div>
+                                                                <div className="grid grid-cols-1 gap-4">
                                                                     <div className="space-y-2">
                                                                         <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
                                                                             SĐT LIÊN HỆ <span className="text-red-500">*</span>

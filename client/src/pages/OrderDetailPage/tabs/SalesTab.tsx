@@ -756,7 +756,7 @@ export function SalesTab({
                             </Card>
 
                             {/* Lịch sử chuyển bước */}
-                            <Card>
+                            <Card className="hidden">
                                 <CardHeader className="pb-3">
                                     <CardTitle className="text-xs font-bold flex items-center gap-2 tracking-widest uppercase text-gray-500">
                                         <History className="h-4 w-4 text-primary" /> Lịch sử chuyển bước (Lên đơn)
@@ -957,3 +957,6 @@ export function SalesTab({
         </>
     );
 }
+
+
+

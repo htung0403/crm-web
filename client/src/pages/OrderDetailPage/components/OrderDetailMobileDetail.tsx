@@ -143,35 +143,64 @@ function ProductLine({
     showProductMeta?: boolean;
     indent?: boolean;
 }) {
+    const isProduct = showProductMeta;
+
     return (
         <div
             className={cn(
-                'flex items-center gap-2 border-t border-slate-100 py-2.5 first:border-t-0',
-                indent && 'pl-3',
+                'flex gap-2.5 py-2.5 first:pt-0 last:pb-0',
+                isProduct
+                    ? 'rounded-xl border border-blue-100 bg-gradient-to-br from-blue-50/90 to-white p-3 shadow-sm'
+                    : 'border-t border-slate-100',
+                indent && 'ml-3 border-t-0 rounded-lg bg-purple-50/50 px-2.5',
             )}
         >
             <span
                 className={cn(
-                    'h-2 w-2 shrink-0 rounded-full',
+                    'mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ring-4',
                     dotColor === 'blue' ? 'bg-blue-600' : 'bg-purple-600',
+                    dotColor === 'blue' ? 'ring-blue-100' : 'ring-purple-100',
                 )}
             />
             <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-medium">{name}</p>
+                <div className="flex min-w-0 items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                        {isProduct && (
+                            <Badge className="mb-1 h-5 rounded-full bg-blue-600 px-2 text-[10px] font-semibold text-white hover:bg-blue-600">
+                                Sản phẩm
+                            </Badge>
+                        )}
+                        <p
+                            className={cn(
+                                'leading-snug text-slate-900',
+                                isProduct ? 'text-[15px] font-bold' : 'text-sm font-semibold',
+                            )}
+                        >
+                            {name}
+                        </p>
+                    </div>
+                    <span
+                        className={cn(
+                            'shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums',
+                            isProduct ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700',
+                        )}
+                    >
+                        SL: {quantity}
+                    </span>
+                </div>
                 {showProductMeta && (
-                    <div className="mt-1 flex items-center gap-1 text-[11px] text-blue-700">
+                    <div className="mt-2 flex items-center gap-1.5 text-[11px] font-medium text-blue-700">
                         <Calendar className="h-3 w-3 shrink-0" />
                         <span>Hạn trả đồ: {dueAt ? new Date(dueAt).toLocaleDateString('vi-VN') : '—'}</span>
                     </div>
                 )}
                 {showProductMeta && (
-                    <div className="mt-0.5 flex items-start gap-1 text-[11px] text-muted-foreground">
+                    <div className="mt-1 flex items-start gap-1.5 rounded-lg bg-white/75 px-2 py-1.5 text-[11px] text-slate-600">
                         <FileText className="mt-0.5 h-3 w-3 shrink-0" />
                         <span className="line-clamp-2 leading-tight">Tình trạng ban đầu: {conditionBefore || '—'}</span>
                     </div>
                 )}
             </div>
-            <span className="shrink-0 text-xs text-muted-foreground">SL: {quantity}</span>
         </div>
     );
 }
@@ -182,7 +211,6 @@ export function OrderDetailMobileDetail({
     hasPendingEditApproval = false,
     onShowPrintDialog,
     onShowInvoicePrintDialog,
-    onShowPaymentDialog,
     onReload,
     onEditOrder,
 }: OrderDetailMobileDetailProps) {
@@ -359,38 +387,55 @@ export function OrderDetailMobileDetail({
                 </div>
 
                 {groups.length > 0 && (
-                    <div className="mt-2">
+                    <div className="mt-3 space-y-3">
                         {groups.map((group, gi) => {
                             if (group.product) {
                                 const product = group.product;
                                 const isCustomerProduct = !!(product as OrderItem & { is_customer_item?: boolean })
                                     .is_customer_item;
                                 return (
-                                    <div key={gi}>
+                                    <div
+                                        key={gi}
+                                        className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+                                    >
                                         <ProductLine
                                             name={product.item_name}
                                             quantity={product.quantity}
                                             dotColor="blue"
                                             dueAt={(product as any).due_at}
-                                            conditionBefore={(product as any).condition_before || (product as any).product_condition_before}
+                                            conditionBefore={
+                                                (product as any).condition_before ||
+                                                (product as any).product_condition_before
+                                            }
                                             showProductMeta
                                         />
                                         {isCustomerProduct && (
-                                            <MobileProductPhotos
-                                                item={product}
-                                                canEdit={canEditPhotos}
-                                                onUpdated={onReload}
-                                            />
+                                            <div className="px-3 pb-3">
+                                                <MobileProductPhotos
+                                                    item={product}
+                                                    canEdit={canEditPhotos}
+                                                    onUpdated={onReload}
+                                                />
+                                            </div>
                                         )}
-                                        {group.services.map((svc, si) => (
-                                            <ProductLine
-                                                key={si}
-                                                name={svc.item_name}
-                                                quantity={svc.quantity}
-                                                dotColor="purple"
-                                                indent
-                                            />
-                                        ))}
+                                        {group.services.length > 0 && (
+                                            <div className="border-t border-slate-100 bg-slate-50/70 px-3 py-2">
+                                                <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                                    Dịch vụ kèm theo
+                                                </p>
+                                                <div className="space-y-1.5">
+                                                    {group.services.map((svc, si) => (
+                                                        <ProductLine
+                                                            key={si}
+                                                            name={svc.item_name}
+                                                            quantity={svc.quantity}
+                                                            dotColor="purple"
+                                                            indent
+                                                        />
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 );
                             }

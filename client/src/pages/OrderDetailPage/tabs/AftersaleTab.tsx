@@ -581,7 +581,7 @@ export function AftersaleTab({
                         </div>
 
                         {/* Lịch sử chuyển giai đoạn After sale */}
-                        <div className="mt-6 border-t pt-6">
+                        <div className="hidden mt-6 border-t pt-6">
                             <h3 className="text-sm font-bold flex items-center gap-2 mb-3">
                                 <History className="h-4 w-4 text-primary" /> Lịch sử chuyển bước (After sale)
                             </h3>
@@ -631,3 +631,4 @@ export function AftersaleTab({
         </TabsContent>
     );
 }
+
