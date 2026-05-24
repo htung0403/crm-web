@@ -1,6 +1,74 @@
 import { useState, useCallback } from 'react';
 import { ordersApi } from '@/lib/api';
 
+export interface SalesStepData extends Record<string, unknown> {
+    pickup_appointment_at?: string;
+    step1_receiver_name?: string;
+    step1_shipping_fee?: number;
+    step1_payment_method?: string;
+    step1_evidence_photos?: string[];
+    step1_notes?: string;
+    step2_tags_photos?: string[];
+    step2_form_photos?: string[];
+    step3_technician_name?: string;
+    step3_work_details?: string;
+    step3_work_location?: string;
+    step3_notes?: string;
+}
+
+type ApiError = {
+    response?: {
+        data?: {
+            message?: string;
+        };
+    };
+};
+
+const getErrorMessage = (err: unknown, fallback: string) => {
+    const apiError = err as ApiError;
+    return apiError.response?.data?.message || fallback;
+};
+
+export interface OrderSurcharge {
+    type: string;
+    label: string;
+    value: number;
+    isPercent?: boolean;
+    is_percent?: boolean;
+    amount?: number;
+}
+
+export interface OrderCustomerItem extends Record<string, unknown> {
+    id: string;
+    name?: string;
+    item_name?: string;
+    type?: string;
+    item_type?: string;
+    quantity?: number;
+    unit_price?: number;
+    total_price?: number;
+    image?: string;
+    images?: string[];
+    services?: OrderItem[];
+    surcharges?: OrderSurcharge[];
+}
+
+export interface CreateOrderCustomerItem extends Record<string, unknown> {
+    name: string;
+    services?: Array<Record<string, unknown>>;
+    surcharges?: OrderSurcharge[];
+}
+
+export interface CreateOrderSaleItem extends Record<string, unknown> {
+    item_id?: string;
+    product_id?: string;
+    service_id?: string;
+    name?: string;
+    quantity?: number;
+    unit_price?: number;
+    surcharges?: OrderSurcharge[];
+}
+
 export interface OrderItemStep {
     id: string;
     started_at?: string;
@@ -41,9 +109,9 @@ export interface OrderItem {
     due_at?: string;
     /** Workflow steps for room deadline calculation */
     order_item_steps?: OrderItemStep[];
-    surcharges?: Array<{ type: string; label: string; value: number; isPercent: boolean }>;
+    surcharges?: OrderSurcharge[];
     surcharge_amount?: number;
-    sales_step_data?: any;
+    sales_step_data?: SalesStepData;
     care_warranty_flow?: string | null;
     care_warranty_stage?: string | null;
     warranty_code?: string | null;
@@ -103,17 +171,19 @@ export interface Order {
     delivery_received_at?: string | null;
     hd_sent?: boolean;
     hd_sent_at?: string | null;
+    hd_sent_photos?: string[];
     feedback_requested?: boolean;
     feedback_requested_at?: string | null;
+    feedback_requested_photos?: string[];
     care_warranty_flow?: string | null;
     care_warranty_stage?: string | null;
     warranty_code?: string | null;
     delivery_payment_method?: string | null;
     notes?: string;
-    customer_items?: any[];
+    customer_items?: OrderCustomerItem[];
     sale_items?: OrderItem[];
     items?: OrderItem[];
-    sales_step_data?: any;
+    sales_step_data?: SalesStepData;
     completed_at?: string;
     created_at: string;
     updated_at?: string;
@@ -166,8 +236,8 @@ export function useOrders() {
                     totalPages: data.pagination.totalPages || 0,
                 });
             }
-        } catch (err: any) {
-            setError(err.response?.data?.message || 'Lỗi khi tải danh sách đơn hàng');
+        } catch (err: unknown) {
+            setError(getErrorMessage(err, 'Lỗi khi tải danh sách đơn hàng'));
         } finally {
             setLoading(false);
         }
@@ -178,8 +248,8 @@ export function useOrders() {
         try {
             const response = await ordersApi.getById(id);
             return response.data.data!.order;
-        } catch (err: any) {
-            const message = err.response?.data?.message || 'Lỗi khi tải thông tin đơn hàng';
+        } catch (err: unknown) {
+            const message = getErrorMessage(err, 'Lỗi khi tải thông tin đơn hàng');
             setError(message);
             throw new Error(message);
         } finally {
@@ -189,13 +259,13 @@ export function useOrders() {
 
     const createOrder = useCallback(async (data: {
         customer_id: string;
-        customer_items?: any[];
-        sale_items?: any[];
+        customer_items?: CreateOrderCustomerItem[];
+        sale_items?: CreateOrderSaleItem[];
         notes?: string;
         discount?: number;
         discount_type?: 'amount' | 'percent';
         discount_value?: number;
-        surcharges?: any[];
+        surcharges?: OrderSurcharge[];
         paid_amount?: number;
         status?: string;
     }): Promise<Order> => {
@@ -205,8 +275,8 @@ export function useOrders() {
             const newOrder = response.data.data!.order;
             setOrders(prev => [newOrder, ...prev]);
             return newOrder;
-        } catch (err: any) {
-            const message = err.response?.data?.message || 'Lỗi khi tạo đơn hàng';
+        } catch (err: unknown) {
+            const message = getErrorMessage(err, 'Lỗi khi tạo đơn hàng');
             setError(message);
             throw new Error(message);
         } finally {
@@ -221,8 +291,8 @@ export function useOrders() {
             const updated = response.data.data!.order;
             setOrders(prev => prev.map(o => o.id === id ? { ...o, status: updated.status } : o));
             return updated;
-        } catch (err: any) {
-            const message = err.response?.data?.message || 'Lỗi khi cập nhật trạng thái';
+        } catch (err: unknown) {
+            const message = getErrorMessage(err, 'Lỗi khi cập nhật trạng thái');
             setError(message);
             throw new Error(message);
         } finally {
@@ -241,8 +311,8 @@ export function useOrders() {
             const updated = response.data.data!.order;
             setOrders(prev => prev.map(o => o.id === id ? updated : o));
             return updated;
-        } catch (err: any) {
-            const message = err.response?.data?.message || 'Lỗi khi cập nhật đơn hàng';
+        } catch (err: unknown) {
+            const message = getErrorMessage(err, 'Lỗi khi cập nhật đơn hàng');
             setError(message);
             throw new Error(message);
         } finally {
@@ -255,8 +325,8 @@ export function useOrders() {
         try {
             await ordersApi.delete(id);
             setOrders(prev => prev.filter(o => o.id !== id));
-        } catch (err: any) {
-            const message = err.response?.data?.message || 'Lỗi khi xóa đơn hàng';
+        } catch (err: unknown) {
+            const message = getErrorMessage(err, 'Lỗi khi xóa đơn hàng');
             setError(message);
             throw new Error(message);
         } finally {

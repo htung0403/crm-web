@@ -723,12 +723,13 @@ async function handleLeadUpdate(data: any) {
     // 1. Tìm leadId
     let leadId = id;
     let currentLead: any = null;
+    const leadSlaSelect = 'id, assigned_to, name, facebook_name, created_at, round_index, t_last_inbound, t_last_outbound, current_deadline_at, current_rule_index, sla_state, owner_sale';
 
     if (!leadId) {
         // Search by fb_thread_id first
         if (fb_thread_id) {
             const { data: found } = await supabaseAdmin.from('leads')
-                .select('id, assigned_to, name, facebook_name, created_at, round_index, t_last_inbound, t_last_outbound')
+                .select(leadSlaSelect)
                 .eq('fb_thread_id', fb_thread_id)
                 .maybeSingle();
             if (found) {
@@ -740,7 +741,7 @@ async function handleLeadUpdate(data: any) {
         // Fallback to pancake_conversation_id
         if (!leadId && pancake_conversation_id) {
             const { data: found } = await supabaseAdmin.from('leads')
-                .select('id, assigned_to, name, facebook_name, created_at, round_index, t_last_inbound, t_last_outbound')
+                .select(leadSlaSelect)
                 .eq('pancake_conversation_id', pancake_conversation_id)
                 .maybeSingle();
             if (found) {
@@ -752,7 +753,7 @@ async function handleLeadUpdate(data: any) {
         // Fallback to pancake_customer_id
         if (!leadId && data.pancake_customer_id) {
             const { data: found } = await supabaseAdmin.from('leads')
-                .select('id, assigned_to, name, facebook_name, created_at, round_index, t_last_inbound, t_last_outbound')
+                .select(leadSlaSelect)
                 .eq('pancake_customer_id', data.pancake_customer_id)
                 .maybeSingle();
             if (found) {
@@ -764,7 +765,7 @@ async function handleLeadUpdate(data: any) {
         // Fallback to phone
         if (!leadId && data.phone) {
             const { data: found } = await supabaseAdmin.from('leads')
-                .select('id, assigned_to, name, facebook_name, created_at, round_index, t_last_inbound, t_last_outbound')
+                .select(leadSlaSelect)
                 .eq('phone', data.phone)
                 .maybeSingle();
             if (found) {
@@ -782,7 +783,7 @@ async function handleLeadUpdate(data: any) {
     if (!currentLead) {
         const { data: found } = await supabaseAdmin
             .from('leads')
-            .select('id, assigned_to, name, facebook_name, created_at, round_index, t_last_inbound, t_last_outbound, current_deadline_at, current_rule_index, sla_state, owner_sale')
+            .select(leadSlaSelect)
             .eq('id', leadId)
             .single();
         currentLead = found;
@@ -963,11 +964,11 @@ async function handleLeadUpdate(data: any) {
         
         // Cập nhật State Machine SLA rời theo đúng kiến trúc sau khi Update lõi Lead xog
         if (effectiveLastActor === 'lead') {
-            await on_customer_message(currentLead);
+            await on_customer_message(lead);
         } else if (effectiveLastActor === 'sale') {
             const saleName = owner_sale || assigned_to;
             const resolvedId = await resolveUserByName(saleName);
-            await on_sale_message(currentLead, resolvedId as string, saleName);
+            await on_sale_message(lead, resolvedId as string, saleName);
         }
     }
 

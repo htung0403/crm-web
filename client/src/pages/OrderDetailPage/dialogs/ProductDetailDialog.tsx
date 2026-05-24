@@ -250,7 +250,9 @@ export function ProductDetailDialog({
                 delivery_staff_name: order.delivery_staff_name || '',
                 delivery_received_at: order.delivery_received_at ? new Date(order.delivery_received_at).toISOString().slice(0, 16) : '',
                 hd_sent: order.hd_sent || false,
+                hd_sent_photos: order.hd_sent_photos || [],
                 feedback_requested: order.feedback_requested || false,
+                feedback_requested_photos: order.feedback_requested_photos || [],
                 notes: order.notes || '',
                 // Strict separation: Only use item-specific photos
                 completion_photos: itemCompPhotos,
@@ -1955,46 +1957,86 @@ export function ProductDetailDialog({
                                             <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-green-800">HD BẢO QUẢN & PHẢN HỒI</h3>
                                             <div className="space-y-3">
                                                 {roomId.startsWith('after3') ? (
-                                                    <label htmlFor="hd_sent" className="bg-white p-4 rounded-xl border border-green-50 shadow-sm flex items-center justify-between cursor-pointer hover:bg-green-50/30 transition-colors">
-                                                        <div className="flex items-center gap-3">
-                                                            <BookOpen className={cn("h-5 w-5", formData.hd_sent ? "text-green-600" : "text-gray-300")} />
-                                                            <span className="text-sm font-medium">Đã gửi hướng dẫn bảo quản</span>
+                                                    <div className="bg-white p-4 rounded-xl border border-green-50 shadow-sm space-y-3">
+                                                        <label htmlFor="hd_sent" className="flex items-center justify-between cursor-pointer">
+                                                            <div className="flex items-center gap-3">
+                                                                <BookOpen className={cn("h-5 w-5", formData.hd_sent ? "text-green-600" : "text-gray-300")} />
+                                                                <span className="text-sm font-medium">Đã gửi hướng dẫn bảo quản</span>
+                                                            </div>
+                                                            <Checkbox
+                                                                id="hd_sent"
+                                                                checked={formData.hd_sent}
+                                                                onCheckedChange={(checked) => setFormData(prev => ({ ...prev, hd_sent: !!checked }))}
+                                                            />
+                                                        </label>
+                                                        <div className="pl-8">
+                                                            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-green-700">
+                                                                <Camera className="h-3.5 w-3.5" />
+                                                                Ảnh chứng minh đã gửi HD
+                                                            </div>
+                                                            <MultiMediaUpload
+                                                                value={formData.hd_sent_photos || []}
+                                                                onChange={(urls) => setFormData(prev => ({ ...prev, hd_sent_photos: urls }))}
+                                                                bucket="orders"
+                                                                folder="hd-feedback"
+                                                                disabled={saving}
+                                                            />
                                                         </div>
-                                                        <Checkbox
-                                                            id="hd_sent"
-                                                            checked={formData.hd_sent}
-                                                            onCheckedChange={(checked) => setFormData(prev => ({ ...prev, hd_sent: !!checked }))}
-                                                        />
-                                                    </label>
+                                                    </div>
                                                 ) : (
-                                                    <div className="bg-white p-4 rounded-xl border border-green-50 shadow-sm flex items-center justify-between">
-                                                        <div className="flex items-center gap-3">
-                                                            <BookOpen className={cn("h-5 w-5", formData.hd_sent ? "text-green-600" : "text-gray-300")} />
-                                                            <span className="text-sm font-medium">Đã gửi hướng dẫn bảo quản</span>
+                                                    <div className="bg-white p-4 rounded-xl border border-green-50 shadow-sm space-y-3">
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-3">
+                                                                <BookOpen className={cn("h-5 w-5", formData.hd_sent ? "text-green-600" : "text-gray-300")} />
+                                                                <span className="text-sm font-medium">Đã gửi hướng dẫn bảo quản</span>
+                                                            </div>
+                                                            <Badge variant="outline" className="bg-green-50 text-green-700">{order.hd_sent ? 'Đã gửi' : 'Chưa gửi'}</Badge>
                                                         </div>
-                                                        <Badge variant="outline" className="bg-green-50 text-green-700">{order.hd_sent ? 'Đã gửi' : 'Chưa gửi'}</Badge>
+                                                        {!!formData.hd_sent_photos?.length && (
+                                                            <MultiMediaUpload value={formData.hd_sent_photos} onChange={() => {}} disabled bucket="orders" folder="hd-feedback" />
+                                                        )}
                                                     </div>
                                                 )}
 
                                                 {roomId.startsWith('after3') ? (
-                                                    <label htmlFor="fb_req" className="bg-white p-4 rounded-xl border border-green-50 shadow-sm flex items-center justify-between cursor-pointer hover:bg-green-50/30 transition-colors">
-                                                        <div className="flex items-center gap-3">
-                                                            <MessageSquare className={cn("h-5 w-5", formData.feedback_requested ? "text-green-600" : "text-gray-300")} />
-                                                            <span className="text-sm font-medium">Yêu cầu Feedback</span>
+                                                    <div className="bg-white p-4 rounded-xl border border-green-50 shadow-sm space-y-3">
+                                                        <label htmlFor="fb_req" className="flex items-center justify-between cursor-pointer">
+                                                            <div className="flex items-center gap-3">
+                                                                <MessageSquare className={cn("h-5 w-5", formData.feedback_requested ? "text-green-600" : "text-gray-300")} />
+                                                                <span className="text-sm font-medium">Yêu cầu Feedback</span>
+                                                            </div>
+                                                            <Checkbox
+                                                                id="fb_req"
+                                                                checked={formData.feedback_requested}
+                                                                onCheckedChange={(checked) => setFormData(prev => ({ ...prev, feedback_requested: !!checked }))}
+                                                            />
+                                                        </label>
+                                                        <div className="pl-8">
+                                                            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-green-700">
+                                                                <Camera className="h-3.5 w-3.5" />
+                                                                Ảnh chứng minh yêu cầu Feedback
+                                                            </div>
+                                                            <MultiMediaUpload
+                                                                value={formData.feedback_requested_photos || []}
+                                                                onChange={(urls) => setFormData(prev => ({ ...prev, feedback_requested_photos: urls }))}
+                                                                bucket="orders"
+                                                                folder="hd-feedback"
+                                                                disabled={saving}
+                                                            />
                                                         </div>
-                                                        <Checkbox
-                                                            id="fb_req"
-                                                            checked={formData.feedback_requested}
-                                                            onCheckedChange={(checked) => setFormData(prev => ({ ...prev, feedback_requested: !!checked }))}
-                                                        />
-                                                    </label>
+                                                    </div>
                                                 ) : (
-                                                    <div className="bg-white p-4 rounded-xl border border-green-50 shadow-sm flex items-center justify-between">
-                                                        <div className="flex items-center gap-3">
-                                                            <MessageSquare className={cn("h-5 w-5", formData.feedback_requested ? "text-green-600" : "text-gray-300")} />
-                                                            <span className="text-sm font-medium">Yêu cầu Feedback</span>
+                                                    <div className="bg-white p-4 rounded-xl border border-green-50 shadow-sm space-y-3">
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-3">
+                                                                <MessageSquare className={cn("h-5 w-5", formData.feedback_requested ? "text-green-600" : "text-gray-300")} />
+                                                                <span className="text-sm font-medium">Yêu cầu Feedback</span>
+                                                            </div>
+                                                            <Badge variant="outline" className="bg-green-50 text-green-700">{order.feedback_requested ? 'Đã gửi' : 'Chưa gửi'}</Badge>
                                                         </div>
-                                                        <Badge variant="outline" className="bg-green-50 text-green-700">{order.feedback_requested ? 'Đã gửi' : 'Chưa gửi'}</Badge>
+                                                        {!!formData.feedback_requested_photos?.length && (
+                                                            <MultiMediaUpload value={formData.feedback_requested_photos} onChange={() => {}} disabled bucket="orders" folder="hd-feedback" />
+                                                        )}
                                                     </div>
                                                 )}
 

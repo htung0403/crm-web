@@ -167,7 +167,9 @@ export const ordersApi = {
         delivery_self_pickup?: boolean;
         delivery_notes?: string | null;
         hd_sent?: boolean;
+        hd_sent_photos?: string[];
         feedback_requested?: boolean;
+        feedback_requested_photos?: string[];
         care_warranty_flow?: string | null;
         care_warranty_stage?: string | null;
         delivery_creator_name?: string | null;

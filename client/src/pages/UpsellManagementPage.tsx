@@ -38,7 +38,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
-import { upsellTicketsApi, requestsApi, leaveRequestsApi, transactionsApi, usersApi } from '@/lib/api';
+import { ordersApi, upsellTicketsApi, requestsApi, leaveRequestsApi, transactionsApi, usersApi } from '@/lib/api';
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -78,6 +78,8 @@ export function UpsellManagementPage() {
 
     // UI States
     const [selectedTicket, setSelectedTicket] = useState<any>(null);
+    const [selectedOrderBefore, setSelectedOrderBefore] = useState<any>(null);
+    const [loadingOrderBefore, setLoadingOrderBefore] = useState(false);
     const [showRejectDialog, setShowRejectDialog] = useState(false);
     const [rejectItem, setRejectItem] = useState<{ id: string; type: 'upsell' | 'order_edit' | 'accessory' | 'partner' | 'extension' | 'leave' | 'voucher' } | null>(null);
     const [rejectionReason, setRejectionReason] = useState('');
@@ -170,6 +172,41 @@ export function UpsellManagementPage() {
         return normalizedType === 'order_edit' ||
             normalizedType === 'edit_order' ||
             normalizedType === 'order_update';
+    };
+
+    const getOrderEditPayload = (ticket: any) => ticket?.data?.update_payload || ticket?.data?.preview || ticket?.data || {};
+
+    const getOrderTotal = (order: any) => Number(order?.total_amount) || 0;
+
+    const getOrderEditTotal = (ticket: any) => {
+        const payload = getOrderEditPayload(ticket);
+        return Number(payload?.total_amount) || Number(payload?.preview?.total_amount_after) || Number(payload?.preview?.total_amount) || Number(ticket?.total_amount) || 0;
+    };
+
+    const getItemTotal = (item: any) => {
+        const servicesTotal = Array.isArray(item?.services)
+            ? item.services.reduce((sum: number, service: any) => sum + (Number(service?.price ?? service?.unit_price) || 0), 0)
+            : 0;
+        return Number(item?.total_price) || ((Number(item?.quantity) || 1) * (Number(item?.unit_price) || 0)) || servicesTotal || 0;
+    };
+
+    const getDisplayName = (item: any) => item?.name || item?.item_name || item?.product?.name || item?.service?.name || item?.package?.name || '—';
+
+    const openOrderEditReview = async (ticket: any) => {
+        setSelectedTicket(ticket);
+        setSelectedOrderBefore(null);
+        const orderId = getOrderId(ticket);
+        if (!orderId) return;
+
+        setLoadingOrderBefore(true);
+        try {
+            const response = await ordersApi.getById(orderId);
+            setSelectedOrderBefore(response.data?.data?.order || null);
+        } catch (error: any) {
+            toast.error(error.response?.data?.message || 'Không thể tải thông tin đơn trước khi sửa');
+        } finally {
+            setLoadingOrderBefore(false);
+        }
     };
 
     const orderEditTickets = upsellTickets.filter((ticket) => isOrderEditTicket(ticket));
@@ -404,6 +441,69 @@ export function UpsellManagementPage() {
             getFirstImage(req.metadata?.photos);
     };
 
+    const OrderSnapshot = ({ title, order, customerItems = [], saleItems = [], totalAmount, accent }: { title: string; order?: any; customerItems?: any[]; saleItems?: any[]; totalAmount: number; accent: 'slate' | 'fuchsia' }) => (
+        <Card className={cn('border shadow-sm overflow-hidden', accent === 'fuchsia' ? 'border-fuchsia-100' : 'border-slate-200')}>
+            <CardHeader className={cn('py-3 px-4 border-b', accent === 'fuchsia' ? 'bg-fuchsia-50' : 'bg-white')}>
+                <CardTitle className="text-sm font-black text-slate-800">{title}</CardTitle>
+                <CardDescription className="text-xs">
+                    {order?.order_code || getOrderCode(selectedTicket)} · {order?.customer?.name || selectedTicket?.customer?.name || '—'}
+                </CardDescription>
+            </CardHeader>
+            <CardContent className="p-4 space-y-4 bg-white">
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase">Tạm tính</p>
+                        <p className="font-bold text-slate-700">{formatCurrency(Number(order?.subtotal_amount) || totalAmount)}</p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase">Tổng tiền</p>
+                        <p className={cn('font-black', accent === 'fuchsia' ? 'text-fuchsia-700' : 'text-slate-900')}>{formatCurrency(totalAmount)}</p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase">Giảm giá</p>
+                        <p className="font-bold text-slate-700">{formatCurrency(Number(order?.discount) || Number(order?.discount_amount) || 0)}</p>
+                    </div>
+                    <div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase">Đã thanh toán</p>
+                        <p className="font-bold text-slate-700">{formatCurrency(Number(order?.paid_amount) || 0)}</p>
+                    </div>
+                </div>
+
+                <div className="space-y-2">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">Sản phẩm khách gửi</p>
+                    {customerItems.length > 0 ? customerItems.map((item: any, index: number) => (
+                        <div key={item?.id || index} className="rounded-lg border border-slate-100 p-2 text-xs">
+                            <div className="font-bold text-slate-700">{getDisplayName(item)}</div>
+                            {Array.isArray(item?.services) && item.services.length > 0 && (
+                                <div className="mt-1 space-y-1 text-slate-500">
+                                    {item.services.map((service: any, serviceIndex: number) => (
+                                        <div key={service?.id || serviceIndex} className="flex justify-between gap-2">
+                                            <span className="truncate">{service?.name || service?.item_name || 'Dịch vụ'}</span>
+                                            <span className="font-bold">{formatCurrency(Number(service?.price ?? service?.unit_price) || 0)}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )) : <p className="text-xs text-slate-400 italic">Không có</p>}
+                </div>
+
+                <div className="space-y-2">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase">Sản phẩm bán thêm</p>
+                    {saleItems.length > 0 ? saleItems.map((item: any, index: number) => (
+                        <div key={item?.id || index} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 p-2 text-xs">
+                            <div>
+                                <p className="font-bold text-slate-700">{getDisplayName(item)}</p>
+                                <p className="text-slate-400">SL: {Number(item?.quantity) || 1}</p>
+                            </div>
+                            <p className="font-black text-slate-700">{formatCurrency(getItemTotal(item))}</p>
+                        </div>
+                    )) : <p className="text-xs text-slate-400 italic">Không có</p>}
+                </div>
+            </CardContent>
+        </Card>
+    );
+
     return (
         <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -564,7 +664,7 @@ export function UpsellManagementPage() {
                                             </div>
                                         </div>
                                         <div className="bg-slate-50 md:w-32 border-l border-slate-100 p-4 flex flex-col justify-center gap-2">
-                                            <Button className="w-full bg-fuchsia-600 hover:bg-fuchsia-700 h-9 text-xs font-bold" onClick={() => handleApproveOrderEdit(ticket.id)} disabled={processing}>Duyệt</Button>
+                                            <Button className="w-full bg-fuchsia-600 hover:bg-fuchsia-700 h-9 text-xs font-bold" onClick={() => openOrderEditReview(ticket)} disabled={processing}>Duyệt</Button>
                                             <Button variant="outline" className="w-full text-red-600 border-red-200 h-9 text-xs font-bold" onClick={() => onRejectClick(ticket.id, 'order_edit')} disabled={processing}>Từ chối</Button>
                                         </div>
                                     </div>
@@ -886,20 +986,77 @@ export function UpsellManagementPage() {
                 </TabsContent>
             </Tabs>
 
-            {/* Upsell Detail Dialog */}
+            {/* Upsell / Order Edit Detail Dialog */}
             <Dialog open={!!selectedTicket} onOpenChange={(open) => !open && setSelectedTicket(null)}>
-                <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl">
-                    <DialogHeader className="px-6 py-4 bg-indigo-600 text-white">
+                <DialogContent className={cn("max-h-[85vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl", isOrderEditTicket(selectedTicket) ? "max-w-5xl" : "max-w-2xl")}>
+                    <DialogHeader className={cn("px-6 py-4 text-white", isOrderEditTicket(selectedTicket) ? "bg-fuchsia-600" : "bg-indigo-600")}>
                         <DialogTitle className="flex items-center gap-2">
                             <Eye className="h-5 w-5" />
-                            Chi tiết hạng mục Upsell
+                            {isOrderEditTicket(selectedTicket) ? 'Duyệt yêu cầu Sửa đơn' : 'Chi tiết hạng mục Upsell'}
                         </DialogTitle>
-                        <DialogDescription className="text-indigo-100">
-                            Chi tiết các thay đổi được yêu cầu cho đơn hàng {getOrderCode(selectedTicket)}
+                        <DialogDescription className={isOrderEditTicket(selectedTicket) ? "text-fuchsia-100" : "text-indigo-100"}>
+                            {isOrderEditTicket(selectedTicket)
+                                ? `Xem thông tin đơn trước và sau khi sửa trước khi phê duyệt ${getOrderCode(selectedTicket)}`
+                                : `Chi tiết các thay đổi được yêu cầu cho đơn hàng ${getOrderCode(selectedTicket)}`}
                         </DialogDescription>
                     </DialogHeader>
 
                     <ScrollArea className="flex-1 p-6 bg-slate-50">
+                        {isOrderEditTicket(selectedTicket) ? (() => {
+                            const payload = getOrderEditPayload(selectedTicket);
+                            const beforeCustomerItems = selectedOrderBefore?.customer_items || [];
+                            const beforeSaleItems = selectedOrderBefore?.sale_items || [];
+                            const afterCustomerItems = payload?.customer_items || [];
+                            const afterSaleItems = payload?.sale_items || [];
+                            const beforeTotal = getOrderTotal(selectedOrderBefore);
+                            const afterTotal = getOrderEditTotal(selectedTicket);
+
+                            return (
+                                <div className="space-y-5">
+                                    {loadingOrderBefore ? (
+                                        <div className="flex items-center justify-center py-16 text-sm font-bold text-slate-500">
+                                            <Loader2 className="h-5 w-5 animate-spin mr-2 text-fuchsia-600" />
+                                            Đang tải thông tin đơn trước khi sửa...
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                                                <OrderSnapshot
+                                                    title="Đơn trước khi sửa"
+                                                    order={selectedOrderBefore}
+                                                    customerItems={beforeCustomerItems}
+                                                    saleItems={beforeSaleItems}
+                                                    totalAmount={beforeTotal}
+                                                    accent="slate"
+                                                />
+                                                <OrderSnapshot
+                                                    title="Đơn sau khi sửa"
+                                                    order={{ ...selectedOrderBefore, ...payload, total_amount: afterTotal }}
+                                                    customerItems={afterCustomerItems}
+                                                    saleItems={afterSaleItems}
+                                                    totalAmount={afterTotal}
+                                                    accent="fuchsia"
+                                                />
+                                            </div>
+                                            <div className="bg-white rounded-xl border border-fuchsia-100 p-4 flex items-center justify-between">
+                                                <div>
+                                                    <p className="text-sm font-black text-slate-800">Chênh lệch tổng tiền</p>
+                                                    <p className="text-xs text-slate-500">Sau sửa - trước sửa</p>
+                                                </div>
+                                                <p className={cn("text-2xl font-black", afterTotal - beforeTotal >= 0 ? "text-emerald-600" : "text-red-600")}>
+                                                    {afterTotal - beforeTotal >= 0 ? '+' : ''}{formatCurrency(afterTotal - beforeTotal)}
+                                                </p>
+                                            </div>
+                                            {selectedTicket?.notes && (
+                                                <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-sm text-amber-900">
+                                                    <span className="font-bold">Ghi chú yêu cầu: </span>{selectedTicket.notes}
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+                            );
+                        })() : (
                         <div className="space-y-6">
                             {/* Customer Items */}
                             {selectedTicket?.data?.customer_items?.length > 0 && (
@@ -963,12 +1120,15 @@ export function UpsellManagementPage() {
                                 <span className="text-2xl font-black text-indigo-700">{formatCurrency(selectedTicket?.total_amount)}</span>
                             </div>
                         </div>
+                        )}
                     </ScrollArea>
 
                     <DialogFooter className="px-6 py-4 bg-white border-t gap-3 flex sm:justify-end">
                         <Button variant="outline" onClick={() => setSelectedTicket(null)}>Đóng</Button>
-                        <Button variant="outline" className="text-red-600 border-red-200" onClick={() => onRejectClick(selectedTicket.id, 'upsell')} disabled={processing}>Từ chối</Button>
-                        <Button className="bg-emerald-600 hover:bg-emerald-700 font-bold" onClick={() => handleApproveUpsell(selectedTicket.id)} disabled={processing}>Phê duyệt & Cập nhật đơn hàng</Button>
+                        <Button variant="outline" className="text-red-600 border-red-200" onClick={() => onRejectClick(selectedTicket.id, isOrderEditTicket(selectedTicket) ? 'order_edit' : 'upsell')} disabled={processing}>Từ chối</Button>
+                        <Button className="bg-emerald-600 hover:bg-emerald-700 font-bold" onClick={() => isOrderEditTicket(selectedTicket) ? handleApproveOrderEdit(selectedTicket.id) : handleApproveUpsell(selectedTicket.id)} disabled={processing || loadingOrderBefore}>
+                            {isOrderEditTicket(selectedTicket) ? 'Phê duyệt & Áp dụng sửa đơn' : 'Phê duyệt & Cập nhật đơn hàng'}
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

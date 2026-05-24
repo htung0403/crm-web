@@ -1796,7 +1796,9 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
             aftersale_return_user_name,
             delivery_notes,
             hd_sent,
+            hd_sent_photos,
             feedback_requested,
+            feedback_requested_photos,
             care_warranty_flow,
             care_warranty_stage,
             after_sale_stage,
@@ -1850,10 +1852,12 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
             updatePayload.hd_sent = !!hd_sent;
             updatePayload.hd_sent_at = !!hd_sent ? new Date().toISOString() : null;
         }
+        if (hd_sent_photos !== undefined) updatePayload.hd_sent_photos = Array.isArray(hd_sent_photos) ? hd_sent_photos : [];
         if (feedback_requested !== undefined) {
             updatePayload.feedback_requested = !!feedback_requested;
             updatePayload.feedback_requested_at = !!feedback_requested ? new Date().toISOString() : null;
         }
+        if (feedback_requested_photos !== undefined) updatePayload.feedback_requested_photos = Array.isArray(feedback_requested_photos) ? feedback_requested_photos : [];
         if (care_warranty_flow !== undefined) {
             if (care_warranty_flow !== null && !CARE_WARRANTY_FLOWS.includes(care_warranty_flow)) {
                 throw new ApiError('care_warranty_flow không hợp lệ. Chọn: warranty, care', 400);
