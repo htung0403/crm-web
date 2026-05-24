@@ -1119,7 +1119,7 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                 category: 'Thanh toán đơn hàng',
                 amount: paidAmountValue,
                 payment_method: payment_method || 'cash',
-                notes: `Thanh toán tại chỗ khi tạo đơn - ${orderCode}`,
+                notes: `Phiếu thu cọc đơn hàng - ${orderCode}`,
                 date: new Date().toISOString().split('T')[0],
                 order_id: order.id,
                 order_code: orderCode,

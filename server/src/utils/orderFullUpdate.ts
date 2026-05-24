@@ -15,6 +15,89 @@ export interface FullOrderUpdatePayload {
     payment_method?: string;
 }
 
+const ORDER_DEPOSIT_TRANSACTION_NOTE_PREFIX = 'Phiếu thu cọc đơn hàng';
+const LEGACY_ORDER_DEPOSIT_NOTE_MARKERS = [
+    ORDER_DEPOSIT_TRANSACTION_NOTE_PREFIX,
+    'Thanh toán tại chỗ khi tạo đơn',
+    'Thanh toán khi cập nhật đơn',
+];
+
+async function syncOrderPaymentTransaction(order: any, paidAmountValue: number, paymentMethod: string | undefined, userId: string) {
+    const { data: orderTransactions } = await supabaseAdmin
+        .from('transactions')
+        .select('id, amount, payment_method, status, notes, created_at')
+        .eq('order_id', order.id)
+        .eq('type', 'income')
+        .eq('category', 'Thanh toán đơn hàng')
+        .neq('status', 'cancelled')
+        .order('created_at', { ascending: true })
+        .limit(50);
+
+    const existingTransaction = (orderTransactions || []).find((transaction: any) => {
+        const notes = String(transaction?.notes || '');
+        return LEGACY_ORDER_DEPOSIT_NOTE_MARKERS.some(marker => notes.includes(marker));
+    });
+
+    if (paidAmountValue <= 0) {
+        if (existingTransaction) {
+            const { error } = await supabaseAdmin
+                .from('transactions')
+                .update({
+                    status: 'cancelled',
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', existingTransaction.id);
+            if (error) console.error('[OrderUpdateFull] Transaction cancellation failed:', error);
+        }
+        return;
+    }
+
+    const transactionPayload = {
+        amount: paidAmountValue,
+        payment_method: paymentMethod || existingTransaction?.payment_method || 'cash',
+        notes: `${ORDER_DEPOSIT_TRANSACTION_NOTE_PREFIX} - ${order.order_code}`,
+        updated_at: new Date().toISOString(),
+    };
+
+    if (existingTransaction) {
+        const { error } = await supabaseAdmin
+            .from('transactions')
+            .update(transactionPayload)
+            .eq('id', existingTransaction.id);
+        if (error) console.error('[OrderUpdateFull] Transaction update failed:', error);
+        return;
+    }
+
+    const { data: lastTrans } = await supabaseAdmin
+        .from('transactions')
+        .select('code')
+        .like('code', 'PT%')
+        .order('created_at', { ascending: false })
+        .limit(1);
+    let tCodeValue = 'PT000001';
+    if (lastTrans && lastTrans.length > 0) {
+        const lNum = parseInt(lastTrans[0].code.replace('PT', ''), 10);
+        tCodeValue = `PT${String(lNum + 1).padStart(6, '0')}`;
+    }
+
+    const { error } = await supabaseAdmin.from('transactions').insert({
+        code: tCodeValue,
+        type: 'income',
+        category: 'Thanh toán đơn hàng',
+        amount: paidAmountValue,
+        payment_method: paymentMethod || 'cash',
+        notes: `${ORDER_DEPOSIT_TRANSACTION_NOTE_PREFIX} - ${order.order_code}`,
+        date: new Date().toISOString().split('T')[0],
+        order_id: order.id,
+        order_code: order.order_code,
+        status: 'approved',
+        created_by: userId,
+        approved_by: userId,
+        approved_at: new Date().toISOString(),
+    });
+    if (error) console.error('[OrderUpdateFull] Transaction recording failed:', error);
+}
+
 export async function applyFullOrderUpdate(orderId: string, payload: FullOrderUpdatePayload, userId: string) {
     const { customer_id, customer_items, sale_items, notes, discount, discount_type, discount_value, surcharges, paid_amount, payment_method } = payload;
 
@@ -52,7 +135,12 @@ export async function applyFullOrderUpdate(orderId: string, payload: FullOrderUp
     }
 
     const discountAmount = Number(discount) || 0;
-    const totalAmount = subtotal - discountAmount;
+    const topLevelSurchargeAmount = Array.isArray(surcharges)
+        ? surcharges.reduce((sum: number, surcharge: any) => sum + (Number(surcharge?.amount) || 0), 0)
+        : 0;
+    const paidAmountValue = Number(paid_amount) || 0;
+    const totalAmount = Math.max(0, subtotal - discountAmount + topLevelSurchargeAmount);
+    const remainingDebt = Math.max(0, totalAmount - paidAmountValue);
 
     const { data: order, error: orderError } = await supabaseAdmin
         .from('orders')
@@ -64,9 +152,11 @@ export async function applyFullOrderUpdate(orderId: string, payload: FullOrderUp
             discount_value,
             total_amount: totalAmount,
             notes,
-            paid_amount: Number(paid_amount) || 0,
-            remaining_debt: totalAmount - (Number(paid_amount) || 0),
+            paid_amount: paidAmountValue,
+            remaining_debt: remainingDebt,
+            payment_status: remainingDebt <= 0 ? 'paid' : (paidAmountValue > 0 ? 'partial' : 'unpaid'),
             surcharges: surcharges || [],
+            surcharges_amount: topLevelSurchargeAmount,
             updated_at: new Date().toISOString(),
         })
         .eq('id', orderId)
@@ -258,37 +348,7 @@ export async function applyFullOrderUpdate(orderId: string, payload: FullOrderUp
         }
     }
 
-    const paidAmountValue = Number(paid_amount) || 0;
-    if (paidAmountValue > 0) {
-        const { data: lastTrans } = await supabaseAdmin
-            .from('transactions')
-            .select('code')
-            .like('code', 'PT%')
-            .order('created_at', { ascending: false })
-            .limit(1);
-        let tCodeValue = 'PT000001';
-        if (lastTrans && lastTrans.length > 0) {
-            const lNum = parseInt(lastTrans[0].code.replace('PT', ''), 10);
-            tCodeValue = `PT${String(lNum + 1).padStart(6, '0')}`;
-        }
-
-        const { error: tError } = await supabaseAdmin.from('transactions').insert({
-            code: tCodeValue,
-            type: 'income',
-            category: 'Thanh toán đơn hàng',
-            amount: paidAmountValue,
-            payment_method: payment_method || 'cash',
-            notes: `Thanh toán khi cập nhật đơn - ${order.order_code}`,
-            date: new Date().toISOString().split('T')[0],
-            order_id: order.id,
-            order_code: order.order_code,
-            status: 'approved',
-            created_by: userId,
-            approved_by: userId,
-            approved_at: new Date().toISOString(),
-        });
-        if (tError) console.error('[OrderUpdateFull] Transaction recording failed:', tError);
-    }
+    await syncOrderPaymentTransaction(order, paidAmountValue, payment_method, userId);
 
     syncInvoiceWithOrder(orderId, payment_method).catch(err => console.error('[OrderUpdate] Failed to sync invoice:', err));
 
@@ -311,4 +371,3 @@ export async function applyFullOrderUpdate(orderId: string, payload: FullOrderUp
 
     return updatedOrder;
 }
-
