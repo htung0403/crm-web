@@ -1125,7 +1125,7 @@ async function handleCustomerCreate(data: any) {
 }
 
 async function handleOrderCreate(data: any) {
-    const { customer_id, customer_phone, items, notes, total_amount } = data;
+    const { customer_id, customer_phone, items, notes, total_amount, status } = data;
 
     let finalCustomerId = customer_id;
 
@@ -1152,7 +1152,7 @@ async function handleOrderCreate(data: any) {
             customer_id: finalCustomerId,
             notes: notes || null,
             total_amount: total_amount || 0,
-            status: 'pending',
+            status: status || 'before_sale',
             source: 'n8n',
         })
         .select()
