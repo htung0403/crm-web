@@ -61,48 +61,29 @@ router.get('/cron-data', verifyN8nSecret, async (req: Request, res: Response, ne
         const fromIso = from.toISOString();
         const toIso = to.toISOString();
 
-        const [itemsRes, ordersRes] = await Promise.all([
-            supabaseAdmin
-                .from('order_items')
-                .select(`
-                    id, order_id, item_name, item_type, item_code, quantity, status,
-                    current_phase, phase_stage, due_at, technician_id,
-                    order:orders(
-                        id, order_code, sales_id, status, due_at,
-                        customer:customers(id, name, phone),
-                        sales_user:users!orders_sales_id_fkey(id, name, telegram_chat_id)
-                    ),
-                    technician:users!order_items_technician_id_fkey(id, name, telegram_chat_id)
-                `)
-                .gte('due_at', fromIso)
-                .lt('due_at', toIso)
-                .order('due_at', { ascending: true }),
-            supabaseAdmin
-                .from('order_products')
-                .select(`
-                    id, order_id, product_code, name, type, status,
-                    after_sale_stage, care_warranty_flow, care_warranty_stage,
-                    current_phase, phase_stage, delivery_code, delivery_carrier,
-                    delivery_type, due_at,
-                    order:orders(
-                        id, order_code, sales_id, status, due_at,
-                        customer:customers(id, name, phone),
-                        sales_user:users!orders_sales_id_fkey(id, name, telegram_chat_id)
-                    )
-                `)
-                .gte('due_at', fromIso)
-                .lt('due_at', toIso)
-                .not('after_sale_stage', 'eq', 'after4')
-                .order('due_at', { ascending: true }),
-        ]);
+        const { data: products, error } = await supabaseAdmin
+            .from('order_products')
+            .select(`
+                id, order_id, product_code, name, type, status,
+                after_sale_stage, care_warranty_flow, care_warranty_stage,
+                current_phase, phase_stage, delivery_code, delivery_carrier,
+                delivery_type, due_at,
+                order:orders(
+                    id, order_code, sales_id, status,
+                    customer:customers(id, name, phone),
+                    sales_user:users!orders_sales_id_fkey(id, name, telegram_chat_id)
+                )
+            `)
+            .gte('due_at', fromIso)
+            .lt('due_at', toIso)
+            .not('after_sale_stage', 'eq', 'after4')
+            .order('due_at', { ascending: true });
 
-        if (itemsRes.error) {
-            throw new ApiError('Lỗi truy vấn deadline items: ' + itemsRes.error.message, 500);
+        if (error) {
+            throw new ApiError('Lỗi truy vấn sản phẩm theo hạn trả: ' + error.message, 500);
         }
 
-        if (ordersRes.error) {
-            throw new ApiError('Lỗi truy vấn return_due orders: ' + ordersRes.error.message, 500);
-        }
+        const productRows = products || [];
 
         res.json({
             status: 'success',
@@ -110,15 +91,15 @@ router.get('/cron-data', verifyN8nSecret, async (req: Request, res: Response, ne
             filters: {
                 from: fromIso,
                 to: toIso,
-                source: 'due_at',
+                source: 'order_products.due_at',
             },
             counts: {
-                items: itemsRes.data?.length || 0,
-                orders: ordersRes.data?.length || 0,
+                items: 0,
+                orders: productRows.length,
             },
             data: {
-                items: itemsRes.data || [],
-                orders: ordersRes.data || [],
+                items: [],
+                orders: productRows,
             },
         });
     } catch (error) {
