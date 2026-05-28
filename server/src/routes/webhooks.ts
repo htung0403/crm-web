@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
-import { fireWebhook } from '../utils/webhookNotifier.js';
+import { fireWebhook, notifyCrmMaster } from '../utils/webhookNotifier.js';
 import { on_customer_message, on_sale_message, on_lead_assigned, getVirtualTimeLeft, SLA_CYCLES } from '../utils/slaManager.js';
 
 const router = Router();
@@ -688,6 +688,8 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
         await on_lead_assigned(lead.id, resolvedAssignedTo as string);
     }
 
+    notifyCrmMaster('lead.created', { lead });
+
     return {
         action: 'created',
         lead
@@ -972,6 +974,8 @@ async function handleLeadUpdate(data: any) {
         }
     }
 
+    notifyCrmMaster('lead.updated', { lead });
+
     return {
         action: 'updated',
         lead
@@ -1043,6 +1047,8 @@ async function handleLeadAIUpdate(data: any) {
         .single();
 
     if (error) throw new ApiError('Lỗi cập nhật AI: ' + error.message, 500);
+
+    notifyCrmMaster('lead.ai_updated', { lead });
 
     // 4. Log hoạt động AI
     if (ai_suggested_reply) {
@@ -1121,6 +1127,8 @@ async function handleCustomerCreate(data: any) {
         throw new ApiError('Lỗi khi tạo customer: ' + error.message, 500);
     }
 
+    notifyCrmMaster('customer.created', { customer });
+
     return { customer };
 }
 
@@ -1161,6 +1169,8 @@ async function handleOrderCreate(data: any) {
     if (error) {
         throw new ApiError('Lỗi khi tạo order: ' + error.message, 500);
     }
+
+    notifyCrmMaster('order.created', { order });
 
     return { order };
 }

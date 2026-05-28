@@ -5,6 +5,7 @@ import { authenticate, AuthenticatedRequest, requireSale } from '../middleware/a
 import { checkAndCompleteOrder } from '../utils/orderHelper.js';
 import { autoCreateInvoice, syncInvoiceWithOrder } from '../utils/billingHelper.js';
 import { notifyFinanceEvent } from '../utils/financeNotifications.js';
+import { notifyCrmMaster } from '../utils/webhookNotifier.js';
 
 
 const router = Router();
@@ -1130,6 +1131,8 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
             });
         }
 
+        notifyCrmMaster('order.created', { order, customer_items: createdCustomerItems });
+
         res.status(201).json({
             status: 'success',
             data: {
@@ -1518,6 +1521,8 @@ router.post('/:id/upsell', authenticate, requireSale, async (req: AuthenticatedR
             console.error('Error updating order totals after upsell:', updateError);
         }
 
+        notifyCrmMaster('order.upsell_added', { order_id: id, newSubtotal, customer_items: createdCustomerItems });
+
         res.json({
             status: 'success',
             data: {
@@ -1672,6 +1677,8 @@ router.put('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, 
             `)
             .eq('id', id)
             .single();
+        notifyCrmMaster('order.updated', { order: updatedOrder });
+
         res.json({
             status: 'success',
             data: { order: updatedOrder },
@@ -2012,6 +2019,8 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
             throw new ApiError('Lỗi khi cập nhật đơn hàng', 500);
         }
 
+        notifyCrmMaster('order.status_updated', { order });
+
         res.json({
             status: 'success',
             data: { order },
@@ -2209,6 +2218,16 @@ router.post('/:id/payments', authenticate, async (req: AuthenticatedRequest, res
 
         // Sync associated invoices (updates totals/items and marks as paid if settled)
         syncInvoiceWithOrder(id, payment_method).catch(err => console.error('[OrderPayment] Failed to sync invoice:', err));
+
+        notifyCrmMaster('order.payment_added', {
+            payment,
+            order: {
+                id,
+                paid_amount: newPaidAmount,
+                remaining_debt: newRemainingDebt,
+                payment_status: newPaymentStatus,
+            },
+        });
 
         res.status(201).json({
             status: 'success',

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireSale } from '../middleware/auth.js';
+import { notifyCrmMaster } from '../utils/webhookNotifier.js';
 
 const router = Router();
 
@@ -143,6 +144,8 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
             throw new ApiError('Lỗi khi tạo khách hàng: ' + error.message, 500);
         }
 
+        notifyCrmMaster('customer.created', { customer });
+
         res.status(201).json({
             status: 'success',
             data: { customer },
@@ -168,6 +171,8 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         if (error) {
             throw new ApiError('Lỗi khi cập nhật khách hàng', 500);
         }
+
+        notifyCrmMaster('customer.updated', { customer });
 
         res.json({
             status: 'success',

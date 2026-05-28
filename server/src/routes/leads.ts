@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireSale } from '../middleware/auth.js';
 import { autoLogKpiViolation } from '../utils/kpiViolationLogger.js';
+import { notifyCrmMaster } from '../utils/webhookNotifier.js';
 
 const router = Router();
 
@@ -126,6 +127,8 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
             throw new ApiError('Lỗi khi tạo lead: ' + error.message, 500);
         }
 
+        notifyCrmMaster('lead.created', { lead });
+
         res.status(201).json({
             status: 'success',
             data: { lead },
@@ -237,6 +240,8 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                 note: `Lead được chuyển từ sale cũ bởi ${(req as any).user?.name || (req as any).user?.id || 'unknown'}`
             });
         }
+
+        notifyCrmMaster('lead.updated', { lead });
 
         res.json({
             status: 'success',
@@ -350,6 +355,8 @@ router.post('/:id/convert', authenticate, requireSale, async (req: Authenticated
                 customer_id: customer.id,
             })
             .eq('id', id);
+
+        notifyCrmMaster('lead.converted', { lead: { ...lead, customer_id: customer.id }, customer });
 
         res.json({
             status: 'success',

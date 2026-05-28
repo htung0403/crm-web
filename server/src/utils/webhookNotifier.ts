@@ -6,6 +6,7 @@
 
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || '';
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || '';
+const CRM_MASTER_WEBHOOK_URL = process.env.CRM_MASTER_WEBHOOK_URL || 'https://dhsywwqoi.datadex.vn/webhook/crm-master-xoxo';
 
 /**
  * Gửi webhook event sang n8n.
@@ -43,4 +44,38 @@ export async function fireWebhook(event: string, data: Record<string, any>): Pro
         console.error(`[WebhookNotifier] ❌ ERROR: Failed to fire event "${event}":`, err);
         return { ok: false, status: 500 };
     }
+}
+
+export async function fireCrmMasterWebhook(event: string, data: Record<string, any>): Promise<{ ok: boolean, status: number } | void> {
+    const payload = {
+        event,
+        timestamp: new Date().toISOString(),
+        data,
+    };
+
+    try {
+        const response = await fetch(CRM_MASTER_WEBHOOK_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            console.error(`[CrmMasterWebhook] ❌ n8n responded ${response.status} for event: ${event}`);
+        } else {
+            console.log(`[CrmMasterWebhook] ✅ SUCCESS: Fired event "${event}" to n8n`);
+        }
+        return { ok: response.ok, status: response.status };
+    } catch (err) {
+        console.error(`[CrmMasterWebhook] ❌ ERROR: Failed to fire event "${event}":`, err);
+        return { ok: false, status: 500 };
+    }
+}
+
+export function notifyCrmMaster(event: string, data: Record<string, any>): void {
+    fireCrmMasterWebhook(event, data).catch((err) => {
+        console.error(`[CrmMasterWebhook] ❌ ERROR: Unhandled event "${event}":`, err);
+    });
 }
