@@ -17,7 +17,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { formatCurrency } from '@/lib/utils';
+import { cn, formatCurrency } from '@/lib/utils';
 import { useCustomers } from '@/hooks/useCustomers';
 import { useProducts } from '@/hooks/useProducts';
 import { usePackages } from '@/hooks/usePackages';
@@ -25,9 +25,11 @@ import { useUsers } from '@/hooks/useUsers';
 import { ordersApi, transactionsApi, salaryConfigsApi, commissionTablesApi } from '@/lib/api';
 import { CreateCustomerDialog } from '@/components/customers/CreateCustomerDialog';
 import { ImageUpload } from '@/components/products/ImageUpload';
-import { useProductTypes } from '@/hooks/useProductTypes';
+import { useProductTypes, type ProductType } from '@/hooks/useProductTypes';
 import { useAuth } from '@/contexts/AuthContext';
 import { ServiceSelector } from '@/components/orders/ServiceSelector';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 
 // Product types will be fetched from API
 
@@ -46,6 +48,208 @@ const COMMON_BRANDS = [
     'Nike', 'Adidas', 'Gucci', 'Louis Vuitton', 'Chanel', 'Hermes',
     'Prada', 'Dior', 'Balenciaga', 'Converse', 'Vans', 'Khác'
 ];
+
+interface BrandComboboxProps {
+    value: string;
+    onChange: (value: string) => void;
+}
+
+function BrandCombobox({ value, onChange }: BrandComboboxProps) {
+    const [open, setOpen] = useState(false);
+    const [searchValue, setSearchValue] = useState('');
+    const trimmedSearch = searchValue.trim();
+    const normalizedSearch = trimmedSearch.toLocaleLowerCase('vi-VN');
+    const filteredBrands = normalizedSearch
+        ? COMMON_BRANDS.filter(brand => brand.toLocaleLowerCase('vi-VN').includes(normalizedSearch))
+        : COMMON_BRANDS;
+    const canCreateBrand = Boolean(trimmedSearch)
+        && !COMMON_BRANDS.some(brand => brand.toLocaleLowerCase('vi-VN') === normalizedSearch);
+
+    const handleSelect = (brand: string) => {
+        onChange(brand);
+        setSearchValue('');
+        setOpen(false);
+    };
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={open}
+                    className={cn(
+                        "h-12 w-full justify-between px-4 text-left font-normal",
+                        !value && "text-muted-foreground"
+                    )}
+                >
+                    <span className="truncate">{value || 'Chọn hoặc nhập'}</span>
+                    <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command shouldFilter={false}>
+                    <CommandInput
+                        placeholder="Tìm hoặc nhập thương hiệu..."
+                        value={searchValue}
+                        onValueChange={setSearchValue}
+                    />
+                    <CommandList>
+                        <CommandGroup>
+                            {filteredBrands.map(brand => (
+                                <CommandItem
+                                    key={brand}
+                                    value={brand}
+                                    onSelect={() => handleSelect(brand)}
+                                >
+                                    <Check className={cn(
+                                        "mr-2 h-4 w-4",
+                                        value === brand ? "opacity-100" : "opacity-0"
+                                    )} />
+                                    {brand}
+                                </CommandItem>
+                            ))}
+                            {canCreateBrand && (
+                                <CommandItem
+                                    value={trimmedSearch}
+                                    onSelect={() => handleSelect(trimmedSearch)}
+                                >
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    Thêm mới "{trimmedSearch}"
+                                </CommandItem>
+                            )}
+                            {!filteredBrands.length && !canCreateBrand && (
+                                <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                                    Không tìm thấy thương hiệu.
+                                </div>
+                            )}
+                        </CommandGroup>
+                    </CommandList>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    );
+}
+
+interface ProductTypeComboboxProps {
+    value: string;
+    productTypes: ProductType[];
+    onChange: (value: string) => void;
+    onCreate: (data: Partial<ProductType>) => Promise<ProductType>;
+}
+
+function ProductTypeCombobox({ value, productTypes, onChange, onCreate }: ProductTypeComboboxProps) {
+    const [open, setOpen] = useState(false);
+    const [searchValue, setSearchValue] = useState('');
+    const [creating, setCreating] = useState(false);
+    const selectedType = productTypes.find(type => type.code === value);
+    const trimmedSearch = searchValue.trim();
+    const normalizedSearch = trimmedSearch.toLocaleLowerCase('vi-VN');
+    const filteredTypes = normalizedSearch
+        ? productTypes.filter(type =>
+            type.name.toLocaleLowerCase('vi-VN').includes(normalizedSearch)
+            || type.code.toLocaleLowerCase('vi-VN').includes(normalizedSearch)
+        )
+        : productTypes;
+    const generatedCode = trimmedSearch
+        .toUpperCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^A-Z0-9]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '');
+    const canCreateType = Boolean(trimmedSearch && generatedCode)
+        && !productTypes.some(type =>
+            type.name.toLocaleLowerCase('vi-VN') === normalizedSearch
+            || type.code.toLocaleLowerCase('vi-VN') === generatedCode.toLocaleLowerCase('vi-VN')
+        );
+
+    const handleSelect = (code: string) => {
+        onChange(code);
+        setSearchValue('');
+        setOpen(false);
+    };
+
+    const handleCreate = async () => {
+        if (!canCreateType || creating) return;
+        setCreating(true);
+        try {
+            const newType = await onCreate({
+                name: trimmedSearch,
+                code: generatedCode,
+                description: 'Created via quick add'
+            });
+            handleSelect(newType.code);
+        } finally {
+            setCreating(false);
+        }
+    };
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={open}
+                    className={cn(
+                        "h-12 w-full justify-between px-4 text-left font-normal",
+                        !selectedType && "text-muted-foreground"
+                    )}
+                >
+                    <span className="truncate">{selectedType?.name || value || 'Chọn hoặc nhập'}</span>
+                    <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command shouldFilter={false}>
+                    <CommandInput
+                        placeholder="Tìm hoặc nhập loại sản phẩm..."
+                        value={searchValue}
+                        onValueChange={setSearchValue}
+                    />
+                    <CommandList>
+                        <CommandGroup>
+                            {filteredTypes.map(type => (
+                                <CommandItem
+                                    key={type.code}
+                                    value={type.name}
+                                    onSelect={() => handleSelect(type.code)}
+                                >
+                                    <Check className={cn(
+                                        "mr-2 h-4 w-4",
+                                        value === type.code ? "opacity-100" : "opacity-0"
+                                    )} />
+                                    {type.name}
+                                </CommandItem>
+                            ))}
+                            {canCreateType && (
+                                <CommandItem
+                                    value={trimmedSearch}
+                                    disabled={creating}
+                                    onSelect={handleCreate}
+                                >
+                                    {creating ? (
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <Plus className="mr-2 h-4 w-4" />
+                                    )}
+                                    Thêm mới "{trimmedSearch}"
+                                </CommandItem>
+                            )}
+                            {!filteredTypes.length && !canCreateType && (
+                                <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                                    Không tìm thấy loại sản phẩm.
+                                </div>
+                            )}
+                        </CommandGroup>
+                    </CommandList>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    );
+}
 
 interface Surcharge {
     id: string;
@@ -173,7 +377,7 @@ export function CreateOrderPage() {
     const { products: catalogProducts, services, fetchProducts, fetchServices } = useProducts();
     const { packages, fetchPackages } = usePackages();
     const { users, fetchUsers, fetchTechnicians, fetchSales } = useUsers();
-    const { productTypes, fetchProductTypes } = useProductTypes();
+    const { productTypes, fetchProductTypes, createProductType } = useProductTypes();
 
     const [salaryConfigs, setSalaryConfigs] = useState<any[]>([]);
     const [commissionTables, setCommissionTables] = useState<any[]>([]);
@@ -1603,38 +1807,20 @@ export function CreateOrderPage() {
 
                                                     <div className="space-y-2">
                                                         <Label>Loại sản phẩm</Label>
-                                                        <Select
+                                                        <ProductTypeCombobox
                                                             value={product.type}
-                                                            onValueChange={(v) => handleUpdateProduct(index, 'type', v)}
-                                                        >
-                                                            <SelectTrigger>
-                                                                <SelectValue />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                {productTypes.map(t => (
-                                                                    <SelectItem key={t.code} value={t.code}>
-                                                                        {t.name}
-                                                                    </SelectItem>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
+                                                            productTypes={productTypes}
+                                                            onChange={(v) => handleUpdateProduct(index, 'type', v)}
+                                                            onCreate={createProductType}
+                                                        />
                                                     </div>
 
                                                     <div className="space-y-2">
                                                         <Label>Hãng/Thương hiệu</Label>
-                                                        <Select
+                                                        <BrandCombobox
                                                             value={product.brand}
-                                                            onValueChange={(v) => handleUpdateProduct(index, 'brand', v)}
-                                                        >
-                                                            <SelectTrigger>
-                                                                <SelectValue placeholder="Chọn hoặc nhập" />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                {COMMON_BRANDS.map(b => (
-                                                                    <SelectItem key={b} value={b}>{b}</SelectItem>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
+                                                            onChange={(v) => handleUpdateProduct(index, 'brand', v)}
+                                                        />
                                                     </div>
 
                                                     <div className="space-y-2">
