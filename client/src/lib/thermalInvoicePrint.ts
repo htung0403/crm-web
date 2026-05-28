@@ -1,5 +1,5 @@
 import type { Order, OrderItem } from '@/hooks/useOrders';
-import { formatDate, formatDateTime } from '@/lib/utils';
+import { formatDate, formatDateTime, formatNumber } from '@/lib/utils';
 import { getPaymentConfig, isPaymentConfigured, type PaymentConfig } from '@/lib/paymentConfig';
 import { buildVietQrPayload } from '@/lib/vietqr';
 
@@ -40,17 +40,9 @@ function escapeHtml(text: string): string {
         .replace(/"/g, '&quot;');
 }
 
-/** Định dạng tiền kiểu hóa đơn XOXO: 9n, 1tr */
+/** Định dạng tiền hóa đơn nhiệt: dấu chấm phân cách nghìn (VD: 2.500.000) */
 export function formatThermalMoney(amount: number): string {
-    const n = Math.round(amount);
-    if (n >= 1_000_000) {
-        const tr = n / 1_000_000;
-        return Number.isInteger(tr) ? `${tr}tr` : `${tr.toFixed(1).replace(/\.0$/, '')}tr`;
-    }
-    if (n >= 1000) {
-        return `${Math.round(n / 1000)}n`;
-    }
-    return String(n);
+    return formatNumber(Math.round(amount));
 }
 
 function extractNoteLines(item: OrderItem): string[] {
@@ -177,11 +169,20 @@ export function collectPrintLineItems(order: Order): PrintProductGroup[] {
 }
 
 export function getOrderPayAmount(order: Order): number {
-
     if (order.payment_status === 'paid') return 0;
     if (order.remaining_debt != null && order.remaining_debt > 0) return order.remaining_debt;
     const paid = order.paid_amount ?? 0;
     return Math.max(0, (order.total_amount ?? 0) - paid);
+}
+
+/** Số tiền khách đã trả (cọc / thanh toán trước) */
+export function getOrderPaidAmount(order: Order): number {
+    const total = Number(order.total_amount) || 0;
+    if (order.payment_status === 'paid') return total;
+    if (order.paid_amount != null && order.paid_amount > 0) return Number(order.paid_amount);
+    const remaining = order.remaining_debt != null ? Number(order.remaining_debt) : null;
+    if (remaining != null && total > 0) return Math.max(0, total - remaining);
+    return 0;
 }
 
 function buildItemsTableHtml(groups: PrintProductGroup[]): string {
@@ -236,7 +237,16 @@ function buildItemsTableHtml(groups: PrintProductGroup[]): string {
     </table>`;
 }
 
-function buildTotalsTableHtml(subtotal: number, discount: number, total: number): string {
+function buildTotalsTableHtml(
+    subtotal: number,
+    discount: number,
+    total: number,
+    paidAmount = 0,
+    remainingPay = 0
+): string {
+    const paid = Math.max(0, Math.min(paidAmount, total));
+    const remaining = remainingPay > 0 ? remainingPay : Math.max(0, total - paid);
+
     return `
     <table class="totals-table">
         <colgroup>
@@ -261,6 +271,18 @@ function buildTotalsTableHtml(subtotal: number, discount: number, total: number)
                 <td colspan="2" class="total-label">Tổng cộng:</td>
                 <td class="col-total">${formatThermalMoney(total)}</td>
             </tr>
+            ${
+                paid > 0
+                    ? `<tr>
+                <td colspan="2" class="total-label">Đã thanh toán (cọc):</td>
+                <td class="col-total paid-line">−${formatThermalMoney(paid)}</td>
+            </tr>
+            <tr class="grand remain">
+                <td colspan="2" class="total-label">Còn phải trả:</td>
+                <td class="col-total">${formatThermalMoney(remaining)}</td>
+            </tr>`
+                    : ''
+            }
         </tbody>
     </table>`;
 }
@@ -308,8 +330,8 @@ const THERMAL_STYLES = `
             border-bottom: 1px solid #000;
             vertical-align: bottom;
         }
-        .grouped-table .col-group-name { width: 72%; }
-        .grouped-table .col-group-total { width: 28%; }
+        .grouped-table .col-group-name { width: 62%; }
+        .grouped-table .col-group-total { width: 38%; }
         .group-head-name { text-align: left; }
         .group-head-total { text-align: right; }
         .group-row td {
@@ -332,8 +354,9 @@ const THERMAL_STYLES = `
         .group-total {
             text-align: right;
             font-weight: 700;
-            font-size: 10px;
+            font-size: 9px;
             white-space: nowrap;
+            letter-spacing: -0.2px;
         }
         .svc-row td {
             padding: 2px;
@@ -350,7 +373,8 @@ const THERMAL_STYLES = `
             text-align: right;
             font-weight: 600;
             white-space: nowrap;
-            font-size: 9.5px;
+            font-size: 8.5px;
+            letter-spacing: -0.2px;
         }
         .svc-note {
             font-size: 8.5px;
@@ -370,12 +394,15 @@ const THERMAL_STYLES = `
         .totals-table td { padding: 3px 2px; }
         .total-label { text-align: left; font-size: 10px; }
         .totals-table .grand td { font-weight: 700; font-size: 11px; padding-top: 4px; }
+        .totals-table .paid-line { color: #333; }
+        .totals-table .remain td { border-top: 1px dashed #000; }
         .footer-title { font-weight: 700; margin: 10px 0 4px; font-size: 10px; text-align: left; }
         .footer-note { font-size: 8.5px; line-height: 1.35; margin: 3px 0; text-align: justify; }
         .footer-note::before { content: "- "; }
         .thanks { text-align: center; font-weight: 700; margin: 10px 0 6px; font-size: 10px; }
         .qr-block { text-align: center; margin-top: 8px; padding-top: 6px; border-top: 1px dashed #000; }
         .qr-title { font-weight: 700; font-size: 10px; }
+        .qr-sub { font-size: 8.5px; margin: 2px 0 4px; color: #333; }
         .qr-amount { font-size: 14px; font-weight: 700; margin: 4px 0; }
         .qr-box { display: flex; justify-content: center; margin: 6px auto; min-height: 140px; }
         .qr-box canvas, .qr-box img { width: 38mm !important; height: 38mm !important; }
@@ -392,7 +419,10 @@ function buildInvoiceBody(order: Order, cfg: PaymentConfig): string {
     const discount = order.discount ?? 0;
 
     const itemsTableHtml = buildItemsTableHtml(groups);
-    const totalsHtml = buildTotalsTableHtml(subtotal, discount, order.total_amount);
+    const totalAmount = Number(order.total_amount) || 0;
+    const paidAmount = getOrderPaidAmount(order);
+    const payQrAmount = getOrderPayAmount(order);
+    const totalsHtml = buildTotalsTableHtml(subtotal, discount, totalAmount, paidAmount, payQrAmount);
 
     const notesBlock = order.notes?.trim()
         ? `<div class="notes-block"><span class="label">Ghi chú</span><br/>${escapeHtml(order.notes)}</div>`
@@ -435,6 +465,28 @@ function buildInvoiceBody(order: Order, cfg: PaymentConfig): string {
     `;
 }
 
+function buildThermalQrBlockHtml(
+    payAmount: number,
+    orderCode: string,
+    cfg: PaymentConfig,
+    includeQrCanvas: boolean
+): string {
+    if (payAmount > 0 && !isPaymentConfigured()) {
+        return `<p class="warn">Chưa cấu hình TK nhận tiền (VITE_PAYMENT_* trong .env)</p>`;
+    }
+    if (!includeQrCanvas || payAmount <= 0) return '';
+
+    return `
+        <div class="qr-block">
+            <p class="qr-title">QUÉT MÃ THANH TOÁN</p>
+            <p class="qr-sub">Số tiền còn phải trả (không phải tổng HĐ)</p>
+            <p class="qr-amount">${formatThermalMoney(payAmount)} đ</p>
+            <div id="payment-qr" class="qr-box"></div>
+            <p class="bank">${escapeHtml(cfg.bankName)} · ${escapeHtml(cfg.accountNumber)}</p>
+            <p class="bank">ND: ${escapeHtml(orderCode)}</p>
+        </div>`;
+}
+
 export function buildThermalInvoiceHtml(order: Order, config?: PaymentConfig): string {
     const cfg = config ?? getPaymentConfig();
     const payAmount = getOrderPayAmount(order);
@@ -450,18 +502,7 @@ export function buildThermalInvoiceHtml(order: Order, config?: PaymentConfig): s
           })
         : '';
 
-    const qrBlock = hasQr
-        ? `
-        <div class="qr-block">
-            <p class="qr-title">QUÉT MÃ THANH TOÁN</p>
-            <p class="qr-amount">${formatThermalMoney(payAmount)}</p>
-            <div id="payment-qr" class="qr-box"></div>
-            <p class="bank">${escapeHtml(cfg.bankName)} · ${escapeHtml(cfg.accountNumber)}</p>
-            <p class="bank">ND: ${escapeHtml(order.order_code)}</p>
-        </div>`
-        : payAmount > 0 && !isPaymentConfigured()
-          ? `<p class="warn">Chưa cấu hình TK nhận tiền (VITE_PAYMENT_* trong .env)</p>`
-          : '';
+    const qrBlock = buildThermalQrBlockHtml(payAmount, order.order_code, cfg, hasQr);
 
     const body = buildInvoiceBody(order, cfg);
 
@@ -499,17 +540,36 @@ export function buildThermalInvoiceHtml(order: Order, config?: PaymentConfig): s
 }
 
 /** HTML fragment for in-app preview (no print script) */
-export function buildThermalInvoicePreviewHtml(order: Order, config?: PaymentConfig): string {
+export function buildThermalInvoicePreviewHtml(
+    order: Order,
+    config?: PaymentConfig,
+    options?: { includeQrSection?: boolean }
+): string {
     const cfg = config ?? getPaymentConfig();
     const body = buildInvoiceBody(order, cfg);
-
     const payAmount = getOrderPayAmount(order);
-    const qrNote =
-        payAmount > 0 && isPaymentConfigured()
-            ? `<p class="warn" style="text-align:center;margin-top:8px;">Còn thanh toán: ${formatThermalMoney(payAmount)} (QR khi in)</p>`
-            : '';
+    const includeQr = options?.includeQrSection !== false;
+    const qrSection =
+        includeQr && payAmount > 0 && isPaymentConfigured()
+            ? buildThermalQrBlockHtml(payAmount, order.order_code, cfg, true)
+            : !includeQr
+              ? ''
+              : buildThermalQrBlockHtml(payAmount, order.order_code, cfg, false);
 
-    return `<div class="thermal-doc">${body}${qrNote}</div><style>${THERMAL_STYLES}</style>`;
+    return `<div class="thermal-doc">${body}${qrSection}</div><style>${THERMAL_STYLES}</style>`;
+}
+
+/** Khối QR (React) — cùng nội dung với bản in */
+export function getThermalQrPreviewMeta(order: Order, config?: PaymentConfig) {
+    const cfg = config ?? getPaymentConfig();
+    const payAmount = getOrderPayAmount(order);
+    const show = payAmount > 0 && isPaymentConfigured();
+    return {
+        payAmount,
+        show,
+        orderCode: order.order_code,
+        bankLine: `${cfg.bankName} · ${cfg.accountNumber}`,
+    };
 }
 
 export function printThermalInvoice(order: Order): void {

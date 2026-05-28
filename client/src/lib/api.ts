@@ -124,6 +124,48 @@ export const customersApi = {
 
     delete: (id: string) =>
         api.delete<ApiResponse<null>>(`/customers/${id}`),
+
+    getDebt: (id: string) =>
+        api.get<ApiResponse<{
+            customer: { id: string; name: string; phone?: string };
+            summary: {
+                total_debt: number;
+                total_paid: number;
+                total_order_value: number;
+                total_deposit: number;
+                open_orders_count: number;
+            };
+            orders: Array<{
+                id: string;
+                order_code: string;
+                created_at: string;
+                total_amount: number;
+                paid_amount: number;
+                deposit_amount: number;
+                remaining_debt: number;
+                payment_status?: string;
+            }>;
+            ledger: Array<{
+                id: string;
+                at: string;
+                code: string;
+                kind: 'sale' | 'payment';
+                label: string;
+                amount: number;
+                balance: number;
+            }>;
+        }>>(`/customers/${id}/debt`),
+
+    collectPayment: (
+        id: string,
+        data: {
+            amount: number;
+            payment_method?: string;
+            notes?: string;
+            content?: string;
+            allocations: Array<{ order_id: string; amount: number }>;
+        }
+    ) => api.post<ApiResponse<{ payments: unknown[] }>>(`/customers/${id}/collect-payment`, data),
 };
 
 // Orders API

@@ -15,6 +15,7 @@ import { ordersApi, orderProductsApi, orderItemsApi } from '@/lib/api';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 
 import type { WorkflowKanbanGroup } from '../types';
+import { getGroupAfterSaleStage } from '../constants';
 
 interface AftersaleTabProps {
     order: Order | null;
@@ -420,19 +421,21 @@ export function AftersaleTab({
             ? orderProductsApi.updateAfterSaleData(itemId, { stage: newStage })
             : orderItemsApi.updateAfterSaleData(itemId, { stage: newStage });
 
-        toast.success(`Đã chuyển sản phẩm "${draggedGroup.product.item_name}" sang bước mới`);
-
-        apiPromise.then(() => {
-            // Also ensure the order status is 'after_sale' if it's not already
-            if (order.status !== 'after_sale') {
-                ordersApi.updateStatus(order.id, 'after_sale').catch(console.error);
-            }
-            reloadOrder();
-            fetchKanbanLogs(order.id);
-        }).catch((e: any) => {
-            reloadOrder();
-            toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
-        });
+        apiPromise
+            .then(() => {
+                if (order.status !== 'after_sale') {
+                    ordersApi.updateStatus(order.id, 'after_sale').catch(console.error);
+                }
+                return reloadOrder();
+            })
+            .then(() => fetchKanbanLogs(order.id))
+            .then(() => {
+                toast.success(`Đã chuyển "${draggedGroup.product?.item_name}" sang ${getAfterSaleStageLabel(newStage)}`);
+            })
+            .catch((e: any) => {
+                reloadOrder();
+                toast.error(e?.response?.data?.message || 'Lỗi cập nhật');
+            });
     };
 
     return (
@@ -452,10 +455,9 @@ export function AftersaleTab({
                         <DragDropContext onDragEnd={handleAfterSaleDragEnd}>
                             <div className="grid grid-cols-1 md:grid-cols-5 gap-4 overflow-x-auto pb-4">
                                 {AFTER_COLS.map((col) => {
-                                    const colGroups = groups.filter(g => {
-                                        const item = (g.product || g.services?.[0]) as any;
-                                        return item?.current_phase === 'after_sale' && item?.phase_stage === col.id;
-                                    });
+                                    const colGroups = groups.filter(
+                                        (g) => getGroupAfterSaleStage(g) === col.id
+                                    );
                                     return (
                                         <div key={col.id} className="flex flex-col min-w-[220px]">
                                             <div className="flex justify-between items-center mb-4 px-2">
@@ -505,10 +507,7 @@ export function AftersaleTab({
                         </DragDropContext>
 
                         {/* Nhắn HD & Feedback */}
-                        {order && groups.some(g => {
-                            const item = (g.product || g.services?.[0]) as any;
-                            return item?.current_phase === 'after_sale' && item?.phase_stage === 'after3';
-                        }) && (
+                        {order && groups.some((g) => getGroupAfterSaleStage(g) === 'after3') && (
                             <div className="mt-6 p-6 bg-purple-50 rounded-2xl border border-purple-100 space-y-6">
                                 <div>
                                     <h3 className="text-xs font-bold text-purple-800 uppercase mb-3 tracking-widest">Đã nhắn HD Bảo Quản & Xin feedback</h3>
@@ -597,10 +596,10 @@ export function AftersaleTab({
                                             return item?.current_phase === 'after_sale';
                                         });
                                         const matchedGroup =
-                                            aftersaleGroups.find(g => {
-                                                const item = (g.product || g.services?.[0]) as any;
-                                                return item?.phase_stage === log.to_stage;
-                                            }) || aftersaleGroups[0] || groups[0] || null;
+                                            aftersaleGroups.find((g) => getGroupAfterSaleStage(g) === log.to_stage) ||
+                                            aftersaleGroups[0] ||
+                                            groups[0] ||
+                                            null;
                                         return (
                                             <li key={log.id} className="text-xs flex items-center gap-2 py-1.5 border-b border-dashed last:border-0 flex-wrap">
                                                 <span className="text-muted-foreground shrink-0">{formatDateTime(log.created_at)}</span>

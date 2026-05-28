@@ -3,6 +3,8 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireSale } from '../middleware/auth.js';
 import { notifyCrmMaster } from '../utils/webhookNotifier.js';
+import { syncInvoiceWithOrder } from '../utils/billingHelper.js';
+import { checkAndCompleteOrder } from '../utils/orderHelper.js';
 
 const router = Router();
 
@@ -65,6 +67,277 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                     totalPages: Math.ceil((count || 0) / Number(limit)),
                 }
             },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Customer debt ledger & order balances (KiotViet-style công nợ)
+router.get('/:id/debt', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+
+        const { data: customer, error: customerError } = await supabaseAdmin
+            .from('customers')
+            .select('id, name, phone, email')
+            .eq('id', id)
+            .single();
+
+        if (customerError || !customer) {
+            throw new ApiError('Không tìm thấy khách hàng', 404);
+        }
+
+        const { data: orders, error: ordersError } = await supabaseAdmin
+            .from('orders')
+            .select('id, order_code, total_amount, paid_amount, remaining_debt, payment_status, created_at, status')
+            .eq('customer_id', id)
+            .neq('status', 'cancelled')
+            .order('created_at', { ascending: true });
+
+        if (ordersError) {
+            throw new ApiError('Lỗi khi lấy đơn hàng', 500);
+        }
+
+        const orderList = orders || [];
+        const orderIds = orderList.map((o) => o.id);
+
+        const depositByOrder: Record<string, number> = {};
+        if (orderIds.length > 0) {
+            const { data: orderProducts } = await supabaseAdmin
+                .from('order_products')
+                .select('id, order_id')
+                .in('order_id', orderIds);
+
+            const productIds = (orderProducts || []).map((p) => p.id);
+            const productToOrder = new Map((orderProducts || []).map((p) => [p.id, p.order_id]));
+
+            if (productIds.length > 0) {
+                const { data: services } = await supabaseAdmin
+                    .from('order_product_services')
+                    .select('order_product_id, deposit_amount')
+                    .in('order_product_id', productIds);
+
+                for (const svc of services || []) {
+                    const orderId = productToOrder.get(svc.order_product_id);
+                    if (!orderId) continue;
+                    depositByOrder[orderId] = (depositByOrder[orderId] || 0) + (Number(svc.deposit_amount) || 0);
+                }
+            }
+        }
+
+        const orderBalances = orderList.map((o) => {
+            const total = Number(o.total_amount) || 0;
+            const paid = Number(o.paid_amount) || 0;
+            const remaining = Number(o.remaining_debt) ?? Math.max(0, total - paid);
+            const depositTotal = depositByOrder[o.id] || 0;
+            return {
+                id: o.id,
+                order_code: o.order_code,
+                created_at: o.created_at,
+                total_amount: total,
+                paid_amount: paid,
+                deposit_amount: depositTotal,
+                remaining_debt: remaining,
+                payment_status: o.payment_status,
+                status: o.status,
+            };
+        });
+
+        const { data: paymentRecords } = orderIds.length > 0
+            ? await supabaseAdmin
+                .from('payment_records')
+                .select('id, order_id, order_code, amount, payment_method, content, created_at')
+                .in('order_id', orderIds)
+                .order('created_at', { ascending: true })
+            : { data: [] };
+
+        type DebtEvent = { id: string; at: string; code: string; kind: 'sale' | 'payment'; label: string; amount: number };
+        const events: DebtEvent[] = [];
+
+        for (const o of orderList) {
+            events.push({
+                id: `sale-${o.id}`,
+                at: o.created_at,
+                code: o.order_code,
+                kind: 'sale',
+                label: 'Bán hàng',
+                amount: Number(o.total_amount) || 0,
+            });
+        }
+
+        for (const p of paymentRecords || []) {
+            events.push({
+                id: `pay-${p.id}`,
+                at: p.created_at,
+                code: p.order_code || p.id.slice(0, 8),
+                kind: 'payment',
+                label: 'Thanh toán',
+                amount: -(Number(p.amount) || 0),
+            });
+        }
+
+        events.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+
+        let balance = 0;
+        const ledger = events.map((ev) => {
+            balance += ev.amount;
+            return { ...ev, balance };
+        });
+
+        const totalDebt = orderBalances.reduce((sum, o) => sum + o.remaining_debt, 0);
+        const totalPaid = orderBalances.reduce((sum, o) => sum + o.paid_amount, 0);
+        const totalOrderValue = orderBalances.reduce((sum, o) => sum + o.total_amount, 0);
+        const totalDeposit = orderBalances.reduce((sum, o) => sum + o.deposit_amount, 0);
+
+        res.json({
+            status: 'success',
+            data: {
+                customer,
+                summary: {
+                    total_debt: totalDebt,
+                    total_paid: totalPaid,
+                    total_order_value: totalOrderValue,
+                    total_deposit: totalDeposit,
+                    open_orders_count: orderBalances.filter((o) => o.remaining_debt > 0).length,
+                },
+                orders: orderBalances,
+                ledger: ledger.reverse(),
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
+// Allocate customer payment across multiple orders
+router.post('/:id/collect-payment', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id } = req.params;
+        const { amount, payment_method, notes, content, allocations } = req.body as {
+            amount?: number;
+            payment_method?: string;
+            notes?: string;
+            content?: string;
+            allocations?: Array<{ order_id: string; amount: number }>;
+        };
+
+        const totalPay = Number(amount) || 0;
+        if (totalPay <= 0) {
+            throw new ApiError('Số tiền thanh toán phải lớn hơn 0', 400);
+        }
+        if (!Array.isArray(allocations) || allocations.length === 0) {
+            throw new ApiError('Vui lòng phân bổ thanh toán cho ít nhất một đơn', 400);
+        }
+
+        const allocSum = allocations.reduce((s, a) => s + (Number(a.amount) || 0), 0);
+        if (allocSum !== totalPay) {
+            throw new ApiError(`Tổng phân bổ (${allocSum}) phải bằng số tiền thanh toán (${totalPay})`, 400);
+        }
+
+        const { data: customer } = await supabaseAdmin.from('customers').select('id, name').eq('id', id).single();
+        if (!customer) throw new ApiError('Không tìm thấy khách hàng', 404);
+
+        const results: any[] = [];
+
+        for (const alloc of allocations) {
+            const payAmount = Number(alloc.amount) || 0;
+            if (payAmount <= 0) continue;
+
+            const { data: order, error: orderError } = await supabaseAdmin
+                .from('orders')
+                .select('id, order_code, customer_id, total_amount, paid_amount, remaining_debt')
+                .eq('id', alloc.order_id)
+                .eq('customer_id', id)
+                .single();
+
+            if (orderError || !order) {
+                throw new ApiError(`Không tìm thấy đơn ${alloc.order_id}`, 404);
+            }
+
+            const remaining = Number(order.remaining_debt) ?? Math.max(0, (order.total_amount || 0) - (order.paid_amount || 0));
+            if (payAmount > remaining + 1) {
+                throw new ApiError(`Số tiền vượt quá công nợ đơn ${order.order_code}`, 400);
+            }
+
+            const payContent = content || `Thanh toán công nợ - ${customer.name}`;
+
+            const { data: payment, error: paymentError } = await supabaseAdmin
+                .from('payment_records')
+                .insert({
+                    order_id: order.id,
+                    order_code: order.order_code,
+                    content: payContent,
+                    amount: payAmount,
+                    payment_method: payment_method || 'cash',
+                    notes,
+                    transaction_type: 'income',
+                    transaction_category: 'Thanh toán đơn hàng',
+                    transaction_status: 'approved',
+                    created_by: req.user!.id,
+                })
+                .select()
+                .single();
+
+            if (paymentError) {
+                throw new ApiError('Lỗi khi ghi nhận thanh toán: ' + paymentError.message, 500);
+            }
+
+            const newPaidAmount = (order.paid_amount || 0) + payAmount;
+            const newRemainingDebt = Math.max(0, order.total_amount - newPaidAmount);
+            const newPaymentStatus = newRemainingDebt <= 0 ? 'paid' : (newPaidAmount > 0 ? 'partial' : 'unpaid');
+
+            await supabaseAdmin
+                .from('orders')
+                .update({
+                    paid_amount: newPaidAmount,
+                    remaining_debt: newRemainingDebt,
+                    payment_status: newPaymentStatus,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', order.id);
+
+            await checkAndCompleteOrder(order.id);
+            syncInvoiceWithOrder(order.id, payment_method).catch(() => undefined);
+
+            const { data: lastTrans } = await supabaseAdmin
+                .from('transactions')
+                .select('code')
+                .like('code', 'PT%')
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+            let transCode = 'PT000001';
+            if (lastTrans?.length) {
+                const lastNum = parseInt(lastTrans[0].code.replace('PT', ''), 10);
+                transCode = `PT${String(lastNum + 1).padStart(6, '0')}`;
+            }
+
+            await supabaseAdmin.from('transactions').insert({
+                code: transCode,
+                type: 'income',
+                category: 'Thanh toán đơn hàng',
+                amount: payAmount,
+                payment_method: payment_method || 'cash',
+                notes: `${payContent} - ${order.order_code}`,
+                date: new Date().toISOString().split('T')[0],
+                order_id: order.id,
+                order_code: order.order_code,
+                status: 'approved',
+                created_by: req.user!.id,
+                approved_by: req.user!.id,
+                approved_at: new Date().toISOString(),
+            });
+
+            results.push({ order_id: order.id, order_code: order.order_code, amount: payAmount, payment });
+        }
+
+        notifyCrmMaster('customer.payment_collected', { customer_id: id, amount: totalPay, allocations: results });
+
+        res.status(201).json({
+            status: 'success',
+            data: { payments: results },
+            message: 'Đã ghi nhận thanh toán',
         });
     } catch (error) {
         next(error);

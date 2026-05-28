@@ -48,8 +48,36 @@ function CreateInvoiceDialog({
     const [notes, setNotes] = useState('');
     const [submitting, setSubmitting] = useState(false);
 
+    const draftKey = 'draft:create-invoice:v1';
+    const isDirty = !!selectedOrderId || paymentMethod !== 'cash' || !!notes.trim();
+
     const availableOrders = orders.filter(o => o.status === 'completed');
     const selectedOrder = availableOrders.find(o => o.id === selectedOrderId);
+
+    useEffect(() => {
+        if (!open) return;
+        try {
+            const raw = localStorage.getItem(draftKey);
+            if (!raw) return;
+            const draft = JSON.parse(raw) as { selectedOrderId?: string; paymentMethod?: typeof paymentMethod; notes?: string };
+            if (draft.selectedOrderId) setSelectedOrderId(draft.selectedOrderId);
+            if (draft.paymentMethod) setPaymentMethod(draft.paymentMethod);
+            if (typeof draft.notes === 'string') setNotes(draft.notes);
+        } catch {
+            // ignore
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
+
+    useEffect(() => {
+        if (!open) return;
+        try {
+            const payload = JSON.stringify({ selectedOrderId, paymentMethod, notes });
+            localStorage.setItem(draftKey, payload);
+        } catch {
+            // ignore
+        }
+    }, [open, selectedOrderId, paymentMethod, notes]);
 
     const handleSubmit = async () => {
         if (!selectedOrderId) {
@@ -70,6 +98,11 @@ function CreateInvoiceDialog({
             setSelectedOrderId('');
             setPaymentMethod('cash');
             setNotes('');
+            try {
+                localStorage.removeItem(draftKey);
+            } catch {
+                // ignore
+            }
         } catch (error: any) {
             toast.error(error.response?.data?.message || 'Lỗi khi tạo hóa đơn');
         } finally {
@@ -78,8 +111,25 @@ function CreateInvoiceDialog({
     };
 
     return (
-        <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-lg">
+        <Dialog
+            open={open}
+            onOpenChange={(next) => {
+                if (!next && isDirty && !submitting) {
+                    const ok = window.confirm('Bạn đang tạo hóa đơn dở. Thoát ra sẽ mất dữ liệu (nháp vẫn được lưu). Bạn chắc chắn muốn thoát?');
+                    if (!ok) return;
+                }
+                onClose();
+            }}
+        >
+            <DialogContent
+                className="max-w-lg"
+                onInteractOutside={(e) => {
+                    if (isDirty && !submitting) e.preventDefault();
+                }}
+                onEscapeKeyDown={(e) => {
+                    if (isDirty && !submitting) e.preventDefault();
+                }}
+            >
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <FileText className="h-5 w-5 text-primary" />

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus, Loader2, Globe, Facebook, MessageSquare } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -40,6 +40,46 @@ export function CreateLeadDialog({
         appointment_time: ''
     });
     const [submitting, setSubmitting] = useState(false);
+    const draftKey = 'draft:create-lead:v1';
+    const isDirty =
+        !!formData.name.trim() ||
+        !!formData.phone.trim() ||
+        !!formData.email.trim() ||
+        !!formData.company.trim() ||
+        !!formData.address.trim() ||
+        !!formData.notes.trim() ||
+        !!formData.fb_thread_id.trim() ||
+        !!formData.link_message.trim() ||
+        !!formData.fb_link.trim() ||
+        !!formData.dob.trim() ||
+        !!formData.appointment_time.trim() ||
+        (formData.source !== 'website') ||
+        (formData.lead_type !== 'individual') ||
+        !!formData.assigned_to;
+
+    // Restore draft when dialog opens
+    useEffect(() => {
+        if (!open) return;
+        try {
+            const raw = localStorage.getItem(draftKey);
+            if (!raw) return;
+            const draft = JSON.parse(raw) as Partial<typeof formData>;
+            setFormData((prev) => ({ ...prev, ...draft }));
+        } catch {
+            // ignore
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [open]);
+
+    // Persist draft while editing
+    useEffect(() => {
+        if (!open) return;
+        try {
+            localStorage.setItem(draftKey, JSON.stringify(formData));
+        } catch {
+            // ignore
+        }
+    }, [open, formData]);
 
     // Auto-fetch avatar from social link
     const handleSocialLinkChange = (url: string) => {
@@ -102,6 +142,11 @@ export function CreateLeadDialog({
                 dob: '',
                 appointment_time: ''
             });
+            try {
+                localStorage.removeItem(draftKey);
+            } catch {
+                // ignore
+            }
             onClose();
         } catch {
             // Error handled in parent
@@ -111,8 +156,25 @@ export function CreateLeadDialog({
     };
 
     return (
-        <Dialog open={open} onOpenChange={onClose}>
-            <DialogContent className="max-w-2xl">
+        <Dialog
+            open={open}
+            onOpenChange={(next) => {
+                if (!next && isDirty && !submitting) {
+                    const ok = window.confirm('Bạn đang tạo lead dở. Thoát ra sẽ mất dữ liệu (nháp vẫn được lưu). Bạn chắc chắn muốn thoát?');
+                    if (!ok) return;
+                }
+                onClose();
+            }}
+        >
+            <DialogContent
+                className="max-w-2xl"
+                onInteractOutside={(e) => {
+                    if (isDirty && !submitting) e.preventDefault();
+                }}
+                onEscapeKeyDown={(e) => {
+                    if (isDirty && !submitting) e.preventDefault();
+                }}
+            >
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
                         <div className="p-2 rounded-lg bg-primary/10">

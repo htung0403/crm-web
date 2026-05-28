@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
     ArrowLeft, Phone, Mail, MapPin, Building2, User, ShoppingCart, DollarSign,
-    Star, MessageCircle, Loader2, Package, Calendar, Clock, ArrowRight, FileText, Video, Edit, AlertCircle
+    Star, MessageCircle, Loader2, Package, Calendar, Clock, ArrowRight, FileText, Video, Edit, AlertCircle, Scale
 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { useCustomers } from '@/hooks/useCustomers';
@@ -22,6 +22,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatCurrency, formatDate, cn } from '@/lib/utils';
 import { customersApi, invoicesApi } from '@/lib/api';
 import { InvoiceDetailDialog, type Invoice } from '@/components/invoices/InvoiceDetailDialog';
+import { CustomerDebtTab } from '@/components/customers/CustomerDebtTab';
 import { useAuth } from '@/contexts/AuthContext';
 
 // Interaction types
@@ -572,6 +573,10 @@ export function CustomerDetailPage() {
                                     <Calendar className="h-4 w-4" />
                                     Lịch sử ({unifiedTimeline.length})
                                 </TabsTrigger>
+                                <TabsTrigger value="debt" className="gap-2">
+                                    <Scale className="h-4 w-4" />
+                                    Công nợ
+                                </TabsTrigger>
                             </TabsList>
 
                             {/* Orders Tab */}
@@ -848,6 +853,14 @@ export function CustomerDetailPage() {
                                         })}
                                     </div>
                                 )}
+                            </TabsContent>
+
+                            <TabsContent value="debt">
+                                <CustomerDebtTab
+                                    customerId={customer.id}
+                                    customerName={customer.name}
+                                    customerPhone={customer.phone}
+                                />
                             </TabsContent>
                         </Tabs>
                     </div>
