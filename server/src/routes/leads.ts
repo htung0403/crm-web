@@ -106,7 +106,9 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                 company,
                 address,
                 notes,
-                status: 'new',
+                // Default to the first pipeline stage used by the CRM UI
+                status: 'xac_dinh_nhu_cau',
+                pipeline_stage: 'xac_dinh_nhu_cau',
                 assigned_to: assigned_to || req.user!.id,
                 created_by: req.user!.id,
                 dob: dob || null,

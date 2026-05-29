@@ -88,6 +88,61 @@ export function getAfterSaleStageLabel(value: string | null | undefined): string
     return AFTER_SALE_STAGE_LABELS[value] ?? value;
 }
 
+/** Bước after-sale của 1 dòng (ưu tiên phase_stage — khớp Kanban) */
+export function getItemAfterSaleStage(item: {
+    phase_stage?: string | null;
+    after_sale_stage?: string | null;
+} | null | undefined): string {
+    if (!item) return 'after1';
+    return item.phase_stage || item.after_sale_stage || 'after1';
+}
+
+/** Bước after-sale của nhóm sản phẩm trên Kanban */
+/** Trường cấp đơn được phép PATCH khi lưu form after-sale (không gồm bước SP) */
+export const ORDER_LEVEL_AFTERSALE_PATCH_KEYS = new Set([
+    'debt_checked',
+    'debt_checked_notes',
+    'debt_checked_by_name',
+    'debt_payment_photos',
+    'aftersale_receiver_name',
+    'packaging_photos',
+    'delivery_carrier',
+    'delivery_address',
+    'delivery_self_pickup',
+    'delivery_type',
+    'delivery_code',
+    'delivery_fee',
+    'aftersale_return_user_name',
+    'delivery_notes',
+    'delivery_creator_name',
+    'delivery_shipper_phone',
+    'delivery_staff_name',
+    'delivery_received_at',
+    'hd_sent',
+    'hd_sent_photos',
+    'feedback_requested',
+    'feedback_requested_photos',
+    'notes',
+    'delivery_payment_method',
+]);
+
+export function pickOrderLevelAfterSalePatch(patch: Record<string, unknown>): Record<string, unknown> {
+    return Object.fromEntries(
+        Object.entries(patch).filter(([key]) => ORDER_LEVEL_AFTERSALE_PATCH_KEYS.has(key))
+    );
+}
+
+export function getGroupAfterSaleStage(group: {
+    product?: { current_phase?: string | null; phase_stage?: string | null; after_sale_stage?: string | null } | null;
+    services?: { current_phase?: string | null; phase_stage?: string | null; after_sale_stage?: string | null }[];
+}): string | null {
+    if (group.product?.current_phase === 'after_sale') {
+        return getItemAfterSaleStage(group.product);
+    }
+    const svc = (group.services || []).find((s) => s.current_phase === 'after_sale');
+    return svc ? getItemAfterSaleStage(svc) : null;
+}
+
 export function getCareWarrantyStageLabel(value: string | null | undefined): string {
     if (value == null || value === '') return '—';
     return CARE_WARRANTY_STAGE_LABELS[value] ?? value;

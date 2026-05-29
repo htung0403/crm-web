@@ -579,15 +579,15 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                             assigned_at: s.assigned_at,
                             is_customer_item: true, // Mark as customer item for grouping in OrderDetailPage
                             sales_step_data: product.sales_step_data, // Inherit from parent product
-                            after_sale_stage: product.after_sale_stage || null,
-                            care_warranty_flow: product.care_warranty_flow || null,
-                            care_warranty_stage: product.care_warranty_stage || null,
+                            after_sale_stage: s.after_sale_stage ?? product.after_sale_stage ?? null,
+                            care_warranty_flow: s.care_warranty_flow ?? product.care_warranty_flow ?? null,
+                            care_warranty_stage: s.care_warranty_stage ?? product.care_warranty_stage ?? null,
                             warranty_code: product.warranty_code || null,
-                            completion_photos: product.completion_photos || [],
-                            packaging_photos: product.packaging_photos || [],
-                            delivery_code: product.delivery_code || null,
-                            delivery_carrier: product.delivery_carrier || null,
-                            delivery_type: product.delivery_type || null,
+                            completion_photos: s.completion_photos ?? product.completion_photos ?? [],
+                            packaging_photos: s.packaging_photos ?? product.packaging_photos ?? [],
+                            delivery_code: s.delivery_code ?? product.delivery_code ?? null,
+                            delivery_carrier: s.delivery_carrier ?? product.delivery_carrier ?? null,
+                            delivery_type: s.delivery_type ?? product.delivery_type ?? null,
                             product: {
                                 id: product.id,
                                 image: product.images?.[0] || null
@@ -929,6 +929,7 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                             item_name: svc.name,
                             item_type: svc.type,
                             unit_price: Number(svc.price) || 0,
+                            deposit_amount: Math.max(0, Number(svc.deposit_amount) || 0),
                             technician_id: techId,
                             status: hasTechs ? 'assigned' : 'pending',
                             assigned_at: hasTechs ? new Date().toISOString() : null,
@@ -1361,6 +1362,7 @@ router.post('/:id/upsell', authenticate, requireSale, async (req: AuthenticatedR
                                 item_name: svc.name,
                                 item_type: svc.type,
                                 unit_price: price,
+                                deposit_amount: Math.max(0, Number(svc.deposit_amount) || 0),
                                 technician_id: techId,
                                 status: hasTechs ? 'assigned' : 'pending',
                                 assigned_at: hasTechs ? new Date().toISOString() : null,
@@ -1972,10 +1974,8 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
             } else if (newFlow === 'care') {
                 itemPhase = 'care';
                 itemPhaseStage = newStage || 'care6';
-            } else if (newAfterSale !== undefined && newAfterSale !== null) {
-                itemPhase = 'after_sale';
-                itemPhaseStage = newAfterSale;
             }
+            // after_sale_stage on order is metadata only — each product has its own stage via PATCH .../after-sale-data
 
             if (itemPhase) {
                 console.log('[OrderPatch] Propagating phase to items:', id, itemPhase, itemPhaseStage);

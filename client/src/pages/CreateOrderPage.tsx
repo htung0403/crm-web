@@ -5,7 +5,7 @@ import {
     ArrowLeft, ArrowRight, Plus, Trash2, Camera, Package, Sparkles,
     Loader2, User, Search, CheckCircle, ShoppingBag, QrCode, Image as ImageIcon,
     Tag, Palette, Layers, Check, Wrench, UserCheck, X, UserPlus,
-    Percent, DollarSign, ChevronDown, CreditCard, Calendar, Pencil, Wallet, Smartphone
+    Percent, DollarSign, ChevronDown, CreditCard, Calendar, Pencil, Wallet, Smartphone, Receipt
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { formatCurrency } from '@/lib/utils';
+import { cn, formatCurrency } from '@/lib/utils';
 import { useCustomers } from '@/hooks/useCustomers';
 import { useProducts } from '@/hooks/useProducts';
 import { usePackages } from '@/hooks/usePackages';
@@ -25,9 +25,13 @@ import { useUsers } from '@/hooks/useUsers';
 import { ordersApi, transactionsApi, salaryConfigsApi, commissionTablesApi } from '@/lib/api';
 import { CreateCustomerDialog } from '@/components/customers/CreateCustomerDialog';
 import { ImageUpload } from '@/components/products/ImageUpload';
-import { useProductTypes } from '@/hooks/useProductTypes';
+import { useProductTypes, type ProductType } from '@/hooks/useProductTypes';
 import { useAuth } from '@/contexts/AuthContext';
 import { ServiceSelector } from '@/components/orders/ServiceSelector';
+import { PrintThermalInvoiceDialog } from '@/components/orders/PrintThermalInvoiceDialog';
+import type { Order } from '@/hooks/useOrders';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 
 // Product types will be fetched from API
 
@@ -46,6 +50,208 @@ const COMMON_BRANDS = [
     'Nike', 'Adidas', 'Gucci', 'Louis Vuitton', 'Chanel', 'Hermes',
     'Prada', 'Dior', 'Balenciaga', 'Converse', 'Vans', 'Khác'
 ];
+
+interface BrandComboboxProps {
+    value: string;
+    onChange: (value: string) => void;
+}
+
+function BrandCombobox({ value, onChange }: BrandComboboxProps) {
+    const [open, setOpen] = useState(false);
+    const [searchValue, setSearchValue] = useState('');
+    const trimmedSearch = searchValue.trim();
+    const normalizedSearch = trimmedSearch.toLocaleLowerCase('vi-VN');
+    const filteredBrands = normalizedSearch
+        ? COMMON_BRANDS.filter(brand => brand.toLocaleLowerCase('vi-VN').includes(normalizedSearch))
+        : COMMON_BRANDS;
+    const canCreateBrand = Boolean(trimmedSearch)
+        && !COMMON_BRANDS.some(brand => brand.toLocaleLowerCase('vi-VN') === normalizedSearch);
+
+    const handleSelect = (brand: string) => {
+        onChange(brand);
+        setSearchValue('');
+        setOpen(false);
+    };
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={open}
+                    className={cn(
+                        "h-12 w-full justify-between px-4 text-left font-normal",
+                        !value && "text-muted-foreground"
+                    )}
+                >
+                    <span className="truncate">{value || 'Chọn hoặc nhập'}</span>
+                    <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command shouldFilter={false}>
+                    <CommandInput
+                        placeholder="Tìm hoặc nhập thương hiệu..."
+                        value={searchValue}
+                        onValueChange={setSearchValue}
+                    />
+                    <CommandList>
+                        <CommandGroup>
+                            {filteredBrands.map(brand => (
+                                <CommandItem
+                                    key={brand}
+                                    value={brand}
+                                    onSelect={() => handleSelect(brand)}
+                                >
+                                    <Check className={cn(
+                                        "mr-2 h-4 w-4",
+                                        value === brand ? "opacity-100" : "opacity-0"
+                                    )} />
+                                    {brand}
+                                </CommandItem>
+                            ))}
+                            {canCreateBrand && (
+                                <CommandItem
+                                    value={trimmedSearch}
+                                    onSelect={() => handleSelect(trimmedSearch)}
+                                >
+                                    <Plus className="mr-2 h-4 w-4" />
+                                    Thêm mới "{trimmedSearch}"
+                                </CommandItem>
+                            )}
+                            {!filteredBrands.length && !canCreateBrand && (
+                                <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                                    Không tìm thấy thương hiệu.
+                                </div>
+                            )}
+                        </CommandGroup>
+                    </CommandList>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    );
+}
+
+interface ProductTypeComboboxProps {
+    value: string;
+    productTypes: ProductType[];
+    onChange: (value: string) => void;
+    onCreate: (data: Partial<ProductType>) => Promise<ProductType>;
+}
+
+function ProductTypeCombobox({ value, productTypes, onChange, onCreate }: ProductTypeComboboxProps) {
+    const [open, setOpen] = useState(false);
+    const [searchValue, setSearchValue] = useState('');
+    const [creating, setCreating] = useState(false);
+    const selectedType = productTypes.find(type => type.code === value);
+    const trimmedSearch = searchValue.trim();
+    const normalizedSearch = trimmedSearch.toLocaleLowerCase('vi-VN');
+    const filteredTypes = normalizedSearch
+        ? productTypes.filter(type =>
+            type.name.toLocaleLowerCase('vi-VN').includes(normalizedSearch)
+            || type.code.toLocaleLowerCase('vi-VN').includes(normalizedSearch)
+        )
+        : productTypes;
+    const generatedCode = trimmedSearch
+        .toUpperCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^A-Z0-9]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_|_$/g, '');
+    const canCreateType = Boolean(trimmedSearch && generatedCode)
+        && !productTypes.some(type =>
+            type.name.toLocaleLowerCase('vi-VN') === normalizedSearch
+            || type.code.toLocaleLowerCase('vi-VN') === generatedCode.toLocaleLowerCase('vi-VN')
+        );
+
+    const handleSelect = (code: string) => {
+        onChange(code);
+        setSearchValue('');
+        setOpen(false);
+    };
+
+    const handleCreate = async () => {
+        if (!canCreateType || creating) return;
+        setCreating(true);
+        try {
+            const newType = await onCreate({
+                name: trimmedSearch,
+                code: generatedCode,
+                description: 'Created via quick add'
+            });
+            handleSelect(newType.code);
+        } finally {
+            setCreating(false);
+        }
+    };
+
+    return (
+        <Popover open={open} onOpenChange={setOpen}>
+            <PopoverTrigger asChild>
+                <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={open}
+                    className={cn(
+                        "h-12 w-full justify-between px-4 text-left font-normal",
+                        !selectedType && "text-muted-foreground"
+                    )}
+                >
+                    <span className="truncate">{selectedType?.name || value || 'Chọn hoặc nhập'}</span>
+                    <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                <Command shouldFilter={false}>
+                    <CommandInput
+                        placeholder="Tìm hoặc nhập loại sản phẩm..."
+                        value={searchValue}
+                        onValueChange={setSearchValue}
+                    />
+                    <CommandList>
+                        <CommandGroup>
+                            {filteredTypes.map(type => (
+                                <CommandItem
+                                    key={type.code}
+                                    value={type.name}
+                                    onSelect={() => handleSelect(type.code)}
+                                >
+                                    <Check className={cn(
+                                        "mr-2 h-4 w-4",
+                                        value === type.code ? "opacity-100" : "opacity-0"
+                                    )} />
+                                    {type.name}
+                                </CommandItem>
+                            ))}
+                            {canCreateType && (
+                                <CommandItem
+                                    value={trimmedSearch}
+                                    disabled={creating}
+                                    onSelect={handleCreate}
+                                >
+                                    {creating ? (
+                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                    ) : (
+                                        <Plus className="mr-2 h-4 w-4" />
+                                    )}
+                                    Thêm mới "{trimmedSearch}"
+                                </CommandItem>
+                            )}
+                            {!filteredTypes.length && !canCreateType && (
+                                <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                                    Không tìm thấy loại sản phẩm.
+                                </div>
+                            )}
+                        </CommandGroup>
+                    </CommandList>
+                </Command>
+            </PopoverContent>
+        </Popover>
+    );
+}
 
 interface Surcharge {
     id: string;
@@ -72,6 +278,8 @@ interface CustomerProduct {
         type: 'service' | 'package';
         name: string;
         price: number;
+        /** Tiền cọc khách trả cho dịch vụ này (khi tạo đơn) */
+        deposit_amount?: number;
         technicians: Array<{
             id: string;
             name: string;
@@ -173,7 +381,7 @@ export function CreateOrderPage() {
     const { products: catalogProducts, services, fetchProducts, fetchServices } = useProducts();
     const { packages, fetchPackages } = usePackages();
     const { users, fetchUsers, fetchTechnicians, fetchSales } = useUsers();
-    const { productTypes, fetchProductTypes } = useProductTypes();
+    const { productTypes, fetchProductTypes, createProductType } = useProductTypes();
 
     const [salaryConfigs, setSalaryConfigs] = useState<any[]>([]);
     const [commissionTables, setCommissionTables] = useState<any[]>([]);
@@ -193,6 +401,9 @@ export function CreateOrderPage() {
     const [loading, setLoading] = useState(true);
     const [submitting, setSubmitting] = useState(false);
     const [createdOrder, setCreatedOrder] = useState<any>(null);
+    const [showInvoicePrintDialog, setShowInvoicePrintDialog] = useState(false);
+    const [invoicePrintOrder, setInvoicePrintOrder] = useState<Order | null>(null);
+    const [loadingInvoiceOrder, setLoadingInvoiceOrder] = useState(false);
 
     // Confirmation dialog state
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
@@ -320,6 +531,7 @@ export function CreateOrderPage() {
                         type: s.item_type,
                         name: s.item_name,
                         price: s.unit_price,
+                        deposit_amount: Number(s.deposit_amount) || 0,
                         technicians: (s.technicians || []).map((t: any) => ({
                             id: t.technician_id,
                             name: t.technician?.name || 'Unknown',
@@ -613,6 +825,7 @@ export function CreateOrderPage() {
                 ...p,
                 services: [...p.services, {
                     ...service,
+                    deposit_amount: 0,
                     technicians: selectedTechnicians.map(t => {
                         const dynamicRate = resolveCommissionRate(t.id, service.id, 'service', false);
                         return {
@@ -729,8 +942,28 @@ export function CreateOrderPage() {
             return {
                 ...p,
                 services: p.services.map((s, si) =>
-                    si === serviceIndex ? { ...s, price } : s
+                    si === serviceIndex
+                        ? {
+                            ...s,
+                            price,
+                            deposit_amount: Math.min(s.deposit_amount || 0, Math.max(0, price)),
+                        }
+                        : s
                 )
+            };
+        }));
+    };
+
+    const handleUpdateServiceDeposit = (productIndex: number, serviceIndex: number, deposit: number) => {
+        setProducts(prev => prev.map((p, i) => {
+            if (i !== productIndex) return p;
+            return {
+                ...p,
+                services: p.services.map((s, si) => {
+                    if (si !== serviceIndex) return s;
+                    const maxDeposit = Math.max(0, s.price || 0);
+                    return { ...s, deposit_amount: Math.min(Math.max(0, deposit), maxDeposit) };
+                }),
             };
         }));
     };
@@ -1023,6 +1256,10 @@ export function CreateOrderPage() {
     }, 0);
 
     const total = Math.max(0, subtotal - discountAmount + totalSurcharges);
+    const totalServiceDeposits = products.reduce(
+        (sum, p) => sum + p.services.reduce((ss, s) => ss + (s.deposit_amount || 0), 0),
+        0
+    );
     const remainingDebt = total - paidAmount;
 
     // Helper to format number with dots for display
@@ -1207,6 +1444,7 @@ export function CreateOrderPage() {
                                 type: s.type,
                                 name: s.name,
                                 price: s.price,
+                                deposit_amount: Math.max(0, Number(s.deposit_amount) || 0),
                                 technicians: s.technicians
                                     .filter(t => Boolean(t.id))
                                     .map(t => ({
@@ -1303,6 +1541,28 @@ export function CreateOrderPage() {
         }
     };
 
+    const handleOpenPrintInvoice = async () => {
+        const orderId = createdOrder?.order?.id;
+        if (!orderId) {
+            toast.error('Không tìm thấy mã đơn để in hóa đơn');
+            return;
+        }
+        setLoadingInvoiceOrder(true);
+        try {
+            const response = await ordersApi.getById(orderId);
+            const order = response.data.data?.order as Order | undefined;
+            if (!order) {
+                throw new Error('Order not found');
+            }
+            setInvoicePrintOrder(order);
+            setShowInvoicePrintDialog(true);
+        } catch {
+            toast.error('Không tải được thông tin đơn để in hóa đơn');
+        } finally {
+            setLoadingInvoiceOrder(false);
+        }
+    };
+
     if (loading) {
         return (
             <div className="min-h-[60vh] flex items-center justify-center">
@@ -1315,30 +1575,30 @@ export function CreateOrderPage() {
     }
 
     return (
-        <div className="space-y-4 animate-fade-in w-full">
+        <div className="min-w-0 max-w-full space-y-4 animate-fade-in w-full overflow-x-hidden">
             {/* Header */}
-            <div className="flex items-center gap-4">
-                <Button variant="ghost" size="icon" onClick={() => navigate('/orders')}>
+            <div className="flex min-w-0 items-start gap-3">
+                <Button variant="ghost" size="icon" className="shrink-0" onClick={() => navigate('/orders')}>
                     <ArrowLeft className="h-5 w-5" />
                 </Button>
-                <div className="flex-1">
-                    <h1 className="text-2xl font-bold flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                    <h1 className="flex flex-wrap items-center gap-2 text-xl font-bold sm:text-2xl">
                         {isEditMode ? (
                             <>
-                                <Wrench className="h-6 w-6 text-orange-500" />
-                                Chỉnh sửa đơn hàng
-                                <Badge variant="outline" className="ml-2 bg-orange-50 text-orange-600 border-orange-200 uppercase tracking-wider text-[10px] font-bold">
+                                <Wrench className="h-5 w-5 shrink-0 text-orange-500 sm:h-6 sm:w-6" />
+                                <span className="min-w-0">Chỉnh sửa đơn hàng</span>
+                                <Badge variant="outline" className="bg-orange-50 text-[10px] font-bold uppercase tracking-wider text-orange-600 border-orange-200">
                                     Edit Mode
                                 </Badge>
                             </>
                         ) : (
                             <>
-                                <ShoppingBag className="h-6 w-6 text-primary" />
-                                Tạo đơn hàng mới
+                                <ShoppingBag className="h-5 w-5 shrink-0 text-primary sm:h-6 sm:w-6" />
+                                <span>Tạo đơn hàng mới</span>
                             </>
                         )}
                     </h1>
-                    <p className="text-muted-foreground">
+                    <p className="text-sm text-muted-foreground sm:text-base">
                         {isEditMode
                             ? "Cập nhật thông tin sản phẩm, dịch vụ và các mục bán kèm cho đơn hàng hiện tại"
                             : "Nhận sản phẩm khách và chọn dịch vụ"}
@@ -1348,24 +1608,40 @@ export function CreateOrderPage() {
 
             {/* Progress Steps - 3 steps now */}
             {step < 4 && (
-                <div className="flex items-center justify-between">
+                <div className="flex min-w-0 items-center justify-between gap-2">
                     {[
-                        { num: 1, label: 'Khách hàng', icon: User },
-                        { num: 2, label: 'Sản phẩm & Dịch vụ', icon: Package },
-                        { num: 3, label: 'Xác nhận', icon: CheckCircle }
+                        { num: 1, label: 'Khách hàng', shortLabel: 'Khách', icon: User },
+                        { num: 2, label: 'Sản phẩm & Dịch vụ', shortLabel: 'Sản phẩm', icon: Package },
+                        { num: 3, label: 'Xác nhận', shortLabel: 'Xác nhận', icon: CheckCircle }
                     ].map((s, i) => (
-                        <div key={s.num} className="flex items-center flex-1">
-                            <div className={`flex items-center gap-2 ${step >= s.num ? 'text-primary' : 'text-muted-foreground'}`}>
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${step > s.num ? 'bg-primary text-white' :
-                                    step === s.num ? 'bg-primary/10 border-2 border-primary' :
-                                        'bg-muted'
-                                    }`}>
+                        <div key={s.num} className="flex min-w-0 flex-1 items-center">
+                            <div
+                                className={cn(
+                                    'flex min-w-0 flex-1 flex-col items-center gap-1 sm:flex-row sm:justify-center sm:gap-2',
+                                    step >= s.num ? 'text-primary' : 'text-muted-foreground'
+                                )}
+                                title={s.label}
+                            >
+                                <div className={cn(
+                                    'flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
+                                    step > s.num ? 'bg-primary text-white' :
+                                        step === s.num ? 'border-2 border-primary bg-primary/10' :
+                                            'bg-muted'
+                                )}>
                                     {step > s.num ? <Check className="h-5 w-5" /> : <s.icon className="h-5 w-5" />}
                                 </div>
-                                <span className="hidden md:inline font-medium">{s.label}</span>
+                                <span className="whitespace-nowrap text-center text-[11px] font-medium leading-none sm:hidden">
+                                    {s.shortLabel}
+                                </span>
+                                <span className="hidden whitespace-nowrap font-medium sm:inline md:hidden">
+                                    {s.shortLabel}
+                                </span>
+                                <span className="hidden whitespace-nowrap font-medium md:inline">
+                                    {s.label}
+                                </span>
                             </div>
                             {i < 2 && (
-                                <div className={`flex-1 h-1 mx-2 rounded ${step > s.num ? 'bg-primary' : 'bg-muted'}`} />
+                                <div className={cn('mx-1 h-0.5 min-w-[12px] flex-1 rounded sm:mx-2', step > s.num ? 'bg-primary' : 'bg-muted')} />
                             )}
                         </div>
                     ))}
@@ -1374,11 +1650,11 @@ export function CreateOrderPage() {
 
             {/* Step 1: Customer Selection */}
             {step === 1 && (
-                <Card>
-                    <CardHeader>
-                        <div className="flex items-center justify-between">
-                            <CardTitle className="flex items-center gap-2">
-                                <User className="h-5 w-5 text-primary" />
+                <Card className="min-w-0 overflow-hidden">
+                    <CardHeader className="space-y-3 pb-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <CardTitle className="flex shrink-0 items-center gap-2 text-base whitespace-nowrap sm:text-lg">
+                                <User className="h-5 w-5 shrink-0 text-primary" />
                                 Chọn khách hàng
                             </CardTitle>
                             <Button
@@ -1388,26 +1664,32 @@ export function CreateOrderPage() {
                                     setIsEditingCustomer(false);
                                     setShowCreateCustomerDialog(true);
                                 }}
-                                className="gap-2"
+                                className="h-9 w-full shrink-0 gap-2 sm:w-auto"
                             >
-                                <UserPlus className="h-4 w-4" />
+                                <UserPlus className="h-4 w-4 shrink-0" />
                                 Thêm khách hàng
                             </Button>
                         </div>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="pt-0">
                         {selectedCustomer ? (
-                            <div className="flex items-center gap-4 p-4 bg-primary/5 rounded-xl border border-primary/20">
-                                <Avatar className="h-16 w-16">
-                                    <AvatarFallback className="bg-primary text-white text-xl">
-                                        {selectedCustomer.name.charAt(0)}
-                                    </AvatarFallback>
-                                </Avatar>
-                                <div className="flex-1">
-                                    <p className="font-semibold text-xl">{selectedCustomer.name}</p>
-                                    <p className="text-muted-foreground">{selectedCustomer.phone}</p>
+                            <div className="flex flex-col gap-4 rounded-xl border border-primary/20 bg-primary/5 p-4 sm:flex-row sm:items-center">
+                                <div className="flex min-w-0 items-center gap-3 sm:flex-1">
+                                    <Avatar className="h-14 w-14 shrink-0 sm:h-16 sm:w-16">
+                                        <AvatarFallback className="bg-primary text-lg text-white sm:text-xl">
+                                            {selectedCustomer.name.charAt(0)}
+                                        </AvatarFallback>
+                                    </Avatar>
+                                    <div className="min-w-0 flex-1">
+                                        <p className="truncate text-lg font-semibold sm:text-xl">{selectedCustomer.name}</p>
+                                        <p className="text-sm text-muted-foreground sm:text-base">{selectedCustomer.phone}</p>
+                                    </div>
                                 </div>
-                                <Button variant="outline" onClick={() => setCustomerId('')}>
+                                <Button
+                                    variant="outline"
+                                    className="h-9 w-full shrink-0 sm:w-auto"
+                                    onClick={() => setCustomerId('')}
+                                >
                                     Đổi khách
                                 </Button>
                             </div>
@@ -1489,9 +1771,9 @@ export function CreateOrderPage() {
             {step === 2 && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div className="lg:col-span-2 space-y-4">
-                        <div className="flex items-center justify-between">
-                            <h2 className="text-lg font-semibold">Sản phẩm khách hàng ({products.length})</h2>
-                            <Button onClick={handleAddProduct} className="gap-2">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <h2 className="text-base font-semibold sm:text-lg">Sản phẩm khách hàng ({products.length})</h2>
+                            <Button onClick={handleAddProduct} className="w-full gap-2 sm:w-auto">
                                 <Plus className="h-4 w-4" />
                                 Thêm sản phẩm
                             </Button>
@@ -1519,75 +1801,73 @@ export function CreateOrderPage() {
                                     const isConfirmed = confirmedProductIds.has(product.id);
 
                                     return (
-                                    <Card key={product.id} className={isCurrent ? 'ring-2 ring-primary' : ''}>
-                                        <CardHeader className="pb-3">
-                                            <div className="flex items-center justify-between gap-3">
-                                                {/* QR Code on left for confirmed products */}
-                                                {isConfirmed && (
-                                                    <div className="bg-white p-1 rounded border shadow-sm flex-shrink-0">
-                                                        <QRCodeSVG
-                                                            value={`${nextOrderCode || 'HĐ1'}.${productNumber}`}
-                                                            size={50}
-                                                            level="M"
-                                                        />
-                                                        <p className="text-[10px] font-mono font-bold text-primary text-center mt-0.5">
-                                                            {nextOrderCode || 'HĐ1'}.{productNumber}
-                                                        </p>
+                                    <Card key={product.id} className={cn('min-w-0 overflow-hidden', isCurrent ? 'ring-2 ring-primary' : '')}>
+                                        <CardHeader className="space-y-3 pb-3">
+                                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                                <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center">
+                                                    {isConfirmed && (
+                                                        <div className="flex shrink-0 flex-col items-center rounded border bg-white p-1 shadow-sm">
+                                                            <QRCodeSVG
+                                                                value={`${nextOrderCode || 'HĐ1'}.${productNumber}`}
+                                                                size={50}
+                                                                level="M"
+                                                            />
+                                                            <p className="mt-0.5 text-center font-mono text-[10px] font-bold text-primary">
+                                                                {nextOrderCode || 'HĐ1'}.{productNumber}
+                                                            </p>
+                                                        </div>
+                                                    )}
+                                                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                                        <Badge variant="outline" className="shrink-0">
+                                                            {productTypes.find(t => t.code === product.type)?.name || 'Khác'}
+                                                        </Badge>
+                                                        <CardTitle className="min-w-0 break-words text-base leading-snug">
+                                                            {product.name || `Sản phẩm ${productNumber}`}
+                                                        </CardTitle>
                                                     </div>
-                                                )}
-
-                                                <div className="flex items-center gap-2 flex-1 min-w-0">
-                                                    <Badge variant="outline" className="shrink-0">
-                                                        {productTypes.find(t => t.code === product.type)?.name || 'Khác'}
-                                                    </Badge>
-                                                    <CardTitle className="text-base truncate">
-                                                        {product.name || `Sản phẩm ${productNumber}`}
-                                                    </CardTitle>
                                                 </div>
-                                                <div className="flex items-center gap-4 flex-shrink-0">
-                                                    <div className="flex items-center gap-2">
-                                                        <Calendar className="h-4 w-4 text-primary shrink-0" />
-                                                        <span className="text-xs text-muted-foreground whitespace-nowrap">Hạn trả đồ</span>
-                                                        <Input
-                                                            type="date"
-                                                            size={1}
-                                                            value={product.due_at || ''}
-                                                            onChange={(e) => handleUpdateProduct(index, 'due_at', e.target.value)}
-                                                            className="h-8 w-[140px] text-xs border-dashed focus:border-solid transition-all px-2"
-                                                        />
-                                                    </div>
-                                                    <div className="flex items-center gap-2">
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="sm"
-                                                            onClick={() => {
-                                                                if (isCurrent) {
-                                                                    // Tự động xác nhận khi thu gọn
-                                                                    setConfirmedProductIds(prev => new Set([...prev, product.id]));
-                                                                    setCurrentProductId(null);
-                                                                } else {
-                                                                    // Nếu đang mở sản phẩm khác, xác nhận sản phẩm đó trước khi chuyển
-                                                                    if (currentProductId) {
-                                                                        setConfirmedProductIds(prev => new Set([...prev, currentProductId]));
-                                                                    }
-                                                                    setCurrentProductId(product.id);
+                                                <div className="flex shrink-0 items-center justify-end gap-1">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-9 px-3"
+                                                        onClick={() => {
+                                                            if (isCurrent) {
+                                                                setConfirmedProductIds(prev => new Set([...prev, product.id]));
+                                                                setCurrentProductId(null);
+                                                            } else {
+                                                                if (currentProductId) {
+                                                                    setConfirmedProductIds(prev => new Set([...prev, currentProductId]));
                                                                 }
-                                                            }}
-                                                        >
-                                                            {isCurrent ? 'Thu gọn' : 'Sửa'}
-                                                        </Button>
+                                                                setCurrentProductId(product.id);
+                                                            }
+                                                        }}
+                                                    >
+                                                        {isCurrent ? 'Thu gọn' : 'Sửa'}
+                                                    </Button>
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
-                                                        className="text-red-500 hover:text-red-600"
+                                                        className="h-9 w-9 text-red-500 hover:text-red-600"
                                                         onClick={() => handleRemoveProduct(index)}
                                                     >
                                                         <Trash2 className="h-4 w-4" />
                                                     </Button>
                                                 </div>
                                             </div>
-                                        </div>
-                                    </CardHeader>
+                                            <div className="flex flex-col gap-2 rounded-lg border border-dashed bg-muted/40 p-2.5 sm:flex-row sm:items-center sm:border-0 sm:bg-transparent sm:p-0">
+                                                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                                                    <Calendar className="h-4 w-4 shrink-0 text-primary" />
+                                                    <span>Hạn trả đồ</span>
+                                                </div>
+                                                <Input
+                                                    type="date"
+                                                    value={product.due_at || ''}
+                                                    onChange={(e) => handleUpdateProduct(index, 'due_at', e.target.value)}
+                                                    className="h-9 w-full border-dashed text-sm transition-all focus:border-solid sm:w-[160px]"
+                                                />
+                                            </div>
+                                        </CardHeader>
 
                                         {isCurrent && (
                                             <CardContent className="space-y-4 border-t pt-4">
@@ -1603,38 +1883,20 @@ export function CreateOrderPage() {
 
                                                     <div className="space-y-2">
                                                         <Label>Loại sản phẩm</Label>
-                                                        <Select
+                                                        <ProductTypeCombobox
                                                             value={product.type}
-                                                            onValueChange={(v) => handleUpdateProduct(index, 'type', v)}
-                                                        >
-                                                            <SelectTrigger>
-                                                                <SelectValue />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                {productTypes.map(t => (
-                                                                    <SelectItem key={t.code} value={t.code}>
-                                                                        {t.name}
-                                                                    </SelectItem>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
+                                                            productTypes={productTypes}
+                                                            onChange={(v) => handleUpdateProduct(index, 'type', v)}
+                                                            onCreate={createProductType}
+                                                        />
                                                     </div>
 
                                                     <div className="space-y-2">
                                                         <Label>Hãng/Thương hiệu</Label>
-                                                        <Select
+                                                        <BrandCombobox
                                                             value={product.brand}
-                                                            onValueChange={(v) => handleUpdateProduct(index, 'brand', v)}
-                                                        >
-                                                            <SelectTrigger>
-                                                                <SelectValue placeholder="Chọn hoặc nhập" />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                {COMMON_BRANDS.map(b => (
-                                                                    <SelectItem key={b} value={b}>{b}</SelectItem>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
+                                                            onChange={(v) => handleUpdateProduct(index, 'brand', v)}
+                                                        />
                                                     </div>
 
                                                     <div className="space-y-2">
@@ -1837,39 +2099,43 @@ export function CreateOrderPage() {
 
                                                                             {/* Assigned technicians */}
                                                                             {s.technicians && s.technicians.length > 0 ? (
-                                                                                <div className="space-y-2 mb-2">
+                                                                                <div className="mb-2 space-y-2">
                                                                                     {s.technicians.map((tech, ti) => (
-                                                                                        <div key={ti} className="flex flex-wrap items-center gap-2 bg-white p-2 rounded-lg border text-xs">
-                                                                                            <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                                                                                                <Avatar className="h-6 w-6 flex-shrink-0">
-                                                                                                    <AvatarFallback className="bg-blue-100 text-blue-700 text-[10px]">
+                                                                                        <div key={ti} className="rounded-lg border bg-white p-2.5 text-xs">
+                                                                                            <div className="flex items-start gap-2">
+                                                                                                <Avatar className="h-7 w-7 shrink-0">
+                                                                                                    <AvatarFallback className="bg-blue-100 text-[10px] text-blue-700">
                                                                                                         {tech.name.charAt(0)}
                                                                                                     </AvatarFallback>
                                                                                                 </Avatar>
-                                                                                                <span className="font-medium truncate">{tech.name}</span>
-                                                                                            </div>
-                                                                                            <div className="flex items-center gap-1.5">
-                                                                                                <Input
-                                                                                                    type="number"
-                                                                                                    min="0"
-                                                                                                    max="100"
-                                                                                                    value={tech.commission || 0}
-                                                                                                    onChange={(e) => handleUpdateTechnicianCommission(index, si, tech.id, Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
-                                                                                                    onFocus={(e) => e.target.select()}
-                                                                                                    className="w-14 h-7 text-xs text-center p-1"
-                                                                                                />
-                                                                                                <span className="text-[10px]">%=</span>
-                                                                                                <span className="font-semibold text-emerald-600 min-w-[55px] text-right text-xs">
-                                                                                                    {formatCurrency(s.price * (tech.commission || 0) / 100)}
-                                                                                                </span>
+                                                                                                <p className="min-w-0 flex-1 break-words font-medium leading-snug">
+                                                                                                    {tech.name}
+                                                                                                </p>
                                                                                                 <Button
                                                                                                     variant="ghost"
                                                                                                     size="icon"
-                                                                                                    className="h-7 w-7 text-red-400 hover:text-red-600 flex-shrink-0 touch-manipulation"
+                                                                                                    className="-mr-1 h-7 w-7 shrink-0 text-red-400 hover:text-red-600 touch-manipulation"
                                                                                                     onClick={() => handleRemoveTechnicianFromService(index, si, tech.id)}
                                                                                                 >
                                                                                                     <X className="h-3.5 w-3.5" />
                                                                                                 </Button>
+                                                                                            </div>
+                                                                                            <div className="mt-2 flex items-center gap-2 border-t border-dashed border-muted/60 pt-2 pl-9 sm:pl-0 sm:mt-1.5 sm:border-0 sm:pt-0">
+                                                                                                <div className="flex items-center gap-1">
+                                                                                                    <Input
+                                                                                                        type="number"
+                                                                                                        min="0"
+                                                                                                        max="100"
+                                                                                                        value={tech.commission || 0}
+                                                                                                        onChange={(e) => handleUpdateTechnicianCommission(index, si, tech.id, Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
+                                                                                                        onFocus={(e) => e.target.select()}
+                                                                                                        className="h-8 w-16 text-center text-xs p-1"
+                                                                                                    />
+                                                                                                    <span className="text-[10px] text-muted-foreground">%</span>
+                                                                                                </div>
+                                                                                                <span className="ml-auto text-right text-xs font-semibold text-emerald-600">
+                                                                                                    {formatCurrency(s.price * (tech.commission || 0) / 100)}
+                                                                                                </span>
                                                                                             </div>
                                                                                         </div>
                                                                                     ))}
@@ -1904,39 +2170,43 @@ export function CreateOrderPage() {
 
                                                                             {/* Assigned sales */}
                                                                             {s.sales && s.sales.length > 0 ? (
-                                                                                <div className="space-y-2 mb-2">
+                                                                                <div className="mb-2 space-y-2">
                                                                                     {s.sales.map((sale, sai) => (
-                                                                                        <div key={sai} className="flex flex-wrap items-center gap-2 bg-white p-2 rounded-lg border text-xs">
-                                                                                            <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                                                                                                <Avatar className="h-6 w-6 flex-shrink-0">
-                                                                                                    <AvatarFallback className="bg-amber-100 text-amber-700 text-[10px]">
+                                                                                        <div key={sai} className="rounded-lg border bg-white p-2.5 text-xs">
+                                                                                            <div className="flex items-start gap-2">
+                                                                                                <Avatar className="h-7 w-7 shrink-0">
+                                                                                                    <AvatarFallback className="bg-amber-100 text-[10px] text-amber-700">
                                                                                                         {sale.name.charAt(0)}
                                                                                                     </AvatarFallback>
                                                                                                 </Avatar>
-                                                                                                <span className="font-medium truncate">{sale.name}</span>
-                                                                                            </div>
-                                                                                            <div className="flex items-center gap-1.5">
-                                                                                                <Input
-                                                                                                    type="number"
-                                                                                                    min="0"
-                                                                                                    max="100"
-                                                                                                    value={sale.commission || 0}
-                                                                                                    onChange={(e) => handleUpdateSaleCommission(index, si, sale.id, Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
-                                                                                                    onFocus={(e) => e.target.select()}
-                                                                                                    className="w-14 h-7 text-xs text-center p-1"
-                                                                                                />
-                                                                                                <span className="text-[10px]">%</span>
-                                                                                                <span className="font-semibold text-amber-600 min-w-[65px] text-right text-xs">
-                                                                                                    = {formatCurrency(s.price * (sale.commission || 0) / 100)}
-                                                                                                </span>
+                                                                                                <p className="min-w-0 flex-1 break-words font-medium leading-snug">
+                                                                                                    {sale.name}
+                                                                                                </p>
                                                                                                 <Button
                                                                                                     variant="ghost"
                                                                                                     size="icon"
-                                                                                                    className="h-7 w-7 text-red-400 hover:text-red-600 flex-shrink-0 touch-manipulation"
+                                                                                                    className="-mr-1 h-7 w-7 shrink-0 text-red-400 hover:text-red-600 touch-manipulation"
                                                                                                     onClick={() => handleRemoveSaleFromService(index, si, sale.id)}
                                                                                                 >
                                                                                                     <X className="h-3.5 w-3.5" />
                                                                                                 </Button>
+                                                                                            </div>
+                                                                                            <div className="mt-2 flex items-center gap-2 border-t border-dashed border-muted/60 pt-2 pl-9 sm:pl-0 sm:mt-1.5 sm:border-0 sm:pt-0">
+                                                                                                <div className="flex items-center gap-1">
+                                                                                                    <Input
+                                                                                                        type="number"
+                                                                                                        min="0"
+                                                                                                        max="100"
+                                                                                                        value={sale.commission || 0}
+                                                                                                        onChange={(e) => handleUpdateSaleCommission(index, si, sale.id, Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
+                                                                                                        onFocus={(e) => e.target.select()}
+                                                                                                        className="h-8 w-16 text-center text-xs p-1"
+                                                                                                    />
+                                                                                                    <span className="text-[10px] text-muted-foreground">%</span>
+                                                                                                </div>
+                                                                                                <span className="ml-auto text-right text-xs font-semibold text-amber-600">
+                                                                                                    {formatCurrency(s.price * (sale.commission || 0) / 100)}
+                                                                                                </span>
                                                                                             </div>
                                                                                         </div>
                                                                                     ))}
@@ -2031,45 +2301,49 @@ export function CreateOrderPage() {
                                             <div className="pt-2 border-t border-amber-200/60">
                                                 <p className="text-[10px] font-medium text-amber-800 uppercase mb-2">Nhân viên sales</p>
                                                 {a.sales && a.sales.length > 0 && (
-                                                    <div className="space-y-2 mb-2">
+                                                    <div className="mb-2 space-y-2">
                                                         {a.sales.map((sale, sai) => (
-                                                            <div key={sai} className="flex flex-wrap items-center gap-2 bg-white p-2 rounded-lg border text-xs">
-                                                                <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                                                                    <Avatar className="h-6 w-6 flex-shrink-0">
-                                                                        <AvatarFallback className="bg-amber-100 text-amber-700 text-[10px]">
+                                                            <div key={sai} className="rounded-lg border bg-white p-2.5 text-xs">
+                                                                <div className="flex items-start gap-2">
+                                                                    <Avatar className="h-7 w-7 shrink-0">
+                                                                        <AvatarFallback className="bg-amber-100 text-[10px] text-amber-700">
                                                                             {sale.name.charAt(0)}
                                                                         </AvatarFallback>
                                                                     </Avatar>
-                                                                    <span className="font-medium truncate">{sale.name}</span>
-                                                                </div>
-                                                                <div className="flex items-center gap-1.5">
-                                                                    <Input
-                                                                        type="number"
-                                                                        min="0"
-                                                                        max="100"
-                                                                        value={sale.commission || 0}
-                                                                        onChange={(e) => handleUpdateAddOnSaleCommission(a.id, sale.id, Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
-                                                                        onFocus={(e) => {
-                                                                            e.target.select();
-                                                                            if (lastAddedAddOnSale?.addOnId === a.id && lastAddedAddOnSale?.saleId === sale.id) {
-                                                                                setLastAddedAddOnSale(null);
-                                                                            }
-                                                                        }}
-                                                                        className="w-14 h-7 text-xs text-center p-1"
-                                                                        autoFocus={lastAddedAddOnSale?.addOnId === a.id && lastAddedAddOnSale?.saleId === sale.id}
-                                                                    />
-                                                                    <span className="text-[10px]">%</span>
-                                                                    <span className="font-semibold text-amber-600 min-w-[65px] text-right text-xs">
-                                                                        = {formatCurrency(((a.price * a.quantity) * (sale.commission || 0)) / 100)}
-                                                                    </span>
+                                                                    <p className="min-w-0 flex-1 break-words font-medium leading-snug">
+                                                                        {sale.name}
+                                                                    </p>
                                                                     <Button
                                                                         variant="ghost"
                                                                         size="icon"
-                                                                        className="h-7 w-7 text-red-400 hover:text-red-600 flex-shrink-0 touch-manipulation"
+                                                                        className="-mr-1 h-7 w-7 shrink-0 text-red-400 hover:text-red-600 touch-manipulation"
                                                                         onClick={() => handleRemoveSaleFromAddOn(a.id, sale.id)}
                                                                     >
                                                                         <X className="h-3.5 w-3.5" />
                                                                     </Button>
+                                                                </div>
+                                                                <div className="mt-2 flex items-center gap-2 border-t border-dashed border-muted/60 pt-2 pl-9">
+                                                                    <div className="flex items-center gap-1">
+                                                                        <Input
+                                                                            type="number"
+                                                                            min="0"
+                                                                            max="100"
+                                                                            value={sale.commission || 0}
+                                                                            onChange={(e) => handleUpdateAddOnSaleCommission(a.id, sale.id, Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
+                                                                            onFocus={(e) => {
+                                                                                e.target.select();
+                                                                                if (lastAddedAddOnSale?.addOnId === a.id && lastAddedAddOnSale?.saleId === sale.id) {
+                                                                                    setLastAddedAddOnSale(null);
+                                                                                }
+                                                                            }}
+                                                                            className="h-8 w-16 text-center text-xs p-1"
+                                                                            autoFocus={lastAddedAddOnSale?.addOnId === a.id && lastAddedAddOnSale?.saleId === sale.id}
+                                                                        />
+                                                                        <span className="text-[10px] text-muted-foreground">%</span>
+                                                                    </div>
+                                                                    <span className="ml-auto text-right text-xs font-semibold text-amber-600">
+                                                                        {formatCurrency(((a.price * a.quantity) * (sale.commission || 0)) / 100)}
+                                                                    </span>
                                                                 </div>
                                                             </div>
                                                         ))}
@@ -2243,31 +2517,57 @@ export function CreateOrderPage() {
                                                 {/* Services */}
                                                 {product.services.length > 0 && (
                                                     <div className="mt-3 space-y-2">
-                                                        {product.services.map((s, si) => (
-                                                            <div key={si} className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2 bg-white p-3 rounded-lg border">
-                                                                <div className="flex-1 min-w-0">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <Sparkles className="h-4 w-4 text-purple-500 flex-shrink-0" />
-                                                                        <span className="font-medium truncate">{s.name}</span>
-                                                                    </div>
-                                                                    {(s.technicians.length > 0 || (s.sales && s.sales.length > 0)) && (
-                                                                        <div className="flex flex-wrap gap-1.5 mt-2">
-                                                                            {s.technicians.map((tech, ti) => (
-                                                                                <span key={ti} className="text-[10px] text-blue-600 bg-blue-50 px-2 py-1 rounded-full whitespace-nowrap">
-                                                                                    KTV: {tech.name} ({tech.commission}%)
-                                                                                </span>
-                                                                            ))}
-                                                                            {s.sales && s.sales.length > 0 && s.sales.map((sale, sai) => (
-                                                                                <span key={`s-${sai}`} className="text-[10px] text-amber-600 bg-amber-50 px-2 py-1 rounded-full whitespace-nowrap">
-                                                                                    Sales: {sale.name} ({sale.commission}%)
-                                                                                </span>
-                                                                            ))}
+                                                        {product.services.map((s, si) => {
+                                                            const deposit = s.deposit_amount || 0;
+                                                            const serviceRemaining = Math.max(0, s.price - deposit);
+                                                            return (
+                                                            <div key={si} className="flex flex-col gap-2 rounded-lg border bg-white p-3">
+                                                                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                                                    <div className="min-w-0 flex-1">
+                                                                        <div className="flex items-center gap-2">
+                                                                            <Sparkles className="h-4 w-4 shrink-0 text-purple-500" />
+                                                                            <span className="font-medium break-words">{s.name}</span>
                                                                         </div>
-                                                                    )}
+                                                                        {(s.technicians.length > 0 || (s.sales && s.sales.length > 0)) && (
+                                                                            <div className="mt-2 flex flex-wrap gap-1.5">
+                                                                                {s.technicians.map((tech, ti) => (
+                                                                                    <span key={ti} className="whitespace-nowrap rounded-full bg-blue-50 px-2 py-1 text-[10px] text-blue-600">
+                                                                                        KTV: {tech.name} ({tech.commission}%)
+                                                                                    </span>
+                                                                                ))}
+                                                                                {s.sales && s.sales.length > 0 && s.sales.map((sale, sai) => (
+                                                                                    <span key={`s-${sai}`} className="whitespace-nowrap rounded-full bg-amber-50 px-2 py-1 text-[10px] text-amber-600">
+                                                                                        Sales: {sale.name} ({sale.commission}%)
+                                                                                    </span>
+                                                                                ))}
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="shrink-0 text-right">
+                                                                        <p className="text-[10px] uppercase text-muted-foreground">Giá dịch vụ</p>
+                                                                        <p className="text-base font-bold text-green-600 sm:text-lg">{formatCurrency(s.price)}</p>
+                                                                    </div>
                                                                 </div>
-                                                                <span className="font-bold text-green-600 text-base sm:text-lg flex-shrink-0">{formatCurrency(s.price)}</span>
+                                                                <div className="flex flex-col gap-2 border-t border-dashed pt-2 sm:flex-row sm:items-end sm:gap-3">
+                                                                    <div className="flex-1 space-y-1">
+                                                                        <Label className="text-[10px] font-bold uppercase text-amber-800">Cọc dịch vụ</Label>
+                                                                        <Input
+                                                                            type="text"
+                                                                            value={deposit ? formatInputCurrency(deposit) : ''}
+                                                                            onFocus={(e) => e.target.select()}
+                                                                            onChange={(e) => handleUpdateServiceDeposit(index, si, parseInputCurrency(e.target.value))}
+                                                                            placeholder="VD: 500.000"
+                                                                            className="h-9 border-amber-200 bg-amber-50/40 focus-visible:ring-amber-400"
+                                                                        />
+                                                                    </div>
+                                                                    <div className="rounded-lg bg-muted/50 px-3 py-2 text-sm sm:min-w-[140px]">
+                                                                        <p className="text-[10px] text-muted-foreground">Còn lại khi trả đồ</p>
+                                                                        <p className="font-semibold text-foreground">{formatCurrency(serviceRemaining)}</p>
+                                                                    </div>
+                                                                </div>
                                                             </div>
-                                                        ))}
+                                                            );
+                                                        })}
                                                     </div>
                                                 )}
                                                 
@@ -2580,8 +2880,28 @@ export function CreateOrderPage() {
                                      </div>
                                  </div>
 
+                                {totalServiceDeposits > 0 && (
+                                    <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm">
+                                        <span className="text-amber-900">Tổng cọc theo dịch vụ</span>
+                                        <span className="font-bold text-amber-800">{formatCurrency(totalServiceDeposits)}</span>
+                                    </div>
+                                )}
+
                                  {/* Payment Input */}                                <div className="space-y-2 pt-2 border-t border-green-200">
-                                    <Label className="text-xs text-green-700">Số tiền khách thanh toán</Label>
+                                    <div className="flex items-center justify-between gap-2">
+                                        <Label className="text-xs text-green-700">Số tiền khách thanh toán</Label>
+                                        {totalServiceDeposits > 0 && (
+                                            <Button
+                                                type="button"
+                                                variant="ghost"
+                                                size="sm"
+                                                className="h-7 px-2 text-[10px] text-green-700 hover:bg-green-100"
+                                                onClick={() => setPaidAmount(Math.min(total, totalServiceDeposits))}
+                                            >
+                                                Dùng tổng cọc
+                                            </Button>
+                                        )}
+                                    </div>
                                     <div className="flex gap-2">
                                         <Input
                                             type="text"
@@ -2654,9 +2974,23 @@ export function CreateOrderPage() {
                             </div>
                         )}
 
-                        <div className="flex gap-4 justify-center flex-wrap">
+                        <div className="mx-auto flex w-full max-w-lg flex-col gap-2 px-1 sm:max-w-none sm:flex-row sm:flex-wrap sm:justify-center sm:gap-3">
                             <Button
                                 variant="outline"
+                                className="h-10 w-full sm:w-auto"
+                                disabled={loadingInvoiceOrder}
+                                onClick={handleOpenPrintInvoice}
+                            >
+                                {loadingInvoiceOrder ? (
+                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                    <Receipt className="mr-2 h-4 w-4" />
+                                )}
+                                In hóa đơn
+                            </Button>
+                            <Button
+                                variant="outline"
+                                className="h-10 w-full sm:w-auto"
                                 onClick={() => {
                                     const printWindow = window.open('', '_blank');
                                     if (printWindow) {
@@ -2698,13 +3032,20 @@ export function CreateOrderPage() {
                                     }
                                 }}
                             >
-                                <QrCode className="h-4 w-4 mr-2" />
+                                <QrCode className="mr-2 h-4 w-4" />
                                 In mã QR
                             </Button>
-                            <Button onClick={() => navigate(`/orders/${createdOrder.order?.id}`)}>
+                            <Button
+                                className="h-10 w-full sm:w-auto"
+                                onClick={() => navigate(`/orders/${createdOrder.order?.id}`)}
+                            >
                                 Xem chi tiết đơn
                             </Button>
-                            <Button variant="outline" onClick={() => navigate('/orders')}>
+                            <Button
+                                variant="outline"
+                                className="h-10 w-full sm:w-auto"
+                                onClick={() => navigate('/orders')}
+                            >
                                 Về danh sách đơn
                             </Button>
                         </div>
@@ -2714,29 +3055,31 @@ export function CreateOrderPage() {
 
             {/* Navigation Buttons */}
             {step < 4 && (
-                <div className="flex justify-between pt-4 border-t">
+                <div className="flex gap-2 border-t pt-4 sm:gap-3">
                     <Button
                         variant="outline"
+                        className="h-10 flex-1 sm:flex-none"
                         onClick={() => setStep(s => Math.max(1, s - 1))}
                         disabled={step === 1}
                     >
-                        <ArrowLeft className="h-4 w-4 mr-2" />
+                        <ArrowLeft className="mr-2 h-4 w-4 shrink-0" />
                         Quay lại
                     </Button>
 
                     {step < 3 ? (
                         <Button
+                            className="h-10 flex-1 sm:flex-none"
                             onClick={() => setStep(s => s + 1)}
                             disabled={!canGoNext()}
                         >
                             Tiếp tục
-                            <ArrowRight className="h-4 w-4 ml-2" />
+                            <ArrowRight className="ml-2 h-4 w-4 shrink-0" />
                         </Button>
                     ) : (
                         <Button
                             onClick={() => handleSubmit('before_sale')}
                             disabled={submitting}
-                            className="bg-green-600 hover:bg-green-700"
+                            className="h-10 flex-1 bg-green-600 hover:bg-green-700 sm:flex-none"
                         >
                             {submitting ? (
                                 <>
@@ -2888,6 +3231,12 @@ export function CreateOrderPage() {
 
 
             {/* Service Selection Dialog for confirmed products - REMOVED */}
-        </div >
+
+            <PrintThermalInvoiceDialog
+                order={invoicePrintOrder}
+                open={showInvoicePrintDialog}
+                onClose={() => setShowInvoicePrintDialog(false)}
+            />
+        </div>
     );
 }

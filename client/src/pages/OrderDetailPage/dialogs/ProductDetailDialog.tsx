@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
     Dialog,
     DialogContent,
@@ -27,7 +27,14 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { ProductChat } from '@/components/orders/workflow/ProductChat';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import { cn, formatCurrency, formatDateTime, formatDate } from '@/lib/utils';
-import { SALES_STATUS_LABELS, getCareWarrantyStageLabel, getAfterSaleStageLabel, getSalesStatusLabel } from '../constants';
+import {
+    SALES_STATUS_LABELS,
+    getCareWarrantyStageLabel,
+    getAfterSaleStageLabel,
+    getSalesStatusLabel,
+    getItemAfterSaleStage as resolveItemAfterSaleStage,
+    pickOrderLevelAfterSalePatch,
+} from '../constants';
 import { getWorkflowRequestLogDisplay, isWorkflowRequestLogAction } from '../workflowRequestLog';
 import { orderItemsApi, orderProductsApi, productChatsApi } from '@/lib/api';
 import { toast } from 'sonner';
@@ -77,12 +84,17 @@ export function MultiMediaUpload({ value, onChange, disabled, bucket = 'orders',
                 if (url) uploadedUrls.push(url);
             }
             onChange([...value, ...uploadedUrls]);
-            toast.success('Đã tải lên thành công');
+            toast.success(
+                uploadedUrls.length > 1
+                    ? `Đã tải lên ${uploadedUrls.length} ảnh/video`
+                    : 'Đã tải lên thành công'
+            );
         } catch (error) {
             console.error('Upload error:', error);
             toast.error('Lỗi upload file');
         } finally {
             setUploading(false);
+            e.target.value = '';
         }
     };
 
@@ -259,7 +271,7 @@ export function ProductDetailDialog({
                 packaging_photos: itemPackPhotos,
                 sales_step_data: (item as any)?.sales_step_data || {},
                 delivery_payment_method: (item as any)?.delivery_payment_method || order.delivery_payment_method || 'cash',
-                debt_collect_amount: order.remaining_debt ?? (order.total_amount - (order.paid_amount || 0)),
+                debt_collect_amount: 0,
                 debt_payment_method: 'cash',
                 debt_payment_photos: parsePhotos((order as any).debt_payment_photos),
             } as any);
@@ -545,10 +557,16 @@ export function ProductDetailDialog({
             // Also update the general order data (debt, receiver, etc)
             // But exclude photos from order-level update to keep them strictly at item-level
             if (onUpdateOrder) {
-                const orderData = Object.fromEntries(
-                    Object.entries(formData).filter(([key]) => key !== 'completion_photos' && key !== 'packaging_photos')
+                const orderData = pickOrderLevelAfterSalePatch(
+                    Object.fromEntries(
+                        Object.entries(formData).filter(
+                            ([key]) => key !== 'completion_photos' && key !== 'packaging_photos'
+                        )
+                    )
                 );
-                await onUpdateOrder(orderData);
+                if (Object.keys(orderData).length > 0) {
+                    await onUpdateOrder(orderData as Partial<Order>);
+                }
             }
 
             toast.success('Đã cập nhật thông tin thành công');
@@ -940,35 +958,64 @@ export function ProductDetailDialog({
 
     const uniqueItems = getAllUniqueItems();
 
-    const getItemAfterSaleStage = (item: any) => optimisticAfterSaleStages[item.id] ?? item.after_sale_stage;
+    const getItemAfterSaleStage = (item: any) =>
+        optimisticAfterSaleStages[item.id] ?? resolveItemAfterSaleStage(item);
     const isItemReadyToReturn = (item: any) => ['after2', 'after3', 'after4'].includes(getItemAfterSaleStage(item));
 
-    const invoiceProductDetails = (() => {
+    const handoffEligibleProducts = useMemo(
+        () =>
+            uniqueItems.filter(
+                (item) =>
+                    (item as any).is_customer_item &&
+                    item.item_type !== 'service' &&
+                    ['after1_debt', 'after2', 'after3', 'after4'].includes(getItemAfterSaleStage(item))
+            ),
+        [uniqueItems, optimisticAfterSaleStages]
+    );
+
+    const invoiceProductDetails = useMemo(() => {
         if (!order) return [];
+
+        const buildDetail = (item: any, services: any[], name: string, code?: string) => {
+            const serviceLines = services.map((service: any) => {
+                const quantity = Number(service.quantity || 1);
+                const amount = Number(service.total_price ?? service.unit_price ?? service.service?.price ?? service.package?.price ?? 0) * quantity;
+                const deposit = Math.max(0, Number(service.deposit_amount) || 0);
+                return {
+                    id: service.id,
+                    name: service.item_name || service.service?.name || service.package?.name || 'Dịch vụ',
+                    amount,
+                    deposit,
+                    collectDue: Math.max(0, amount - deposit),
+                };
+            });
+            const serviceTotal = serviceLines.reduce((sum, s) => sum + s.amount, 0);
+            const depositTotal = serviceLines.reduce((sum, s) => sum + s.deposit, 0);
+            const surchargeTotal = Number(item.surcharge_amount || 0);
+            const total = serviceTotal + surchargeTotal;
+
+            return {
+                id: item.id,
+                name,
+                code,
+                afterSaleStage: getItemAfterSaleStage(item),
+                services: serviceLines,
+                surchargeTotal,
+                depositTotal,
+                total,
+                collectDue: Math.max(0, total - depositTotal),
+            };
+        };
 
         if (Array.isArray(order.customer_items) && order.customer_items.length > 0) {
             return order.customer_items.map((item: any) => {
                 const services = Array.isArray(item.services) ? item.services : [];
-                const serviceTotal = services.reduce((sum: number, service: any) => {
-                    const quantity = Number(service.quantity || 1);
-                    const price = Number(service.total_price ?? service.unit_price ?? service.service?.price ?? service.package?.price ?? 0);
-                    return sum + price * quantity;
-                }, 0);
-                const surchargeTotal = Number(item.surcharge_amount || 0);
-
-                return {
-                    id: item.id,
-                    name: item.name || item.item_name || 'Sản phẩm',
-                    code: item.product_code || item.item_code,
-                    afterSaleStage: getItemAfterSaleStage(item),
-                    services: services.map((service: any) => ({
-                        id: service.id,
-                        name: service.item_name || service.service?.name || service.package?.name || 'Dịch vụ',
-                        amount: Number(service.total_price ?? service.unit_price ?? service.service?.price ?? service.package?.price ?? 0) * Number(service.quantity || 1),
-                    })),
-                    surchargeTotal,
-                    total: serviceTotal + surchargeTotal,
-                };
+                return buildDetail(
+                    item,
+                    services,
+                    item.name || item.item_name || 'Sản phẩm',
+                    item.product_code || item.item_code
+                );
             });
         }
 
@@ -978,24 +1025,24 @@ export function ProductDetailDialog({
                 service.item_type === 'service' &&
                 (service.product?.id === item.id || service.item_name?.includes(`(${item.item_name})`))
             );
-            const serviceTotal = services.reduce((sum: number, service: any) => sum + Number(service.total_price ?? service.unit_price ?? 0), 0);
-            const surchargeTotal = Number(item.surcharge_amount || 0);
-
-            return {
-                id: item.id,
-                name: item.item_name || 'Sản phẩm',
-                code: item.item_code,
-                afterSaleStage: getItemAfterSaleStage(item),
-                services: services.map((service: any) => ({
-                    id: service.id,
-                    name: service.item_name?.replace(` (${item.item_name})`, '') || 'Dịch vụ',
-                    amount: Number(service.total_price ?? service.unit_price ?? 0),
-                })),
-                surchargeTotal,
-                total: serviceTotal + surchargeTotal,
-            };
+            return buildDetail(item, services, item.item_name || 'Sản phẩm', item.item_code);
         });
-    })();
+    }, [order, uniqueItems, optimisticAfterSaleStages]);
+
+    const handoffCollectAmount = useMemo(() => {
+        return invoiceProductDetails
+            .filter((detail) => ['after2', 'after3', 'after4'].includes(detail.afterSaleStage))
+            .reduce((sum, detail) => sum + detail.collectDue, 0);
+    }, [invoiceProductDetails]);
+
+    const handoffSelectedCount = useMemo(() => {
+        return invoiceProductDetails.filter((detail) => ['after2', 'after3', 'after4'].includes(detail.afterSaleStage)).length;
+    }, [invoiceProductDetails]);
+
+    useEffect(() => {
+        if (!open || (!roomId.startsWith('after1_debt') && roomId !== 'after4')) return;
+        setFormData((prev) => ({ ...prev, debt_collect_amount: handoffCollectAmount } as any));
+    }, [open, roomId, handoffCollectAmount]);
 
     const getRemainingItemsCount = () => {
         return uniqueItems.filter(item => 
@@ -1368,37 +1415,16 @@ export function ProductDetailDialog({
                                                         </div>
                                                     </div>
                                                     <Badge variant="outline" className="text-[9px] bg-white text-purple-600 border-purple-200">
-                                                        {(formData.completion_photos?.length || 0)} ảnh
+                                                        {(formData.completion_photos?.length || 0)} ảnh/video
                                                     </Badge>
                                                 </div>
 
-                                                <div className="flex flex-wrap gap-2 pt-1">
-                                                    {(Array.isArray(formData.completion_photos) ? formData.completion_photos : []).map((photo, idx) => (
-                                                        <ImageUpload
-                                                            key={`comp-${idx}`}
-                                                            value={photo}
-                                                            onChange={(url) => {
-                                                                setFormData(prev => {
-                                                                    const newPhotos = [...(prev.completion_photos || [])];
-                                                                    if (url) { newPhotos[idx] = url; } else { newPhotos.splice(idx, 1); }
-                                                                    return { ...prev, completion_photos: newPhotos };
-                                                                });
-                                                            }}
-                                                            className="w-16 h-16 rounded-xl border-2"
-                                                            bucket="orders" folder="completion" hideInfo
-                                                        />
-                                                    ))}
-                                                    <ImageUpload
-                                                        key="comp-new" value={null}
-                                                        onChange={(url) => {
-                                                            if (url) {
-                                                                setFormData(prev => ({ ...prev, completion_photos: [...(prev.completion_photos || []), url] }));
-                                                            }
-                                                        }}
-                                                        className="w-16 h-16 rounded-xl border-2 border-dashed"
-                                                        bucket="orders" folder="completion" placeholderIcon={<Camera className="h-6 w-6 text-purple-300" />} hideInfo
-                                                    />
-                                                </div>
+                                                <MultiMediaUpload
+                                                    value={Array.isArray(formData.completion_photos) ? formData.completion_photos : []}
+                                                    onChange={(urls) => setFormData(prev => ({ ...prev, completion_photos: urls }))}
+                                                    bucket="orders"
+                                                    folder="completion"
+                                                />
                                             </div>
 
                                             <div className="space-y-2">
@@ -1467,12 +1493,26 @@ export function ProductDetailDialog({
 
                                                                     {item.services.length > 0 ? (
                                                                         <div className="space-y-1 border-t border-purple-100 pt-1.5">
-                                                                            {item.services.map((service: { id: string; name: string; amount: number }) => (
-                                                                                <div key={service.id} className="flex justify-between gap-2 text-[11px]">
-                                                                                    <span className="text-gray-500 truncate">{service.name}</span>
-                                                                                    <span className="font-bold text-gray-800 tabular-nums whitespace-nowrap">{formatCurrency(service.amount)}</span>
+                                                                            {item.services.map((service: { id: string; name: string; amount: number; deposit?: number; collectDue?: number }) => (
+                                                                                <div key={service.id} className="space-y-0.5 text-[11px]">
+                                                                                    <div className="flex justify-between gap-2">
+                                                                                        <span className="text-gray-500 truncate">{service.name}</span>
+                                                                                        <span className="font-bold text-gray-800 tabular-nums whitespace-nowrap">{formatCurrency(service.amount)}</span>
+                                                                                    </div>
+                                                                                    {(service.deposit ?? 0) > 0 && (
+                                                                                        <div className="flex justify-between gap-2 pl-2 text-[10px] text-amber-700">
+                                                                                            <span>Đã cọc</span>
+                                                                                            <span className="tabular-nums">−{formatCurrency(service.deposit!)}</span>
+                                                                                        </div>
+                                                                                    )}
                                                                                 </div>
                                                                             ))}
+                                                                            {item.depositTotal > 0 && (
+                                                                                <div className="flex justify-between gap-2 border-t border-purple-100 pt-1 text-[10px] font-bold text-purple-800">
+                                                                                    <span>Cần thu SP này</span>
+                                                                                    <span className="tabular-nums">{formatCurrency(item.collectDue)}</span>
+                                                                                </div>
+                                                                            )}
                                                                             {item.surchargeTotal > 0 && (
                                                                                 <div className="flex justify-between gap-2 text-[11px]">
                                                                                     <span className="text-gray-500 truncate">Phụ thu</span>
@@ -1501,16 +1541,29 @@ export function ProductDetailDialog({
 
                                                     <div className="space-y-2 mb-2 pt-2 border-t border-purple-50">
                                                         <Label className="text-[10px] font-black text-blue-600 uppercase">Danh sách bàn giao đợt này:</Label>
+                                                        <p className="text-[10px] text-muted-foreground leading-snug">
+                                                            Chỉ hiện SP đã qua Kiểm nợ. SP khác trên đơn vẫn ở Ảnh hoàn thiện cho đến khi chuyển bước riêng.
+                                                        </p>
                                                         <div className="space-y-1.5 max-h-[150px] overflow-y-auto pr-1 custom-scrollbar">
-                                                            {uniqueItems.filter(item => (item as any).is_customer_item && item.item_type !== 'service').map(item => (
+                                                            {handoffEligibleProducts.length === 0 ? (
+                                                                <p className="text-[10px] text-gray-400 italic py-2 text-center">
+                                                                    Chưa có SP nào ở bước Kiểm nợ để bàn giao đợt này.
+                                                                </p>
+                                                            ) : null}
+                                                            {handoffEligibleProducts.map(item => (
                                                                 <div key={item.id} className="flex items-center justify-between p-2 rounded-lg border bg-blue-50/20 hover:bg-white transition-colors group">
                                                                     <div className="flex items-center gap-2 min-w-0">
                                                                         <Checkbox 
                                                                             id={`item-sent-${item.id}`}
                                                                             checked={isItemReadyToReturn(item)}
                                                                             onCheckedChange={async (checked) => {
+                                                                                const currentStage = getItemAfterSaleStage(item);
+                                                                                if (checked && currentStage === 'after1') {
+                                                                                    toast.error('Sản phẩm chưa qua Kiểm nợ — hoàn thành ảnh hoàn thiện và chuyển sang Kiểm nợ trước');
+                                                                                    return;
+                                                                                }
                                                                                 const nextStage = checked ? 'after2' : 'after1_debt';
-                                                                                const previousStage = getItemAfterSaleStage(item) || 'after1_debt';
+                                                                                const previousStage = currentStage;
 
                                                                                 setOptimisticAfterSaleStages(prev => ({ ...prev, [item.id]: nextStage }));
 
@@ -1554,6 +1607,19 @@ export function ProductDetailDialog({
                                                     </div>
 
                                                     <div className="pt-3 mt-1 border-t-2 border-dashed border-purple-100 space-y-3">
+                                                        <div className="rounded-xl border border-blue-200 bg-blue-50/50 px-3 py-2 text-[11px]">
+                                                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                                                <span className="font-bold text-blue-800">
+                                                                    SP bàn giao đợt này: {handoffSelectedCount}
+                                                                </span>
+                                                                <span className="font-black text-blue-900 tabular-nums">
+                                                                    Thu: {formatCurrency(handoffCollectAmount)}
+                                                                </span>
+                                                            </div>
+                                                            <p className="mt-1 text-[10px] text-blue-600/90 leading-snug">
+                                                                Tự động = tổng (giá SP − cọc từng dịch vụ) của các SP đã tick bàn giao.
+                                                            </p>
+                                                        </div>
                                                         <div className="grid grid-cols-2 gap-3">
                                                             <div className="space-y-1.5">
                                                                 <Label className="text-[10px] font-black text-purple-900 uppercase">SỐ TIỀN THU (ĐIỀU CHỈNH):</Label>

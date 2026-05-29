@@ -241,6 +241,7 @@ export async function applyFullOrderUpdate(orderId: string, payload: FullOrderUp
                             item_name: svc.name,
                             item_type: svc.type,
                             unit_price: Number(svc.price) || 0,
+                            deposit_amount: Math.max(0, Number(svc.deposit_amount) || 0),
                             technician_id: techId,
                             status: hasTechs ? 'assigned' : 'pending',
                             assigned_at: hasTechs ? new Date().toISOString() : null,

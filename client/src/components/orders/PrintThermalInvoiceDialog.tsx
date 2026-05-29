@@ -9,7 +9,7 @@ import { buildVietQrPayload } from '@/lib/vietqr';
 import {
     buildThermalInvoicePreviewHtml,
     formatThermalMoney,
-    getOrderPayAmount,
+    getThermalQrPreviewMeta,
     printThermalInvoice,
 } from '@/lib/thermalInvoicePrint';
 
@@ -21,7 +21,8 @@ interface PrintThermalInvoiceDialogProps {
 
 export function PrintThermalInvoiceDialog({ order, open, onClose }: PrintThermalInvoiceDialogProps) {
     const config = getPaymentConfig();
-    const payAmount = order ? getOrderPayAmount(order) : 0;
+    const qrMeta = order ? getThermalQrPreviewMeta(order, config) : null;
+    const payAmount = qrMeta?.payAmount ?? 0;
     const configured = isPaymentConfigured();
 
     const qrPayload = useMemo(() => {
@@ -37,7 +38,7 @@ export function PrintThermalInvoiceDialog({ order, open, onClose }: PrintThermal
 
     const previewHtml = useMemo(() => {
         if (!order) return '';
-        return buildThermalInvoicePreviewHtml(order, config);
+        return buildThermalInvoicePreviewHtml(order, config, { includeQrSection: false });
     }, [order, config]);
 
     if (!order) return null;
@@ -74,15 +75,21 @@ export function PrintThermalInvoiceDialog({ order, open, onClose }: PrintThermal
                     <div
                         className="overflow-y-auto max-h-[55vh] bg-white"
                         style={{ width: '72mm', maxWidth: '100%' }}
-                        dangerouslySetInnerHTML={{ __html: previewHtml }}
-                    />
-                    {qrPayload && (
-                        <div className="border-t p-3 bg-muted/30 text-center">
-                            <p className="text-xs font-bold mb-1">Xem trước QR thanh toán</p>
-                            <QRCodeSVG value={qrPayload} size={120} level="M" className="mx-auto" />
-                            <p className="text-sm font-bold mt-1">{formatThermalMoney(payAmount)}</p>
-                        </div>
-                    )}
+                    >
+                        <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
+                        {qrPayload && qrMeta?.show && (
+                            <div className="qr-block text-center mt-2 pt-2 border-t border-dashed border-black px-2 pb-3">
+                                <p className="font-bold text-[10px]">QUÉT MÃ THANH TOÁN</p>
+                                <p className="text-[8.5px] text-gray-700 my-0.5">
+                                    Số tiền còn phải trả (không phải tổng HĐ)
+                                </p>
+                                <p className="text-sm font-bold my-1">{formatThermalMoney(payAmount)} đ</p>
+                                <QRCodeSVG value={qrPayload} size={152} level="M" className="mx-auto" />
+                                <p className="text-[9px] mt-1">{qrMeta.bankLine}</p>
+                                <p className="text-[9px]">ND: {qrMeta.orderCode}</p>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 <div className="flex gap-2 pt-2">

@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { ordersApi, orderItemsApi, orderProductsApi } from '@/lib/api';
 import { useOrders } from '@/hooks/useOrders';
 import type { Order, OrderItem } from '@/hooks/useOrders';
+import { pickOrderLevelAfterSalePatch } from '../constants';
 
 export function useOrderActions(
     id: string | undefined,
@@ -24,7 +25,9 @@ export function useOrderActions(
     const updateOrderAfterSale = useCallback(async (patch: Partial<Order>) => {
         if (!id) return;
         try {
-            await ordersApi.patch(id, patch);
+            const safePatch = pickOrderLevelAfterSalePatch(patch as Record<string, unknown>);
+            if (Object.keys(safePatch).length === 0) return;
+            await ordersApi.patch(id, safePatch);
             await reloadOrder();
         } catch (error) {
             toast.error('Lỗi khi cập nhật thông tin After-sale');

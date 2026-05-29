@@ -698,6 +698,19 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
             throw new ApiError('Không thể cập nhật thông tin after-sale', 500);
         }
 
+        // Đồng bộ bước xuống dịch vụ của đúng sản phẩm này (không đụng SP khác trên đơn)
+        if (stage !== undefined && care_warranty_flow === undefined && product?.id) {
+            await supabaseAdmin
+                .from('order_product_services')
+                .update({
+                    current_phase: 'after_sale',
+                    phase_stage: stage,
+                    after_sale_stage: stage,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('order_product_id', id);
+        }
+
         // 🔔 WH1: Fire webhook — Lưu thông tin nhận đồ (khi sales_step_data được cập nhật)
         if (sales_step_data !== undefined) {
             // Lấy thông tin order để bắn webhook
