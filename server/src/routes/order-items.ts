@@ -5,6 +5,12 @@ import { ApiError } from '../middleware/errorHandler.js';
 import { checkAndCompleteOrder } from '../utils/orderHelper.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
 import { logAccessoryStatusChange, logPartnerStatusChange } from '../utils/workflowRequestLog.js';
+import {
+    buildServiceEventBase,
+    getManagerRecipients,
+    getServiceNotificationContext,
+    notifyCrmMasterUser,
+} from '../utils/n8nCrmEvents.js';
 
 function derivePhaseFromStatus(status: string): { current_phase: string; phase_stage: string } {
     if (['step1', 'step2', 'step3', 'step4'].includes(status)) {
@@ -1609,6 +1615,16 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
                 metadata: metadata || {},
                 requested_by: req.user?.id || null,
             });
+
+            for (const manager of await getManagerRecipients()) {
+                notifyCrmMasterUser('accessory.request.created', {
+                    target_user_id: manager.id,
+                    target_role: manager.role || 'manager',
+                    channel: 'telegram',
+                    item: { id, service_name: itemName, note: notes || null },
+                    requester_id: req.user?.id || null,
+                });
+            }
         }
 
         res.json({
@@ -1736,6 +1752,17 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
                 metadata: metadata || {},
                 requested_by: req.user?.id || null,
             });
+
+            for (const manager of await getManagerRecipients()) {
+                notifyCrmMasterUser('partner.request.created', {
+                    target_user_id: manager.id,
+                    target_role: manager.role || 'manager',
+                    channel: 'telegram',
+                    item: { id, service_name: metadata?.item_name || null, note: notes || null },
+                    partner: metadata?.partner || metadata?.partner_name || null,
+                    requester_id: req.user?.id || null,
+                });
+            }
         }
 
         res.json({
@@ -1802,6 +1829,22 @@ router.patch('/:id/fail', authenticate, async (req: AuthenticatedRequest, res, n
                 .single();
             if (error) throw new ApiError('Lỗi cập nhật: ' + error.message, 500);
             item = updated;
+
+            const context = await getServiceNotificationContext(id);
+            if (context) {
+                const managers = await getManagerRecipients();
+                const basePayload = buildServiceEventBase(context);
+                for (const manager of managers) {
+                    notifyCrmMasterUser('workflow.item.failed', {
+                        ...basePayload,
+                        target_user_id: manager.id,
+                        target_role: manager.role || 'manager',
+                        channel: 'telegram',
+                        item: { ...basePayload.item, reason },
+                        reason,
+                    });
+                }
+            }
         } else {
             throw new ApiError('Không tìm thấy hạng mục', 404);
         }
@@ -2053,6 +2096,37 @@ router.patch('/:id/change-room', authenticate, async (req: AuthenticatedRequest,
             });
         }
 
+        if (isV2 && technician_id) {
+            const context = await getServiceNotificationContext(id);
+            const { data: technician } = await supabaseAdmin
+                .from('users')
+                .select('id, name, role, telegram_chat_id')
+                .eq('id', technician_id)
+                .maybeSingle();
+
+            if (context && technician?.id) {
+                const basePayload = buildServiceEventBase(context);
+                notifyCrmMasterUser('workflow.item.room_changed', {
+                    ...basePayload,
+                    target_user_id: technician.id,
+                    target_role: 'technician',
+                    channel: 'telegram',
+                    item: {
+                        ...basePayload.item,
+                        room_name: toRoom,
+                        reason: reason || null,
+                        note: finalNotes || null,
+                    },
+                    staff: {
+                        id: technician.id,
+                        name: technician.name,
+                        role: technician.role || 'technician',
+                        telegram_chat_id: technician.telegram_chat_id || null,
+                    },
+                });
+            }
+        }
+
         res.json({
             status: 'success',
             data: finalStep,
@@ -2261,6 +2335,19 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
             reason,
             new_due_at,
         });
+
+        for (const manager of await getManagerRecipients()) {
+            notifyCrmMasterUser('extension.request.created', {
+                target_user_id: manager.id,
+                target_role: manager.role || 'manager',
+                channel: 'telegram',
+                order: { id: orderId, order_code: orderForWh2?.order_code || null },
+                item: { id, service_name: itemName, reason, deadline_at: new_due_at },
+                reason,
+                new_deadline: new_due_at,
+                requester_id: userId || null,
+            });
+        }
 
         try {
             await supabaseAdmin.from('order_workflow_step_log').insert({

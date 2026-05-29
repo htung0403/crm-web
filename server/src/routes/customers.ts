@@ -114,7 +114,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 // Create customer
 router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { name, phone, email, type, company, tax_code, address, source, notes, assigned_to, dob } = req.body;
+        const { name, phone, email, type, company, tax_code, address, source, notes, assigned_to, dob, zalo_user_id, customer_zalo_user_id } = req.body;
 
         if (!name || !phone) {
             throw new ApiError('Tên và số điện thoại là bắt buộc', 400);
@@ -136,6 +136,8 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                 assigned_to: assigned_to || req.user!.id,
                 created_by: req.user!.id,
                 dob: dob || null,
+                zalo_user_id: zalo_user_id || customer_zalo_user_id || null,
+                customer_zalo_user_id: customer_zalo_user_id || zalo_user_id || null,
             })
             .select()
             .single();
@@ -207,3 +209,4 @@ router.delete('/:id', authenticate, requireSale, async (req: AuthenticatedReques
 });
 
 export { router as customersRouter };
+

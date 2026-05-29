@@ -47,11 +47,7 @@ export async function fireWebhook(event: string, data: Record<string, any>): Pro
 }
 
 export async function fireCrmMasterWebhook(event: string, data: Record<string, any>): Promise<{ ok: boolean, status: number } | void> {
-    const payload = {
-        event,
-        timestamp: new Date().toISOString(),
-        data,
-    };
+    const payload = data.event === event ? data : { event, ...data };
 
     try {
         const response = await fetch(CRM_MASTER_WEBHOOK_URL, {
@@ -79,3 +75,4 @@ export function notifyCrmMaster(event: string, data: Record<string, any>): void 
         console.error(`[CrmMasterWebhook] ❌ ERROR: Unhandled event "${event}":`, err);
     });
 }
+

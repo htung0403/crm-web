@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
+import { notifyCrmMasterUser } from '../utils/n8nCrmEvents.js';
 import {
     logAccessoryStatusChange,
     logExtensionStatusChange,
@@ -109,6 +110,18 @@ router.patch('/accessories/:id', authenticate, async (req: AuthenticatedRequest,
                 new_status: status,
                 notes: notes || null,
             });
+
+            if (status === 'delivered_to_tech') {
+                const technicianId = (metadata || current.metadata || {})?.technician_id;
+                if (technicianId) {
+                    notifyCrmMasterUser('accessory.approved', {
+                        target_user_id: technicianId,
+                        target_role: 'technician',
+                        channel: 'telegram',
+                        item: { id, service_name: (metadata || current.metadata || {})?.item_name || 'Phụ kiện', note: notes || null },
+                    });
+                }
+            }
         }
 
         res.json({ status: 'success', data });
@@ -295,7 +308,7 @@ router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, 
 
         const { data: current, error: fetchError } = await supabaseAdmin
             .from('order_extension_requests')
-            .select('id, status, reason, order_item_id, order_product_service_id')
+            .select('id, status, reason, order_id, requested_by, order_item_id, order_product_service_id')
             .eq('id', id)
             .single();
 
@@ -416,6 +429,18 @@ router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, 
                 new_status: status,
                 customer_result: customer_result || null,
                 kpi_impact: typeof kpi_impact === 'boolean' ? kpi_impact : null,
+            });
+        }
+
+        if (status === 'manager_approved' && data?.requested_by) {
+            notifyCrmMasterUser('extension.approved', {
+                target_user_id: data.requested_by,
+                target_role: 'sale',
+                channel: 'telegram',
+                order: { id: data.order_id },
+                new_deadline: data.new_due_at || new_due_at || null,
+                approver_id: userId || null,
+                extension_id: id,
             });
         }
 

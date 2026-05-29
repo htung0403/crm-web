@@ -4,6 +4,7 @@ import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
 import { applyFullOrderUpdate } from '../utils/orderFullUpdate.js';
+import { notifyCrmMasterUser } from '../utils/n8nCrmEvents.js';
 
 const router = Router();
 
@@ -87,6 +88,15 @@ router.post('/:id/approve', requireAdminOrManager, async (req: AuthenticatedRequ
                     updated_at: new Date().toISOString(),
                 })
                 .eq('id', ticketId);
+
+            notifyCrmMasterUser('order_edit.approved', {
+                target_user_id: ticket.sales_id,
+                target_role: 'sale',
+                channel: 'telegram',
+                order: { id, order_code: null },
+                approver_id: userId,
+                ticket_id: ticketId,
+            });
 
             res.json({
                 status: 'success',
@@ -388,6 +398,15 @@ router.post('/:id/approve', requireAdminOrManager, async (req: AuthenticatedRequ
             amount: totalIncrement,
         });
 
+        notifyCrmMasterUser('upsell.approved', {
+            target_user_id: ticket.sales_id,
+            target_role: 'sale',
+            channel: 'telegram',
+            order: { id, order_code: order.order_code },
+            approver_id: userId,
+            ticket_id: ticketId,
+        });
+
         res.json({
             status: 'success',
             message: `Đã duyệt và cập nhật thành công ${totalIncrement.toLocaleString()}đ vào đơn hàng.`
@@ -402,6 +421,13 @@ router.post('/:id/approve', requireAdminOrManager, async (req: AuthenticatedRequ
 router.post('/:id/reject', requireAdminOrManager, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
         const { id } = req.params;
+        const { reason } = req.body || {};
+        const { data: ticket } = await supabaseAdmin
+            .from('upsell_tickets')
+            .select('id, order_id, sales_id, data')
+            .eq('id', id)
+            .maybeSingle();
+
         const { error } = await supabaseAdmin
             .from('upsell_tickets')
             .update({
@@ -411,6 +437,22 @@ router.post('/:id/reject', requireAdminOrManager, async (req: AuthenticatedReque
             .eq('id', id);
 
         if (error) throw new ApiError('Không thể từ chối ticket', 500);
+
+        if (ticket?.sales_id) {
+            const ticketType = String(ticket?.data?.request_type || ticket?.data?.ticket_type || ticket?.data?.flow_type || '').toLowerCase();
+            const eventName = ['order_edit', 'edit_order', 'order_update'].includes(ticketType)
+                ? 'order_edit.rejected'
+                : 'upsell.rejected';
+
+            notifyCrmMasterUser(eventName, {
+                target_user_id: ticket.sales_id,
+                target_role: 'sale',
+                channel: 'telegram',
+                order: { id: ticket.order_id },
+                reason: reason || null,
+                ticket_id: ticket.id,
+            });
+        }
 
         res.json({ status: 'success', message: 'Đã từ chối yêu cầu upsell' });
     } catch (e) {

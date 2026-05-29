@@ -3,6 +3,12 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { checkAndCompleteOrder } from '../utils/orderHelper.js';
+import {
+    buildServiceEventBase,
+    getManagerRecipients,
+    getServiceNotificationContext,
+    notifyCrmMasterUser,
+} from '../utils/n8nCrmEvents.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
 
 const router = Router();
@@ -163,6 +169,20 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
             throw new ApiError(`Không thể cập nhật trạng thái: ${error.message}`, 500);
         }
 
+        if (status === 'step5') {
+            const managers = await getManagerRecipients();
+            for (const manager of managers) {
+                notifyCrmMasterUser('workflow.item.waiting_assignment', {
+                    target_user_id: manager.id,
+                    target_role: manager.role || 'manager',
+                    channel: 'telegram',
+                    order: { id: product.order_id },
+                    item: { id: product.id, service_name: product.name, deadline_at: product.due_at || null },
+                    product_image_url: Array.isArray(product.images) ? product.images[0] || null : null,
+                });
+            }
+        }
+
         res.json({
             status: 'success',
             data: product,
@@ -246,6 +266,11 @@ router.patch('/services/:serviceId/assign', authenticate, async (req: Authentica
         }
 
         const primaryTechId = techAssignments[0].technician_id;
+        const { data: beforeAssignService } = await supabaseAdmin
+            .from('order_product_services')
+            .select('technician_id')
+            .eq('id', serviceId)
+            .maybeSingle();
 
         // Update main service record
         const { data: service, error } = await supabaseAdmin
@@ -280,6 +305,32 @@ router.patch('/services/:serviceId/assign', authenticate, async (req: Authentica
         const { error: junctionError } = await supabaseAdmin.from('order_product_service_technicians').insert(junctionRows);
         if (junctionError) {
             console.error('Error inserting order_product_service_technicians:', junctionError);
+        }
+
+        const context = await getServiceNotificationContext(serviceId);
+        if (context) {
+            const basePayload = buildServiceEventBase(context);
+            for (const assignment of techAssignments) {
+                const { data: technician } = await supabaseAdmin
+                    .from('users')
+                    .select('id, name, role, telegram_chat_id')
+                    .eq('id', assignment.technician_id)
+                    .maybeSingle();
+
+                if (!technician?.id) continue;
+                notifyCrmMasterUser(beforeAssignService?.technician_id && beforeAssignService.technician_id !== technician.id ? 'workflow.item.technician_changed' : 'workflow.item.assigned', {
+                    ...basePayload,
+                    target_user_id: technician.id,
+                    target_role: 'technician',
+                    channel: 'telegram',
+                    staff: {
+                        id: technician.id,
+                        name: technician.name,
+                        role: technician.role || 'technician',
+                        telegram_chat_id: technician.telegram_chat_id || null,
+                    },
+                });
+            }
         }
 
         res.json({
@@ -366,6 +417,26 @@ router.patch('/services/:serviceId/complete', authenticate, async (req: Authenti
 
         if (error) {
             throw new ApiError('Không thể hoàn thành dịch vụ', 500);
+        }
+
+        const context = await getServiceNotificationContext(serviceId);
+        if (context) {
+            const basePayload = buildServiceEventBase(context);
+            const managers = await getManagerRecipients();
+            for (const manager of managers) {
+                notifyCrmMasterUser('workflow.item.completed_step', {
+                    ...basePayload,
+                    target_user_id: manager.id,
+                    target_role: manager.role || 'manager',
+                    channel: 'telegram',
+                    staff: context.technician ? {
+                        id: context.technician.id,
+                        name: context.technician.name,
+                        role: context.technician.role || 'technician',
+                        telegram_chat_id: context.technician.telegram_chat_id || null,
+                    } : null,
+                });
+            }
         }
 
         // Check if all services for this product are completed
@@ -716,3 +787,4 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
 });
 
 export default router;
+

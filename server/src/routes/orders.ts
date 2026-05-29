@@ -6,6 +6,7 @@ import { checkAndCompleteOrder } from '../utils/orderHelper.js';
 import { autoCreateInvoice, syncInvoiceWithOrder } from '../utils/billingHelper.js';
 import { notifyFinanceEvent } from '../utils/financeNotifications.js';
 import { notifyCrmMaster } from '../utils/webhookNotifier.js';
+import { buildCrmOrderUrl, getManagerRecipients, notifyCrmMasterUser } from '../utils/n8nCrmEvents.js';
 
 
 const router = Router();
@@ -868,7 +869,7 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                 notes,
                 created_by: req.user!.id,
             })
-            .select()
+            .select('*, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)')
             .single();
 
         if (orderError) {
@@ -1232,11 +1233,23 @@ router.post('/:id/upsell-ticket', authenticate, async (req: AuthenticatedRequest
                 total_amount: totalAmount,
                 notes: notes || ''
             })
-            .select()
+            .select('*, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)')
             .single();
 
         if (ticketError) {
             throw new ApiError('Lỗi khi tạo ticket upsell: ' + ticketError.message, 500);
+        }
+
+        const eventName = isOrderEditRequest ? 'order_edit.request.created' : 'upsell.request.created';
+        for (const manager of await getManagerRecipients()) {
+            notifyCrmMasterUser(eventName, {
+                target_user_id: manager.id,
+                target_role: manager.role || 'manager',
+                channel: 'telegram',
+                order: { id: orderId },
+                requester_id: req.user!.id,
+                ticket_id: ticket.id,
+            });
         }
 
         res.json({
@@ -1577,7 +1590,7 @@ router.put('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, 
                 updated_at: new Date().toISOString(),
             })
             .eq('id', id)
-            .select()
+            .select('*, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)')
             .single();
 
         if (orderError) {
@@ -1758,7 +1771,7 @@ router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequ
                 total_amount: totalAmount,
                 notes: notes || 'Yêu cầu sửa đơn'
             })
-            .select()
+            .select('*, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)')
             .single();
 
         if (ticketError) {
@@ -1893,11 +1906,56 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
             .from('orders')
             .update(updatePayload)
             .eq('id', id)
-            .select()
+            .select('*, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)')
             .single();
 
         if (error) {
             throw new ApiError('Lỗi khi cập nhật đơn hàng', 500);
+        }
+
+        if (debt_checked === true) {
+            const managers = await getManagerRecipients();
+            const recipients = [
+                ...managers,
+                ...(order.sales_id ? [{ id: order.sales_id, role: 'sale' }] : []),
+            ];
+
+            for (const recipient of recipients) {
+                notifyCrmMasterUser('aftersale.debt_check.started', {
+                    target_user_id: recipient.id,
+                    target_role: recipient.role || 'manager',
+                    channel: 'telegram',
+                    order: { id: order.id, order_code: order.order_code, return_due_at: order.due_at || null },
+                    links: { crm_url: buildCrmOrderUrl(order.order_code || order.id) },
+                });
+            }
+        }
+
+        const orderCustomer = Array.isArray((order as any).customer) ? (order as any).customer[0] : (order as any).customer;
+        const customerZaloUserId = orderCustomer?.zalo_user_id || orderCustomer?.customer_zalo_user_id || null;
+
+        if (delivery_code !== undefined && delivery_code && customerZaloUserId) {
+            notifyCrmMasterUser('shipping.tracking_code.updated', {
+                target_user_id: order.customer_id,
+                target_role: 'customer',
+                channel: 'zalo',
+                order: { id: order.id, order_code: order.order_code, return_due_at: order.due_at || null },
+                customer: { name: orderCustomer?.name || null, phone: orderCustomer?.phone || null, zalo_user_id: customerZaloUserId },
+                tracking_code: delivery_code,
+                delivery_carrier: delivery_carrier || order.delivery_carrier || null,
+                links: { crm_url: buildCrmOrderUrl(order.order_code || order.id) },
+            });
+        }
+
+        if ((feedback_requested === true || hd_sent === true) && customerZaloUserId) {
+            notifyCrmMasterUser('aftersale.care_feedback.started', {
+                target_user_id: order.customer_id,
+                target_role: 'customer',
+                channel: 'zalo',
+                order: { id: order.id, order_code: order.order_code, return_due_at: order.due_at || null },
+                customer: { name: orderCustomer?.name || null, phone: orderCustomer?.phone || null, zalo_user_id: customerZaloUserId },
+                links: { crm_url: buildCrmOrderUrl(order.order_code || order.id) },
+            });
         }
 
         if (care_warranty_flow !== undefined || care_warranty_stage !== undefined || after_sale_stage !== undefined) {
@@ -2012,7 +2070,7 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
                 ...confirmedAtPayload,
             })
             .eq('id', id)
-            .select()
+            .select('*, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)')
             .single();
 
         if (error) {
@@ -2096,7 +2154,7 @@ router.post('/:id/payments', authenticate, async (req: AuthenticatedRequest, res
                 transaction_status: 'approved',
                 created_by: req.user!.id,
             })
-            .select()
+            .select('*, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)')
             .single();
 
         if (paymentError) {
@@ -2274,7 +2332,7 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
                 new_due_at: new_due_at || null,
                 status: 'requested',
             })
-            .select()
+            .select('*, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)')
             .single();
 
         if (error) throw new ApiError('Lỗi tạo yêu cầu gia hạn: ' + error.message, 500);
@@ -2320,7 +2378,7 @@ router.patch('/:id/extension-request', authenticate, async (req: AuthenticatedRe
             .from('order_extension_requests')
             .update(updatePayload)
             .eq('id', latest.id)
-            .select()
+            .select('*, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)')
             .single();
 
         if (error) throw new ApiError('Lỗi cập nhật: ' + error.message, 500);
@@ -2414,3 +2472,5 @@ router.delete('/:id', authenticate, requireSale, async (req: AuthenticatedReques
 });
 
 export { router as ordersRouter };
+
+
