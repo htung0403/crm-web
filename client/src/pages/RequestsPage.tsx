@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, type ReactNode } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
     Package,
@@ -37,6 +37,11 @@ import { requestsApi, orderItemsApi, ordersApi, usersApi, transactionsApi } from
 import { uploadFile } from '@/lib/supabase';
 import { cn, formatDateTime, formatCurrency } from '@/lib/utils';
 import { ACCESSORY_LABELS, PARTNER_LABELS, EXTENSION_LABELS, REQUEST_SLA } from '@/components/orders/constants';
+import {
+    MobileKanbanColumnTabs,
+    MobileKanbanMoveBar,
+    type MobileKanbanColumn,
+} from '@/components/kanban/mobileKanban';
 
 const ACCESSORY_COLUMNS = Object.entries(ACCESSORY_LABELS)
     .filter(([id]) => id !== 'requested' && id !== 'rejected')
@@ -117,6 +122,144 @@ function groupByStatus<T extends { status: string }>(items: T[], columnIds: stri
         if (map[item.status]) map[item.status].push(item);
     });
     return map;
+}
+
+type RequestKanbanColumn = { id: string; label: string };
+
+function RequestKanbanBoard({
+    columns,
+    items,
+    updatingId,
+    onDragEnd,
+    renderCard,
+}: {
+    columns: RequestKanbanColumn[];
+    items: { id: string; status: string }[];
+    updatingId: string | null;
+    onDragEnd: (result: DropResult) => void;
+    renderCard: (row: any) => ReactNode;
+}) {
+    const [mobileCol, setMobileCol] = useState(columns[0]?.id ?? '');
+    const byStatus = useMemo(() => groupByStatus(items, columns.map((c) => c.id)), [items, columns]);
+    const mobileColumns: MobileKanbanColumn[] = columns.map((c) => ({ id: c.id, title: c.label }));
+    const isUpdating = !!updatingId;
+    const activeCol = columns.find((c) => c.id === mobileCol) ?? columns[0];
+
+    return (
+        <DragDropContext onDragEnd={onDragEnd}>
+            <div className="space-y-3 md:hidden">
+                <MobileKanbanColumnTabs
+                    columns={mobileColumns}
+                    activeId={mobileCol}
+                    onChange={setMobileCol}
+                    getCount={(id) => byStatus[id]?.length ?? 0}
+                />
+                {activeCol && (
+                    <Droppable droppableId={activeCol.id}>
+                        {(provided, snapshot) => (
+                            <div
+                                ref={provided.innerRef}
+                                {...provided.droppableProps}
+                                className={cn(
+                                    'min-h-[200px] space-y-2 rounded-xl border bg-muted/30 p-2 transition-colors',
+                                    snapshot.isDraggingOver && 'bg-primary/10 border-primary/30'
+                                )}
+                            >
+                                <div className="mb-2 flex flex-col gap-1">
+                                    <span className="font-bold text-sm text-slate-700">{activeCol.label}</span>
+                                    {COLUMN_SLA_LABELS[activeCol.id] && (
+                                        <span className="text-[10px] font-medium italic text-muted-foreground">
+                                            {COLUMN_SLA_LABELS[activeCol.id]}
+                                        </span>
+                                    )}
+                                </div>
+                                {(byStatus[activeCol.id] || []).map((row: any, index: number) => (
+                                    <Draggable
+                                        key={row.id}
+                                        draggableId={row.id}
+                                        index={index}
+                                        isDragDisabled
+                                    >
+                                        {(dragProvided) => (
+                                            <div
+                                                ref={dragProvided.innerRef}
+                                                {...dragProvided.draggableProps}
+                                            >
+                                                {renderCard(row)}
+                                                <MobileKanbanMoveBar
+                                                    columns={mobileColumns}
+                                                    currentColumnId={activeCol.id}
+                                                    draggableId={row.id}
+                                                    onMove={onDragEnd}
+                                                    disabled={isUpdating}
+                                                    sourceIndex={index}
+                                                    embedded
+                                                />
+                                            </div>
+                                        )}
+                                    </Draggable>
+                                ))}
+                                {provided.placeholder}
+                            </div>
+                        )}
+                    </Droppable>
+                )}
+            </div>
+
+            <div className="-mx-4 hidden min-h-[320px] gap-4 overflow-x-auto px-4 pb-2 md:flex sm:mx-0 sm:gap-4 sm:px-0">
+                {columns.map((col) => (
+                    <Droppable key={col.id} droppableId={col.id}>
+                        {(provided, snapshot) => (
+                            <div
+                                ref={provided.innerRef}
+                                {...provided.droppableProps}
+                                className={cn(
+                                    'w-[280px] shrink-0 rounded-xl border bg-muted/30 p-3 transition-colors',
+                                    snapshot.isDraggingOver && 'bg-primary/10 border-primary/30'
+                                )}
+                            >
+                                <div className="mb-3 flex flex-col gap-1">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-sm font-bold text-slate-700">{col.label}</span>
+                                        <Badge variant="secondary" className="h-4 px-1.5 text-[10px]">
+                                            {byStatus[col.id]?.length ?? 0}
+                                        </Badge>
+                                    </div>
+                                    {COLUMN_SLA_LABELS[col.id] && (
+                                        <span className="text-[10px] font-medium italic text-muted-foreground">
+                                            {COLUMN_SLA_LABELS[col.id]}
+                                        </span>
+                                    )}
+                                </div>
+                                <div className="min-h-[200px] space-y-2">
+                                    {(byStatus[col.id] || []).map((row: any, index: number) => (
+                                        <Draggable
+                                            key={row.id}
+                                            draggableId={row.id}
+                                            index={index}
+                                            isDragDisabled={isUpdating}
+                                        >
+                                            {(dragProvided, dragSnapshot) => (
+                                                <div
+                                                    ref={dragProvided.innerRef}
+                                                    {...dragProvided.draggableProps}
+                                                    {...dragProvided.dragHandleProps}
+                                                    className={dragSnapshot.isDragging ? 'opacity-90' : ''}
+                                                >
+                                                    {renderCard(row)}
+                                                </div>
+                                            )}
+                                        </Draggable>
+                                    ))}
+                                </div>
+                                {provided.placeholder}
+                            </div>
+                        )}
+                    </Droppable>
+                ))}
+            </div>
+        </DragDropContext>
+    );
 }
 
 function getFirstImage(value: any): string | null {
@@ -630,70 +773,40 @@ function AccessoryKanban({
     onOpenDialog: (row: any) => void;
     onNavigateOrder: (id: string) => void;
 }) {
-    const columns = ACCESSORY_COLUMNS;
-    const byStatus = useMemo(() => groupByStatus(items, columns.map((c) => c.id)), [items, columns]);
-    const isUpdating = !!updatingId;
     return (
-        <DragDropContext onDragEnd={onDragEnd}>
-            <div className="-mx-4 flex min-h-[320px] gap-4 overflow-x-auto px-4 pb-2 snap-x snap-mandatory sm:mx-0 sm:gap-4 sm:px-0">
-                {columns.map((col) => (
-                    <Droppable key={col.id} droppableId={col.id}>
-                        {(provided, snapshot) => (
-                            <div
-                                ref={provided.innerRef}
-                                {...provided.droppableProps}
-                                className={`shrink-0 w-[88vw] snap-center rounded-xl border bg-muted/30 p-2 transition-colors sm:w-[280px] sm:p-3 ${snapshot.isDraggingOver ? 'bg-primary/10 border-primary/30' : ''}`}
-                            >
-                                <div className="mb-3 flex flex-col gap-1">
-                                    <div className="flex items-center justify-between">
-                                        <span className="font-bold text-sm text-slate-700">{col.label}</span>
-                                        <Badge variant="secondary" className="text-[10px] h-4 px-1.5">{byStatus[col.id]?.length ?? 0}</Badge>
-                                    </div>
-                                    {COLUMN_SLA_LABELS[col.id] && (
-                                        <span className="text-[10px] text-muted-foreground font-medium italic">
-                                            {COLUMN_SLA_LABELS[col.id]}
-                                        </span>
-                                    )}
-                                </div>
-                                <div className="space-y-2 min-h-[200px]">
-                                    {(byStatus[col.id] || []).map((row: any, index: number) => {
-                                        const order = row.order_item?.order ?? row.order_product_service?.order_product?.order ?? row.order_product?.order;
-                                        return (
-                                            <Draggable key={row.id} draggableId={row.id} index={index} isDragDisabled={isUpdating}>
-                                                {(provided, snapshot) => (
-                                                    <div
-                                                        ref={provided.innerRef}
-                                                        {...provided.draggableProps}
-                                                        {...provided.dragHandleProps}
-                                                        className={snapshot.isDragging ? 'opacity-90' : ''}
-                                                    >
-                                                        <AccessoryKanbanCard
-                                                            row={row}
-                                                            onOpenDialog={onOpenDialog}
-                                                            onNavigateOrder={onNavigateOrder}
-                                                            getOrder={() => order || {}}
-                                                            getProductCode={(r) => r.order_item?.item_code ??
-                                                                r.order_product_service?.order_product?.product_code ??
-                                                                r.order_product?.product_code ??
-                                                                (r.metadata?.order_code ?? '—').toUpperCase().replace('HD', 'HĐ')}
-                                                            getItemName={(r) => r.order_item?.item_name ??
-                                                                r.order_product_service?.order_product?.name ??
-                                                                r.order_product?.name ?? '—'}
-                                                            getProductImage={getRequestProductImage}
-                                                        />
-                                                    </div>
-                                                )}
-                                            </Draggable>
-                                        );
-                                    })}
-                                </div>
-                                {provided.placeholder}
-                            </div>
-                        )}
-                    </Droppable>
-                ))}
-            </div>
-        </DragDropContext>
+        <RequestKanbanBoard
+            columns={ACCESSORY_COLUMNS}
+            items={items}
+            updatingId={updatingId}
+            onDragEnd={onDragEnd}
+            renderCard={(row) => {
+                const order =
+                    row.order_item?.order ??
+                    row.order_product_service?.order_product?.order ??
+                    row.order_product?.order;
+                return (
+                    <AccessoryKanbanCard
+                        row={row}
+                        onOpenDialog={onOpenDialog}
+                        onNavigateOrder={onNavigateOrder}
+                        getOrder={() => order || {}}
+                        getProductCode={(r) =>
+                            r.order_item?.item_code ??
+                            r.order_product_service?.order_product?.product_code ??
+                            r.order_product?.product_code ??
+                            (r.metadata?.order_code ?? '—').toUpperCase().replace('HD', 'HĐ')
+                        }
+                        getItemName={(r) =>
+                            r.order_item?.item_name ??
+                            r.order_product_service?.order_product?.name ??
+                            r.order_product?.name ??
+                            '—'
+                        }
+                        getProductImage={getRequestProductImage}
+                    />
+                );
+            }}
+        />
     );
 }
 
@@ -710,70 +823,40 @@ function PartnerKanban({
     onOpenDialog: (row: any) => void;
     onNavigateOrder: (id: string) => void;
 }) {
-    const columns = PARTNER_COLUMNS;
-    const byStatus = useMemo(() => groupByStatus(items, columns.map((c) => c.id)), [items, columns]);
-    const isUpdating = !!updatingId;
     return (
-        <DragDropContext onDragEnd={onDragEnd}>
-            <div className="-mx-4 flex min-h-[320px] gap-4 overflow-x-auto px-4 pb-2 snap-x snap-mandatory sm:mx-0 sm:gap-4 sm:px-0">
-                {columns.map((col) => (
-                    <Droppable key={col.id} droppableId={col.id}>
-                        {(provided, snapshot) => (
-                            <div
-                                ref={provided.innerRef}
-                                {...provided.droppableProps}
-                                className={`shrink-0 w-[88vw] snap-center rounded-xl border bg-muted/30 p-2 transition-colors sm:w-[280px] sm:p-3 ${snapshot.isDraggingOver ? 'bg-primary/10 border-primary/30' : ''}`}
-                            >
-                                <div className="mb-3 flex flex-col gap-1">
-                                    <div className="flex items-center justify-between">
-                                        <span className="font-bold text-sm text-slate-700">{col.label}</span>
-                                        <Badge variant="secondary" className="text-[10px] h-4 px-1.5">{byStatus[col.id]?.length ?? 0}</Badge>
-                                    </div>
-                                    {COLUMN_SLA_LABELS[col.id] && (
-                                        <span className="text-[10px] text-muted-foreground font-medium italic">
-                                            {COLUMN_SLA_LABELS[col.id]}
-                                        </span>
-                                    )}
-                                </div>
-                                <div className="space-y-2 min-h-[200px]">
-                                    {(byStatus[col.id] || []).map((row: any, index: number) => {
-                                        const order = row.order_item?.order ?? row.order_product_service?.order_product?.order ?? row.order_product?.order;
-                                        return (
-                                            <Draggable key={row.id} draggableId={row.id} index={index} isDragDisabled={isUpdating}>
-                                                {(provided, snapshot) => (
-                                                    <div
-                                                        ref={provided.innerRef}
-                                                        {...provided.draggableProps}
-                                                        {...provided.dragHandleProps}
-                                                        className={snapshot.isDragging ? 'opacity-90' : ''}
-                                                    >
-                                                        <PartnerKanbanCard
-                                                            row={row}
-                                                            onOpenDialog={onOpenDialog}
-                                                            onNavigateOrder={onNavigateOrder}
-                                                            getOrder={() => order || {}}
-                                                            getProductCode={(r) => r.order_item?.item_code ??
-                                                                r.order_product_service?.order_product?.product_code ??
-                                                                r.order_product?.product_code ??
-                                                                (r.metadata?.order_code ?? '—').toUpperCase().replace('HD', 'HĐ')}
-                                                            getItemName={(r) => r.order_item?.item_name ??
-                                                                r.order_product_service?.order_product?.name ??
-                                                                r.order_product?.name ?? '—'}
-                                                            getProductImage={getRequestProductImage}
-                                                        />
-                                                    </div>
-                                                )}
-                                            </Draggable>
-                                        );
-                                    })}
-                                </div>
-                                {provided.placeholder}
-                            </div>
-                        )}
-                    </Droppable>
-                ))}
-            </div>
-        </DragDropContext>
+        <RequestKanbanBoard
+            columns={PARTNER_COLUMNS}
+            items={items}
+            updatingId={updatingId}
+            onDragEnd={onDragEnd}
+            renderCard={(row) => {
+                const order =
+                    row.order_item?.order ??
+                    row.order_product_service?.order_product?.order ??
+                    row.order_product?.order;
+                return (
+                    <PartnerKanbanCard
+                        row={row}
+                        onOpenDialog={onOpenDialog}
+                        onNavigateOrder={onNavigateOrder}
+                        getOrder={() => order || {}}
+                        getProductCode={(r) =>
+                            r.order_item?.item_code ??
+                            r.order_product_service?.order_product?.product_code ??
+                            r.order_product?.product_code ??
+                            (r.metadata?.order_code ?? '—').toUpperCase().replace('HD', 'HĐ')
+                        }
+                        getItemName={(r) =>
+                            r.order_item?.item_name ??
+                            r.order_product_service?.order_product?.name ??
+                            r.order_product?.name ??
+                            '—'
+                        }
+                        getProductImage={getRequestProductImage}
+                    />
+                );
+            }}
+        />
     );
 }
 
@@ -790,63 +873,40 @@ function ExtensionKanban({
     onOpenDialog: (row: any) => void;
     onNavigateOrder: (id: string) => void;
 }) {
-    const columns = EXTENSION_COLUMNS;
-    const byStatus = useMemo(() => groupByStatus(items, columns.map((c) => c.id)), [items, columns]);
-    const isUpdating = !!updatingId;
     return (
-        <DragDropContext onDragEnd={onDragEnd}>
-            <div className="-mx-4 flex min-h-[320px] gap-4 overflow-x-auto px-4 pb-2 snap-x snap-mandatory sm:mx-0 sm:gap-4 sm:px-0">
-                {columns.map((col) => (
-                    <Droppable key={col.id} droppableId={col.id}>
-                        {(provided, snapshot) => (
-                            <div
-                                ref={provided.innerRef}
-                                {...provided.droppableProps}
-                                className={`shrink-0 w-[88vw] snap-center rounded-xl border bg-muted/30 p-2 transition-colors sm:w-[280px] sm:p-3 ${snapshot.isDraggingOver ? 'bg-primary/10 border-primary/30' : ''}`}
-                            >
-                                <div className="mb-2 flex items-center justify-between">
-                                    <span className="font-medium text-sm">{col.label}</span>
-                                    <Badge variant="secondary" className="text-xs">{byStatus[col.id]?.length ?? 0}</Badge>
-                                </div>
-                                <div className="space-y-2 min-h-[200px]">
-                                    {(byStatus[col.id] || []).map((row: any, index: number) => {
-                                        const order = row.order as any;
-                                        return (
-                                            <Draggable key={row.id} draggableId={row.id} index={index} isDragDisabled={isUpdating}>
-                                                {(provided, snapshot) => (
-                                                    <div
-                                                        ref={provided.innerRef}
-                                                        {...provided.draggableProps}
-                                                        {...provided.dragHandleProps}
-                                                        className={snapshot.isDragging ? 'opacity-90' : ''}
-                                                    >
-                                                        <ExtensionKanbanCard
-                                                            row={row}
-                                                            onOpenDialog={onOpenDialog}
-                                                            onNavigateOrder={onNavigateOrder}
-                                                            getOrder={() => ({ id: order?.id ?? row.order_id, order_code: order?.order_code || '—' })}
-                                                            getProductCode={(r) => r.order_item?.item_code ??
-                                                                r.order_product_service?.order_product?.product_code ??
-                                                                r.order_product?.product_code ??
-                                                                (order?.order_code ?? '—').toUpperCase().replace('HD', 'HĐ')}
-                                                            getItemName={(r) => r.order_item?.item_name ??
-                                                                r.order_product_service?.item_name ??
-                                                                r.order_product?.name ?? '—'}
-                                                            getProductImage={getRequestProductImage}
-                                                        />
-                                                    </div>
-                                                )}
-                                            </Draggable>
-                                        );
-                                    })}
-                                </div>
-                                {provided.placeholder}
-                            </div>
-                        )}
-                    </Droppable>
-                ))}
-            </div>
-        </DragDropContext>
+        <RequestKanbanBoard
+            columns={EXTENSION_COLUMNS}
+            items={items}
+            updatingId={updatingId}
+            onDragEnd={onDragEnd}
+            renderCard={(row) => {
+                const order = row.order as any;
+                return (
+                    <ExtensionKanbanCard
+                        row={row}
+                        onOpenDialog={onOpenDialog}
+                        onNavigateOrder={onNavigateOrder}
+                        getOrder={() => ({
+                            id: order?.id ?? row.order_id,
+                            order_code: order?.order_code || '—',
+                        })}
+                        getProductCode={(r) =>
+                            r.order_item?.item_code ??
+                            r.order_product_service?.order_product?.product_code ??
+                            r.order_product?.product_code ??
+                            (order?.order_code ?? '—').toUpperCase().replace('HD', 'HĐ')
+                        }
+                        getItemName={(r) =>
+                            r.order_item?.item_name ??
+                            r.order_product_service?.item_name ??
+                            r.order_product?.name ??
+                            '—'
+                        }
+                        getProductImage={getRequestProductImage}
+                    />
+                );
+            }}
+        />
     );
 }
 

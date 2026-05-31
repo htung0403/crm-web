@@ -5,6 +5,7 @@ import {
     DialogHeader,
     DialogTitle,
     DialogDescription,
+    DialogFooter,
 } from '@/components/ui/dialog';
 import {
     ShoppingBag, Tag, FileText, Package, Truck, Wrench, Camera,
@@ -274,6 +275,7 @@ export function ProductDetailDialog({
                 debt_collect_amount: 0,
                 debt_payment_method: 'cash',
                 debt_payment_photos: parsePhotos((order as any).debt_payment_photos),
+                accessories_returned_checked: !!((item as any)?.sales_step_data?.after2_accessories_returned_checked),
             } as any);
             
             setActiveImageIdx(0);
@@ -357,6 +359,8 @@ export function ProductDetailDialog({
     // Sales step data state
     const [stepData, setStepData] = useState<Record<string, any>>({});
     const [savingStepData, setSavingStepData] = useState(false);
+    const [showAccessoriesWarning, setShowAccessoriesWarning] = useState(false);
+    const [showAccessoriesReturnWarning, setShowAccessoriesReturnWarning] = useState(false);
 
     // Load sales_step_data from item when opening or when data updates
     useEffect(() => {
@@ -384,6 +388,10 @@ export function ProductDetailDialog({
             }
             if (!stepData.step1_evidence_photos || stepData.step1_evidence_photos.length === 0) {
                 toast.error('Vui lòng tải ảnh/video làm bằng chứng trước khi kỹ thuật làm');
+                return;
+            }
+            if (!stepData.step1_accessories_checked) {
+                setShowAccessoriesWarning(true);
                 return;
             }
         }
@@ -534,6 +542,12 @@ export function ProductDetailDialog({
             }
         }
 
+        // Validation: xác nhận trả đủ phụ kiện khi đóng gói / giao hàng
+        if (isAftersale && roomId.startsWith('after2') && !(formData as any).accessories_returned_checked) {
+            setShowAccessoriesReturnWarning(true);
+            return;
+        }
+
         setSaving(true);
         try {
             if ((isAftersale || isCareFlow) && onUpdateItemAfterSaleData) {
@@ -567,6 +581,16 @@ export function ProductDetailDialog({
                 if (Object.keys(orderData).length > 0) {
                     await onUpdateOrder(orderData as Partial<Order>);
                 }
+            }
+
+            const itemId = product?.id || services[0]?.id;
+            if (itemId && roomId.startsWith('after2')) {
+                const item = (group?.product || group?.services?.[0]) as any;
+                const existingStepData = item?.sales_step_data || {};
+                await orderItemsApi.updateSalesStepData(itemId, {
+                    ...existingStepData,
+                    after2_accessories_returned_checked: !!(formData as any).accessories_returned_checked,
+                });
             }
 
             toast.success('Đã cập nhật thông tin thành công');
@@ -1969,6 +1993,24 @@ export function ProductDetailDialog({
                                                     </div>
                                                 )}
 
+                                                <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
+                                                    <Checkbox
+                                                        id="accessories_returned_checked"
+                                                        checked={!!(formData as any).accessories_returned_checked}
+                                                        onCheckedChange={(checked) =>
+                                                            setFormData((prev) => ({ ...prev, accessories_returned_checked: !!checked }))
+                                                        }
+                                                        className="mt-0.5"
+                                                    />
+                                                    <Label
+                                                        htmlFor="accessories_returned_checked"
+                                                        className="cursor-pointer text-sm font-semibold leading-snug text-emerald-900"
+                                                    >
+                                                        Xác nhận trả đủ đồ phụ kiện cho khách
+                                                        <span className="text-red-500"> *</span>
+                                                    </Label>
+                                                </div>
+
                                                 <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 shadow-sm space-y-3 pt-2">
                                                     <div className="flex items-center justify-between">
                                                         <div className="flex items-center gap-2">
@@ -2173,7 +2215,9 @@ export function ProductDetailDialog({
                                                 disabled={saving}
                                             >
                                                 {saving ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Save className="h-5 w-5 mr-2" />}
-                                                Cập nhật thông tin
+                                                {roomId.startsWith('after2')
+                                                    ? 'Xác nhận trả phụ kiện & Lưu'
+                                                    : 'Cập nhật thông tin'}
                                             </Button>
                                         </div>
                                     )}
@@ -2441,6 +2485,24 @@ export function ProductDetailDialog({
                                                             onChange={(urls) => setStepData(prev => ({ ...prev, step1_evidence_photos: urls }))}
                                                          />
                                                      </div>
+
+                                                    <div className="flex items-start gap-3 rounded-xl border border-amber-100 bg-amber-50/60 p-3">
+                                                        <Checkbox
+                                                            id="step1_accessories_checked"
+                                                            checked={!!stepData.step1_accessories_checked}
+                                                            onCheckedChange={(checked) =>
+                                                                setStepData(prev => ({ ...prev, step1_accessories_checked: !!checked }))
+                                                            }
+                                                            className="mt-0.5"
+                                                        />
+                                                        <Label
+                                                            htmlFor="step1_accessories_checked"
+                                                            className="cursor-pointer text-sm font-semibold leading-snug text-amber-900"
+                                                        >
+                                                            Đã kiểm tra đầy đủ phụ kiện đi kèm
+                                                            <span className="text-red-500"> *</span>
+                                                        </Label>
+                                                    </div>
 
                                                     <div className="space-y-1.5">
                                                         <Label className="text-xs font-bold text-gray-500">GHI CHÚ NHẬN ĐỒ</Label>
@@ -2773,6 +2835,46 @@ export function ProductDetailDialog({
                             <img src={mainPreviewUrl} alt="" className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl bg-white" />
                         )
                     )}
+                </DialogContent>
+            </Dialog>
+
+            {/* Cảnh báo chưa xác nhận trả phụ kiện */}
+            <Dialog open={showAccessoriesReturnWarning} onOpenChange={setShowAccessoriesReturnWarning}>
+                <DialogContent className="max-w-sm rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-base font-bold">Chưa xác nhận trả phụ kiện</DialogTitle>
+                        <DialogDescription className="text-sm text-muted-foreground">
+                            Vui lòng tick &quot;Xác nhận trả đủ đồ phụ kiện cho khách&quot; trước khi lưu hoặc chuyển bước.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button
+                            className="w-full rounded-xl font-semibold"
+                            onClick={() => setShowAccessoriesReturnWarning(false)}
+                        >
+                            Đã hiểu
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Cảnh báo chưa xác nhận phụ kiện đi kèm (nhận đồ) */}
+            <Dialog open={showAccessoriesWarning} onOpenChange={setShowAccessoriesWarning}>
+                <DialogContent className="max-w-sm rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-base font-bold">Chưa xác nhận phụ kiện</DialogTitle>
+                        <DialogDescription className="text-sm text-muted-foreground">
+                            Vui lòng tick vào ô &quot;Đã kiểm tra đầy đủ phụ kiện đi kèm&quot; trước khi lưu thông tin nhận đồ.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button
+                            className="w-full rounded-xl font-semibold"
+                            onClick={() => setShowAccessoriesWarning(false)}
+                        >
+                            Đã hiểu
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
 

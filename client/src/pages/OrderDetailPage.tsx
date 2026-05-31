@@ -970,6 +970,7 @@ export function OrderDetailPage() {
                     getGroupCurrentTechRoom={getGroupCurrentTechRoom}
                     onProductCardClick={handleOpenProductDialog}
                     onOpenProductDialogWithMove={handleOpenProductDialogWithMove}
+                    isPhoneView={isPhoneView}
                 />
 
                 <CareTab
@@ -982,6 +983,7 @@ export function OrderDetailPage() {
                     getCareWarrantyStageLabel={getCareWarrantyStageLabel}
                     onProductCardClick={handleOpenProductDialog}
                     onUpdateItemAfterSaleData={updateItemAfterSaleData}
+                    isPhoneView={isPhoneView}
                 />
             </Tabs>
 

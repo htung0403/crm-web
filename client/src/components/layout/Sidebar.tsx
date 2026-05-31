@@ -22,6 +22,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import type { User, UserRole } from '@/types';
 import { canAccessView } from '@/lib/viewPermissions';
+import { confirmLeavePage } from '@/lib/navigationGuard';
 
 interface SidebarProps {
     isOpen: boolean;
@@ -174,6 +175,8 @@ export function Sidebar({ isOpen, onClose, isMobile, currentUser, onLogout }: Si
     };
 
     const handleNavigate = (page: string) => {
+        const currentPath = location.pathname.slice(1);
+        if (page !== currentPath && !confirmLeavePage()) return;
         navigate(`/${page}`);
         if (isMobile) {
             onClose();

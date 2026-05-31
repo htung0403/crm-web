@@ -7,6 +7,37 @@ import { notifyCrmMaster } from '../utils/webhookNotifier.js';
 
 const router = Router();
 
+/** Chuỗi rỗng → null để tránh vi phạm unique index trên cột optional */
+function optionalText(value: unknown): string | null {
+    if (value == null) return null;
+    const trimmed = String(value).trim();
+    return trimmed === '' ? null : trimmed;
+}
+
+function isFbThreadIdDuplicateError(error: { code?: string; message?: string } | null): boolean {
+    if (!error) return false;
+    if (error.code === '23505') {
+        const msg = (error.message || '').toLowerCase();
+        return msg.includes('fb_thread_id') || msg.includes('idx_leads_fb_thread_id');
+    }
+    return false;
+}
+
+async function assertUniqueFbThreadId(fbThreadId: string | null): Promise<void> {
+    if (!fbThreadId) return;
+    const { data: existing } = await supabaseAdmin
+        .from('leads')
+        .select('id, name')
+        .eq('fb_thread_id', fbThreadId)
+        .maybeSingle();
+    if (existing) {
+        throw new ApiError(
+            `Mã hội thoại (Thread ID) đã được dùng cho lead "${existing.name}". Vui lòng kiểm tra lại hoặc để trống.`,
+            409
+        );
+    }
+}
+
 // Get all leads
 router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -96,36 +127,45 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
             throw new ApiError('Tên và số điện thoại là bắt buộc', 400);
         }
 
+        const normalizedFbThreadId = optionalText(fb_thread_id);
+        await assertUniqueFbThreadId(normalizedFbThreadId);
+
         const { data: lead, error } = await supabaseAdmin
             .from('leads')
             .insert({
-                name,
-                phone,
-                email,
+                name: String(name).trim(),
+                phone: String(phone).trim(),
+                email: optionalText(email),
                 source: source || 'other',
-                company,
-                address,
-                notes,
+                company: optionalText(company),
+                address: optionalText(address),
+                notes: optionalText(notes),
                 // Default to the first pipeline stage used by the CRM UI
                 status: 'xac_dinh_nhu_cau',
                 pipeline_stage: 'xac_dinh_nhu_cau',
                 assigned_to: assigned_to || req.user!.id,
                 created_by: req.user!.id,
-                dob: dob || null,
-                fb_thread_id,
-                fb_profile_pic,
-                fb_link,
-                link_message,
+                dob: optionalText(dob),
+                fb_thread_id: normalizedFbThreadId,
+                fb_profile_pic: optionalText(fb_profile_pic),
+                fb_link: optionalText(fb_link),
+                link_message: optionalText(link_message),
                 appointment_time: appointment_time || null,
                 lead_type: lead_type || 'individual',
                 delivery_method: delivery_method || null,
-                tracking_code: tracking_code || null,
+                tracking_code: optionalText(tracking_code),
                 shipping_fee: shipping_fee || 0,
             })
             .select()
             .single();
 
         if (error) {
+            if (isFbThreadIdDuplicateError(error)) {
+                throw new ApiError(
+                    'Mã hội thoại (Thread ID) đã được dùng cho lead khác. Vui lòng kiểm tra lại hoặc để trống.',
+                    409
+                );
+            }
             throw new ApiError('Lỗi khi tạo lead: ' + error.message, 500);
         }
 

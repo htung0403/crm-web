@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { memo, useState, useRef } from 'react';
 import { Upload, X, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { uploadFile } from '@/lib/supabase';
@@ -14,7 +14,7 @@ interface ImageUploadProps {
     placeholderIcon?: React.ReactNode;
 }
 
-export function ImageUpload({
+export const ImageUpload = memo(function ImageUpload({
     value,
     onChange,
     bucket = 'products',
@@ -117,4 +117,6 @@ export function ImageUpload({
             )}
         </div>
     );
-}
+});
+
+ImageUpload.displayName = 'ImageUpload';
