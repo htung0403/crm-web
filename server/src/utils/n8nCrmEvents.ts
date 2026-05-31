@@ -120,6 +120,8 @@ export function buildServiceEventBase(context: any) {
         item: {
             id: context.service.id,
             service_name: context.service.item_name || context.orderProduct?.name || null,
+            product_name: context.orderProduct?.name || null,
+            product_code: context.orderProduct?.product_code || null,
             deadline_at: context.orderProduct?.due_at || context.order?.due_at || null,
             note: context.service.notes || null,
         },
@@ -134,4 +136,5 @@ export function buildServiceEventBase(context: any) {
         },
     };
 }
+
 

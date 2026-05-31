@@ -477,7 +477,9 @@ router.get('/check-return-due-reminders', verifyCronSecret, async (req: Request,
                 product_name: product.name || 'N/A',
                 due_at: product.due_at,
                 reminder_type: '1_day_before_return',
-                sale_id: saleUser?.id || null,
+                target_user_id: saleUser?.id || orderObj?.sales_id || null,
+                target_role: 'sale',
+                sale_id: saleUser?.id || orderObj?.sales_id || null,
                 sale_name: saleUser?.name || null,
                 tele_id_sale: saleUser?.telegram_chat_id || null,
                 technicians: uniqueTechnicians,
@@ -591,3 +593,5 @@ router.get('/check-debt-overdue', verifyCronSecret, async (req: Request, res: Re
 });
 
 export { router as cronRouter };
+
+

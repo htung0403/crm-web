@@ -7,6 +7,7 @@ import { fireWebhook } from '../utils/webhookNotifier.js';
 import { logAccessoryStatusChange, logPartnerStatusChange } from '../utils/workflowRequestLog.js';
 import {
     buildServiceEventBase,
+    buildCrmOrderUrl,
     getManagerRecipients,
     getServiceNotificationContext,
     notifyCrmMasterUser,
@@ -292,6 +293,41 @@ router.patch('/:id/assign', authenticate, async (req: AuthenticatedRequest, res,
             await recordCommissions(item.order.id);
         }
 
+        if (item?.technician_id) {
+            const { data: technician } = await supabaseAdmin
+                .from('users')
+                .select('id, name, role, telegram_chat_id')
+                .eq('id', item.technician_id)
+                .maybeSingle();
+
+            if (technician?.id) {
+                let basePayload: any = null;
+                if (v1Exists) {
+                    const orderObj = Array.isArray(item.order) ? item.order[0] : item.order;
+                    basePayload = {
+                        order: orderObj ? { id: orderObj.id, order_code: orderObj.order_code, return_due_at: null } : null,
+                        item: { id: item.id, service_name: item.item_name || null, deadline_at: null, note: item.notes || null },
+                        links: { crm_url: buildCrmOrderUrl(orderObj?.order_code || orderObj?.id) },
+                    };
+                } else {
+                    const context = await getServiceNotificationContext(id);
+                    basePayload = context ? buildServiceEventBase(context) : null;
+                }
+
+                notifyCrmMasterUser('workflow.item.assigned', {
+                    ...(basePayload || { item: { id }, order: item.order ? { id: item.order.id, order_code: item.order.order_code } : null }),
+                    target_user_id: technician.id,
+                    target_role: 'technician',
+                    channel: 'telegram',
+                    staff: {
+                        id: technician.id,
+                        name: technician.name,
+                        role: technician.role || 'technician',
+                        telegram_chat_id: technician.telegram_chat_id || null,
+                    },
+                });
+            }
+        }
         res.json({
             status: 'success',
             data: item,
@@ -1915,7 +1951,7 @@ router.patch('/:id/fail', authenticate, async (req: AuthenticatedRequest, res, n
 });
 
 // Change Room / Process Step with Reason and Deadline
-router.patch('/:id/change-room', authenticate, async (req: AuthenticatedRequest, res, next) => {
+router.patch(['/:id/change-room', '/:id/transfer-room'], authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
         const { targetRoomId, reason, deadline_days, technician_id, note, photos } = req.body;
@@ -1983,7 +2019,7 @@ router.patch('/:id/change-room', authenticate, async (req: AuthenticatedRequest,
 
         // c. Get Transition details
         const activeItemStep = steps.find(s => ['assigned', 'in_progress', 'started'].includes(s.status));
-        const fromRoom = activeItemStep?.step_name || 'Khởi tạo';
+        const fromRoom = (activeItemStep as any)?.department?.name || activeItemStep?.step_name || 'Khởi tạo';
         const toRoom = targetDept?.name || deptSearch;
 
         // c. Mark ALL currently active/pending steps as 'skipped'
@@ -2108,11 +2144,19 @@ router.patch('/:id/change-room', authenticate, async (req: AuthenticatedRequest,
                 const basePayload = buildServiceEventBase(context);
                 notifyCrmMasterUser('workflow.item.room_changed', {
                     ...basePayload,
+                    order: {
+                        ...(basePayload.order || {}),
+                        id: context.order?.id || basePayload.order?.id || null,
+                        order_code: context.order?.order_code || basePayload.order?.order_code || null,
+                    },
                     target_user_id: technician.id,
                     target_role: 'technician',
                     channel: 'telegram',
                     item: {
                         ...basePayload.item,
+                        product_name: context.orderProduct?.name || basePayload.item?.product_name || null,
+                        product_code: context.orderProduct?.product_code || basePayload.item?.product_code || null,
+                        from_room: fromRoom,
                         room_name: toRoom,
                         reason: reason || null,
                         note: finalNotes || null,
@@ -2369,5 +2413,11 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
 });
 
 export default router;
+
+
+
+
+
+
 
 

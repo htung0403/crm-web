@@ -10,6 +10,55 @@ import { buildCrmOrderUrl, getManagerRecipients, notifyCrmMasterUser } from '../
 
 
 const router = Router();
+async function getOrderNotificationContext(orderId: string) {
+    const { data: order, error } = await supabaseAdmin
+        .from('orders')
+        .select('id, order_code, sales_id, due_at, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)')
+        .eq('id', orderId)
+        .maybeSingle();
+
+    if (error || !order) {
+        if (error) console.error('[OrderNotify] Failed to load order context:', error.message);
+        return null;
+    }
+
+    const salesUser = Array.isArray((order as any).sales_user) ? (order as any).sales_user[0] : (order as any).sales_user;
+    const customer = Array.isArray((order as any).customer) ? (order as any).customer[0] : (order as any).customer;
+
+    return { order, salesUser, customer };
+}
+
+function notifyOrderSalesUser(event: string, context: any, extra: Record<string, any> = {}) {
+    const targetUserId = context?.salesUser?.id || context?.order?.sales_id;
+    if (!targetUserId) {
+        console.warn(`[OrderNotify] Skip ${event}: order has no sales_user UUID`);
+        return;
+    }
+
+    notifyCrmMasterUser(event, {
+        target_user_id: targetUserId,
+        target_role: context.salesUser?.role || 'sale',
+        channel: 'telegram',
+        order: {
+            id: context.order.id,
+            order_code: context.order.order_code,
+            return_due_at: context.order.due_at || null,
+        },
+        customer: context.customer ? {
+            name: context.customer.name,
+            phone: context.customer.phone,
+            zalo_user_id: context.customer.zalo_user_id || context.customer.customer_zalo_user_id || null,
+        } : null,
+        staff: context.salesUser ? {
+            id: context.salesUser.id,
+            name: context.salesUser.name,
+            role: context.salesUser.role || 'sale',
+            telegram_chat_id: context.salesUser.telegram_chat_id || null,
+        } : null,
+        links: { crm_url: buildCrmOrderUrl(context.order.order_code || context.order.id) },
+        ...extra,
+    });
+}
 
 // =====================================================
 // ORDER CODE GENERATION HELPERS
@@ -1156,11 +1205,12 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
 
 // Upsell: Add more products/services to an existing order
 // Create an upsell ticket (to be approved by manager)
-router.post('/:id/upsell-ticket', authenticate, async (req: AuthenticatedRequest, res, next) => {
+router.post(['/:id/upsell-ticket', '/:id/upsell-request', '/:id/edit-request'], authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id: orderId } = req.params;
         const { customer_items, sale_items, notes, request_type, update_payload } = req.body;
-        const normalizedType = typeof request_type === 'string' ? request_type.toLowerCase() : 'upsell';
+        const inferredRequestType = req.path.endsWith('/edit-request') ? 'order_edit' : req.path.endsWith('/upsell-request') ? 'upsell' : request_type;
+        const normalizedType = typeof inferredRequestType === 'string' ? inferredRequestType.toLowerCase() : 'upsell';
         const isOrderEditRequest =
             normalizedType === 'order_edit' ||
             normalizedType === 'edit_order' ||
@@ -1169,7 +1219,7 @@ router.post('/:id/upsell-ticket', authenticate, async (req: AuthenticatedRequest
         // 1. Get order details to get customer_id
         const { data: order, error: orderError } = await supabaseAdmin
             .from('orders')
-            .select('customer_id')
+            .select('id, order_code, customer_id, sales_id, due_at, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)')
             .eq('id', orderId)
             .single();
 
@@ -1242,14 +1292,12 @@ router.post('/:id/upsell-ticket', authenticate, async (req: AuthenticatedRequest
         }
 
         const eventName = isOrderEditRequest ? 'order_edit.request.created' : 'upsell.request.created';
-        for (const manager of await getManagerRecipients()) {
-            notifyCrmMasterUser(eventName, {
-                target_user_id: manager.id,
-                target_role: manager.role || 'manager',
-                channel: 'telegram',
-                order: { id: orderId },
+        const orderContext = await getOrderNotificationContext(orderId);
+        if (orderContext) {
+            notifyOrderSalesUser(eventName, orderContext, {
                 requester_id: req.user!.id,
                 ticket_id: ticket.id,
+                ticket: { id: ticket.id, total_amount: ticket.total_amount, request_type: isOrderEditRequest ? 'order_edit' : 'upsell' },
             });
         }
 
@@ -2436,6 +2484,77 @@ router.patch('/:id/extension-request', authenticate, async (req: AuthenticatedRe
     }
 });
 
+router.post('/:id/accessory-request', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id: orderId } = req.params;
+        const { order_item_id, order_product_service_id, notes, metadata } = req.body;
+        if (!order_item_id && !order_product_service_id) {
+            throw new ApiError('Cần order_item_id hoặc order_product_service_id', 400);
+        }
+
+        const { data: accessory, error } = await supabaseAdmin
+            .from('order_item_accessories')
+            .insert({
+                order_item_id: order_item_id || null,
+                order_product_service_id: order_product_service_id || null,
+                status: 'need_buy',
+                notes: notes || null,
+                metadata: metadata || {},
+                updated_by: req.user?.id || null,
+            })
+            .select('*')
+            .single();
+
+        if (error) throw new ApiError('Không thể tạo yêu cầu phụ kiện: ' + error.message, 500);
+
+        const context = await getOrderNotificationContext(orderId);
+        if (context) {
+            notifyOrderSalesUser('accessory.request.created', context, {
+                requester_id: req.user!.id,
+                accessory_request: accessory,
+                item: { id: order_item_id || order_product_service_id || null, note: notes || null },
+            });
+        }
+
+        res.status(201).json({ status: 'success', data: accessory, message: 'Đã tạo yêu cầu phụ kiện' });
+    } catch (error) {
+        next(error);
+    }
+});
+
+router.post('/:id/debt-check', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { id: orderId } = req.params;
+        const { notes, debt_checked_by_name } = req.body;
+        const now = new Date().toISOString();
+
+        const { data: order, error } = await supabaseAdmin
+            .from('orders')
+            .update({
+                debt_checked: true,
+                debt_checked_at: now,
+                debt_checked_notes: notes || null,
+                debt_checked_by_name: debt_checked_by_name || req.user?.name || null,
+            })
+            .eq('id', orderId)
+            .select('id, order_code, sales_id, due_at')
+            .single();
+
+        if (error) throw new ApiError('Không thể bắt đầu kiểm nợ: ' + error.message, 500);
+
+        const context = await getOrderNotificationContext(orderId);
+        if (context) {
+            notifyOrderSalesUser('aftersale.debt_check.started', context, {
+                requester_id: req.user!.id,
+                notes: notes || null,
+            });
+        }
+
+        res.json({ status: 'success', data: order, message: 'Đã bắt đầu kiểm nợ' });
+    } catch (error) {
+        next(error);
+    }
+});
 // Delete order
 router.delete('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -2472,5 +2591,10 @@ router.delete('/:id', authenticate, requireSale, async (req: AuthenticatedReques
 });
 
 export { router as ordersRouter };
+
+
+
+
+
 
 
