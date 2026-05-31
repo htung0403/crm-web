@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { fireWebhook, notifyCrmMaster } from '../utils/webhookNotifier.js';
-import { on_customer_message, on_sale_message, on_lead_assigned, getVirtualTimeLeft, SLA_CYCLES } from '../utils/slaManager.js';
+import { on_customer_message, on_sale_message, on_lead_assigned, getVirtualTimeLeft, calculateDeadline, SLA_CYCLES } from '../utils/slaManager.js';
 
 const router = Router();
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -843,6 +843,7 @@ async function handleLeadUpdate(data: any) {
     // Handled by handleLeadAIUpdate instead
 
     let effectiveLastActor = normalizeMessageActor(rawLastActor, message_direction);
+    let saleSlaHandledInCoreUpdate = false;
 
     // Logic Ownership:
     // 1. Trường hợp đặc biệt: Thu hồi lead (Unassign) từ n8n (Tuần tra SLA)
@@ -862,8 +863,26 @@ async function handleLeadUpdate(data: any) {
         const saleName = owner_sale || assigned_to;
         const resolvedId = await resolveUserByName(saleName);
         if (resolvedId) {
+            const now = new Date();
             updateData.assigned_to = resolvedId;
             updateData.assign_state = 'assigned';
+
+            if (effectiveLastActor === 'sale' && last_message_text) {
+                const deadline = calculateDeadline(now, SLA_CYCLES[1], currentLead.created_at || now.toISOString());
+                updateData.current_rule_index = 1;
+                updateData.current_deadline_at = deadline.toISOString();
+                updateData.last_valid_followup_at = now.toISOString();
+                updateData.t_last_outbound = now.toISOString();
+                updateData.last_message_time = last_message_time || now.toISOString();
+                updateData.last_actor = 'sale';
+                updateData.sla_state = 'ACTIVE';
+                saleSlaHandledInCoreUpdate = true;
+            } else {
+                const deadline = calculateDeadline(now, SLA_CYCLES[0], currentLead.created_at || now.toISOString());
+                updateData.current_rule_index = 0;
+                updateData.current_deadline_at = deadline.toISOString();
+                updateData.sla_state = 'ACTIVE';
+            }
 
             // Log sự kiện gán Sale
             await logLeadActivity(leadId, {
@@ -872,9 +891,6 @@ async function handleLeadUpdate(data: any) {
                 userId: resolvedId,
                 userName: saleName
             });
-            
-            // Trigger 3 phút
-            await on_lead_assigned(leadId, resolvedId as string);
         }
     }
     // 3. Chống giành khách (Sale B nhắn vào Lead của Sale A)
@@ -976,7 +992,7 @@ async function handleLeadUpdate(data: any) {
         // Cập nhật State Machine SLA rời theo đúng kiến trúc sau khi Update lõi Lead xog
         if (effectiveLastActor === 'lead') {
             await on_customer_message(lead);
-        } else if (effectiveLastActor === 'sale') {
+        } else if (effectiveLastActor === 'sale' && !saleSlaHandledInCoreUpdate) {
             const saleName = owner_sale || assigned_to;
             const resolvedId = await resolveUserByName(saleName);
             await on_sale_message(lead, resolvedId as string, saleName);

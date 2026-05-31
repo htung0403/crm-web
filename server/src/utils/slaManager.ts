@@ -260,7 +260,7 @@ export async function checkSlaCron() {
         const { data: leads, error } = await supabaseAdmin
             .from('leads')
             .select(`
-                id, name, assigned_to, appointment_time, next_followup_time, sla_state, current_deadline_at, current_rule_index, appointment_reminded_at, next_followup_reminded_at, pipeline_stage, created_at, last_actor, assigned_to_user: users!leads_assigned_to_fkey(name, telegram_chat_id)
+                id, name, assigned_to, appointment_time, next_followup_time, sla_state, current_deadline_at, current_rule_index, appointment_reminded_at, next_followup_reminded_at, pipeline_stage, created_at, last_actor, t_last_outbound, assigned_to_user: users!leads_assigned_to_fkey(name, telegram_chat_id)
             `)
             .not('assigned_to', 'is', null)
             .not('pipeline_stage', 'in', '("chot_don", "huy", "fail")');
@@ -369,6 +369,11 @@ export async function checkSlaCron() {
                 // Thủng SLA
                 if (timeLeft <= 0) {
                     if (ruleIndex === 0) {
+                        if (lead.last_actor === 'sale' || lead.t_last_outbound) {
+                            await move_to_next_rule(lead, null, false, true);
+                            continue;
+                        }
+
                         // RECLAIM
                         fireWebhook('SLA_RECLAIM', {
                             lead_id: lead.id,
