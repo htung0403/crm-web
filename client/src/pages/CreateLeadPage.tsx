@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Loader2, Facebook, MessageSquare, ArrowLeft } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
@@ -39,6 +39,10 @@ export function CreateLeadPage() {
     useEffect(() => {
         fetchEmployees({ role: 'sale' });
     }, [fetchEmployees]);
+
+    const handleProfilePicChange = useCallback((img: string | null) => {
+        setFormData((prev) => ({ ...prev, fb_profile_pic: img }));
+    }, []);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -82,7 +86,7 @@ export function CreateLeadPage() {
     );
 
     return (
-        <div className="w-full max-w-full mx-auto overflow-x-hidden px-1 sm:px-2 md:px-4 space-y-3 sm:space-y-4 animate-fade-in pb-24 md:pb-8">
+        <div className="w-full max-w-full mx-auto overflow-x-hidden px-1 sm:px-2 md:px-4 space-y-3 sm:space-y-4 pb-24 md:pb-8">
             <Toaster richColors position="top-right" />
             {/* Header */}
             <div className="bg-white p-3 sm:p-5 rounded-xl sm:rounded-2xl border border-border shadow-md mb-4 sm:mb-8">
@@ -106,7 +110,7 @@ export function CreateLeadPage() {
                     </div>
                 </div>
                 <div className="hidden md:flex items-center justify-end gap-3 mt-4">
-                    <Button
+                        <Button
                         type="button"
                         variant="outline"
                         onClick={() => navigate('/leads')}
@@ -115,7 +119,7 @@ export function CreateLeadPage() {
                     >
                         Hủy
                     </Button>
-                    {submitButton()}
+                    {submitButton('h-11 sm:h-12 px-6 sm:px-8 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-all active:scale-95')}
                 </div>
             </div>
 
@@ -304,7 +308,7 @@ export function CreateLeadPage() {
                                 <Label className="text-xs sm:text-sm font-bold text-slate-700 uppercase tracking-wider">Hình ảnh Lead</Label>
                                 <ImageUpload
                                     value={formData.fb_profile_pic}
-                                    onChange={(img) => setFormData(prev => ({ ...prev, fb_profile_pic: img }))}
+                                    onChange={handleProfilePicChange}
                                     folder="leads"
                                     className="w-full max-w-[240px] sm:max-w-[320px] aspect-square"
                                     hideInfo={true}
@@ -353,7 +357,7 @@ export function CreateLeadPage() {
             </form>
 
             {/* Mobile sticky actions */}
-            <div className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border bg-white/95 backdrop-blur-sm p-3 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
+            <div className="md:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border bg-white p-3 shadow-[0_-2px_10px_rgba(0,0,0,0.06)]">
                 <div className="flex gap-2 max-w-lg mx-auto">
                     <Button
                         type="button"
