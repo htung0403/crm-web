@@ -149,10 +149,6 @@ export async function move_to_next_rule(lead: any, saleId: string | null = null,
         updated_at: now.toISOString()
     };
     
-    if (!fromCron) {
-        updates.last_valid_followup_at = now.toISOString();
-    }
-    
     if (saleId || markOutbound) {
         updates.last_actor = 'sale';
         updates.t_last_outbound = now.toISOString();
@@ -424,3 +420,4 @@ export async function checkSlaCron() {
 
 // Export them with original name too for backward compatibility in index.ts if needed
 export { checkSlaCron as checkAllSLA };
+

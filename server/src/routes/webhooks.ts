@@ -877,7 +877,6 @@ async function handleLeadUpdate(data: any) {
                 const deadline = calculateDeadline(now, SLA_CYCLES[1], currentLead.created_at || now.toISOString());
                 updateData.current_rule_index = 1;
                 updateData.current_deadline_at = deadline.toISOString();
-                updateData.last_valid_followup_at = now.toISOString();
                 updateData.t_last_outbound = now.toISOString();
                 updateData.last_message_time = last_message_time || now.toISOString();
                 updateData.last_actor = 'sale';
@@ -1360,3 +1359,4 @@ async function logWebhookEvent(
 }
 
 export default router;
+
