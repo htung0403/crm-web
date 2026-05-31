@@ -6,6 +6,91 @@ import { hashPassword } from '../utils/password.js';
 
 const router = Router();
 
+function normalizeTelegramChatId(value: unknown): string | null {
+    if (value === undefined || value === null) return null;
+    const trimmed = String(value).trim();
+    return trimmed === '' ? null : trimmed;
+}
+
+function mapUserDbError(error: { code?: string; message?: string }, action: string): ApiError {
+    console.error(`[users] Supabase error during ${action}:`, error);
+
+    if (error.code === '23505') {
+        if (/telegram|users_telegram_chat_id/i.test(error.message || '')) {
+            return new ApiError('Telegram Chat ID này đã được gắn với nhân viên khác', 409);
+        }
+        return new ApiError('Dữ liệu bị trùng trong hệ thống', 409);
+    }
+    if (error.code === '42703') {
+        if (/telegram_chat_id/i.test(error.message || '')) {
+            return new ApiError('Database chưa có cột telegram_chat_id. Vui lòng chạy migration 20260531_add_telegram_chat_id_to_users.sql', 500);
+        }
+        if (/kpi_policy_id/i.test(error.message || '')) {
+            return new ApiError('Database chưa có cột kpi_policy_id trên bảng users', 500);
+        }
+        return new ApiError(`Database thiếu cột: ${error.message || 'unknown column'}`, 500);
+    }
+    if (error.code === '22P02') {
+        return new ApiError('Dữ liệu không hợp lệ. Kiểm tra phòng ban, chức danh hoặc chi nhánh.', 400);
+    }
+
+    return new ApiError(`${action}: ${error.message || 'Lỗi database'}`, 500);
+}
+
+function parseOptionalUuid(value: unknown): string | null | undefined {
+    if (value === undefined) return undefined;
+    if (value === null || value === '') return null;
+    const str = String(value).trim();
+    if (!str || str === 'none') return null;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str)) {
+        return null;
+    }
+    return str;
+}
+
+const USER_DETAIL_SELECT =
+    'id, email, name, role, phone, avatar, department, department_id, departments!department_id(name), status, created_at, last_login, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes';
+
+async function assertTelegramChatIdAvailable(userId: string, telegramChatId: string | null) {
+    if (!telegramChatId) return;
+
+    const { data: existing, error } = await supabaseAdmin
+        .from('users')
+        .select('id, name')
+        .eq('telegram_chat_id', telegramChatId)
+        .neq('id', userId)
+        .maybeSingle();
+
+    if (error) {
+        console.error('[users] Failed to check telegram_chat_id uniqueness:', error);
+        return;
+    }
+
+    if (existing) {
+        throw new ApiError(`Telegram Chat ID này đã được gắn với nhân viên "${existing.name}"`, 409);
+    }
+}
+
+function mapUserRecord(user: any) {
+    return {
+        ...user,
+        department: user.departments?.name || user.department || null,
+        departmentId: user.department_id,
+        bankAccount: user.bank_account,
+        bankName: user.bank_name,
+        telegramChatId: user.telegram_chat_id,
+        employeeCode: user.employee_code,
+        timekeepingCode: user.timekeeping_code,
+        jobTitleId: user.job_title_id,
+        joinDate: user.join_date,
+        payrollBranchId: user.payroll_branch_id,
+        workingBranchId: user.working_branch_id,
+        kiotvietAccount: user.kiotviet_account,
+        mobileDevice: user.mobile_device,
+        identityCard: user.identity_card,
+    };
+}
+
 // Get technicians list (cho tất cả user đã đăng nhập - dùng để phân công)
 router.get('/technicians', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -166,7 +251,7 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
                 commission: commission || 0,
                 bank_account: bankAccount || null,
                 bank_name: bankName || null,
-                telegram_chat_id: telegramChatId || null,
+                telegram_chat_id: normalizeTelegramChatId(telegramChatId),
                 status: 'active',
                 created_at: new Date().toISOString(),
                 timekeeping_code: timekeepingCode,
@@ -187,7 +272,7 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
             .single();
 
         if (insertError) {
-            throw new ApiError(`Lỗi tạo hồ sơ người dùng: ${insertError.message}`, 500);
+            throw mapUserDbError(insertError, 'Lỗi tạo hồ sơ người dùng');
         }
 
         // Map snake_case to camelCase
@@ -269,7 +354,7 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         const { 
             name, phone, avatar, department, departmentId, status, role, salary, commission, bankAccount, bankName, telegramChatId,
             dob, gender, identityCard, jobTitleId, joinDate, payrollBranchId, workingBranchId, kiotvietAccount, facebook, address, mobileDevice, notes,
-            kpiPolicyId, password
+            password
         } = req.body;
 
         // Chỉ cho phép cập nhật thông tin của chính mình hoặc quản lý
@@ -280,15 +365,16 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             throw new ApiError('Không có quyền cập nhật thông tin người dùng này', 403);
         }
 
-        const updateData: Record<string, any> = {
-            updated_at: new Date().toISOString(),
-        };
+        const updateData: Record<string, any> = {};
 
         // Thông tin cơ bản - ai cũng có thể cập nhật cho mình
         if (name) updateData.name = name;
         if (phone !== undefined) updateData.phone = phone || null;
         if (avatar !== undefined) updateData.avatar = avatar || null;
-        if (telegramChatId !== undefined) updateData.telegram_chat_id = telegramChatId || null;
+        if (telegramChatId !== undefined) {
+            updateData.telegram_chat_id = normalizeTelegramChatId(telegramChatId);
+            await assertTelegramChatIdAvailable(id, updateData.telegram_chat_id);
+        }
         if (dob !== undefined) updateData.dob = dob || null;
         if (gender !== undefined) updateData.gender = gender || null;
         if (identityCard !== undefined) updateData.identity_card = identityCard || null;
@@ -300,19 +386,22 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
         // Chỉ manager mới được cập nhật role, status, department, salary, etc.
         if (isManager) {
             if (department !== undefined) updateData.department = department || null;
-            if (departmentId !== undefined) updateData.department_id = departmentId || null;
+            const parsedDepartmentId = parseOptionalUuid(departmentId);
+            if (parsedDepartmentId !== undefined) updateData.department_id = parsedDepartmentId;
             if (status) updateData.status = status;
             if (role) updateData.role = role;
             if (salary !== undefined) updateData.salary = salary;
             if (commission !== undefined) updateData.commission = commission;
             if (bankAccount !== undefined) updateData.bank_account = bankAccount || null;
             if (bankName !== undefined) updateData.bank_name = bankName || null;
-            if (jobTitleId !== undefined) updateData.job_title_id = jobTitleId || null;
+            const parsedJobTitleId = parseOptionalUuid(jobTitleId);
+            if (parsedJobTitleId !== undefined) updateData.job_title_id = parsedJobTitleId;
             if (joinDate !== undefined) updateData.join_date = joinDate || null;
-            if (payrollBranchId !== undefined) updateData.payroll_branch_id = payrollBranchId || null;
-            if (workingBranchId !== undefined) updateData.working_branch_id = workingBranchId || null;
+            const parsedPayrollBranchId = parseOptionalUuid(payrollBranchId);
+            if (parsedPayrollBranchId !== undefined) updateData.payroll_branch_id = parsedPayrollBranchId;
+            const parsedWorkingBranchId = parseOptionalUuid(workingBranchId);
+            if (parsedWorkingBranchId !== undefined) updateData.working_branch_id = parsedWorkingBranchId;
             if (kiotvietAccount !== undefined) updateData.kiotviet_account = kiotvietAccount || null;
-            if (kpiPolicyId !== undefined) updateData.kpi_policy_id = kpiPolicyId || null;
             if (password) {
                 if (password.length < 6) {
                     throw new ApiError('Mật khẩu phải có ít nhất 6 ký tự', 400);
@@ -321,43 +410,34 @@ router.put('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             }
         }
 
-        console.log('[DEBUG PUT /users/:id] req.body.jobTitleId =', jobTitleId, '| updateData =', JSON.stringify(updateData));
-
-        const { data: user, error } = await supabaseAdmin
-            .from('users')
-            .update(updateData)
-            .eq('id', id)
-            .select('id, email, name, role, phone, avatar, department, department_id, departments!department_id(name), status, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes, kpi_policy_id')
-            .single();
-
-        if (error) {
-            console.error('[DEBUG PUT /users/:id] Supabase error:', error);
-            throw new ApiError('Lỗi khi cập nhật người dùng', 500);
+        if (Object.keys(updateData).length === 0) {
+            throw new ApiError('Không có dữ liệu để cập nhật', 400);
         }
 
-        // Map snake_case to camelCase for response
-        const mappedUser = {
-            ...user,
-            department: (user as any).departments?.name || (user as any).department || null,
-            departmentId: (user as any).department_id,
-            bankAccount: user.bank_account,
-            bankName: user.bank_name,
-            telegramChatId: user.telegram_chat_id,
-            employeeCode: user.employee_code,
-            timekeepingCode: user.timekeeping_code,
-            jobTitleId: user.job_title_id,
-            joinDate: user.join_date,
-            payrollBranchId: user.payroll_branch_id,
-            workingBranchId: user.working_branch_id,
-            kiotvietAccount: user.kiotviet_account,
-            mobileDevice: user.mobile_device,
-            identityCard: user.identity_card,
-            kpiPolicyId: user.kpi_policy_id,
-        };
+        console.log('[PUT /users/:id] updateData =', JSON.stringify(updateData));
+
+        const { error: updateError } = await supabaseAdmin
+            .from('users')
+            .update(updateData)
+            .eq('id', id);
+
+        if (updateError) {
+            throw mapUserDbError(updateError, 'Lỗi khi cập nhật người dùng');
+        }
+
+        const { data: user, error: fetchError } = await supabaseAdmin
+            .from('users')
+            .select(USER_DETAIL_SELECT)
+            .eq('id', id)
+            .single();
+
+        if (fetchError) {
+            throw mapUserDbError(fetchError, 'Lỗi khi lấy thông tin người dùng sau cập nhật');
+        }
 
         res.json({
             status: 'success',
-            data: { user: mappedUser },
+            data: { user: mapUserRecord(user) },
         });
     } catch (error) {
         next(error);

@@ -18,6 +18,9 @@ import {
     SALES_STEPS,
     getSalesStatusLabel,
 } from '../constants';
+import { rejectNonSequentialKanbanMove } from '@/lib/kanbanSequential';
+
+const SALES_COLUMN_IDS = SALES_STEPS.map((s) => s.id);
 import {
     getItemTypeLabel,
     getItemTypeColor,
@@ -485,6 +488,13 @@ export function SalesTab({
                                         <DragDropContext
                                             onDragEnd={async (result: DropResult) => {
                                                 if (!result.destination || result.destination.droppableId === result.source.droppableId) return;
+                                                if (rejectNonSequentialKanbanMove(
+                                                    SALES_COLUMN_IDS,
+                                                    result.source.droppableId,
+                                                    result.destination.droppableId
+                                                )) {
+                                                    return;
+                                                }
                                                 const draggableId = result.draggableId;
                                                 const newStatus = result.destination.droppableId;
                                                 const group = workflowKanbanGroups?.find(
@@ -560,6 +570,13 @@ export function SalesTab({
                                 <DragDropContext
                                     onDragEnd={async (result: DropResult) => {
                                         if (!result.destination || result.destination.droppableId === result.source.droppableId) return;
+                                        if (rejectNonSequentialKanbanMove(
+                                            SALES_COLUMN_IDS,
+                                            result.source.droppableId,
+                                            result.destination.droppableId
+                                        )) {
+                                            return;
+                                        }
                                         const draggableId = result.draggableId;
                                         const newStatus = result.destination.droppableId;
                                         const stepLabel = SALES_STEPS.find((s: any) => s.id === newStatus)?.label || newStatus;

@@ -22,6 +22,7 @@ import {
     buildKanbanDropResult,
     type MobileKanbanColumn,
 } from '@/components/kanban/mobileKanban';
+import { rejectNonSequentialKanbanMove, AFTER_SALE_COLUMN_IDS } from '@/lib/kanbanSequential';
 
 interface AftersaleTabProps {
     order: Order | null;
@@ -550,6 +551,13 @@ export function AftersaleTab({
 
     const handleAfterSaleDragEnd = (result: DropResult) => {
         if (!order || !result.destination || result.destination.droppableId === result.source.droppableId) return;
+        if (rejectNonSequentialKanbanMove(
+            AFTER_SALE_COLUMN_IDS,
+            result.source.droppableId,
+            result.destination.droppableId
+        )) {
+            return;
+        }
         const newStage = result.destination.droppableId as string;
         const itemId = result.draggableId;
 

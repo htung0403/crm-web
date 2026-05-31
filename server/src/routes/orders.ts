@@ -1284,7 +1284,7 @@ router.post(['/:id/upsell-ticket', '/:id/upsell-request', '/:id/edit-request'], 
                 total_amount: totalAmount,
                 notes: notes || ''
             })
-            .select('*, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)')
+            .select('*, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!upsell_tickets_sales_id_fkey(id, name, role, telegram_chat_id)')
             .single();
 
         if (ticketError) {
@@ -1821,7 +1821,7 @@ router.put('/:id/full', authenticate, requireSale, async (req: AuthenticatedRequ
                 total_amount: totalAmount,
                 notes: notes || 'Yêu cầu sửa đơn'
             })
-            .select('*, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)')
+            .select('*, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!upsell_tickets_sales_id_fkey(id, name, role, telegram_chat_id)')
             .single();
 
         if (ticketError) {

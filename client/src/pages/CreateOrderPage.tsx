@@ -1097,18 +1097,39 @@ export function CreateOrderPage() {
         }));
     };
 
-    const handleUpdateServiceDeposit = (productIndex: number, serviceIndex: number, deposit: number) => {
-        setProducts(prev => prev.map((p, i) => {
-            if (i !== productIndex) return p;
-            return {
+    const maxServiceDeposit = products.reduce(
+        (sum, p) => sum + p.services.reduce((ss, s) => ss + (s.price || 0), 0),
+        0
+    );
+    const hasServices = products.some(p => p.services.length > 0);
+
+    const handleSetTotalServiceDeposit = (totalDeposit: number) => {
+        const amount = Math.min(Math.max(0, totalDeposit), maxServiceDeposit);
+        setProducts(prev => {
+            const entries = prev.flatMap(p =>
+                p.services.map(s => ({ price: s.price || 0 }))
+            );
+            if (entries.length === 0) return prev;
+
+            const totalPrice = entries.reduce((a, e) => a + e.price, 0);
+            const capped = Math.min(amount, totalPrice);
+            let remaining = capped;
+            const shares = entries.map((e, idx) => {
+                if (idx === entries.length - 1) return remaining;
+                const share = totalPrice > 0 ? Math.floor((capped * e.price) / totalPrice) : 0;
+                remaining -= share;
+                return share;
+            });
+
+            let shareIdx = 0;
+            return prev.map(p => ({
                 ...p,
-                services: p.services.map((s, si) => {
-                    if (si !== serviceIndex) return s;
-                    const maxDeposit = Math.max(0, s.price || 0);
-                    return { ...s, deposit_amount: Math.min(Math.max(0, deposit), maxDeposit) };
-                }),
-            };
-        }));
+                services: p.services.map(s => ({
+                    ...s,
+                    deposit_amount: shares[shareIdx++],
+                })),
+            }));
+        });
     };
 
     // Add sale to a service
@@ -1417,6 +1438,25 @@ export function CreateOrderPage() {
         return Number(cleanValue) || 0;
     };
 
+    const serviceDepositInput = hasServices ? (
+        <div className="space-y-2">
+            <Label className="text-xs font-bold uppercase text-amber-800">Cọc đơn hàng</Label>
+            <Input
+                type="text"
+                value={totalServiceDeposits ? formatInputCurrency(totalServiceDeposits) : ''}
+                onFocus={(e) => e.target.select()}
+                onChange={(e) => handleSetTotalServiceDeposit(parseInputCurrency(e.target.value))}
+                placeholder="VD: 500.000"
+                className="h-9 border-amber-200 bg-amber-50/40 focus-visible:ring-amber-400"
+            />
+            {totalServiceDeposits > 0 && (
+                <p className="text-[10px] text-muted-foreground">
+                    Còn lại khi trả đồ (dịch vụ): {formatCurrency(Math.max(0, maxServiceDeposit - totalServiceDeposits))}
+                </p>
+            )}
+        </div>
+    ) : null;
+
     // Add surcharge handler
     const handleAddSurcharge = (type: string) => {
         const surchargeType = SURCHARGE_TYPES.find(s => s.value === type);
@@ -1532,6 +1572,14 @@ export function CreateOrderPage() {
                                 </Badge>
                             </div>
                         </div>
+                    </CardContent>
+                </Card>
+            )}
+
+            {serviceDepositInput && (
+                <Card className="border-amber-200 bg-amber-50/30">
+                    <CardContent className="p-4">
+                        {serviceDepositInput}
                     </CardContent>
                 </Card>
             )}
@@ -1799,7 +1847,7 @@ export function CreateOrderPage() {
 
             {/* Step 1: Customer Selection */}
             {step === 1 && (
-                <Card className="min-w-0 overflow-hidden">
+                <Card className="min-w-0 overflow-visible">
                     <CardHeader className="space-y-3 pb-4">
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <CardTitle className="flex shrink-0 items-center gap-2 text-base whitespace-nowrap sm:text-lg">
@@ -1858,7 +1906,7 @@ export function CreateOrderPage() {
 
                                     {/* Dropdown results */}
                                     {customerDropdownOpen && (
-                                        <div className="absolute z-50 w-full mt-1 bg-background border rounded-lg shadow-lg max-h-[300px] overflow-y-auto">
+                                        <div className="absolute z-50 left-0 right-0 mt-1 w-full min-w-0 bg-background border rounded-xl shadow-lg max-h-[min(320px,55vh)] overflow-y-auto overflow-x-hidden">
                                             {filteredCustomers.length === 0 ? (
                                                 <div className="text-center py-4 px-3">
                                                     <p className="text-sm text-muted-foreground mb-2">
@@ -1882,20 +1930,23 @@ export function CreateOrderPage() {
                                                 filteredCustomers.slice(0, 10).map(c => (
                                                     <button
                                                         key={c.id}
+                                                        type="button"
                                                         onClick={() => {
                                                             setCustomerId(c.id);
                                                             setCustomerSearch('');
                                                             setCustomerDropdownOpen(false);
                                                         }}
-                                                        className="w-full flex items-center gap-2 p-2 hover:bg-muted/50 transition-colors text-left"
+                                                        className="w-full flex items-center gap-3 p-3 hover:bg-muted/50 transition-colors text-left border-b border-border/60 last:border-b-0"
                                                     >
-                                                        <Avatar className="h-7 w-7">
-                                                            <AvatarFallback className="bg-primary/10 text-primary text-xs">
+                                                        <Avatar className="h-9 w-9 shrink-0">
+                                                            <AvatarFallback className="bg-primary/10 text-primary text-sm">
                                                                 {c.name.charAt(0)}
                                                             </AvatarFallback>
                                                         </Avatar>
-                                                        <span className="font-medium text-sm">{c.name}</span>
-                                                        <span className="text-xs text-muted-foreground">• {c.phone}</span>
+                                                        <div className="min-w-0 flex-1">
+                                                            <p className="font-medium text-sm leading-snug break-words">{c.name}</p>
+                                                            <p className="text-xs text-muted-foreground tabular-nums mt-0.5">{c.phone}</p>
+                                                        </div>
                                                     </button>
                                                 ))
                                             )}
@@ -2584,6 +2635,16 @@ export function CreateOrderPage() {
                         </Card>
                     </div>
 
+                    {serviceDepositInput && (
+                        <div className="lg:hidden">
+                            <Card className="border-amber-200 bg-amber-50/30">
+                                <CardContent className="p-4">
+                                    {serviceDepositInput}
+                                </CardContent>
+                            </Card>
+                        </div>
+                    )}
+
                     {/* Sidebar */}
                     <div className="hidden lg:block">
                         {orderSidebarContent}
@@ -2666,57 +2727,34 @@ export function CreateOrderPage() {
                                                 {/* Services */}
                                                 {product.services.length > 0 && (
                                                     <div className="mt-3 space-y-2">
-                                                        {product.services.map((s, si) => {
-                                                            const deposit = s.deposit_amount || 0;
-                                                            const serviceRemaining = Math.max(0, s.price - deposit);
-                                                            return (
-                                                            <div key={si} className="flex flex-col gap-2 rounded-lg border bg-white p-3">
-                                                                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                                                                    <div className="min-w-0 flex-1">
-                                                                        <div className="flex items-center gap-2">
-                                                                            <Sparkles className="h-4 w-4 shrink-0 text-purple-500" />
-                                                                            <span className="font-medium break-words">{s.name}</span>
+                                                        {product.services.map((s, si) => (
+                                                            <div key={si} className="flex flex-col gap-2 rounded-lg border bg-white p-3 sm:flex-row sm:items-start sm:justify-between">
+                                                                <div className="min-w-0 flex-1">
+                                                                    <div className="flex items-center gap-2">
+                                                                        <Sparkles className="h-4 w-4 shrink-0 text-purple-500" />
+                                                                        <span className="font-medium break-words">{s.name}</span>
+                                                                    </div>
+                                                                    {(s.technicians.length > 0 || (s.sales && s.sales.length > 0)) && (
+                                                                        <div className="mt-2 flex flex-wrap gap-1.5">
+                                                                            {s.technicians.map((tech, ti) => (
+                                                                                <span key={ti} className="whitespace-nowrap rounded-full bg-blue-50 px-2 py-1 text-[10px] text-blue-600">
+                                                                                    KTV: {tech.name} ({tech.commission}%)
+                                                                                </span>
+                                                                            ))}
+                                                                            {s.sales && s.sales.length > 0 && s.sales.map((sale, sai) => (
+                                                                                <span key={`s-${sai}`} className="whitespace-nowrap rounded-full bg-amber-50 px-2 py-1 text-[10px] text-amber-600">
+                                                                                    Sales: {sale.name} ({sale.commission}%)
+                                                                                </span>
+                                                                            ))}
                                                                         </div>
-                                                                        {(s.technicians.length > 0 || (s.sales && s.sales.length > 0)) && (
-                                                                            <div className="mt-2 flex flex-wrap gap-1.5">
-                                                                                {s.technicians.map((tech, ti) => (
-                                                                                    <span key={ti} className="whitespace-nowrap rounded-full bg-blue-50 px-2 py-1 text-[10px] text-blue-600">
-                                                                                        KTV: {tech.name} ({tech.commission}%)
-                                                                                    </span>
-                                                                                ))}
-                                                                                {s.sales && s.sales.length > 0 && s.sales.map((sale, sai) => (
-                                                                                    <span key={`s-${sai}`} className="whitespace-nowrap rounded-full bg-amber-50 px-2 py-1 text-[10px] text-amber-600">
-                                                                                        Sales: {sale.name} ({sale.commission}%)
-                                                                                    </span>
-                                                                                ))}
-                                                                            </div>
-                                                                        )}
-                                                                    </div>
-                                                                    <div className="shrink-0 text-right">
-                                                                        <p className="text-[10px] uppercase text-muted-foreground">Giá dịch vụ</p>
-                                                                        <p className="text-base font-bold text-green-600 sm:text-lg">{formatCurrency(s.price)}</p>
-                                                                    </div>
+                                                                    )}
                                                                 </div>
-                                                                <div className="flex flex-col gap-2 border-t border-dashed pt-2 sm:flex-row sm:items-end sm:gap-3">
-                                                                    <div className="flex-1 space-y-1">
-                                                                        <Label className="text-[10px] font-bold uppercase text-amber-800">Cọc dịch vụ</Label>
-                                                                        <Input
-                                                                            type="text"
-                                                                            value={deposit ? formatInputCurrency(deposit) : ''}
-                                                                            onFocus={(e) => e.target.select()}
-                                                                            onChange={(e) => handleUpdateServiceDeposit(index, si, parseInputCurrency(e.target.value))}
-                                                                            placeholder="VD: 500.000"
-                                                                            className="h-9 border-amber-200 bg-amber-50/40 focus-visible:ring-amber-400"
-                                                                        />
-                                                                    </div>
-                                                                    <div className="rounded-lg bg-muted/50 px-3 py-2 text-sm sm:min-w-[140px]">
-                                                                        <p className="text-[10px] text-muted-foreground">Còn lại khi trả đồ</p>
-                                                                        <p className="font-semibold text-foreground">{formatCurrency(serviceRemaining)}</p>
-                                                                    </div>
+                                                                <div className="shrink-0 text-right">
+                                                                    <p className="text-[10px] uppercase text-muted-foreground">Giá dịch vụ</p>
+                                                                    <p className="text-base font-bold text-green-600 sm:text-lg">{formatCurrency(s.price)}</p>
                                                                 </div>
                                                             </div>
-                                                            );
-                                                        })}
+                                                        ))}
                                                     </div>
                                                 )}
                                                 
@@ -2992,6 +3030,13 @@ export function CreateOrderPage() {
                                     </div>
                                 </div>
 
+                                {/* Service deposit */}
+                                {serviceDepositInput && (
+                                    <div className="space-y-2 pt-2 border-t border-amber-200">
+                                        {serviceDepositInput}
+                                    </div>
+                                )}
+
                                 {/* Payment Method Selection */}
                                  <div className="space-y-2 pt-2 border-t border-green-200">
                                      <Label className="text-xs text-green-700">Phương thức thanh toán</Label>
@@ -3028,13 +3073,6 @@ export function CreateOrderPage() {
                                          </Button>
                                      </div>
                                  </div>
-
-                                {totalServiceDeposits > 0 && (
-                                    <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm">
-                                        <span className="text-amber-900">Tổng cọc theo dịch vụ</span>
-                                        <span className="font-bold text-amber-800">{formatCurrency(totalServiceDeposits)}</span>
-                                    </div>
-                                )}
 
                                  {/* Payment Input */}                                <div className="space-y-2 pt-2 border-t border-green-200">
                                     <div className="flex items-center justify-between gap-2">
