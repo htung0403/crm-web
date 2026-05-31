@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { DragDropContext, Droppable, type DropResult } from '@hello-pangea/dnd';
 import { Plus, Loader2, Search, ListFilter, QrCode } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -36,7 +35,6 @@ import { orderItemsApi, orderProductsApi, ordersApi } from '@/lib/api';
 import { normalizeSearchText } from '@/lib/utils';
 import { ConfirmDoneDialog } from '@/components/orders/workflow/ConfirmDoneDialog';
 import { useViewActionForRoles } from '@/hooks/useViewAction';
-import { rejectNonSequentialKanbanMove, ORDER_KANBAN_COLUMN_IDS } from '@/lib/kanbanSequential';
 
 const MOBILE_ORDER_STAT_STYLES: Record<string, { bg: string; label: string }> = {
     before_sale: { bg: 'bg-blue-600', label: 'Before Sale' },
@@ -97,76 +95,6 @@ export function OrdersPage() {
         document.addEventListener('visibilitychange', handleVisibilityChange);
         return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
     }, [fetchOrders]);
-
-    const handleDragEnd = async (result: DropResult) => {
-        const { destination, source, draggableId } = result;
-
-        if (!destination) return;
-        if (destination.droppableId === source.droppableId && destination.index === source.index) return;
-
-        if (rejectNonSequentialKanbanMove(
-            ORDER_KANBAN_COLUMN_IDS,
-            source.droppableId,
-            destination.droppableId
-        )) {
-            return;
-        }
-
-        const newStatus = destination.droppableId;
-        const [orderId, groupIndexStr] = draggableId.split('__');
-        const order = orders.find(o => o.id === orderId);
-
-        if (!order) return;
-
-        const groups = getOrderProductGroups(order);
-        const groupIndex = parseInt(groupIndexStr, 10);
-        const group = groups[groupIndex];
-
-        if (!group) return;
-
-        // If dropping to after_sale, show payment dialog if order is not fully paid
-        if (newStatus === 'after_sale') {
-            if (order.payment_status !== 'paid') {
-                setPendingDrop({ orderId, targetStatus: newStatus });
-                setPayingOrder(order);
-                setPayingGroup(group);
-                return;
-            }
-        }
-
-        // Show confirmation dialog if moving to done
-        if (newStatus === 'done') {
-            const itemIds: string[] = [];
-            if (group.product) itemIds.push(group.product.id);
-            group.services.forEach(s => itemIds.push(s.id));
-
-            setConfirmDoneItemIds(itemIds);
-            setIsV2ServiceForDone(group.services.some(s => s.item_type === 'service' || s.item_type === 'package'));
-            setOrderToCheckStatus(orderId);
-            setShowConfirmDoneDialog(true);
-            return;
-        }
-
-        try {
-            // Identify all items in this group
-            const itemIds: string[] = [];
-            if (group.product) itemIds.push(group.product.id);
-            group.services.forEach(s => itemIds.push(s.id));
-
-            // Map target column status to valid item status for API
-            let targetStatus = newStatus;
-            if (newStatus === 'before_sale') targetStatus = 'step1';
-
-            // Update status of all items in the group
-            await Promise.all(itemIds.map(id => orderItemsApi.updateStatus(id, targetStatus)));
-            
-            toast.success('Đã cập nhật trạng thái sản phẩm');
-            await fetchOrders();
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Lỗi khi cập nhật trạng thái';
-            toast.error(message);
-        }
-    };
 
     const handleMarkGroupDone = (
         order: Order,
@@ -591,7 +519,6 @@ export function OrdersPage() {
                         onEditOrder={canEdit ? (order) => navigate(`/orders/${order.id}/edit`) : undefined}
                         onMarkDone={canEdit ? handleMarkGroupDone : undefined}
                         onDeleteOrder={canDelete ? handleDeleteOrder : undefined}
-                        onStatusMove={canEdit ? handleDragEnd : undefined}
                     />
                 </div>
 
@@ -678,84 +605,74 @@ export function OrdersPage() {
                     </div>
 
                     <div className="pb-6">
-                        <DragDropContext onDragEnd={handleDragEnd}>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-                                {columns.map((column) => (
-                                    <div key={column.id} className="min-w-0">
-                                        <Card className={`${column.bgColor} border ${column.borderColor} h-full`}>
-                                            <CardHeader className="p-3 pb-2">
-                                                <CardTitle className={`text-sm font-semibold flex items-center justify-between ${column.color}`}>
-                                                    <span>{column.title}</span>
-                                                    <Badge variant="secondary" className="bg-white/80">
-                                                        {(() => {
-                                                            const searchText = normalizeSearchText(columnSearch[column.id] || '');
-                                                            const statusCards = getCardsByStatus(column.id);
-                                                            if (!searchText) return statusCards.length;
-                                                            return statusCards.filter((c) =>
-                                                                matchesGlobalSearch(c.order, c.group, columnSearch[column.id] || ''),
-                                                            ).length;
-                                                        })()}
-                                                    </Badge>
-                                                </CardTitle>
-                                                <div className="relative mt-1.5 px-0.5">
-                                                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                                                    <Input
-                                                        placeholder="Mã đơn, mã HĐ, khách..."
-                                                        value={columnSearch[column.id] || ''}
-                                                        onChange={(e) => setColumnSearch({ ...columnSearch, [column.id]: e.target.value })}
-                                                        className="h-7 pl-6.5 text-[11px] bg-white/40 border-0 focus-visible:ring-1 focus-visible:ring-primary/20 placeholder:text-muted-foreground/60"
-                                                    />
-                                                </div>
-                                            </CardHeader>
-                                            <CardContent className="p-2">
-                                                <Droppable droppableId={column.id}>
-                                                    {(provided, snapshot) => {
-                                                        const cardsByStatus = getCardsByStatus(column.id);
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+                            {columns.map((column) => (
+                                <div key={column.id} className="min-w-0">
+                                    <Card className={`${column.bgColor} border ${column.borderColor} h-full`}>
+                                        <CardHeader className="p-3 pb-2">
+                                            <CardTitle className={`text-sm font-semibold flex items-center justify-between ${column.color}`}>
+                                                <span>{column.title}</span>
+                                                <Badge variant="secondary" className="bg-white/80">
+                                                    {(() => {
                                                         const searchText = normalizeSearchText(columnSearch[column.id] || '');
-                                                        const filteredCards = searchText
-                                                            ? cardsByStatus.filter((c) =>
-                                                                matchesGlobalSearch(
-                                                                    c.order,
-                                                                    c.group,
-                                                                    columnSearch[column.id] || '',
-                                                                ),
-                                                            )
-                                                            : cardsByStatus;
-                                                        return (
-                                                            <div
-                                                                ref={provided.innerRef}
-                                                                {...provided.droppableProps}
-                                                                className={`kanban-column space-y-3 min-h-[100px] lg:min-h-[calc(100vh-300px)] p-1 rounded-lg transition-colors ${snapshot.isDraggingOver ? 'bg-white/50' : ''
-                                                                    }`}
-                                                            >
-                                                                    {filteredCards.map(({ order, group, groupIndex }, index) => (
-                                                                        <OrderCard
-                                                                            key={`${order.id}__${groupIndex}`}
-                                                                            draggableId={`${order.id}__${groupIndex}`}
-                                                                            order={order}
-                                                                            productGroup={group}
-                                                                            columnId={column.id}
-                                                                            index={index}
-                                                                            onClick={() => navigate(`/orders/${order.id}`)}
-                                                                        />
-                                                                    ))}
-                                                                {provided.placeholder}
-
-                                                                {filteredCards.length === 0 && (
-                                                                    <div className="flex items-center justify-center h-20 lg:h-32 text-muted-foreground text-sm">
-                                                                        Không có đơn hàng
-                                                                    </div>
-                                                                )}
+                                                        const statusCards = getCardsByStatus(column.id);
+                                                        if (!searchText) return statusCards.length;
+                                                        return statusCards.filter((c) =>
+                                                            matchesGlobalSearch(c.order, c.group, columnSearch[column.id] || ''),
+                                                        ).length;
+                                                    })()}
+                                                </Badge>
+                                            </CardTitle>
+                                            <div className="relative mt-1.5 px-0.5">
+                                                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
+                                                <Input
+                                                    placeholder="Mã đơn, mã HĐ, khách..."
+                                                    value={columnSearch[column.id] || ''}
+                                                    onChange={(e) => setColumnSearch({ ...columnSearch, [column.id]: e.target.value })}
+                                                    className="h-7 pl-6.5 text-[11px] bg-white/40 border-0 focus-visible:ring-1 focus-visible:ring-primary/20 placeholder:text-muted-foreground/60"
+                                                />
+                                            </div>
+                                        </CardHeader>
+                                        <CardContent className="p-2">
+                                            {(() => {
+                                                const cardsByStatus = getCardsByStatus(column.id);
+                                                const searchText = normalizeSearchText(columnSearch[column.id] || '');
+                                                const filteredCards = searchText
+                                                    ? cardsByStatus.filter((c) =>
+                                                        matchesGlobalSearch(
+                                                            c.order,
+                                                            c.group,
+                                                            columnSearch[column.id] || '',
+                                                        ),
+                                                    )
+                                                    : cardsByStatus;
+                                                return (
+                                                    <div className="kanban-column space-y-3 min-h-[100px] lg:min-h-[calc(100vh-300px)] p-1 rounded-lg">
+                                                        {filteredCards.map(({ order, group, groupIndex }, index) => (
+                                                            <OrderCard
+                                                                key={`${order.id}__${groupIndex}`}
+                                                                draggableId={`${order.id}__${groupIndex}`}
+                                                                order={order}
+                                                                productGroup={group}
+                                                                columnId={column.id}
+                                                                index={index}
+                                                                draggable={false}
+                                                                onClick={() => navigate(`/orders/${order.id}`)}
+                                                            />
+                                                        ))}
+                                                        {filteredCards.length === 0 && (
+                                                            <div className="flex items-center justify-center h-20 lg:h-32 text-muted-foreground text-sm">
+                                                                Không có đơn hàng
                                                             </div>
-                                                        );
-                                                    }}
-                                                </Droppable>
-                                            </CardContent>
-                                        </Card>
-                                    </div>
-                                ))}
-                            </div>
-                        </DragDropContext>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })()}
+                                        </CardContent>
+                                    </Card>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 </div>
             </div>
