@@ -4,6 +4,14 @@ import { toast } from 'sonner';
 export const SEQUENTIAL_KANBAN_MOVE_MESSAGE =
     'Chỉ được chuyển sang bước liền kề, không được nhảy cóc';
 
+export const ORDER_KANBAN_COLUMN_IDS = [
+    'before_sale',
+    'in_progress',
+    'done',
+    'after_sale',
+    'cancelled',
+] as const;
+
 export const WORKFLOW_KANBAN_COLUMN_IDS = [
     'waiting',
     ...TECH_ROOM_IDS,

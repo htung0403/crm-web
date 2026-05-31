@@ -36,6 +36,7 @@ import { orderItemsApi, orderProductsApi, ordersApi } from '@/lib/api';
 import { normalizeSearchText } from '@/lib/utils';
 import { ConfirmDoneDialog } from '@/components/orders/workflow/ConfirmDoneDialog';
 import { useViewActionForRoles } from '@/hooks/useViewAction';
+import { rejectNonSequentialKanbanMove, ORDER_KANBAN_COLUMN_IDS } from '@/lib/kanbanSequential';
 
 const MOBILE_ORDER_STAT_STYLES: Record<string, { bg: string; label: string }> = {
     before_sale: { bg: 'bg-blue-600', label: 'Before Sale' },
@@ -102,6 +103,14 @@ export function OrdersPage() {
 
         if (!destination) return;
         if (destination.droppableId === source.droppableId && destination.index === source.index) return;
+
+        if (rejectNonSequentialKanbanMove(
+            ORDER_KANBAN_COLUMN_IDS,
+            source.droppableId,
+            destination.droppableId
+        )) {
+            return;
+        }
 
         const newStatus = destination.droppableId;
         const [orderId, groupIndexStr] = draggableId.split('__');
