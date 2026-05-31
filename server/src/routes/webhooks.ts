@@ -844,10 +844,15 @@ async function handleLeadUpdate(data: any) {
 
     let effectiveLastActor = normalizeMessageActor(rawLastActor, message_direction);
     let saleSlaHandledInCoreUpdate = false;
+    const incomingSaleName = owner_sale || assigned_to;
+
+    if (incomingSaleName && last_message_text && message_direction !== 'inbound') {
+        effectiveLastActor = 'sale';
+    }
 
     // Logic Ownership:
     // 1. Trường hợp đặc biệt: Thu hồi lead (Unassign) từ n8n (Tuần tra SLA)
-    if (assign_state === 'unassigned' && assigned_to === null) {
+    if (!incomingSaleName && assign_state === 'unassigned' && assigned_to === null) {
         updateData.assigned_to = null;
         updateData.assign_state = 'unassigned';
 
@@ -859,13 +864,14 @@ async function handleLeadUpdate(data: any) {
         });
     }
     // 2. Gán Sale mới: Ưu tiên owner_sale hoặc assigned_to
-    else if ((owner_sale || assigned_to) && !currentLead.assigned_to) {
-        const saleName = owner_sale || assigned_to;
+    else if (incomingSaleName && !currentLead.assigned_to) {
+        const saleName = incomingSaleName;
         const resolvedId = await resolveUserByName(saleName);
         if (resolvedId) {
             const now = new Date();
             updateData.assigned_to = resolvedId;
             updateData.assign_state = 'assigned';
+            updateData.owner_sale = saleName;
 
             if (effectiveLastActor === 'sale' && last_message_text) {
                 const deadline = calculateDeadline(now, SLA_CYCLES[1], currentLead.created_at || now.toISOString());
@@ -894,8 +900,8 @@ async function handleLeadUpdate(data: any) {
         }
     }
     // 3. Chống giành khách (Sale B nhắn vào Lead của Sale A)
-    else if ((owner_sale || assigned_to) && currentLead.assigned_to) {
-        const saleName = owner_sale || assigned_to;
+    else if (incomingSaleName && currentLead.assigned_to) {
+        const saleName = incomingSaleName;
         const resolvedId = await resolveUserByName(saleName);
         if (resolvedId && resolvedId !== currentLead.assigned_to) {
             // Lấy telegram_chat_id và tên của cả 2 sale
