@@ -457,6 +457,13 @@ async function resolveUserByName(nameOrId: string): Promise<string | null> {
     return data.id;
 }
 
+function normalizeMessageActor(lastActor?: string | null, messageDirection?: string | null): 'lead' | 'sale' | undefined {
+    if (lastActor === 'lead' || lastActor === 'sale') return lastActor;
+    if (messageDirection === 'inbound') return 'lead';
+    if (messageDirection === 'outbound') return 'sale';
+    return undefined;
+}
+
 async function handleLeadUpsert(incomingData: any, event?: string) {
     // Tự động xử lý nếu dữ liệu bị bọc trong key "lead" (giúp n8n linh hoạt hơn)
     const data = (incomingData && incomingData.lead)
@@ -469,6 +476,8 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
         last_message_text, last_message_time, last_actor,
         pancake_customer_id, message_direction
     } = data;
+
+    const normalizedLastActor = normalizeMessageActor(last_actor, message_direction);
 
     // Thông tin debug để trả về cho n8n đối soát
     const debugInfo = {
@@ -559,7 +568,7 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
     // Nếu không tìm thấy existing lead mà có thông tin tin nhắn, thì bỏ qua việc tạo mới
     // NHƯNG nếu là tin nhắn inbound từ khách (lead), có thread/conv id rõ ràng thì VẪN phải tạo.
     if (!existing && last_message_text && event !== 'lead.create') {
-        const isLeadInbound = last_actor === 'lead' && message_direction === 'inbound';
+        const isLeadInbound = normalizedLastActor === 'lead';
 
         if (!isLeadInbound) {
             console.log(`[Webhook] Không tìm thấy lead cho thread ${fb_thread_id || pancake_conversation_id}, bỏ qua tạo mới theo yêu cầu.`);
@@ -598,7 +607,7 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
         avatar_url: avatar_url || null,
         last_message_text: last_message_text || null,
         last_message_time: last_message_time || new Date().toISOString(),
-        last_actor: last_actor || null,
+        last_actor: normalizedLastActor || null,
         assign_state: resolvedAssignedTo ? 'assigned' : 'unassigned'
     };
 
@@ -672,15 +681,15 @@ async function handleLeadUpsert(incomingData: any, event?: string) {
     if (last_message_text) {
         await logLeadMessage(lead.id, {
             content: last_message_text,
-            sender_type: last_actor || 'lead',
-            sender_name: last_actor === 'lead' ? (name || facebook_name) : 'Sale',
+            sender_type: normalizedLastActor || 'lead',
+            sender_name: normalizedLastActor === 'lead' ? (name || facebook_name) : 'Sale',
             created_at: last_message_time
         });
         
         // Trigger SLA Rule 1 or 2
-        if (last_actor === 'lead') {
+        if (normalizedLastActor === 'lead') {
             await on_customer_message(lead);
-        } else if (last_actor === 'sale') {
+        } else if (normalizedLastActor === 'sale') {
             await on_sale_message(lead, resolvedAssignedTo as string, saleName);
         }
     } else if (resolvedAssignedTo) {
@@ -711,7 +720,7 @@ async function handleLeadUpdate(data: any) {
         assigned_to,
         owner_sale, // Tên sale từ n8n
         assign_state, // Bôi đậm trạng thái gán
-        message_direction: _ignored_direction, // Không phải cột DB
+        message_direction, // Không phải cột DB
         lead: _ignored_lead, // Bỏ qua key "lead" để không bị nhầm là cột database
         t_last_message: _ignored_t1, // Bỏ key rác từ n8n
         t_last_customer_message: _ignored_t2, // Bỏ key rác từ n8n
@@ -833,7 +842,7 @@ async function handleLeadUpdate(data: any) {
     // AI fields removed from core update
     // Handled by handleLeadAIUpdate instead
 
-    let effectiveLastActor = rawLastActor;
+    let effectiveLastActor = normalizeMessageActor(rawLastActor, message_direction);
 
     // Logic Ownership:
     // 1. Trường hợp đặc biệt: Thu hồi lead (Unassign) từ n8n (Tuần tra SLA)
@@ -899,7 +908,7 @@ async function handleLeadUpdate(data: any) {
             });
 
             // Ghi tin nhắn vào CRM nhưng KHÔNG tính SLA
-            if (last_message_text && rawLastActor === 'sale') {
+            if (last_message_text && effectiveLastActor === 'sale') {
                 await logLeadActivity(leadId, {
                     type: 'note',
                     content: `[Cảnh báo vi phạm] ${saleName} đã nhắn tin: ${last_message_text}`,
@@ -959,8 +968,8 @@ async function handleLeadUpdate(data: any) {
     if (last_message_text) {
         await logLeadMessage(leadId, {
             content: last_message_text,
-            sender_type: rawLastActor || 'lead',
-            sender_name: rawLastActor === 'lead' ? (currentLead?.name || currentLead?.facebook_name) : 'Sale',
+            sender_type: effectiveLastActor || 'lead',
+            sender_name: effectiveLastActor === 'lead' ? (currentLead?.name || currentLead?.facebook_name) : 'Sale',
             created_at: last_message_time
         });
         

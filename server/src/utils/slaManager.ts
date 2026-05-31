@@ -127,7 +127,7 @@ export async function on_customer_message(lead: any) {
 /**
  * Di chuyển SLA sang mốc tiếp theo
  */
-export async function move_to_next_rule(lead: any, saleId: string | null = null, fromCron: boolean = false) {
+export async function move_to_next_rule(lead: any, saleId: string | null = null, fromCron: boolean = false, markOutbound: boolean = false) {
     const now = new Date();
     const nextIndex = (lead.current_rule_index || 0) + 1;
     console.log('[DEBUG SLA] nextIndex:', nextIndex);
@@ -153,7 +153,7 @@ export async function move_to_next_rule(lead: any, saleId: string | null = null,
         updates.last_valid_followup_at = now.toISOString();
     }
     
-    if (saleId) {
+    if (saleId || markOutbound) {
         updates.last_actor = 'sale';
         updates.t_last_outbound = now.toISOString();
         updates.last_message_time = now.toISOString();
@@ -169,6 +169,18 @@ export async function move_to_next_rule(lead: any, saleId: string | null = null,
  * Xử lý khi Sale Nhắn (Rule 2 + Rule 4)
  */
 export async function on_sale_message(lead: any, saleId: string | null, saleName: string) {
+    if (lead.id) {
+        const { data: freshLead, error } = await supabaseAdmin
+            .from('leads')
+            .select('id, assigned_to, name, owner_sale, created_at, current_deadline_at, current_rule_index, sla_state')
+            .eq('id', lead.id)
+            .maybeSingle();
+
+        if (!error && freshLead) {
+            lead = { ...lead, ...freshLead };
+        }
+    }
+
     // Check Giành khách (Rule 4)
     // Fix: Chỉ trigger giành khách nếu thực sự resolve được saleId và nó KHÁC với assigned_to
     if (lead.assigned_to && saleId && saleId !== lead.assigned_to) {
@@ -195,7 +207,7 @@ export async function on_sale_message(lead: any, saleId: string | null, saleName
     const timeLeftMins = getVirtualTimeLeft(now, currDeadline, lead.created_at);
     
     if (is_valid_followup(lead.current_rule_index || 0, timeLeftMins)) {
-        await move_to_next_rule(lead, saleId);
+        await move_to_next_rule(lead, saleId, false, true);
     } else {
         // Sai khung -> Không hợp lệ -> Trôi tiếp chờ cron
         const { error } = await supabaseAdmin.from('leads').update({
