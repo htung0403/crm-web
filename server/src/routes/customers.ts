@@ -5,6 +5,7 @@ import { authenticate, AuthenticatedRequest, requireSale } from '../middleware/a
 import { notifyCrmMaster } from '../utils/webhookNotifier.js';
 import { syncInvoiceWithOrder } from '../utils/billingHelper.js';
 import { checkAndCompleteOrder } from '../utils/orderHelper.js';
+import { insertPaymentRecord, sumPaidAmountByProduct } from '../utils/paymentRecordsHelper.js';
 
 const router = Router();
 
@@ -103,26 +104,69 @@ router.get('/:id/debt', authenticate, async (req: AuthenticatedRequest, res, nex
         const orderIds = orderList.map((o) => o.id);
 
         const depositByOrder: Record<string, number> = {};
+        const productsByOrder: Record<string, Array<{
+            id: string;
+            product_code: string;
+            name: string;
+            image_url: string | null;
+            total_amount: number;
+            deposit_amount: number;
+            paid_amount: number;
+            remaining_debt: number;
+        }>> = {};
+
         if (orderIds.length > 0) {
             const { data: orderProducts } = await supabaseAdmin
                 .from('order_products')
-                .select('id, order_id')
+                .select('id, order_id, product_code, name, images')
                 .in('order_id', orderIds);
 
             const productIds = (orderProducts || []).map((p) => p.id);
             const productToOrder = new Map((orderProducts || []).map((p) => [p.id, p.order_id]));
 
+            const depositByProduct: Record<string, number> = {};
+            const totalByProduct: Record<string, number> = {};
+            const paidByProduct = productIds.length > 0 && orderIds.length > 0
+                ? await sumPaidAmountByProduct(orderIds)
+                : {};
+
             if (productIds.length > 0) {
                 const { data: services } = await supabaseAdmin
                     .from('order_product_services')
-                    .select('order_product_id, deposit_amount')
+                    .select('order_product_id, deposit_amount, unit_price')
                     .in('order_product_id', productIds);
 
                 for (const svc of services || []) {
                     const orderId = productToOrder.get(svc.order_product_id);
                     if (!orderId) continue;
-                    depositByOrder[orderId] = (depositByOrder[orderId] || 0) + (Number(svc.deposit_amount) || 0);
+                    const dep = Number(svc.deposit_amount) || 0;
+                    const price = Number(svc.unit_price) || 0;
+                    depositByOrder[orderId] = (depositByOrder[orderId] || 0) + dep;
+                    depositByProduct[svc.order_product_id] = (depositByProduct[svc.order_product_id] || 0) + dep;
+                    totalByProduct[svc.order_product_id] = (totalByProduct[svc.order_product_id] || 0) + price;
                 }
+            }
+
+            for (const p of orderProducts || []) {
+                const orderId = p.order_id;
+                if (!productsByOrder[orderId]) productsByOrder[orderId] = [];
+                const images = Array.isArray(p.images) ? p.images : [];
+                const totalAmount = totalByProduct[p.id] || 0;
+                const paidAmount = paidByProduct[p.id] || 0;
+                productsByOrder[orderId].push({
+                    id: p.id,
+                    product_code: p.product_code,
+                    name: p.name || p.product_code,
+                    image_url: images[0] || null,
+                    total_amount: totalAmount,
+                    deposit_amount: depositByProduct[p.id] || 0,
+                    paid_amount: paidAmount,
+                    remaining_debt: Math.max(0, totalAmount - paidAmount),
+                });
+            }
+
+            for (const orderId of Object.keys(productsByOrder)) {
+                productsByOrder[orderId].sort((a, b) => a.product_code.localeCompare(b.product_code));
             }
         }
 
@@ -141,6 +185,7 @@ router.get('/:id/debt', authenticate, async (req: AuthenticatedRequest, res, nex
                 remaining_debt: remaining,
                 payment_status: o.payment_status,
                 status: o.status,
+                products: productsByOrder[o.id] || [],
             };
         });
 
@@ -219,7 +264,12 @@ router.post('/:id/collect-payment', authenticate, requireSale, async (req: Authe
             payment_method?: string;
             notes?: string;
             content?: string;
-            allocations?: Array<{ order_id: string; amount: number }>;
+            allocations?: Array<{
+                order_id: string;
+                amount: number;
+                order_product_id?: string;
+                payment_kind?: 'deposit' | 'payment';
+            }>;
         };
 
         const totalPay = Number(amount) || 0;
@@ -260,27 +310,63 @@ router.post('/:id/collect-payment', authenticate, requireSale, async (req: Authe
                 throw new ApiError(`Số tiền vượt quá công nợ đơn ${order.order_code}`, 400);
             }
 
-            const payContent = content || `Thanh toán công nợ - ${customer.name}`;
+            const paymentKind = alloc.payment_kind === 'deposit' ? 'deposit' : 'payment';
+            let productCode: string | null = null;
 
-            const { data: payment, error: paymentError } = await supabaseAdmin
-                .from('payment_records')
-                .insert({
-                    order_id: order.id,
-                    order_code: order.order_code,
-                    content: payContent,
-                    amount: payAmount,
-                    payment_method: payment_method || 'cash',
-                    notes,
-                    transaction_type: 'income',
-                    transaction_category: 'Thanh toán đơn hàng',
-                    transaction_status: 'approved',
-                    created_by: req.user!.id,
-                })
-                .select()
-                .single();
+            if (alloc.order_product_id) {
+                const { data: orderProduct } = await supabaseAdmin
+                    .from('order_products')
+                    .select('id, product_code, order_id')
+                    .eq('id', alloc.order_product_id)
+                    .eq('order_id', order.id)
+                    .single();
+
+                if (!orderProduct) {
+                    throw new ApiError(`Sản phẩm không thuộc đơn ${order.order_code}`, 400);
+                }
+                productCode = orderProduct.product_code;
+            }
+
+            const kindLabel = paymentKind === 'deposit' ? 'Tiền cọc' : 'Thanh toán';
+            const productSuffix = productCode ? ` - ${productCode}` : '';
+            const payContent = content || `${kindLabel} công nợ${productSuffix} - ${customer.name}`;
+
+            const { data: payment, error: paymentError } = await insertPaymentRecord({
+                order_id: order.id,
+                order_code: order.order_code,
+                order_product_id: alloc.order_product_id || null,
+                payment_kind: paymentKind,
+                content: payContent,
+                amount: payAmount,
+                payment_method: payment_method || 'cash',
+                notes,
+                transaction_type: 'income',
+                transaction_category: paymentKind === 'deposit' ? 'Tiền cọc' : 'Thanh toán đơn hàng',
+                transaction_status: 'approved',
+                created_by: req.user!.id,
+            });
 
             if (paymentError) {
                 throw new ApiError('Lỗi khi ghi nhận thanh toán: ' + paymentError.message, 500);
+            }
+
+            if (paymentKind === 'deposit' && alloc.order_product_id) {
+                const { data: svcList } = await supabaseAdmin
+                    .from('order_product_services')
+                    .select('id, deposit_amount')
+                    .eq('order_product_id', alloc.order_product_id)
+                    .order('created_at', { ascending: true })
+                    .limit(1);
+
+                if (svcList?.length) {
+                    const svc = svcList[0];
+                    await supabaseAdmin
+                        .from('order_product_services')
+                        .update({
+                            deposit_amount: (Number(svc.deposit_amount) || 0) + payAmount,
+                        })
+                        .eq('id', svc.id);
+                }
             }
 
             const newPaidAmount = (order.paid_amount || 0) + payAmount;

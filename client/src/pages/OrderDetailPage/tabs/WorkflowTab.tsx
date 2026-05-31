@@ -23,7 +23,6 @@ import {
     buildKanbanDropResult,
     type MobileKanbanColumn,
 } from '@/components/kanban/mobileKanban';
-import { rejectNonSequentialKanbanMove, WORKFLOW_KANBAN_COLUMN_IDS } from '@/lib/kanbanSequential';
 
 interface WorkflowCardProps {
     group: { product: OrderItem | null; services: OrderItem[] };
@@ -227,6 +226,7 @@ const WorkflowCard = memo(({
                                 }
                                 sourceIndex={index}
                                 embedded
+                                allowColumnJump
                             />
                         </div>
                     )}
@@ -668,13 +668,6 @@ export function WorkflowTab({
             return;
         }
         if (!result.destination) return;
-        if (rejectNonSequentialKanbanMove(
-            WORKFLOW_KANBAN_COLUMN_IDS,
-            result.source.droppableId,
-            result.destination.droppableId
-        )) {
-            return;
-        }
         onWorkflowDragEnd(result);
     };
 
@@ -800,13 +793,6 @@ export function WorkflowTab({
                                 <DragDropContext onDragEnd={(result) => {
                                     if (!canDragWorkflow) return;
                                     if (!result.destination) return;
-                                    if (rejectNonSequentialKanbanMove(
-                                        WORKFLOW_KANBAN_COLUMN_IDS,
-                                        result.source.droppableId,
-                                        result.destination.droppableId
-                                    )) {
-                                        return;
-                                    }
                                     onWorkflowDragEnd(result);
                                 }}>
                                     <div className="hidden gap-4 overflow-x-auto pb-4 md:grid md:grid-cols-6 md:min-w-[1200px]">

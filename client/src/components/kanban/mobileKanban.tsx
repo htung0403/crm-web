@@ -92,6 +92,8 @@ export function MobileKanbanMoveBar({
     className,
     /** true = luôn hiện (parent đã bọc md:hidden), không thêm md:hidden */
     embedded = false,
+    /** true = hiện dropdown chọn cột bất kỳ (nhảy cóc), dùng cho tab Quy trình */
+    allowColumnJump = false,
 }: {
     columns: MobileKanbanColumn[];
     currentColumnId: string;
@@ -102,10 +104,12 @@ export function MobileKanbanMoveBar({
     sourceIndex?: number;
     className?: string;
     embedded?: boolean;
+    allowColumnJump?: boolean;
 }) {
     const idx = columns.findIndex((c) => c.id === currentColumnId);
     const prev = idx > 0 ? columns[idx - 1] : null;
     const next = idx >= 0 && idx < columns.length - 1 ? columns[idx + 1] : null;
+    const others = allowColumnJump ? columns.filter((c) => c.id !== currentColumnId) : [];
 
     const fire = (destId: string) => {
         if (destId === currentColumnId) return;
@@ -155,6 +159,26 @@ export function MobileKanbanMoveBar({
                     </Button>
                 )}
             </div>
+            {others.length > 0 && (
+                <select
+                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-[12px] text-foreground"
+                    defaultValue=""
+                    onChange={(e) => {
+                        const v = e.target.value;
+                        if (v) fire(v);
+                        e.target.value = '';
+                    }}
+                >
+                    <option value="" disabled>
+                        Chọn phòng khác…
+                    </option>
+                    {others.map((c) => (
+                        <option key={c.id} value={c.id}>
+                            {c.title}
+                        </option>
+                    ))}
+                </select>
+            )}
         </div>
     );
 }

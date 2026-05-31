@@ -144,6 +144,16 @@ export const customersApi = {
                 deposit_amount: number;
                 remaining_debt: number;
                 payment_status?: string;
+                products?: Array<{
+                    id: string;
+                    product_code: string;
+                    name: string;
+                    image_url: string | null;
+                    total_amount: number;
+                    deposit_amount: number;
+                    paid_amount?: number;
+                    remaining_debt?: number;
+                }>;
             }>;
             ledger: Array<{
                 id: string;
@@ -163,7 +173,12 @@ export const customersApi = {
             payment_method?: string;
             notes?: string;
             content?: string;
-            allocations: Array<{ order_id: string; amount: number }>;
+            allocations: Array<{
+                order_id: string;
+                amount: number;
+                order_product_id?: string;
+                payment_kind?: 'deposit' | 'payment';
+            }>;
         }
     ) => api.post<ApiResponse<{ payments: unknown[] }>>(`/customers/${id}/collect-payment`, data),
 };

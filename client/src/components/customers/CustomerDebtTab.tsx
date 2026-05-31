@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Loader2, Wallet, RefreshCw, FileText } from 'lucide-react';
+import { Loader2, Wallet, RefreshCw, FileText, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { customersApi } from '@/lib/api';
 import { formatCurrency, formatDateTime, formatNumber, cn } from '@/lib/utils';
 import { CustomerCollectPaymentDialog, type CustomerDebtOrderRow } from './CustomerCollectPaymentDialog';
+import { CustomerOrderPaymentDetailDialog } from './CustomerOrderPaymentDetailDialog';
 
 interface CustomerDebtTabProps {
     customerId: string;
@@ -38,6 +39,7 @@ export function CustomerDebtTab({ customerId, customerName, customerPhone }: Cus
     const [orders, setOrders] = useState<CustomerDebtOrderRow[]>([]);
     const [ledger, setLedger] = useState<LedgerRow[]>([]);
     const [showPayDialog, setShowPayDialog] = useState(false);
+    const [detailOrder, setDetailOrder] = useState<CustomerDebtOrderRow | null>(null);
 
     const loadDebt = useCallback(async () => {
         setLoading(true);
@@ -124,12 +126,13 @@ export function CustomerDebtTab({ customerId, customerName, customerPhone }: Cus
                                     <th className="p-3 text-right">Đã cọc</th>
                                     <th className="p-3 text-right">Đã thu</th>
                                     <th className="p-3 text-right">Còn nợ</th>
+                                    <th className="p-3 text-center w-[120px]">Thao tác</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {orders.length === 0 ? (
                                     <tr>
-                                        <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                                        <td colSpan={7} className="p-8 text-center text-muted-foreground">
                                             Chưa có đơn hàng
                                         </td>
                                     </tr>
@@ -147,6 +150,17 @@ export function CustomerDebtTab({ customerId, customerName, customerPhone }: Cus
                                                 <span className={cn('font-bold tabular-nums', o.remaining_debt > 0 ? 'text-red-600' : 'text-green-600')}>
                                                     {formatCurrency(o.remaining_debt)}
                                                 </span>
+                                            </td>
+                                            <td className="p-3 text-center">
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-8 gap-1.5 text-primary"
+                                                    onClick={() => setDetailOrder(o)}
+                                                >
+                                                    <Eye className="h-3.5 w-3.5" />
+                                                    Xem chi tiết
+                                                </Button>
                                             </td>
                                         </tr>
                                     ))
@@ -172,12 +186,13 @@ export function CustomerDebtTab({ customerId, customerName, customerPhone }: Cus
                                     <th className="p-3 text-left">Loại</th>
                                     <th className="p-3 text-right">Số tiền</th>
                                     <th className="p-3 text-right">Dư nợ KH</th>
+                                    <th className="p-3 text-center w-[100px]"></th>
                                 </tr>
                             </thead>
                             <tbody>
                                 {ledger.length === 0 ? (
                                     <tr>
-                                        <td colSpan={5} className="p-8 text-center text-muted-foreground">
+                                        <td colSpan={6} className="p-8 text-center text-muted-foreground">
                                             Chưa có giao dịch
                                         </td>
                                     </tr>
@@ -201,6 +216,22 @@ export function CustomerDebtTab({ customerId, customerName, customerPhone }: Cus
                                                 {formatNumber(Math.abs(row.amount))}
                                             </td>
                                             <td className="p-3 text-right font-bold tabular-nums">{formatNumber(row.balance)}</td>
+                                            <td className="p-3 text-center">
+                                                {row.kind === 'payment' && (
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        className="h-8 gap-1 text-primary"
+                                                        onClick={() => {
+                                                            const matched = orders.find((o) => o.order_code === row.code);
+                                                            if (matched) setDetailOrder(matched);
+                                                        }}
+                                                    >
+                                                        <Eye className="h-3.5 w-3.5" />
+                                                        Chi tiết
+                                                    </Button>
+                                                )}
+                                            </td>
                                         </tr>
                                     ))
                                 )}
@@ -219,6 +250,12 @@ export function CustomerDebtTab({ customerId, customerName, customerPhone }: Cus
                 totalDebt={summary?.total_debt || 0}
                 orders={orders}
                 onSuccess={() => void loadDebt()}
+            />
+
+            <CustomerOrderPaymentDetailDialog
+                open={!!detailOrder}
+                onOpenChange={(open) => !open && setDetailOrder(null)}
+                order={detailOrder}
             />
         </div>
     );

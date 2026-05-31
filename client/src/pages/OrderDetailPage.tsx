@@ -68,7 +68,6 @@ import { WorkflowTab } from './OrderDetailPage/tabs/WorkflowTab';
 import { AftersaleTab } from './OrderDetailPage/tabs/AftersaleTab';
 import { CareTab } from './OrderDetailPage/tabs/CareTab';
 import { TECH_ROOMS } from '@/components/orders/constants';
-import { rejectNonSequentialKanbanMove, WORKFLOW_KANBAN_COLUMN_IDS } from '@/lib/kanbanSequential';
 import { columns, getAfterSaleStageLabel, getCareWarrantyStageLabel } from './OrderDetailPage/constants';
 import { getStatusVariant, getSLADisplay } from './OrderDetailPage/utils';
 import { cn } from '@/lib/utils';
@@ -571,14 +570,6 @@ export function OrderDetailPage() {
 
     const onWorkflowDragEnd = (result: DropResult) => {
         if (!result.destination || result.destination.droppableId === result.source.droppableId) return;
-
-        if (rejectNonSequentialKanbanMove(
-            WORKFLOW_KANBAN_COLUMN_IDS,
-            result.source.droppableId,
-            result.destination.droppableId
-        )) {
-            return;
-        }
 
         const draggableId = result.draggableId;
         const targetRoomId = result.destination.droppableId;

@@ -7,6 +7,7 @@ import { autoCreateInvoice, syncInvoiceWithOrder } from '../utils/billingHelper.
 import { notifyFinanceEvent } from '../utils/financeNotifications.js';
 import { notifyCrmMaster } from '../utils/webhookNotifier.js';
 import { buildCrmOrderUrl, getManagerRecipients, notifyCrmMasterUser } from '../utils/n8nCrmEvents.js';
+import { fetchOrderPaymentRecords } from '../utils/paymentRecordsHelper.js';
 
 
 const router = Router();
@@ -2145,11 +2146,7 @@ router.get('/:id/payments', authenticate, async (req: AuthenticatedRequest, res,
     try {
         const { id } = req.params;
 
-        const { data: payments, error } = await supabaseAdmin
-            .from('payment_records')
-            .select('*, created_by_user:users!payment_records_created_by_fkey(id, name, avatar)')
-            .eq('order_id', id)
-            .order('created_at', { ascending: false });
+        const { data: payments, error } = await fetchOrderPaymentRecords(id);
 
         if (error) {
             console.error('Error fetching payments:', error);
