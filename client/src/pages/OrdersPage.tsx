@@ -582,6 +582,7 @@ export function OrdersPage() {
                         onEditOrder={canEdit ? (order) => navigate(`/orders/${order.id}/edit`) : undefined}
                         onMarkDone={canEdit ? handleMarkGroupDone : undefined}
                         onDeleteOrder={canDelete ? handleDeleteOrder : undefined}
+                        onStatusMove={canEdit ? handleDragEnd : undefined}
                     />
                 </div>
 

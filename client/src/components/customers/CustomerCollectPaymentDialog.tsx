@@ -69,7 +69,6 @@ export function CustomerCollectPaymentDialog({
     );
 
     const [paidAt, setPaidAt] = useState('');
-    const [totalAmount, setTotalAmount] = useState(0);
     const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'zalopay'>('cash');
     const [notes, setNotes] = useState('');
     const [allocations, setAllocations] = useState<Record<string, number>>({});
@@ -80,7 +79,6 @@ export function CustomerCollectPaymentDialog({
         const now = new Date();
         const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
         setPaidAt(local);
-        setTotalAmount(totalDebt);
         setPaymentMethod('cash');
         setNotes('');
         const initial: Record<string, number> = {};
@@ -88,36 +86,28 @@ export function CustomerCollectPaymentDialog({
             initial[o.id] = o.remaining_debt;
         });
         setAllocations(initial);
-    }, [open, totalDebt, openOrders]);
+    }, [open, openOrders]);
 
     const allocSum = useMemo(
         () => Object.values(allocations).reduce((s, v) => s + (v || 0), 0),
         [allocations]
     );
 
-    const distributeFifo = (amount: number) => {
-        let left = amount;
+    const distributeFullFifo = () => {
         const next: Record<string, number> = {};
-        for (const o of openOrders) {
-            const pay = Math.min(o.remaining_debt, Math.max(0, left));
-            next[o.id] = pay;
-            left -= pay;
-        }
+        openOrders.forEach((o) => {
+            next[o.id] = o.remaining_debt;
+        });
         setAllocations(next);
     };
 
-    const handleTotalAmountChange = (amount: number) => {
-        setTotalAmount(amount);
-        distributeFifo(amount);
-    };
-
     const handleSubmit = async () => {
-        if (totalAmount <= 0) {
-            toast.error('Nhập số tiền thanh toán');
+        if (allocSum <= 0) {
+            toast.error('Nhập số tiền thanh toán vào từng đơn');
             return;
         }
-        if (allocSum !== totalAmount) {
-            toast.error('Tổng phân bổ phải bằng số tiền thanh toán');
+        if (allocSum > totalDebt) {
+            toast.error('Tổng phân bổ không được vượt quá nợ hiện tại');
             return;
         }
         const payload = openOrders
@@ -131,7 +121,7 @@ export function CustomerCollectPaymentDialog({
         setSubmitting(true);
         try {
             await customersApi.collectPayment(customerId, {
-                amount: totalAmount,
+                amount: allocSum,
                 payment_method: paymentMethod,
                 notes: notes || undefined,
                 content: `Thanh toán công nợ - ${customerName}`,
@@ -161,19 +151,10 @@ export function CustomerCollectPaymentDialog({
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <div className="space-y-1.5">
                         <Label className="text-xs">Thời gian</Label>
                         <Input type="datetime-local" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
-                    </div>
-                    <div className="space-y-1.5">
-                        <Label className="text-xs">Số tiền</Label>
-                        <Input
-                            type="text"
-                            value={formatInputCurrency(totalAmount)}
-                            onFocus={(e) => e.target.select()}
-                            onChange={(e) => handleTotalAmountChange(parseInputCurrency(e.target.value))}
-                        />
                     </div>
                     <div className="space-y-1.5">
                         <Label className="text-xs">Phương thức</Label>
@@ -255,9 +236,12 @@ export function CustomerCollectPaymentDialog({
 
                 <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                     <span className="text-muted-foreground">
-                        Tổng phân bổ: <strong className={allocSum === totalAmount ? 'text-green-600' : 'text-red-600'}>{formatCurrency(allocSum)}</strong>
+                        Tổng phân bổ:{' '}
+                        <strong className={allocSum > 0 && allocSum <= totalDebt ? 'text-green-600' : 'text-red-600'}>
+                            {formatCurrency(allocSum)}
+                        </strong>
                     </span>
-                    <Button type="button" variant="outline" size="sm" onClick={() => distributeFifo(totalAmount)}>
+                    <Button type="button" variant="outline" size="sm" onClick={distributeFullFifo}>
                         Phân bổ theo thứ tự đơn
                     </Button>
                 </div>

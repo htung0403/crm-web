@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams, useParams, useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
@@ -32,6 +32,15 @@ import { PrintThermalInvoiceDialog } from '@/components/orders/PrintThermalInvoi
 import type { Order } from '@/hooks/useOrders';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import {
+    CREATE_ORDER_DRAFT_KEY,
+    clearOrderDraft,
+    getEditOrderDraftKey,
+    loadOrderDraft,
+    saveOrderDraft,
+    type OrderFormDraft,
+} from '@/lib/orderFormDraft';
+import { setNavigationGuard } from '@/lib/navigationGuard';
 
 // Product types will be fetched from API
 
@@ -656,6 +665,140 @@ export function CreateOrderPage() {
             }
         }
     }, [searchParams, customers, createCustomer]);
+
+    const draftKey = useMemo(
+        () => (isEditMode && id ? getEditOrderDraftKey(id) : CREATE_ORDER_DRAFT_KEY),
+        [isEditMode, id]
+    );
+    const draftRestoredRef = useRef(false);
+
+    const isDirty = useMemo(() => {
+        if (step >= 4) return false;
+        return (
+            step > 1 ||
+            !!customerId ||
+            products.length > 0 ||
+            addOnProducts.length > 0 ||
+            !!notes.trim() ||
+            discount > 0 ||
+            surcharges.length > 0 ||
+            paidAmount > 0
+        );
+    }, [step, customerId, products, addOnProducts, notes, discount, surcharges, paidAmount]);
+
+    const applyOrderDraft = useCallback((draft: OrderFormDraft) => {
+        setStep(Math.min(3, Math.max(1, draft.step || 1)));
+        setCustomerId(draft.customerId || '');
+        setCustomerSearch(draft.customerSearch || '');
+        setProducts((draft.products || []) as CustomerProduct[]);
+        setCurrentProductId(draft.currentProductId ?? null);
+        setNotes(draft.notes || '');
+        setDiscount(draft.discount || 0);
+        setDiscountType(draft.discountType || 'amount');
+        setSurcharges((draft.surcharges || []) as Surcharge[]);
+        setPaidAmount(draft.paidAmount || 0);
+        setPaymentMethod(draft.paymentMethod || 'cash');
+        setAddOnProducts((draft.addOnProducts || []) as AddOnProduct[]);
+        setConfirmedProductIds(new Set(draft.confirmedProductIds || []));
+    }, []);
+
+    useEffect(() => {
+        if (loading || draftRestoredRef.current) return;
+        if (searchParams.get('lead_phone') || searchParams.get('lead_id')) {
+            draftRestoredRef.current = true;
+            return;
+        }
+
+        const draft = loadOrderDraft(draftKey);
+        draftRestoredRef.current = true;
+        if (!draft) return;
+
+        const restore = () => {
+            applyOrderDraft(draft);
+            toast.info('Đã khôi phục bản nháp đơn hàng');
+        };
+
+        if (isEditMode) {
+            if (window.confirm('Có bản nháp chỉnh sửa đơn chưa gửi. Khôi phục bản nháp?')) {
+                restore();
+            } else {
+                clearOrderDraft(draftKey);
+            }
+        } else {
+            restore();
+        }
+    }, [loading, draftKey, isEditMode, applyOrderDraft, searchParams]);
+
+    useEffect(() => {
+        if (loading || step >= 4 || !isDirty) return;
+        saveOrderDraft(draftKey, {
+            step,
+            customerId,
+            customerSearch,
+            products,
+            currentProductId,
+            notes,
+            discount,
+            discountType,
+            surcharges,
+            paidAmount,
+            paymentMethod,
+            addOnProducts,
+            confirmedProductIds: Array.from(confirmedProductIds),
+            savedAt: Date.now(),
+        });
+    }, [
+        loading,
+        step,
+        isDirty,
+        draftKey,
+        customerId,
+        customerSearch,
+        products,
+        currentProductId,
+        notes,
+        discount,
+        discountType,
+        surcharges,
+        paidAmount,
+        paymentMethod,
+        addOnProducts,
+        confirmedProductIds,
+    ]);
+
+    useEffect(() => {
+        if (!isDirty) {
+            setNavigationGuard(null);
+            return;
+        }
+        setNavigationGuard(() =>
+            window.confirm(
+                'Bạn đang tạo đơn dở. Dữ liệu đã được lưu nháp tự động.\n\nRời trang và quay lại sẽ khôi phục bản nháp.\n\nBạn có chắc muốn rời trang?'
+            )
+        );
+        return () => setNavigationGuard(null);
+    }, [isDirty]);
+
+    useEffect(() => {
+        if (!isDirty) return;
+        const onBeforeUnload = (e: BeforeUnloadEvent) => {
+            e.preventDefault();
+            e.returnValue = '';
+        };
+        window.addEventListener('beforeunload', onBeforeUnload);
+        return () => window.removeEventListener('beforeunload', onBeforeUnload);
+    }, [isDirty]);
+
+    const leavePage = useCallback(
+        (to: string) => {
+            if (!isDirty || window.confirm(
+                'Bạn đang tạo đơn dở. Dữ liệu đã được lưu nháp tự động.\n\nRời trang và quay lại sẽ khôi phục bản nháp.\n\nBạn có chắc muốn rời trang?'
+            )) {
+                navigate(to);
+            }
+        },
+        [isDirty, navigate]
+    );
 
     // List of users filtered by role for selection
     const availableTechnicians = users.filter(t => {
@@ -1506,6 +1649,7 @@ export function CreateOrderPage() {
                     notes: notes || 'Yêu cầu sửa đơn'
                 });
                 toast.success('Đã gửi yêu cầu sửa đơn. Vui lòng chờ quản lý duyệt.');
+                clearOrderDraft(draftKey);
                 navigate(`/orders/${id}`, {
                     state: {
                         pendingEditApproval: true
@@ -1520,7 +1664,7 @@ export function CreateOrderPage() {
 
             const orderResult = response.data.data;
             setCreatedOrder(orderResult);
-
+            clearOrderDraft(draftKey);
 
             setStep(4); // Success step
             toast.success(isEditMode ? 'Đã cập nhật đơn hàng thành công!' : 'Đã tạo đơn hàng thành công!');
@@ -1578,7 +1722,7 @@ export function CreateOrderPage() {
         <div className="min-w-0 max-w-full space-y-4 animate-fade-in w-full overflow-x-hidden">
             {/* Header */}
             <div className="flex min-w-0 items-start gap-3">
-                <Button variant="ghost" size="icon" className="shrink-0" onClick={() => navigate('/orders')}>
+                <Button variant="ghost" size="icon" className="shrink-0" onClick={() => leavePage('/orders')}>
                     <ArrowLeft className="h-5 w-5" />
                 </Button>
                 <div className="min-w-0 flex-1">
@@ -1603,6 +1747,11 @@ export function CreateOrderPage() {
                             ? "Cập nhật thông tin sản phẩm, dịch vụ và các mục bán kèm cho đơn hàng hiện tại"
                             : "Nhận sản phẩm khách và chọn dịch vụ"}
                     </p>
+                    {isDirty && step < 4 && (
+                        <p className="mt-1 text-xs font-medium text-amber-700">
+                            Đã lưu nháp tự động — bấm nhầm menu vẫn khôi phục được khi quay lại
+                        </p>
+                    )}
                 </div>
             </div>
 

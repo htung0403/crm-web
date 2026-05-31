@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
 import { Heart, Wrench, History, ShoppingBag, User as UserIcon, Tag, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +10,11 @@ import { formatDateTime } from '@/lib/utils';
 import { ordersApi } from '@/lib/api';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import type { WorkflowKanbanGroup } from '../types';
+import {
+    MobileKanbanColumnTabs,
+    MobileKanbanMoveBar,
+    type MobileKanbanColumn,
+} from '@/components/kanban/mobileKanban';
 
 interface CareTabProps {
     order: Order | null;
@@ -21,6 +26,7 @@ interface CareTabProps {
     getCareWarrantyStageLabel: (stage: string) => string;
     onProductCardClick: (group: any, roomId: string) => void;
     onUpdateItemAfterSaleData: (itemId: string, isCustomerItem: boolean, data: any) => Promise<void>;
+    isPhoneView?: boolean;
 }
 
 const CARE_WAR_COLS = [
@@ -37,13 +43,19 @@ const CareCard = memo(({
     index,
     col,
     order,
-    onProductCardClick
+    onProductCardClick,
+    isPhoneView = false,
+    flowColumns = [],
+    onCareMove,
 }: {
     group: WorkflowKanbanGroup;
     index: number;
     col: typeof CARE_WAR_COLS[number];
     order: Order;
     onProductCardClick: (group: any, roomId: string) => void;
+    isPhoneView?: boolean;
+    flowColumns?: MobileKanbanColumn[];
+    onCareMove?: (result: DropResult) => void;
 }) => {
     const productItem = group.product;
     const productName = productItem?.item_name || 'Sản phẩm';
@@ -51,14 +63,15 @@ const CareCard = memo(({
     const draggableId = `${order.id}::${productItem?.id || index}::${col.flow}`;
 
     return (
-        <Draggable key={draggableId} draggableId={draggableId} index={index}>
+        <Draggable key={draggableId} draggableId={draggableId} index={index} isDragDisabled={isPhoneView}>
             {(provided, snapshot) => (
                 <div
                     ref={provided.innerRef}
                     {...provided.draggableProps}
-                    {...provided.dragHandleProps}
+                    {...(isPhoneView ? {} : provided.dragHandleProps)}
                     className={cn(
-                        "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all cursor-grab active:cursor-grabbing",
+                        "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all",
+                        isPhoneView ? "cursor-pointer" : "cursor-grab active:cursor-grabbing",
                         snapshot.isDragging ? "shadow-lg ring-2 ring-primary/20 scale-105" : "",
                         col.flow === 'warranty' ? "border-red-400 hover:border-red-600" : "border-teal-400 hover:border-teal-600"
                     )}
@@ -103,6 +116,16 @@ const CareCard = memo(({
                             {col.flow === 'warranty' ? <Wrench className="h-3.5 w-3.5" /> : <Heart className="h-3.5 w-3.5" />}
                         </div>
                     </div>
+                    {onCareMove && flowColumns.length > 0 && (
+                        <MobileKanbanMoveBar
+                            columns={flowColumns}
+                            currentColumnId={col.id}
+                            draggableId={draggableId}
+                            onMove={onCareMove}
+                            sourceIndex={index}
+                            embedded
+                        />
+                    )}
                 </div>
             )}
         </Draggable>
@@ -120,11 +143,20 @@ export function CareTab({
     fetchKanbanLogs,
     getCareWarrantyStageLabel,
     onProductCardClick,
-    onUpdateItemAfterSaleData
+    onUpdateItemAfterSaleData,
+    isPhoneView = false,
 }: CareTabProps) {
     if (!order) return null;
-    
 
+    const [mobileWarCol, setMobileWarCol] = useState('war1');
+    const [mobileCareCol, setMobileCareCol] = useState('care6');
+    const warrantyColumns: MobileKanbanColumn[] = CARE_WAR_COLS.filter((c) => c.flow === 'warranty').map(
+        (c) => ({ id: c.id, title: c.title })
+    );
+    const careColumns: MobileKanbanColumn[] = CARE_WAR_COLS.filter((c) => c.flow === 'care').map((c) => ({
+        id: c.id,
+        title: c.title,
+    }));
     const orderInCareFlow = groups.some(g => {
         const item = (g.product || g.services?.[0]) as any;
         return item?.current_phase === 'care' || item?.current_phase === 'warranty';
@@ -199,7 +231,115 @@ export function CareTab({
                         </div>
                     )}
                     <DragDropContext onDragEnd={handleCareDragEnd}>
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        {isPhoneView && (
+                            <div className="space-y-6 mb-6 md:hidden">
+                                <div>
+                                    <h3 className="font-black text-red-700 mb-3 flex items-center tracking-widest uppercase text-xs">
+                                        <Wrench className="mr-2 h-4 w-4" /> Bảo hành
+                                    </h3>
+                                    <MobileKanbanColumnTabs
+                                        columns={warrantyColumns}
+                                        activeId={mobileWarCol}
+                                        onChange={setMobileWarCol}
+                                        getCount={(id) =>
+                                            groups.filter((g) => {
+                                                const item = (g.product || g.services?.[0]) as any;
+                                                return item?.current_phase === 'warranty' && item?.phase_stage === id;
+                                            }).length
+                                        }
+                                        className="mb-3"
+                                    />
+                                    {CARE_WAR_COLS.filter((c) => c.flow === 'warranty' && c.id === mobileWarCol).map((col) => {
+                                        const colGroups = groups.filter((g) => {
+                                            const item = (g.product || g.services?.[0]) as any;
+                                            return item?.current_phase === 'warranty' && item?.phase_stage === col.id;
+                                        });
+                                        return (
+                                            <Droppable key={col.id} droppableId={col.id}>
+                                                {(provided, snapshot) => (
+                                                    <div
+                                                        ref={provided.innerRef}
+                                                        {...provided.droppableProps}
+                                                        className={cn(
+                                                            'min-h-[120px] p-2 rounded-xl border-2 border-dashed',
+                                                            snapshot.isDraggingOver ? 'bg-red-50 border-red-300' : 'bg-gray-100 border-transparent'
+                                                        )}
+                                                    >
+                                                        {colGroups.map((group, index) => (
+                                                            <CareCard
+                                                                key={group.product?.id || index}
+                                                                group={group}
+                                                                index={index}
+                                                                col={col}
+                                                                order={order}
+                                                                onProductCardClick={onProductCardClick}
+                                                                isPhoneView
+                                                                flowColumns={warrantyColumns}
+                                                                onCareMove={handleCareDragEnd}
+                                                            />
+                                                        ))}
+                                                        {provided.placeholder}
+                                                    </div>
+                                                )}
+                                            </Droppable>
+                                        );
+                                    })}
+                                </div>
+                                <div>
+                                    <h3 className="font-black text-teal-700 mb-3 flex items-center tracking-widest uppercase text-xs">
+                                        <Heart className="mr-2 h-4 w-4" /> Chăm sóc
+                                    </h3>
+                                    <MobileKanbanColumnTabs
+                                        columns={careColumns}
+                                        activeId={mobileCareCol}
+                                        onChange={setMobileCareCol}
+                                        getCount={(id) =>
+                                            groups.filter((g) => {
+                                                const item = (g.product || g.services?.[0]) as any;
+                                                return item?.current_phase === 'care' && item?.phase_stage === id;
+                                            }).length
+                                        }
+                                        className="mb-3"
+                                    />
+                                    {CARE_WAR_COLS.filter((c) => c.flow === 'care' && c.id === mobileCareCol).map((col) => {
+                                        const colGroups = groups.filter((g) => {
+                                            const item = (g.product || g.services?.[0]) as any;
+                                            return item?.current_phase === 'care' && item?.phase_stage === col.id;
+                                        });
+                                        return (
+                                            <Droppable key={col.id} droppableId={col.id}>
+                                                {(provided, snapshot) => (
+                                                    <div
+                                                        ref={provided.innerRef}
+                                                        {...provided.droppableProps}
+                                                        className={cn(
+                                                            'min-h-[120px] p-2 rounded-xl border-2 border-dashed',
+                                                            snapshot.isDraggingOver ? 'bg-teal-50 border-teal-300' : 'bg-gray-100 border-transparent'
+                                                        )}
+                                                    >
+                                                        {colGroups.map((group, index) => (
+                                                            <CareCard
+                                                                key={group.product?.id || index}
+                                                                group={group}
+                                                                index={index}
+                                                                col={col}
+                                                                order={order}
+                                                                onProductCardClick={onProductCardClick}
+                                                                isPhoneView
+                                                                flowColumns={careColumns}
+                                                                onCareMove={handleCareDragEnd}
+                                                            />
+                                                        ))}
+                                                        {provided.placeholder}
+                                                    </div>
+                                                )}
+                                            </Droppable>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
+                        <div className={cn('grid grid-cols-1 lg:grid-cols-2 gap-8', isPhoneView && 'hidden lg:grid')}>
                             {/* Warranty Section */}
                             <div className="flex flex-col min-w-0">
                                 <h3 className="font-black text-red-700 mb-4 flex items-center tracking-widest uppercase text-xs">

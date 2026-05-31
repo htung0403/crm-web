@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { DragDropContext } from '@hello-pangea/dnd';
 import type { DropResult } from '@hello-pangea/dnd';
@@ -32,6 +32,7 @@ import {
     MobileFilterSheet,
 } from '@/components/leads';
 import type { CreateLeadFormData } from '@/components/leads';
+import { MobileKanbanColumnTabs } from '@/components/kanban/mobileKanban';
 
 export function LeadsPage() {
     const navigate = useNavigate();
@@ -54,44 +55,6 @@ export function LeadsPage() {
 
     // Mobile kanban state
     const [activeColumnIndex, setActiveColumnIndex] = useState(0);
-    const kanbanScrollRef = useRef<HTMLDivElement>(null);
-
-    // Scroll to column when tapping a mobile tab
-    const scrollToColumn = useCallback((index: number) => {
-        setActiveColumnIndex(index);
-        const container = kanbanScrollRef.current;
-        if (container) {
-            const children = container.children;
-            if (children[index]) {
-                (children[index] as HTMLElement).scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'nearest',
-                    inline: 'start',
-                });
-            }
-        }
-    }, []);
-
-    // Detect which column is visible via IntersectionObserver
-    useEffect(() => {
-        const container = kanbanScrollRef.current;
-        if (!container) return;
-
-        const observer = new IntersectionObserver(
-            (entries) => {
-                for (const entry of entries) {
-                    if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
-                        const idx = Array.from(container.children).indexOf(entry.target as Element);
-                        if (idx >= 0) setActiveColumnIndex(idx);
-                    }
-                }
-            },
-            { root: container, threshold: 0.5 }
-        );
-
-        Array.from(container.children).forEach((child) => observer.observe(child));
-        return () => observer.disconnect();
-    }, [kanbanColumns]);
 
     // State for CreateOrderDialog
     const [showOrderDialog, setShowOrderDialog] = useState(false);
@@ -166,6 +129,11 @@ export function LeadsPage() {
         });
         return grouped;
     }, [filteredLeads]);
+
+    const stageColumns = useMemo(
+        () => kanbanColumns.map((c) => ({ id: c.id, title: c.label })),
+        []
+    );
 
     // Calculate stats
     const stats = useMemo(() => {
@@ -566,38 +534,46 @@ export function LeadsPage() {
                     </Card>
                 </div>
 
-                {/* Mobile Column Tab Bar */}
+                {/* Mobile Column Tab Bar + single column */}
                 <div className="md:hidden">
-                    <div className="mobile-kanban-tabs px-1">
-                        {kanbanColumns.map((column, idx) => {
-                            const Icon = column.icon;
-                            const count = (leadsByStatus[column.id] || []).length;
-                            return (
-                                <button
+                    <DragDropContext onDragEnd={handleDragEnd}>
+                        <MobileKanbanColumnTabs
+                            columns={stageColumns}
+                            activeId={kanbanColumns[activeColumnIndex]?.id ?? stageColumns[0]?.id}
+                            onChange={(id) => {
+                                const idx = kanbanColumns.findIndex((c) => c.id === id);
+                                if (idx >= 0) setActiveColumnIndex(idx);
+                            }}
+                            getCount={(id) => (leadsByStatus[id] || []).length}
+                            className="mb-3 px-1"
+                        />
+                        {kanbanColumns
+                            .filter((_, idx) => idx === activeColumnIndex)
+                            .map((column) => (
+                                <KanbanColumn
                                     key={column.id}
-                                    className={`mobile-kanban-tab ${column.textColor} ${activeColumnIndex === idx ? `active ${column.bgColor}` : 'bg-white'}`}
-                                    onClick={() => scrollToColumn(idx)}
-                                >
-                                    <Icon className="h-3.5 w-3.5" />
-                                    <span>{column.label}</span>
-                                    <span className={`inline-flex items-center justify-center h-5 min-w-[20px] px-1 rounded-full text-[10px] font-bold text-white ${column.color}`}>
-                                        {count}
-                                    </span>
-                                </button>
-                            );
-                        })}
-                    </div>
+                                    column={column}
+                                    leads={leadsByStatus[column.id] || []}
+                                    onCardClick={(lead) => navigate(`/leads/${lead.id}`)}
+                                    onDeleteLead={handleDeleteLead}
+                                    onLongPressLead={(lead) => {
+                                        setLeadForMobileSheet(lead);
+                                        setShowMobileSheet(true);
+                                    }}
+                                    stageColumns={stageColumns}
+                                    onStageChange={handleDragEnd}
+                                    isPhoneView
+                                />
+                            ))}
+                    </DragDropContext>
                 </div>
 
-                {/* Kanban Board - Flexible layout with auto-fit */}
-                <div className="pb-6">
+                {/* Kanban Board - Desktop */}
+                <div className="hidden pb-6 md:block">
                     <DragDropContext onDragEnd={handleDragEnd}>
-                        <div
-                            ref={kanbanScrollRef}
-                            className="flex gap-3 pb-4 px-4 sm:px-0 kanban-scroll-container md:!overflow-visible md:!scroll-snap-type-none"
-                        >
-                            {kanbanColumns.map(column => (
-                                <div key={column.id} className="md:flex-1 md:min-w-0">
+                        <div className="flex gap-3 pb-4 px-0">
+                            {kanbanColumns.map((column) => (
+                                <div key={column.id} className="flex-1 min-w-0">
                                     <KanbanColumn
                                         column={column}
                                         leads={leadsByStatus[column.id] || []}

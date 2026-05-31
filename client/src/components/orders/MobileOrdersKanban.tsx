@@ -1,4 +1,5 @@
 import React from 'react';
+import type { DropResult } from '@hello-pangea/dnd';
 import {
     Calendar,
     CheckCircle2,
@@ -14,6 +15,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { cn, formatDate } from '@/lib/utils';
 import type { KanbanColumn } from './constants';
 import type { Order, OrderItem } from '@/hooks/useOrders';
+import { MobileKanbanMoveBar, type MobileKanbanColumn } from '@/components/kanban/mobileKanban';
 
 interface ProductGroup {
     product: OrderItem | null;
@@ -30,6 +32,7 @@ interface MobileOrdersKanbanProps {
     onEditOrder?: (order: Order) => void;
     onMarkDone?: (order: Order, group: ProductGroup) => void;
     onDeleteOrder?: (order: Order) => void;
+    onStatusMove?: (result: DropResult) => void;
 }
 
 const TAB_SHORT_LABELS: Record<string, string> = {
@@ -106,14 +109,20 @@ function getDeadlineStatus(dueAt?: string) {
 function MobileOrderCard({
     order,
     group,
+    groupIndex,
     columnId,
+    statusColumns,
+    onStatusMove,
     onView,
     onEdit,
     onMarkDone,
 }: {
     order: Order;
     group: ProductGroup;
+    groupIndex: number;
     columnId: string;
+    statusColumns: MobileKanbanColumn[];
+    onStatusMove?: (result: DropResult) => void;
     onView: () => void;
     onEdit?: () => void;
     onMarkDone?: () => void;
@@ -278,6 +287,16 @@ function MobileOrderCard({
                     </Button>
                 )}
             </div>
+            {onStatusMove && statusColumns.length > 1 && (
+                <MobileKanbanMoveBar
+                    columns={statusColumns}
+                    currentColumnId={columnId}
+                    draggableId={`${order.id}__${groupIndex}`}
+                    onMove={onStatusMove}
+                    embedded
+                    className="px-2 pb-2"
+                />
+            )}
         </div>
     );
 }
@@ -290,6 +309,7 @@ export function MobileOrdersKanban({
     onViewOrder,
     onEditOrder,
     onMarkDone,
+    onStatusMove,
 }: MobileOrdersKanbanProps) {
     const [internalIndex, setInternalIndex] = React.useState(0);
     const activeColumnIndex = controlledIndex ?? internalIndex;
@@ -297,6 +317,10 @@ export function MobileOrdersKanban({
 
     const activeColumn = columnsList[activeColumnIndex];
     const cards = activeColumn ? getCardsByStatus(activeColumn.id) : [];
+    const statusColumns: MobileKanbanColumn[] = columnsList.map((c) => ({
+        id: c.id,
+        title: c.title,
+    }));
 
     return (
         <div className="space-y-2">
@@ -349,7 +373,10 @@ export function MobileOrdersKanban({
                             key={`${item.order.id}-${item.groupIndex}-${idx}`}
                             order={item.order}
                             group={item.group}
+                            groupIndex={item.groupIndex}
                             columnId={activeColumn?.id ?? ''}
+                            statusColumns={statusColumns}
+                            onStatusMove={onStatusMove}
                             onView={() => onViewOrder(item.order, item.group)}
                             onEdit={onEditOrder ? () => onEditOrder(item.order) : undefined}
                             onMarkDone={

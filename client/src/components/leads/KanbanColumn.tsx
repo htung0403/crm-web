@@ -1,7 +1,9 @@
 import { Droppable } from '@hello-pangea/dnd';
+import type { DropResult } from '@hello-pangea/dnd';
 import type { Lead } from '@/hooks/useLeads';
 import type { KanbanColumnConfig } from './constants';
 import { LeadCard } from './LeadCard';
+import type { MobileKanbanColumn } from '@/components/kanban/mobileKanban';
 
 interface KanbanColumnProps {
     column: KanbanColumnConfig;
@@ -9,9 +11,21 @@ interface KanbanColumnProps {
     onCardClick: (lead: Lead) => void;
     onDeleteLead?: (id: string) => void;
     onLongPressLead?: (lead: Lead) => void;
+    stageColumns?: MobileKanbanColumn[];
+    onStageChange?: (result: DropResult) => void;
+    isPhoneView?: boolean;
 }
 
-export function KanbanColumn({ column, leads, onCardClick, onDeleteLead, onLongPressLead }: KanbanColumnProps) {
+export function KanbanColumn({
+    column,
+    leads,
+    onCardClick,
+    onDeleteLead,
+    onLongPressLead,
+    stageColumns,
+    onStageChange,
+    isPhoneView = false,
+}: KanbanColumnProps) {
     const Icon = column.icon;
 
     return (
@@ -41,9 +55,13 @@ export function KanbanColumn({ column, leads, onCardClick, onDeleteLead, onLongP
                                 key={lead.id}
                                 lead={lead}
                                 index={index}
+                                columnId={column.id}
+                                stageColumns={stageColumns}
                                 onClick={() => onCardClick(lead)}
                                 onDelete={onDeleteLead}
                                 onLongPress={onLongPressLead}
+                                onStageChange={onStageChange}
+                                isPhoneView={isPhoneView}
                             />
                         ))}
                         {provided.placeholder}

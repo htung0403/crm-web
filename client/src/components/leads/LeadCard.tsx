@@ -1,5 +1,6 @@
 import { useRef, useCallback } from 'react';
 import { Draggable } from '@hello-pangea/dnd';
+import type { DropResult } from '@hello-pangea/dnd';
 import { Eye, Trash2, Flame, AlertTriangle, CalendarClock } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -8,16 +9,31 @@ import type { Lead } from '@/hooks/useLeads';
 import { sourceLabels } from './constants';
 import { SLACountdown } from './SLACountdown';
 import { useAuth } from '@/contexts/AuthContext';
+import { MobileKanbanMoveBar, type MobileKanbanColumn } from '@/components/kanban/mobileKanban';
 
 interface LeadCardProps {
     lead: Lead;
     index: number;
+    columnId: string;
+    stageColumns?: MobileKanbanColumn[];
     onClick: () => void;
     onDelete?: (id: string) => void;
     onLongPress?: (lead: Lead) => void;
+    onStageChange?: (result: DropResult) => void;
+    isPhoneView?: boolean;
 }
 
-export function LeadCard({ lead, index, onClick, onDelete, onLongPress }: LeadCardProps) {
+export function LeadCard({
+    lead,
+    index,
+    columnId,
+    stageColumns = [],
+    onClick,
+    onDelete,
+    onLongPress,
+    onStageChange,
+    isPhoneView = false,
+}: LeadCardProps) {
     const { user } = useAuth();
     // Use channel first, fallback to source for legacy data
     const channelKey = lead.channel || lead.source || '';
@@ -70,13 +86,13 @@ export function LeadCard({ lead, index, onClick, onDelete, onLongPress }: LeadCa
     };
 
     return (
-        <Draggable draggableId={lead.id} index={index}>
+        <Draggable draggableId={lead.id} index={index} isDragDisabled={isPhoneView}>
             {(provided, snapshot) => (
                 <div
                     ref={provided.innerRef}
                     {...provided.draggableProps}
-                    {...provided.dragHandleProps}
-                    className={`kanban-card bg-white rounded-lg border p-3 cursor-pointer group ${snapshot.isDragging ? 'shadow-lg ring-2 ring-primary/20' : 'shadow-sm hover:shadow-md'
+                    {...(isPhoneView ? {} : provided.dragHandleProps)}
+                    className={`kanban-card bg-white rounded-lg border p-3 group ${isPhoneView ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'} ${snapshot.isDragging ? 'shadow-lg ring-2 ring-primary/20' : 'shadow-sm hover:shadow-md'
                         }`}
                     onClick={handleCardClick}
                     onTouchStart={handleTouchStart}
@@ -208,6 +224,16 @@ export function LeadCard({ lead, index, onClick, onDelete, onLongPress }: LeadCa
                         </div>
                         <span>{formatTimeAgo(lead.created_at)}</span>
                     </div>
+                    {isPhoneView && onStageChange && stageColumns.length > 0 && (
+                        <MobileKanbanMoveBar
+                            columns={stageColumns}
+                            currentColumnId={columnId}
+                            draggableId={lead.id}
+                            onMove={onStageChange}
+                            sourceIndex={index}
+                            embedded
+                        />
+                    )}
                 </div>
             )}
         </Draggable>

@@ -147,7 +147,31 @@ export function useLeads(): UseLeadsReturn {
         setLoading(true);
         setError(null);
         try {
-            const response = await leadsApi.create(data);
+            const payload: Partial<Lead> = { ...data };
+            const trimOrDrop = (key: keyof Lead) => {
+                const val = payload[key];
+                if (typeof val === 'string') {
+                    const trimmed = val.trim();
+                    if (trimmed === '') {
+                        delete payload[key];
+                    } else {
+                        (payload as Record<string, unknown>)[key as string] = trimmed;
+                    }
+                }
+            };
+            trimOrDrop('fb_thread_id');
+            trimOrDrop('fb_link');
+            trimOrDrop('link_message');
+            trimOrDrop('email');
+            trimOrDrop('company');
+            trimOrDrop('address');
+            trimOrDrop('notes');
+            trimOrDrop('dob');
+            if (payload.assigned_to === '') {
+                delete payload.assigned_to;
+            }
+
+            const response = await leadsApi.create(payload);
             const newLead = response.data.data!.lead;
             await fetchLeads({ limit: 500 });
             return newLead;

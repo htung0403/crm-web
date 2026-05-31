@@ -56,6 +56,7 @@ const SalesCard = memo(({
     onBackwardMove,
     onUpsell,
     onOpenProductDialogWithMove,
+    isPhoneView = false,
 }: {
     group: { product: OrderItem | null; services: OrderItem[] };
     index: number;
@@ -71,6 +72,7 @@ const SalesCard = memo(({
     reloadOrder: () => Promise<void>;
     onTabChange?: (tab: string) => void;
     onOpenProductDialogWithMove?: (group: any, roomId: string, moveCallback: () => Promise<void>) => void;
+    isPhoneView?: boolean;
 }) => {
     const leadItem = group.product || group.services[0];
     const isWarranty = leadItem?.care_warranty_flow === 'warranty' || !!leadItem?.warranty_code;
@@ -119,14 +121,15 @@ const SalesCard = memo(({
     }, [leadItem?.id, column, salesLogs]);
 
     return (
-        <Draggable key={draggableId} draggableId={draggableId} index={index}>
+        <Draggable key={draggableId} draggableId={draggableId} index={index} isDragDisabled={isPhoneView}>
             {(provided, snapshot) => (
                 <div
                     ref={provided.innerRef}
                     {...provided.draggableProps}
-                    {...provided.dragHandleProps}
+                    {...(isPhoneView ? {} : provided.dragHandleProps)}
                     className={cn(
-                        "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all cursor-grab active:cursor-grabbing relative",
+                        "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all relative",
+                        isPhoneView ? "cursor-pointer" : "cursor-grab active:cursor-grabbing",
                         snapshot.isDragging ? "shadow-lg ring-2 ring-primary/20 scale-105" : "",
                         remainingTime?.isOverdue ? "bg-red-50 border-red-500 ring-2 ring-red-100" :
                             column.id === 'step4' ? "border-red-400 hover:border-red-600" :
@@ -219,12 +222,16 @@ const SalesCard = memo(({
                             </div>
                         )}
                         <div className="flex-1" />
-                        <div className="flex items-center gap-1">
-
+                        <div className={cn('flex items-center gap-1', isPhoneView && 'w-full justify-between')}>
+                            {isPhoneView && (
+                                <span className="text-[9px] font-bold uppercase text-muted-foreground mr-1">
+                                    Chuyển bước
+                                </span>
+                            )}
                             <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 rounded-full"
+                                variant={isPhoneView ? 'outline' : 'ghost'}
+                                size={isPhoneView ? 'sm' : 'icon'}
+                                className={isPhoneView ? 'h-8 flex-1 text-[10px] gap-1' : 'h-8 w-8 rounded-full'}
                                 disabled={colIdx === 0}
                                 onClick={async (e) => {
                                     e.stopPropagation();
@@ -235,11 +242,12 @@ const SalesCard = memo(({
                                 }}
                             >
                                 <ArrowLeft className="h-4 w-4" />
+                                {isPhoneView && <span>Lùi</span>}
                             </Button>
                             <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 rounded-full text-primary hover:bg-primary hover:text-white"
+                                variant={isPhoneView ? 'default' : 'ghost'}
+                                size={isPhoneView ? 'sm' : 'icon'}
+                                className={isPhoneView ? 'h-8 flex-1 text-[10px] gap-1' : 'h-8 w-8 rounded-full text-primary hover:bg-primary hover:text-white'}
                                 disabled={colIdx === SALES_STEPS.length - 1}
                                 onClick={async (e) => {
                                     e.stopPropagation();
@@ -253,9 +261,8 @@ const SalesCard = memo(({
                                     if (column.id === 'step1') {
                                         const firstItem = itemsToUpdate[0];
                                         const stepData = firstItem?.sales_step_data || {};
-                                        if (!stepData.step1_receiver_name || !stepData.step1_evidence_photos?.length) {
-                                            toast.error('Vui lòng vào chi tiết cập nhật "NV Sale nhận" và "Ảnh bằng chứng" ở bước 1 trước khi chuyển');
-                                            // Mở dialog kèm move callback
+                                        if (!stepData.step1_receiver_name || !stepData.step1_evidence_photos?.length || !stepData.step1_accessories_checked) {
+                                            toast.error('Vui lòng hoàn thành bước 1: NV Sale nhận, ảnh bằng chứng và xác nhận phụ kiện đi kèm');
                                             const moveAction = async () => {
                                                 for (const item of itemsToUpdate) {
                                                     await updateOrderItemStatus(item.id, nextStep);
@@ -312,6 +319,7 @@ const SalesCard = memo(({
                                     }
                                 }}
                             >
+                                {isPhoneView && <span>Tiếp</span>}
                                 <ArrowRight className="h-4 w-4" />
                             </Button>
                         </div>
@@ -430,12 +438,15 @@ export function SalesTab({
                                 </div>
                             </div>
                         </CardHeader>
-                        <CardContent>
+                        <CardContent className="min-w-0 overflow-visible">
                             {/* Kanban Board Layout */}
-                            <div className="pb-4">
+                            <div className="pb-4 min-w-0">
                                 {isPhoneView && (
-                                    <div className="mb-4 space-y-3 md:hidden">
-                                        <div className="flex gap-1 overflow-x-auto pb-1 no-scrollbar">
+                                    <div className="mb-4 min-w-0 space-y-3 md:hidden">
+                                        <p className="text-[10px] text-muted-foreground px-0.5">
+                                            Vuốt ngang để chọn bước →
+                                        </p>
+                                        <div className="mobile-kanban-tabs -mx-1 px-1">
                                             {SALES_STEPS.map((column, colIdx) => {
                                                 const columnGroups =
                                                     workflowKanbanGroups?.filter((group) => {
@@ -445,19 +456,28 @@ export function SalesTab({
                                                         if (itemAny.current_phase !== 'sales') return false;
                                                         return (itemAny.phase_stage || 'step1') === column.id;
                                                     }) || [];
+                                                const isActive = mobileSalesStep === column.id;
                                                 return (
                                                     <button
                                                         key={column.id}
                                                         type="button"
                                                         onClick={() => setMobileSalesStep(column.id)}
                                                         className={cn(
-                                                            'shrink-0 rounded-lg border px-2 py-1.5 text-[10px] font-medium',
-                                                            mobileSalesStep === column.id
-                                                                ? 'border-primary bg-primary text-primary-foreground'
-                                                                : 'border-border bg-background',
+                                                            'mobile-kanban-tab',
+                                                            isActive
+                                                                ? 'active border-primary bg-primary text-primary-foreground'
+                                                                : 'border-slate-200 bg-white text-foreground'
                                                         )}
                                                     >
-                                                        {colIdx + 1}. {column.title} ({columnGroups.length})
+                                                        <span>{colIdx + 1}. {column.title}</span>
+                                                        <span
+                                                            className={cn(
+                                                                'inline-flex h-5 min-w-[20px] items-center justify-center rounded-full px-1 text-[10px] font-bold',
+                                                                isActive ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-700'
+                                                            )}
+                                                        >
+                                                            {columnGroups.length}
+                                                        </span>
                                                     </button>
                                                 );
                                             })}
@@ -525,6 +545,7 @@ export function SalesTab({
                                                                     }}
                                                                     onUpsell={(g) => setUpsellGroup(g)}
                                                                     onOpenProductDialogWithMove={onOpenProductDialogWithMove}
+                                                                    isPhoneView
                                                                 />
                                                             ))}
                                                             {provided.placeholder}
@@ -566,8 +587,8 @@ export function SalesTab({
                                             if (result.source.droppableId === 'step1' && destIdx > sourceIdx) {
                                                 const firstItem = itemsToUpdate[0];
                                                 const stepData = firstItem?.sales_step_data || {};
-                                                if (!stepData.step1_receiver_name || !stepData.step1_evidence_photos?.length) {
-                                                    toast.error('Vui lòng hoàn thành thông tin nhân viên Sale và ảnh/video bằng chứng bước 1 trước khi chuyển');
+                                                if (!stepData.step1_receiver_name || !stepData.step1_evidence_photos?.length || !stepData.step1_accessories_checked) {
+                                                    toast.error('Vui lòng hoàn thành bước 1: NV Sale nhận, ảnh bằng chứng và xác nhận phụ kiện đi kèm');
                                                     const moveAction = async () => {
                                                         for (const item of itemsToUpdate) {
                                                             await updateOrderItemStatus(item.id, newStatus);

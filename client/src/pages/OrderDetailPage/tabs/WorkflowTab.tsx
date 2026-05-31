@@ -1,7 +1,7 @@
-import React, { memo, useMemo, useState } from 'react';
+import React, { memo, useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import {
     Layers, Loader2, ShoppingBag, Tag, FileText, Wrench, User as UserIcon,
-    History, Clock, Maximize2, ExternalLink
+    History, Clock, Maximize2, ExternalLink, ChevronRight, ChevronLeft
 } from 'lucide-react';
 import { WorkflowLogDetailDialog } from '@/components/orders/workflow/WorkflowLogDetailDialog';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +17,12 @@ import { BackwardMoveDialog } from '@/components/orders/BackwardMoveDialog';
 import { toast } from 'sonner';
 import { getWorkflowRequestLogDisplay, isWorkflowRequestLogAction } from '../workflowRequestLog';
 import { useAuth } from '@/contexts/AuthContext';
+import {
+    MobileKanbanColumnTabs,
+    MobileKanbanMoveBar,
+    buildKanbanDropResult,
+    type MobileKanbanColumn,
+} from '@/components/kanban/mobileKanban';
 
 interface WorkflowCardProps {
     group: { product: OrderItem | null; services: OrderItem[] };
@@ -34,6 +40,9 @@ interface WorkflowCardProps {
     onCardClick: (group: { product: OrderItem | null; services: OrderItem[] }, roomId: string) => void;
     handleOpenBackwardMove: (group: any) => void;
     orderExtensionRequest?: any;
+    isPhoneView?: boolean;
+    workflowColumns?: MobileKanbanColumn[];
+    onWorkflowMove?: (result: DropResult) => void;
 }
 
 const WorkflowCard = memo(({
@@ -51,7 +60,10 @@ const WorkflowCard = memo(({
     handleOpenSaleAssignDialog,
     onCardClick,
     handleOpenBackwardMove,
-    orderExtensionRequest
+    orderExtensionRequest,
+    isPhoneView = false,
+    workflowColumns = [],
+    onWorkflowMove,
 }: WorkflowCardProps) => {
     const productName = group.product?.item_name ?? group.services[0]?.item_name ?? '—';
     const productItem = group.product as any;
@@ -67,7 +79,26 @@ const WorkflowCard = memo(({
     const currentStep = leadItem ? getItemCurrentStep(leadItem.id) : null;
     const isSlaPaused = stepDeadline.label === 'Đang chờ duyệt' || stepDeadline.label === '⏸ Đang tạm dừng';
 
-    const isCardDragDisabled = !canDragWorkflow || roomId === 'done' || roomId === 'fail' || isSlaPaused;
+    const colIdx = workflowColumns.findIndex((c) => c.id === roomId);
+    const prevCol = colIdx > 0 ? workflowColumns[colIdx - 1] : null;
+    const nextCol =
+        colIdx >= 0 && colIdx < workflowColumns.length - 1 ? workflowColumns[colIdx + 1] : null;
+
+    const tryMoveTo = (destId: string) => {
+        if (!onWorkflowMove || destId === roomId) return;
+        if (!canDragWorkflow || isSlaPaused) {
+            toast.error(
+                isSlaPaused
+                    ? 'Đang chờ duyệt — không thể chuyển bước'
+                    : 'Chỉ Sale/Quản lý mới chuyển bước trên Kanban'
+            );
+            return;
+        }
+        onWorkflowMove(buildKanbanDropResult(cardKey, roomId, destId, index, 0));
+    };
+
+    const isCardDragDisabled =
+        !canDragWorkflow || roomId === 'done' || roomId === 'fail' || isSlaPaused || isPhoneView;
 
     return (
         <Draggable key={cardKey} draggableId={cardKey} index={index} isDragDisabled={isCardDragDisabled}>
@@ -75,10 +106,10 @@ const WorkflowCard = memo(({
                 <div
                     ref={provided.innerRef}
                     {...provided.draggableProps}
-                    {...provided.dragHandleProps}
+                    {...(isPhoneView ? {} : provided.dragHandleProps)}
                     className={cn(
                         "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all",
-                        isCardDragDisabled ? "cursor-not-allowed opacity-75" : "cursor-grab active:cursor-grabbing",
+                        isCardDragDisabled && !isPhoneView ? "cursor-not-allowed opacity-75" : isPhoneView ? "cursor-pointer" : "cursor-grab active:cursor-grabbing",
                         snapshot.isDragging ? "shadow-lg ring-2 ring-primary/20 scale-105" : "",
                         itemLate && roomId !== 'done' ? (
                             (extensionRequest?.status === 'pending' || extensionRequest?.status === 'requested') ? "border-amber-400 bg-amber-50/50 border-dashed" : "border-red-500 bg-red-50/30"
@@ -180,6 +211,25 @@ const WorkflowCard = memo(({
                         })}
                     </ul>
 
+                    {onWorkflowMove && workflowColumns.length > 0 && roomId !== 'done' && roomId !== 'fail' && (
+                        <div className="max-md:block hidden">
+                            <MobileKanbanMoveBar
+                                columns={workflowColumns}
+                                currentColumnId={roomId}
+                                draggableId={cardKey}
+                                onMove={onWorkflowMove}
+                                disabled={!canDragWorkflow || isSlaPaused}
+                                disabledMessage={
+                                    isSlaPaused
+                                        ? 'Đang chờ duyệt — không thể chuyển bước'
+                                        : 'Chỉ Sale/Quản lý mới chuyển bước trên Kanban'
+                                }
+                                sourceIndex={index}
+                                embedded
+                            />
+                        </div>
+                    )}
+
                     {roomId !== 'done' && roomId !== 'fail' && (
                         <>
                             <div className="mt-2 flex items-center justify-between text-[11px]">
@@ -271,6 +321,32 @@ const WorkflowCard = memo(({
                                         <span className="truncate">Trả về Sales</span>
                                     </button>
                                 )}
+                                {onWorkflowMove && nextCol && (
+                                    <div
+                                        className="col-span-3 mt-2 max-md:block hidden space-y-1.5"
+                                        onClick={(e) => e.stopPropagation()}
+                                    >
+                                        <Button
+                                            type="button"
+                                            className="h-10 w-full gap-1.5 text-xs font-bold shadow-sm"
+                                            onClick={() => tryMoveTo(nextCol.id)}
+                                        >
+                                            Chuyển sang {nextCol.title}
+                                            <ChevronRight className="h-4 w-4 shrink-0" />
+                                        </Button>
+                                        {prevCol && (
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="h-8 w-full gap-1 text-[11px]"
+                                                onClick={() => tryMoveTo(prevCol.id)}
+                                            >
+                                                <ChevronLeft className="h-3.5 w-3.5 shrink-0" />
+                                                Về {prevCol.title}
+                                            </Button>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         </>
                     )}
@@ -297,6 +373,8 @@ interface WorkflowColumnProps {
     onCardClick: (group: { product: OrderItem | null; services: OrderItem[] }, roomId: string) => void;
     handleOpenBackwardMove: (group: any) => void;
     orderExtensionRequest?: any;
+    workflowColumns?: MobileKanbanColumn[];
+    onWorkflowMove?: (result: DropResult) => void;
 }
 
 const WorkflowColumn = ({
@@ -313,7 +391,9 @@ const WorkflowColumn = ({
     handleOpenSaleAssignDialog,
     onCardClick,
     handleOpenBackwardMove,
-    orderExtensionRequest
+    orderExtensionRequest,
+    workflowColumns = [],
+    onWorkflowMove,
 }: WorkflowColumnProps) => {
     return (
         <div className="flex flex-col min-w-[240px]">
@@ -358,6 +438,9 @@ const WorkflowColumn = ({
                                 onCardClick={onCardClick}
                                 handleOpenBackwardMove={handleOpenBackwardMove}
                                 orderExtensionRequest={orderExtensionRequest}
+                                isPhoneView
+                                workflowColumns={workflowColumns}
+                                onWorkflowMove={onWorkflowMove}
                             />
                         ))}
                         {provided.placeholder}
@@ -423,8 +506,19 @@ export function WorkflowTab({
     const [backwardMoveGroup, setBackwardMoveGroup] = useState<any>(null);
     const [viewLogData, setViewLogData] = useState<any>(null);
     const [mobileRoomId, setMobileRoomId] = useState('waiting');
+    const mobileScrollRef = useRef<HTMLDivElement>(null);
 
     const canDragWorkflow = user?.role === 'admin' || user?.role === 'manager' || user?.role === 'sale';
+
+    const scrollToWorkflowRoom = useCallback((roomId: string) => {
+        setMobileRoomId(roomId);
+        const container = mobileScrollRef.current;
+        if (!container) return;
+        const el = container.querySelector(`[data-kanban-col="${roomId}"]`);
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
+        }
+    }, []);
 
     const handleOpenBackwardMove = (group: any) => {
         setBackwardMoveGroup(group);
@@ -536,6 +630,46 @@ export function WorkflowTab({
         return map;
     }, [filteredGroups, getGroupCurrentTechRoom, rooms]);
 
+    const workflowColumns = useMemo(
+        (): MobileKanbanColumn[] => rooms.map((r) => ({ id: r.id, title: r.title })),
+        [rooms]
+    );
+
+    // Mobile: tự chọn cột có card
+    useEffect(() => {
+        if ((groupsByRoom[mobileRoomId] || []).length > 0) return;
+        const firstWithCards = rooms.find((r) => (groupsByRoom[r.id] || []).length > 0);
+        if (firstWithCards) scrollToWorkflowRoom(firstWithCards.id);
+    }, [groupsByRoom, mobileRoomId, rooms, scrollToWorkflowRoom]);
+
+    useEffect(() => {
+        const container = mobileScrollRef.current;
+        if (!container) return;
+
+        const observer = new IntersectionObserver(
+            (entries) => {
+                for (const entry of entries) {
+                    if (entry.isIntersecting && entry.intersectionRatio >= 0.55) {
+                        const roomId = (entry.target as HTMLElement).dataset.kanbanCol;
+                        if (roomId) setMobileRoomId(roomId);
+                    }
+                }
+            },
+            { root: container, threshold: 0.55 }
+        );
+
+        container.querySelectorAll('[data-kanban-col]').forEach((el) => observer.observe(el));
+        return () => observer.disconnect();
+    }, [filteredGroups, groupsByRoom]);
+
+    const handleWorkflowMove = (result: DropResult) => {
+        if (!canDragWorkflow) {
+            toast.error('Chỉ Sale/Quản lý mới chuyển bước trên Kanban');
+            return;
+        }
+        onWorkflowDragEnd(result);
+    };
+
     return (
         <TabsContent value="workflow">
             <div className="space-y-6">
@@ -550,7 +684,7 @@ export function WorkflowTab({
                             Dịch vụ theo quy trình gồm các phòng Mạ, Dán đế, Da. Sau khi KTV xác nhận hoàn thành bước, dịch vụ sẽ được chuyển sang phòng tiếp theo.
                         </p>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="min-w-0 overflow-visible">
                         {stepsLoading && !order?.items?.length ? (
                             <div className="flex items-center justify-center py-12">
                                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -563,35 +697,98 @@ export function WorkflowTab({
                             </div>
                         ) : (
                             <div className="pb-4">
-                                {isPhoneView && (
-                                    <div className="mb-4 space-y-3 md:hidden">
-                                        <div className="flex gap-1 overflow-x-auto pb-1 no-scrollbar">
+                                {/* Mobile: cột ngang + vuốt + nút chuyển trạng thái trên card */}
+                                <div className="mb-4 min-w-0 space-y-2 md:hidden">
+                                    <MobileKanbanColumnTabs
+                                        columns={workflowColumns}
+                                        activeId={mobileRoomId}
+                                        onChange={scrollToWorkflowRoom}
+                                        getCount={(id) => (groupsByRoom[id] || []).length}
+                                        hint="Vuốt ngang giữa các cột hoặc chọn tab →"
+                                    />
+                                    <DragDropContext onDragEnd={handleWorkflowMove}>
+                                        <div
+                                            ref={mobileScrollRef}
+                                            className="kanban-scroll-container no-scrollbar -mx-1 px-1 touch-pan-x"
+                                        >
                                             {rooms.map((room) => {
-                                                const count = (groupsByRoom[room.id] || []).length;
+                                                const mobileGroups = groupsByRoom[room.id] || [];
                                                 return (
-                                                    <button key={room.id} type="button" onClick={() => setMobileRoomId(room.id)} className={cn('shrink-0 rounded-lg border px-2.5 py-1.5 text-[11px] font-medium', mobileRoomId === room.id ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-background')}>
-                                                        {room.title} ({count})
-                                                    </button>
+                                                    <div
+                                                        key={room.id}
+                                                        data-kanban-col={room.id}
+                                                        className="flex min-h-[280px] flex-col"
+                                                    >
+                                                        <div className="mb-2 flex items-center justify-between px-1">
+                                                            <h2
+                                                                className={cn(
+                                                                    'text-xs font-bold uppercase tracking-wide',
+                                                                    room.id === 'done'
+                                                                        ? 'text-green-600'
+                                                                        : room.id === 'fail'
+                                                                          ? 'text-red-500'
+                                                                          : 'text-blue-700'
+                                                                )}
+                                                            >
+                                                                {room.title}
+                                                            </h2>
+                                                            <span className="rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-bold text-gray-700">
+                                                                {mobileGroups.length}
+                                                            </span>
+                                                        </div>
+                                                        <Droppable droppableId={room.id}>
+                                                            {(provided, snapshot) => (
+                                                                <div
+                                                                    ref={provided.innerRef}
+                                                                    {...provided.droppableProps}
+                                                                    className={cn(
+                                                                        'min-h-[220px] flex-1 rounded-xl border-2 border-dashed p-2 transition-colors',
+                                                                        snapshot.isDraggingOver
+                                                                            ? 'border-primary/40 bg-primary/5'
+                                                                            : 'border-transparent bg-gray-100'
+                                                                    )}
+                                                                >
+                                                                    {mobileGroups.map((group, index) => (
+                                                                        <WorkflowCard
+                                                                            key={
+                                                                                group.product?.id ??
+                                                                                group.services.map((s) => s.id).join('-')
+                                                                            }
+                                                                            group={group}
+                                                                            index={index}
+                                                                            roomId={room.id}
+                                                                            canDragWorkflow={canDragWorkflow}
+                                                                            orderCode={order?.order_code}
+                                                                            getItemCurrentStep={getItemCurrentStep}
+                                                                            getStepDeadlineDisplay={getStepDeadlineDisplay}
+                                                                            handleOpenAccessory={handleOpenAccessory}
+                                                                            handleOpenPartner={handleOpenPartner}
+                                                                            handleOpenExtension={handleOpenExtension}
+                                                                            handleOpenAssignDialog={handleOpenAssignDialog}
+                                                                            handleOpenSaleAssignDialog={handleOpenSaleAssignDialog}
+                                                                            onCardClick={onProductCardClick}
+                                                                            handleOpenBackwardMove={handleOpenBackwardMove}
+                                                                            orderExtensionRequest={order?.extension_request}
+                                                                            isPhoneView
+                                                                            workflowColumns={workflowColumns}
+                                                                            onWorkflowMove={handleWorkflowMove}
+                                                                        />
+                                                                    ))}
+                                                                    {provided.placeholder}
+                                                                    {mobileGroups.length === 0 && !snapshot.isDraggingOver && (
+                                                                        <div className="flex h-24 items-center justify-center text-xs italic text-muted-foreground">
+                                                                            Trống
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            )}
+                                                        </Droppable>
+                                                    </div>
                                                 );
                                             })}
                                         </div>
-                                        <DragDropContext onDragEnd={(result) => {
-                                            if (!canDragWorkflow) return;
-                                            onWorkflowDragEnd(result);
-                                        }}>
-                                            <Droppable droppableId={mobileRoomId}>
-                                                {(provided, snapshot) => (
-                                                    <div ref={provided.innerRef} {...provided.droppableProps} className={cn('min-h-[100px] space-y-2 rounded-xl border-2 border-dashed p-2', snapshot.isDraggingOver && 'border-primary/40 bg-primary/5')}>
-                                                        {(groupsByRoom[mobileRoomId] || []).map((group, index) => (
-                                                            <WorkflowCard key={group.product?.id ?? group.services.map((s) => s.id).join('-')} group={group} index={index} roomId={mobileRoomId} canDragWorkflow={canDragWorkflow} orderCode={order?.order_code} getItemCurrentStep={getItemCurrentStep} getStepDeadlineDisplay={getStepDeadlineDisplay} handleOpenAccessory={handleOpenAccessory} handleOpenPartner={handleOpenPartner} handleOpenExtension={handleOpenExtension} handleOpenAssignDialog={handleOpenAssignDialog} handleOpenSaleAssignDialog={handleOpenSaleAssignDialog} onCardClick={onProductCardClick} handleOpenBackwardMove={handleOpenBackwardMove} orderExtensionRequest={order?.extension_request} />
-                                                        ))}
-                                                        {provided.placeholder}
-                                                    </div>
-                                                )}
-                                            </Droppable>
-                                        </DragDropContext>
-                                    </div>
-                                )}
+                                    </DragDropContext>
+                                </div>
                                 <DragDropContext onDragEnd={(result) => {
                                     if (!canDragWorkflow) return;
                                     onWorkflowDragEnd(result);
@@ -614,6 +811,8 @@ export function WorkflowTab({
                                                 onCardClick={onProductCardClick}
                                                 handleOpenBackwardMove={handleOpenBackwardMove}
                                                 orderExtensionRequest={order?.extension_request}
+                                                workflowColumns={workflowColumns}
+                                                onWorkflowMove={handleWorkflowMove}
                                             />
                                         ))}
                                     </div>

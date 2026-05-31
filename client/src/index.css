@@ -195,6 +195,8 @@ body {
     scroll-behavior: smooth;
     gap: 12px;
     padding-bottom: 12px;
+    touch-action: pan-x;
+    overscroll-behavior-x: contain;
   }
 
   .kanban-scroll-container::-webkit-scrollbar {
@@ -223,14 +225,34 @@ body {
   }
 }
 
+/* Horizontal scroll strips (mobile kanban tabs, order detail sub-tabs) */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Mobile column tab bar */
 .mobile-kanban-tabs {
   display: flex;
   gap: 6px;
   overflow-x: auto;
+  overflow-y: hidden;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   padding: 4px 0;
   scrollbar-width: none;
   -ms-overflow-style: none;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
 }
 
 .mobile-kanban-tabs::-webkit-scrollbar {

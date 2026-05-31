@@ -7,7 +7,9 @@ export interface SalesStepData extends Record<string, unknown> {
     step1_shipping_fee?: number;
     step1_payment_method?: string;
     step1_evidence_photos?: string[];
+    step1_accessories_checked?: boolean;
     step1_notes?: string;
+    after2_accessories_returned_checked?: boolean;
     step2_tags_photos?: string[];
     step2_form_photos?: string[];
     step3_technician_name?: string;

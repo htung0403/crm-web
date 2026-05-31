@@ -209,6 +209,21 @@ export function UpsellManagementPage() {
         }
     };
 
+    const closeDetailDialog = () => {
+        setSelectedTicket(null);
+        setSelectedOrderBefore(null);
+        setLoadingOrderBefore(false);
+    };
+
+    const handleApprovalError = (error: any, fallback: string) => {
+        const message = error.response?.data?.message || fallback;
+        toast.error(message);
+        if (/đã được xử lý/i.test(message)) {
+            closeDetailDialog();
+            loadData();
+        }
+    };
+
     const orderEditTickets = upsellTickets.filter((ticket) => isOrderEditTicket(ticket));
     const upsellOnlyTickets = upsellTickets.filter((ticket) => !isOrderEditTicket(ticket));
     const totalPendingCount =
@@ -229,9 +244,10 @@ export function UpsellManagementPage() {
         try {
             await upsellTicketsApi.approve(id);
             toast.success('Đã duyệt yêu cầu Upsell');
+            closeDetailDialog();
             loadData();
         } catch (error: any) {
-            toast.error(error.response?.data?.message || 'Lỗi khi duyệt');
+            handleApprovalError(error, 'Lỗi khi duyệt');
         } finally {
             setProcessing(false);
         }
@@ -242,9 +258,10 @@ export function UpsellManagementPage() {
         try {
             await upsellTicketsApi.approve(id);
             toast.success('Đã duyệt yêu cầu Sửa đơn');
+            closeDetailDialog();
             loadData();
         } catch (error: any) {
-            toast.error(error.response?.data?.message || 'Lỗi khi duyệt');
+            handleApprovalError(error, 'Lỗi khi duyệt');
         } finally {
             setProcessing(false);
         }
@@ -358,9 +375,18 @@ export function UpsellManagementPage() {
             }
             toast.success('Đã từ chối yêu cầu');
             setShowRejectDialog(false);
+            if (rejectItem.type === 'upsell' || rejectItem.type === 'order_edit') {
+                closeDetailDialog();
+            }
             loadData();
         } catch (error: any) {
-            toast.error(error.response?.data?.message || 'Lỗi khi từ chối');
+            const message = error.response?.data?.message || 'Lỗi khi từ chối';
+            toast.error(message);
+            if (/đã được xử lý/i.test(message)) {
+                setShowRejectDialog(false);
+                closeDetailDialog();
+                loadData();
+            }
         } finally {
             setProcessing(false);
         }
@@ -987,7 +1013,7 @@ export function UpsellManagementPage() {
             </Tabs>
 
             {/* Upsell / Order Edit Detail Dialog */}
-            <Dialog open={!!selectedTicket} onOpenChange={(open) => !open && setSelectedTicket(null)}>
+            <Dialog open={!!selectedTicket} onOpenChange={(open) => !open && closeDetailDialog()}>
                 <DialogContent className={cn("max-h-[85vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl", isOrderEditTicket(selectedTicket) ? "max-w-5xl" : "max-w-2xl")}>
                     <DialogHeader className={cn("px-6 py-4 text-white", isOrderEditTicket(selectedTicket) ? "bg-fuchsia-600" : "bg-indigo-600")}>
                         <DialogTitle className="flex items-center gap-2">
@@ -1124,7 +1150,7 @@ export function UpsellManagementPage() {
                     </ScrollArea>
 
                     <DialogFooter className="px-6 py-4 bg-white border-t gap-3 flex sm:justify-end">
-                        <Button variant="outline" onClick={() => setSelectedTicket(null)}>Đóng</Button>
+                        <Button variant="outline" onClick={closeDetailDialog}>Đóng</Button>
                         <Button variant="outline" className="text-red-600 border-red-200" onClick={() => onRejectClick(selectedTicket.id, isOrderEditTicket(selectedTicket) ? 'order_edit' : 'upsell')} disabled={processing}>Từ chối</Button>
                         <Button className="bg-emerald-600 hover:bg-emerald-700 font-bold" onClick={() => isOrderEditTicket(selectedTicket) ? handleApproveOrderEdit(selectedTicket.id) : handleApproveUpsell(selectedTicket.id)} disabled={processing || loadingOrderBefore}>
                             {isOrderEditTicket(selectedTicket) ? 'Phê duyệt & Áp dụng sửa đơn' : 'Phê duyệt & Cập nhật đơn hàng'}
