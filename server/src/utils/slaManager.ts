@@ -256,7 +256,7 @@ export async function checkSlaCron() {
         const { data: leads, error } = await supabaseAdmin
             .from('leads')
             .select(`
-                id, name, assigned_to, appointment_time, next_followup_time, sla_state, current_deadline_at, current_rule_index, appointment_reminded_at, next_followup_reminded_at, pipeline_stage, created_at, last_actor, t_last_outbound, assigned_to_user: users!leads_assigned_to_fkey(name, telegram_chat_id)
+                id, name, assigned_to, appointment_time, next_followup_time, sla_state, current_deadline_at, current_rule_index, appointment_reminded_at, next_followup_reminded_at, pipeline_stage, created_at, last_actor, t_last_inbound, t_last_outbound, assigned_to_user: users!leads_assigned_to_fkey(name, telegram_chat_id)
             `)
             .not('assigned_to', 'is', null)
             .not('pipeline_stage', 'in', '("chot_don", "huy", "fail")');
@@ -321,6 +321,38 @@ export async function checkSlaCron() {
 
             // Theo dõi trạng thái ACTIVE
             if (lead.sla_state === 'ACTIVE' && lead.current_deadline_at) {
+                const { data: latestMessage } = await supabaseAdmin
+                    .from('lead_messages')
+                    .select('sender_type, created_at')
+                    .eq('lead_id', lead.id)
+                    .order('created_at', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+
+                if (latestMessage?.sender_type === 'lead') {
+                    const latestInboundAt = new Date(latestMessage.created_at);
+                    const knownInboundAt = lead.t_last_inbound ? new Date(lead.t_last_inbound) : null;
+                    const shouldRestoreInboundState = lead.last_actor !== 'lead' || !knownInboundAt || latestInboundAt.getTime() > knownInboundAt.getTime();
+
+                    if (shouldRestoreInboundState) {
+                        const restoredDeadline = calculateDeadline(latestInboundAt, SLA_CYCLES[0], lead.created_at);
+                        lead.last_actor = 'lead';
+                        lead.t_last_inbound = latestInboundAt.toISOString();
+                        lead.current_rule_index = 0;
+                        lead.current_deadline_at = restoredDeadline.toISOString();
+
+                        await supabaseAdmin.from('leads').update({
+                            last_actor: 'lead',
+                            t_last_inbound: latestInboundAt.toISOString(),
+                            last_message_time: latestInboundAt.toISOString(),
+                            current_rule_index: 0,
+                            current_deadline_at: restoredDeadline.toISOString(),
+                            sla_state: 'ACTIVE',
+                            updated_at: now.toISOString()
+                        }).eq('id', lead.id);
+                    }
+                }
+
                 const deadline = new Date(lead.current_deadline_at);
                 const timeLeft = (deadline.getTime() - now.getTime()) / 60000;
                 
@@ -365,8 +397,12 @@ export async function checkSlaCron() {
                 // Thủng SLA
                 if (timeLeft <= 0) {
                     if (ruleIndex === 0) {
-                        if (lead.last_actor === 'sale' || lead.t_last_outbound) {
-                            await move_to_next_rule(lead, null, false, true);
+                        const lastInboundAt = lead.t_last_inbound ? new Date(lead.t_last_inbound).getTime() : 0;
+                        const lastOutboundAt = lead.t_last_outbound ? new Date(lead.t_last_outbound).getTime() : 0;
+                        const hasSaleRepliedAfterCustomer = lead.last_actor === 'sale' && lastOutboundAt >= lastInboundAt;
+
+                        if (hasSaleRepliedAfterCustomer) {
+                            await move_to_next_rule(lead, null, true, false);
                             continue;
                         }
 
@@ -420,4 +456,7 @@ export async function checkSlaCron() {
 
 // Export them with original name too for backward compatibility in index.ts if needed
 export { checkSlaCron as checkAllSLA };
+
+
+
 
