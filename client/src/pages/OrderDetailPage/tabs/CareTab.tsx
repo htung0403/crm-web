@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { TabsContent } from '@/components/ui/tabs';
 import { DragDropContext, Droppable, Draggable, type DropResult } from '@hello-pangea/dnd';
+import { rejectNonSequentialKanbanMove, CARE_WARRANTY_COLUMN_IDS } from '@/lib/kanbanSequential';
 import { cn } from '@/lib/utils';
 import { formatDateTime } from '@/lib/utils';
 import { ordersApi } from '@/lib/api';
@@ -164,6 +165,13 @@ export function CareTab({
 
     const handleCareDragEnd = (result: DropResult) => {
         if (!order || !result.destination || result.destination.droppableId === result.source.droppableId) return;
+        if (rejectNonSequentialKanbanMove(
+            CARE_WARRANTY_COLUMN_IDS,
+            result.source.droppableId,
+            result.destination.droppableId
+        )) {
+            return;
+        }
         
         const toStage = result.destination.droppableId as string;
         const toFlow = ['war1', 'war2', 'war3'].includes(toStage) ? 'warranty' : 'care';

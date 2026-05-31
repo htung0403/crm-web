@@ -57,6 +57,23 @@ const roleOptions = [
     { value: 'cashier', label: 'Thu ngân' },
 ];
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (value?: string | null) => !!value && UUID_RE.test(value);
+
+function resolveDepartmentSelectValue(
+    employee: Employee,
+    departments: { id: string; name: string }[]
+): string {
+    if (isUuid(employee.departmentId)) return employee.departmentId!;
+    if (isUuid(employee.department_id)) return employee.department_id!;
+    if (isUuid(employee.department)) return employee.department!;
+    if (employee.department) {
+        const match = departments.find(d => d.name === employee.department);
+        if (match) return match.id;
+    }
+    return '';
+}
+
 interface SystemUser {
     id: string;
     name: string;
@@ -190,7 +207,7 @@ export function EmployeeFormDialog({
             setAvatar(employee.avatar || '');
             setPhone(employee.phone || '');
             setRole(employee.role || 'sale');
-            setDepartment(employee.departmentId || employee.department_id || employee.department || '');
+            setDepartment(resolveDepartmentSelectValue(employee, departments));
             setSalary(employee.salary || 0);
             setCommission(employee.commission || 0);
             setBankAccount(employee.bankAccount || '');
@@ -249,7 +266,7 @@ export function EmployeeFormDialog({
         setInlineTitleName('');
         setShowCreateAccountDialog(false);
         setShowEditAccountDialog(false);
-    }, [employee, open]);
+    }, [employee, open, departments]);
 
     const handleSubmit = async () => {
         if (!name || !email || !phone) {
@@ -280,19 +297,23 @@ export function EmployeeFormDialog({
         setSubmitting(true);
         try {
             const normalizedDepartment = department && department !== 'none' ? department : '';
+            const departmentId = isUuid(normalizedDepartment) ? normalizedDepartment : undefined;
+            const departmentName = departmentId
+                ? departments.find(d => d.id === departmentId)?.name
+                : undefined;
 
             const submitData: any = {
                 name,
                 email,
                 phone,
                 role,
-                department: normalizedDepartment || undefined,
-                departmentId: normalizedDepartment || undefined,
+                department: departmentName || undefined,
+                departmentId,
                 salary,
                 commission,
                 bankAccount,
                 bankName,
-                telegramChatId,
+                telegramChatId: telegramChatId.trim() || undefined,
                 joinDate,
                 avatar: avatar || undefined,
                 status: employee?.status || 'active',
@@ -315,8 +336,9 @@ export function EmployeeFormDialog({
 
             await onSubmit(submitData);
             onClose();
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error saving employee:', error);
+            toast.error(error?.message || 'Lỗi khi lưu nhân viên');
         } finally {
             setSubmitting(false);
         }

@@ -587,8 +587,8 @@ export function EmployeesPage() {
         try {
             await updateUser(selectedEmployee.id, data as any);
             toast.success('Đã cập nhật nhân viên!');
-        } catch (error) {
-            toast.error('Lỗi khi cập nhật');
+        } catch (error: any) {
+            toast.error(error?.message || 'Lỗi khi cập nhật');
             throw error;
         }
     };
