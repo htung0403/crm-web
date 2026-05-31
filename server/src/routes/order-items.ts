@@ -35,6 +35,21 @@ function derivePhaseFromStatus(status: string): { current_phase: string; phase_s
     return { current_phase: 'sales', phase_stage: 'step1' };
 }
 
+
+function getTechRoomDisplayName(room?: string | null): string | null {
+    if (!room) return null;
+    const roomMap: Record<string, string> = {
+        phong_ma: 'Mạ',
+        phong_dan_de: 'Dán đế',
+        phong_da: 'Da',
+        phong_ve_sinh: 'Vệ sinh',
+        ve_sinh: 'Vệ sinh',
+        waiting: 'Chờ xử lý',
+        done: 'Hoàn thành',
+        fail: 'Thất bại',
+    };
+    return roomMap[room] || room;
+}
 const router = Router();
 console.log('📦 Order Items Router Loaded');
 
@@ -1827,8 +1842,8 @@ router.patch('/:id/fail', authenticate, async (req: AuthenticatedRequest, res, n
         }
 
         // 1. Determine if V1 or V2
-        const { data: v1Item } = await supabaseAdmin.from('order_items').select('id, order_id').eq('id', id).maybeSingle();
-        const { data: v2Item } = await supabaseAdmin.from('order_product_services').select('id, order_product:order_products(order_id)').eq('id', id).maybeSingle();
+        const { data: v1Item } = await supabaseAdmin.from('order_items').select('id, order_id, item_name, tech_room, order:orders(id, order_code)').eq('id', id).maybeSingle();
+        const { data: v2Item } = await supabaseAdmin.from('order_product_services').select('id, item_name, tech_room, order_product:order_products(id, order_id, name, product_code, order:orders(id, order_code))').eq('id', id).maybeSingle();
 
         let item: any = null;
         let orderId: string | null = null;
@@ -1972,8 +1987,8 @@ router.patch(['/:id/change-room', '/:id/transfer-room'], authenticate, async (re
         }
 
         // 1. Resolve Item Type
-        const { data: v1Item } = await supabaseAdmin.from('order_items').select('id, order_id').eq('id', id).maybeSingle();
-        const { data: v2Item } = await supabaseAdmin.from('order_product_services').select('id, order_product:order_products(order_id)').eq('id', id).maybeSingle();
+        const { data: v1Item } = await supabaseAdmin.from('order_items').select('id, order_id, item_name, tech_room, order:orders(id, order_code)').eq('id', id).maybeSingle();
+        const { data: v2Item } = await supabaseAdmin.from('order_product_services').select('id, item_name, tech_room, order_product:order_products(id, order_id, name, product_code, order:orders(id, order_code))').eq('id', id).maybeSingle();
 
         let isV1 = !!v1Item;
         let isV2 = !!v2Item;
@@ -2019,7 +2034,8 @@ router.patch(['/:id/change-room', '/:id/transfer-room'], authenticate, async (re
 
         // c. Get Transition details
         const activeItemStep = steps.find(s => ['assigned', 'in_progress', 'started'].includes(s.status));
-        const fromRoom = (activeItemStep as any)?.department?.name || activeItemStep?.step_name || 'Khởi tạo';
+        const previousTechRoom = isV1 ? (v1Item as any)?.tech_room : (v2Item as any)?.tech_room;
+        const fromRoom = getTechRoomDisplayName(previousTechRoom) || (activeItemStep as any)?.department?.name || activeItemStep?.step_name || 'Khởi tạo';
         const toRoom = targetDept?.name || deptSearch;
 
         // c. Mark ALL currently active/pending steps as 'skipped'
@@ -2090,7 +2106,7 @@ router.patch(['/:id/change-room', '/:id/transfer-room'], authenticate, async (re
         }
 
         // 4. Also update the PARENT item status and technician
-        const parentUpdate: any = { status: 'in_progress' };
+        const parentUpdate: any = { status: 'in_progress', tech_room: targetRoomId };
         if (technician_id) parentUpdate.technician_id = technician_id;
 
         if (isV1) {
@@ -2142,20 +2158,25 @@ router.patch(['/:id/change-room', '/:id/transfer-room'], authenticate, async (re
 
             if (context && technician?.id) {
                 const basePayload = buildServiceEventBase(context);
+                const directOrder = isV1
+                    ? (Array.isArray((v1Item as any)?.order) ? (v1Item as any).order[0] : (v1Item as any)?.order)
+                    : (Array.isArray((v2Item as any)?.order_product?.order) ? (v2Item as any).order_product.order[0] : (v2Item as any)?.order_product?.order);
+                const directProduct = (v2Item as any)?.order_product;
+
                 notifyCrmMasterUser('workflow.item.room_changed', {
                     ...basePayload,
                     order: {
                         ...(basePayload.order || {}),
-                        id: context.order?.id || basePayload.order?.id || null,
-                        order_code: context.order?.order_code || basePayload.order?.order_code || null,
+                        id: directOrder?.id || context.order?.id || basePayload.order?.id || null,
+                        order_code: directOrder?.order_code || context.order?.order_code || basePayload.order?.order_code || null,
                     },
                     target_user_id: technician.id,
                     target_role: 'technician',
                     channel: 'telegram',
                     item: {
                         ...basePayload.item,
-                        product_name: context.orderProduct?.name || basePayload.item?.product_name || null,
-                        product_code: context.orderProduct?.product_code || basePayload.item?.product_code || null,
+                        product_name: directProduct?.name || context.orderProduct?.name || basePayload.item?.product_name || null,
+                        product_code: directProduct?.product_code || context.orderProduct?.product_code || basePayload.item?.product_code || null,
                         from_room: fromRoom,
                         room_name: toRoom,
                         reason: reason || null,
@@ -2413,6 +2434,9 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
 });
 
 export default router;
+
+
+
 
 
 
