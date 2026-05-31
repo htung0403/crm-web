@@ -90,7 +90,16 @@ function normalizeService(service: any, orderProduct: any, order: any) {
 
     for (const tech of [primaryTechnician, ...technicians].filter(Boolean)) uniqueTechnicians.set(tech.id, tech);
 
-    const salesUser = normalizeUser(firstRelation(order?.sales_user));
+    const serviceSales = (service.sales || [])
+        .map((row: any) => normalizeUser(firstRelation(row.sale)))
+        .filter(Boolean);
+    const orderSalesUser = normalizeUser(firstRelation(order?.sales_user));
+    const uniqueSalesUsers = new Map<string, any>();
+
+    for (const sale of [...serviceSales, orderSalesUser].filter(Boolean)) uniqueSalesUsers.set(sale.id, sale);
+
+    const technicianList = Array.from(uniqueTechnicians.values());
+    const salesUserList = Array.from(uniqueSalesUsers.values());
 
     return {
         id: service.id,
@@ -103,11 +112,12 @@ function normalizeService(service: any, orderProduct: any, order: any) {
         order_id: order?.id || orderProduct.order_id,
         order_code: order?.order_code || null,
         product_image_url: getFirstImage(orderProduct.images),
-        technicians: Array.from(uniqueTechnicians.values()),
-        sales_users: salesUser ? [salesUser] : [],
+        technician: technicianList[0] || null,
+        technicians: technicianList,
+        sales_user: salesUserList[0] || null,
+        sales_users: salesUserList,
     };
 }
-
 async function fetchOrderProductsByDueWindow(fromIso: string | null, toIso: string) {
     let query = supabaseAdmin
         .from('order_products')
@@ -125,6 +135,9 @@ async function fetchOrderProductsByDueWindow(fromIso: string | null, toIso: stri
                 technician:users!order_product_services_technician_id_fkey(id, name, telegram_chat_id),
                 technicians:order_product_service_technicians(
                     technician:users!order_product_service_technicians_technician_id_fkey(id, name, telegram_chat_id)
+                ),
+                sales:order_product_service_sales(
+                    sale:users!order_product_service_sales_sale_id_fkey(id, name, telegram_chat_id)
                 )
             )
         `)
@@ -210,3 +223,7 @@ router.get('/cron-data', verifyN8nSecret, async (req: Request, res: Response, ne
 });
 
 export default router;
+
+
+
+
