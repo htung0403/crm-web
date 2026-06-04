@@ -381,25 +381,25 @@ export function ProductDetailDialog({
 
     const handleSaveStepData = async () => {
         const itemId = product?.id || services[0]?.id;
-        if (!itemId) return;
+        if (!itemId) return false;
 
         // Validation for step1
         if (roomId === 'step1') {
             if (!stepData.step1_receiver_name) {
                 toast.error('Vui lòng chọn nhân viên Sale nhận');
-                return;
+                return false;
             }
             if (stepData.step1_shipping_fee > 0 && !stepData.step1_payment_method) {
                 toast.error('Vui lòng chọn phương thức thanh toán cho tiền ship');
-                return;
+                return false;
             }
             if (!stepData.step1_evidence_photos || stepData.step1_evidence_photos.length === 0) {
                 toast.error('Vui lòng tải ảnh/video làm bằng chứng trước khi kỹ thuật làm');
-                return;
+                return false;
             }
             if (!stepData.step1_accessories_checked) {
                 setShowAccessoriesWarning(true);
-                return;
+                return false;
             }
         }
 
@@ -407,17 +407,18 @@ export function ProductDetailDialog({
         if (roomId === 'step2') {
             if (!stepData.step2_tags_photos || stepData.step2_tags_photos.length === 0) {
                 toast.error('Vui lòng tải ảnh chứng minh đã gắn tags');
-                return;
+                return false;
             }
             if (!stepData.step2_form_photos || stepData.step2_form_photos.length === 0) {
                 toast.error('Vui lòng tải ảnh đã gắn Form túi hoặc shoestree');
-                return;
+                return false;
             }
         }
 
         setSavingStepData(true);
         try {
-            await orderItemsApi.updateSalesStepData(itemId, stepData);
+            let savedStepData = { ...stepData };
+            await orderItemsApi.updateSalesStepData(itemId, savedStepData);
             toast.success('Đã lưu thông tin thành công');
 
             // Send notifications if Step 3 and mentions exist
@@ -448,14 +449,50 @@ export function ProductDetailDialog({
                 }
             }
 
-            if (onReloadOrder) onReloadOrder();
-            // Nếu có pending move (drag-and-drop yêu cầu thông tin), tự động chuyển trạng thái và đóng dialog
+            if (roomId === 'step1' && Number(stepData.step1_shipping_fee) > 0 && order && !stepData.step1_shipping_expense_transaction_id) {
+                const { transactionsApi } = await import('@/lib/api');
+                const response = await transactionsApi.create({
+                    type: 'expense',
+                    category: 'Phí ship nhận hàng',
+                    amount: Number(stepData.step1_shipping_fee),
+                    notes: `Tiền ship nhận đồ cho đơn ${order.order_code || order.id}`,
+                    order_id: order.id,
+                    order_code: order.order_code,
+                    order_product_id: product?.id,
+                    date: new Date().toISOString().split('T')[0],
+                    payment_method: stepData.step1_payment_method || 'cash',
+                    status: 'approved',
+                    metadata: {
+                        source: 'sales_step1_shipping_fee',
+                        item_id: itemId,
+                        product_name: productName,
+                    },
+                });
+
+                const transaction = response.data?.data?.transaction;
+                savedStepData = {
+                    ...savedStepData,
+                    step1_shipping_expense_transaction_id: transaction?.id || true,
+                    step1_shipping_expense_transaction_code: transaction?.code,
+                };
+                await orderItemsApi.updateSalesStepData(itemId, savedStepData);
+                setStepData(savedStepData);
+                toast.success('Đã tạo phiếu chi cho tiền ship');
+            }
+
+            // Nếu có pending move (drag-and-drop yêu cầu thông tin), chỉ chuyển bước sau khi phiếu chi đã tạo thành công
             if (onConfirmAndMove) {
                 await onConfirmAndMove();
+            }
+
+            if (onReloadOrder) await onReloadOrder();
+            if (onConfirmAndMove) {
                 onOpenChange(false);
             }
+            return true;
         } catch (error: any) {
             toast.error(error?.response?.data?.message || 'Lỗi khi lưu thông tin');
+            return false;
         } finally {
             setSavingStepData(false);
         }
@@ -2552,29 +2589,7 @@ export function ProductDetailDialog({
                                             <div className="sticky bottom-0 -mx-4 -mb-4 mt-auto p-4 bg-white/95 backdrop-blur-sm border-t border-gray-200/50 shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)] z-50 order-last">
                                                 <Button
                                                     className="w-full h-11 rounded-xl font-bold shadow-lg shadow-blue-200 bg-blue-600 hover:bg-blue-700 text-white"
-                                                    onClick={async () => {
-                                                        await handleSaveStepData();
-                                                        // Nếu có tiền ship thì tạo phiếu chi (expense)
-                                                        if (roomId === 'step1' && stepData.step1_shipping_fee > 0 && order) {
-                                                            const { transactionsApi } = await import('@/lib/api');
-                                                            try {
-                                                                await transactionsApi.create({
-                                                                    type: 'expense',
-                                                                    category: 'Phí ship nhận hàng',
-                                                                    amount: stepData.step1_shipping_fee,
-                                                                    notes: `Tiền ship nhận đồ cho đơn ${order.order_code || order.id}`,
-                                                                    order_id: order.id,
-                                                                    order_code: order.order_code,
-                                                                    date: new Date().toISOString().split('T')[0],
-                                                                    payment_method: stepData.step1_payment_method || 'cash'
-                                                                });
-                                                                toast.success('Đã tạo phiếu chi cho tiền ship');
-                                                            } catch (error) {
-                                                                console.error('Lỗi tạo phiếu chi:', error);
-                                                                toast.error('Lỗi khi tạo phiếu chi tự động');
-                                                            }
-                                                        }
-                                                    }}
+                                                    onClick={handleSaveStepData}
                                                     disabled={savingStepData}
                                                 >
                                                     {savingStepData ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
