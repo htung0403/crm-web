@@ -437,6 +437,7 @@ export function OrderDetailPage() {
                     order_product_id = accessoryItem.id;
                 } else {
                     order_product_service_id = accessoryItem.id;
+                    order_product_id = (accessoryItem as any).order_product_id || (accessoryItem as any).order_product?.id;
                 }
             } else {
                 order_item_id = accessoryItem.id;
@@ -451,6 +452,8 @@ export function OrderDetailPage() {
                     price_estimate: newItemPrice,
                     photos: newItemPhotos,
                     order_code: newItemOrderCode || order.order_code,
+                    order_product_id,
+                    order_product_code: (accessoryItem as any).product_code || (accessoryItem as any).order_product?.product_code,
                 },
                 order_item_id,
                 order_product_id,
@@ -500,7 +503,16 @@ export function OrderDetailPage() {
         if (!partnerItem) return;
         setPartnerLoading(true);
         try {
-            await orderItemsApi.updatePartner(partnerItem.id, { status: 'requested', notes: partnerNotes || undefined });
+            await orderItemsApi.updatePartner(partnerItem.id, {
+                status: 'requested',
+                notes: partnerNotes || undefined,
+                metadata: {
+                    order_product_id: (partnerItem as any).is_customer_item && (partnerItem as any).item_type === 'product'
+                        ? partnerItem.id
+                        : (partnerItem as any).order_product_id || (partnerItem as any).order_product?.id,
+                    order_product_code: (partnerItem as any).product_code || (partnerItem as any).order_product?.product_code,
+                },
+            });
             toast.success('Đã cập nhật trạng thái gửi đối tác');
             await reloadOrder();
             setShowPartnerDialog(false);

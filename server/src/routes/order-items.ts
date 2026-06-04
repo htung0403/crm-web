@@ -97,7 +97,8 @@ router.post('/accessories', authenticate, async (req: AuthenticatedRequest, res,
                 order_product:order_products(id, name, product_code, images, order:orders(id, order_code)),
                 order_product_service:order_product_services(
                     id,
-                    order_product:order_products(name, product_code, images, order:orders(id, order_code))
+                    order_product_id,
+                    order_product:order_products(id, name, product_code, images, order:orders(id, order_code))
                 )
             `)
             .single();

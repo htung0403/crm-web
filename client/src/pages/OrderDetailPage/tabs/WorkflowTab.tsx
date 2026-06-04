@@ -256,8 +256,9 @@ const WorkflowCard = memo(({
                                     disabled={!canDragWorkflow}
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        if (!canDragWorkflow || !leadItem) return;
-                                        handleOpenAccessory(leadItem);
+                                        const targetItem = group.product || leadItem;
+                                        if (!canDragWorkflow || !targetItem) return;
+                                        handleOpenAccessory(targetItem);
                                     }}
                                     className={cn(
                                         "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",
@@ -276,8 +277,9 @@ const WorkflowCard = memo(({
                                     disabled={!canDragWorkflow}
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        if (!canDragWorkflow || !leadItem) return;
-                                        handleOpenPartner(leadItem);
+                                        const targetItem = group.product || leadItem;
+                                        if (!canDragWorkflow || !targetItem) return;
+                                        handleOpenPartner(targetItem);
                                     }}
                                     className={cn(
                                         "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",

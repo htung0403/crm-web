@@ -215,7 +215,8 @@ router.get('/accessories', async (req: AuthenticatedRequest, res: Response, next
                 order_product:order_products(id, name, product_code, images, order:orders(id, order_code)),
                 order_product_service:order_product_services(
                     id,
-                    order_product:order_products(name, product_code, images, order:orders(id, order_code))
+                    order_product_id,
+                    order_product:order_products(id, name, product_code, images, order:orders(id, order_code))
                 )
             `)
             .order('created_at', { ascending: false });
@@ -245,7 +246,8 @@ router.get('/partners', async (req: AuthenticatedRequest, res: Response, next: N
                 order_product:order_products(id, name, product_code, images, order:orders(id, order_code)),
                 order_product_service:order_product_services(
                     id, 
-                    order_product:order_products(name, product_code, images, order:orders(id, order_code))
+                    order_product_id,
+                    order_product:order_products(id, name, product_code, images, order:orders(id, order_code))
                 )
             `)
             .order('created_at', { ascending: false });

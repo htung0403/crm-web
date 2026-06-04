@@ -990,6 +990,7 @@ export function RequestsPage() {
         if (!req) return undefined;
         return (
             req.order_product_id ||
+            req.metadata?.order_product_id ||
             req.order_product?.id ||
             req.order_product_service?.order_product_id ||
             req.order_product_service?.order_product?.id ||
@@ -1001,6 +1002,7 @@ export function RequestsPage() {
         const code =
             req.order_product?.product_code ||
             req.order_product_service?.order_product?.product_code ||
+            req.metadata?.order_product_code ||
             req.metadata?.product_code;
         return code ? `[${code}] ${base}` : base;
     };
