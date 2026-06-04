@@ -5,7 +5,13 @@ import { authenticate, AuthenticatedRequest, requireSale } from '../middleware/a
 import { notifyCrmMaster } from '../utils/webhookNotifier.js';
 import { syncInvoiceWithOrder } from '../utils/billingHelper.js';
 import { checkAndCompleteOrder } from '../utils/orderHelper.js';
-import { insertPaymentRecord, sumPaidAmountByProduct } from '../utils/paymentRecordsHelper.js';
+import {
+    distributeOrphanDepositToProducts,
+    insertPaymentRecord,
+    reconcileOrderDeposits,
+    sumPaidAmountByProduct,
+    sumPaymentTotalsByOrder,
+} from '../utils/paymentRecordsHelper.js';
 
 const router = Router();
 
@@ -103,6 +109,34 @@ router.get('/:id/debt', authenticate, async (req: AuthenticatedRequest, res, nex
         const orderList = orders || [];
         const orderIds = orderList.map((o) => o.id);
 
+        // Đồng bộ phiếu thu cọc nếu DV đã có deposit_amount nhưng chưa ghi payment_records
+        for (const o of orderList) {
+            try {
+                await reconcileOrderDeposits({
+                    orderId: o.id,
+                    orderCode: o.order_code,
+                    customerName: customer.name,
+                    createdBy: req.user!.id,
+                });
+            } catch (reconcileErr) {
+                console.warn(`[debt] reconcileOrderDeposits ${o.order_code}:`, reconcileErr);
+            }
+        }
+
+        // Reload orders after reconcile (paid_amount may have changed)
+        const { data: ordersRefreshed } = orderIds.length > 0
+            ? await supabaseAdmin
+                .from('orders')
+                .select('id, order_code, total_amount, paid_amount, remaining_debt, payment_status, created_at, status')
+                .in('id', orderIds)
+                .order('created_at', { ascending: true })
+            : { data: [] };
+        const orderListFresh = ordersRefreshed || orderList;
+
+        const paymentTotals = orderIds.length > 0
+            ? await sumPaymentTotalsByOrder(orderIds)
+            : { paidByOrder: {}, depositByOrder: {}, depositByProduct: {}, paidByProduct: {} };
+
         const depositByOrder: Record<string, number> = {};
         const productsByOrder: Record<string, Array<{
             id: string;
@@ -126,7 +160,7 @@ router.get('/:id/debt', authenticate, async (req: AuthenticatedRequest, res, nex
 
             const depositByProduct: Record<string, number> = {};
             const totalByProduct: Record<string, number> = {};
-            const paidByProduct = productIds.length > 0 && orderIds.length > 0
+            const paidByProductFromRecords = productIds.length > 0 && orderIds.length > 0
                 ? await sumPaidAmountByProduct(orderIds)
                 : {};
 
@@ -152,29 +186,45 @@ router.get('/:id/debt', authenticate, async (req: AuthenticatedRequest, res, nex
                 if (!productsByOrder[orderId]) productsByOrder[orderId] = [];
                 const images = Array.isArray(p.images) ? p.images : [];
                 const totalAmount = totalByProduct[p.id] || 0;
-                const paidAmount = paidByProduct[p.id] || 0;
+                const svcDeposit = depositByProduct[p.id] || 0;
+                const payDeposit = paymentTotals.depositByProduct[p.id] || 0;
+                const depositAmount = Math.max(svcDeposit, payDeposit);
+                const paidAmount = Math.max(
+                    paidByProductFromRecords[p.id] || 0,
+                    paymentTotals.paidByProduct[p.id] || 0
+                );
+                const collected = Math.max(paidAmount, depositAmount);
                 productsByOrder[orderId].push({
                     id: p.id,
                     product_code: p.product_code,
                     name: p.name || p.product_code,
                     image_url: images[0] || null,
                     total_amount: totalAmount,
-                    deposit_amount: depositByProduct[p.id] || 0,
+                    deposit_amount: depositAmount,
                     paid_amount: paidAmount,
-                    remaining_debt: Math.max(0, totalAmount - paidAmount),
+                    remaining_debt: Math.max(0, totalAmount - collected),
                 });
             }
 
             for (const orderId of Object.keys(productsByOrder)) {
-                productsByOrder[orderId].sort((a, b) => a.product_code.localeCompare(b.product_code));
+                const products = productsByOrder[orderId];
+                products.sort((a, b) => a.product_code.localeCompare(b.product_code));
+
+                const productDepositSum = products.reduce((s, p) => s + (p.deposit_amount || 0), 0);
+                const orderPayDeposit = paymentTotals.depositByOrder[orderId] || 0;
+                const orphanDeposit = Math.max(0, orderPayDeposit - productDepositSum);
+                distributeOrphanDepositToProducts(products, orphanDeposit);
             }
         }
 
-        const orderBalances = orderList.map((o) => {
+        const orderBalances = orderListFresh.map((o) => {
             const total = Number(o.total_amount) || 0;
-            const paid = Number(o.paid_amount) || 0;
+            const paidFromOrder = Number(o.paid_amount) || 0;
+            const paidFromRecords = paymentTotals.paidByOrder[o.id] || 0;
+            const paid = Math.max(paidFromOrder, paidFromRecords);
             const remaining = Number(o.remaining_debt) ?? Math.max(0, total - paid);
-            const depositTotal = depositByOrder[o.id] || 0;
+            const products = productsByOrder[o.id] || [];
+            const depositTotal = products.reduce((s, p) => s + (p.deposit_amount || 0), 0);
             return {
                 id: o.id,
                 order_code: o.order_code,
@@ -182,20 +232,42 @@ router.get('/:id/debt', authenticate, async (req: AuthenticatedRequest, res, nex
                 total_amount: total,
                 paid_amount: paid,
                 deposit_amount: depositTotal,
-                remaining_debt: remaining,
+                remaining_debt: Math.max(0, total - paid),
                 payment_status: o.payment_status,
                 status: o.status,
-                products: productsByOrder[o.id] || [],
+                products,
             };
         });
 
-        const { data: paymentRecords } = orderIds.length > 0
-            ? await supabaseAdmin
+        let paymentRecords: Array<{
+            id: string;
+            order_id: string;
+            order_code: string | null;
+            amount: number;
+            payment_method: string | null;
+            content: string | null;
+            created_at: string;
+            payment_kind?: string | null;
+            transaction_category?: string | null;
+        }> = [];
+
+        if (orderIds.length > 0) {
+            let payResult = await supabaseAdmin
                 .from('payment_records')
-                .select('id, order_id, order_code, amount, payment_method, content, created_at')
+                .select('id, order_id, order_code, amount, payment_method, content, created_at, payment_kind, transaction_category')
                 .in('order_id', orderIds)
-                .order('created_at', { ascending: true })
-            : { data: [] };
+                .order('created_at', { ascending: true });
+
+            if (payResult.error) {
+                payResult = await supabaseAdmin
+                    .from('payment_records')
+                    .select('id, order_id, order_code, amount, payment_method, content, created_at, transaction_category')
+                    .in('order_id', orderIds)
+                    .order('created_at', { ascending: true });
+            }
+
+            paymentRecords = (payResult.data || []) as typeof paymentRecords;
+        }
 
         type DebtEvent = { id: string; at: string; code: string; kind: 'sale' | 'payment'; label: string; amount: number };
         const events: DebtEvent[] = [];
@@ -212,14 +284,34 @@ router.get('/:id/debt', authenticate, async (req: AuthenticatedRequest, res, nex
         }
 
         for (const p of paymentRecords || []) {
+            const isDeposit =
+                (p.payment_kind || '').toLowerCase() === 'deposit' ||
+                (p.transaction_category || '').toLowerCase().includes('cọc') ||
+                (p.content || '').toLowerCase().includes('tiền cọc');
             events.push({
                 id: `pay-${p.id}`,
                 at: p.created_at,
                 code: p.order_code || p.id.slice(0, 8),
                 kind: 'payment',
-                label: 'Thanh toán',
+                label: isDeposit ? 'Tiền cọc' : 'Thanh toán',
                 amount: -(Number(p.amount) || 0),
             });
+        }
+
+        for (const o of orderBalances) {
+            const paid = o.paid_amount || 0;
+            if (paid <= 0) continue;
+            const hasPaymentEvent = (paymentRecords || []).some((p) => p.order_id === o.id);
+            if (!hasPaymentEvent) {
+                events.push({
+                    id: `pay-order-${o.id}`,
+                    at: o.created_at,
+                    code: o.order_code,
+                    kind: 'payment',
+                    label: o.deposit_amount >= paid ? 'Tiền cọc' : 'Thanh toán',
+                    amount: -paid,
+                });
+            }
         }
 
         events.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
@@ -233,7 +325,11 @@ router.get('/:id/debt', authenticate, async (req: AuthenticatedRequest, res, nex
         const totalDebt = orderBalances.reduce((sum, o) => sum + o.remaining_debt, 0);
         const totalPaid = orderBalances.reduce((sum, o) => sum + o.paid_amount, 0);
         const totalOrderValue = orderBalances.reduce((sum, o) => sum + o.total_amount, 0);
-        const totalDeposit = orderBalances.reduce((sum, o) => sum + o.deposit_amount, 0);
+        // Tổng cọc = cộng cọc từng SP (HĐxx.1, HĐxx.2, …) trên mọi đơn
+        const totalDeposit = orderBalances.reduce(
+            (sum, o) => sum + (o.products || []).reduce((ps, p) => ps + (p.deposit_amount || 0), 0),
+            0
+        );
 
         res.json({
             status: 'success',
@@ -305,11 +401,6 @@ router.post('/:id/collect-payment', authenticate, requireSale, async (req: Authe
                 throw new ApiError(`Không tìm thấy đơn ${alloc.order_id}`, 404);
             }
 
-            const remaining = Number(order.remaining_debt) ?? Math.max(0, (order.total_amount || 0) - (order.paid_amount || 0));
-            if (payAmount > remaining + 1) {
-                throw new ApiError(`Số tiền vượt quá công nợ đơn ${order.order_code}`, 400);
-            }
-
             const paymentKind = alloc.payment_kind === 'deposit' ? 'deposit' : 'payment';
             let productCode: string | null = null;
 
@@ -325,6 +416,35 @@ router.post('/:id/collect-payment', authenticate, requireSale, async (req: Authe
                     throw new ApiError(`Sản phẩm không thuộc đơn ${order.order_code}`, 400);
                 }
                 productCode = orderProduct.product_code;
+
+                const { data: svcRows } = await supabaseAdmin
+                    .from('order_product_services')
+                    .select('unit_price, deposit_amount')
+                    .eq('order_product_id', alloc.order_product_id);
+
+                const productTotal = (svcRows || []).reduce(
+                    (s, svc) => s + (Number(svc.unit_price) || 0),
+                    0
+                );
+                const productDeposit = (svcRows || []).reduce(
+                    (s, svc) => s + (Number(svc.deposit_amount) || 0),
+                    0
+                );
+                const paidMap = await sumPaidAmountByProduct([order.id]);
+                const productPaid = paidMap[alloc.order_product_id] || 0;
+                const productRemaining = Math.max(0, productTotal - Math.max(productPaid, productDeposit));
+
+                if (payAmount > productRemaining + 1) {
+                    throw new ApiError(
+                        `Số tiền vượt quá cần thu SP ${productCode} (còn ${productRemaining.toLocaleString('vi-VN')}đ)`,
+                        400
+                    );
+                }
+            } else {
+                const remaining = Number(order.remaining_debt) ?? Math.max(0, (order.total_amount || 0) - (order.paid_amount || 0));
+                if (payAmount > remaining + 1) {
+                    throw new ApiError(`Số tiền vượt quá công nợ đơn ${order.order_code}`, 400);
+                }
             }
 
             const kindLabel = paymentKind === 'deposit' ? 'Tiền cọc' : 'Thanh toán';

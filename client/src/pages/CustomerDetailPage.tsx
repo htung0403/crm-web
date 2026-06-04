@@ -24,6 +24,7 @@ import { customersApi, invoicesApi } from '@/lib/api';
 import { InvoiceDetailDialog, type Invoice } from '@/components/invoices/InvoiceDetailDialog';
 import { CustomerDebtTab } from '@/components/customers/CustomerDebtTab';
 import { useAuth } from '@/contexts/AuthContext';
+import { CustomerPhone } from '@/components/customers/CustomerPhone';
 
 // Interaction types
 type InteractionType = 'call' | 'email' | 'meeting' | 'message' | 'note' | 'task' | 'purchase';
@@ -289,6 +290,30 @@ export function CustomerDetailPage() {
         }
     };
 
+    const handleInvoiceStatusChange = async (
+        invoiceId: string,
+        status: string,
+        options?: { cancel_related_payments?: boolean },
+    ) => {
+        try {
+            await invoicesApi.updateStatus(invoiceId, status, options);
+            if (status === 'cancelled') {
+                toast.success(
+                    options?.cancel_related_payments !== false
+                        ? 'Đã hủy hóa đơn và các phiếu thanh toán liên quan'
+                        : 'Đã hủy hóa đơn!',
+                );
+            } else {
+                toast.success('Đã cập nhật trạng thái hóa đơn');
+            }
+            await fetchInvoices();
+            const response = await invoicesApi.getById(invoiceId);
+            if (response.data.data?.invoice) setSelectedInvoice(response.data.data.invoice);
+        } catch (err: any) {
+            toast.error(err.response?.data?.message || 'Lỗi khi cập nhật trạng thái hóa đơn');
+        }
+    };
+
     const handleViewInvoice = async (invoiceId: string) => {
         setLoadingInvoice(true);
         try {
@@ -469,7 +494,7 @@ export function CustomerDetailPage() {
                                     </div>
                                     <div className="flex items-center gap-3">
                                         <Phone className="h-4 w-4 text-muted-foreground" />
-                                        <span className="text-sm">{customer.phone}</span>
+                                        <CustomerPhone phone={customer.phone} className="text-sm" linkable />
                                     </div>
                                     <div className="flex items-center gap-3">
                                         <MapPin className="h-4 w-4 text-muted-foreground" />
@@ -880,6 +905,11 @@ export function CustomerDetailPage() {
                 invoice={selectedInvoice}
                 open={showInvoiceDetail}
                 onClose={() => setShowInvoiceDetail(false)}
+                onStatusChange={
+                    ['manager', 'admin', 'accountant'].includes(user?.role || '')
+                        ? handleInvoiceStatusChange
+                        : undefined
+                }
                 canEdit={['manager', 'admin', 'accountant'].includes(user?.role || '')}
             />
         </>

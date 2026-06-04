@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Loader2, Wallet, Banknote, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -14,9 +14,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { customersApi } from '@/lib/api';
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils';
 import { CustomerOrderPaymentDetailDialog } from './CustomerOrderPaymentDetailDialog';
-import { CustomerCollectPaymentConfirmDialog } from './CustomerCollectPaymentConfirmDialog';
 
 export type CustomerDebtProductRow = {
     id: string;
@@ -40,6 +40,17 @@ export interface CustomerDebtOrderRow {
     products?: CustomerDebtProductRow[];
 }
 
+type PaymentKind = 'deposit' | 'payment';
+
+type ProductPayRow = {
+    key: string;
+    orderId: string;
+    orderCode: string;
+    orderCreatedAt: string;
+    product: CustomerDebtProductRow;
+    needCollect: number;
+};
+
 interface CustomerCollectPaymentDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -57,6 +68,11 @@ const PAYMENT_METHODS = [
     { value: 'zalopay', label: 'Zalo Pay', icon: Wallet },
 ] as const;
 
+const PAYMENT_KINDS = [
+    { value: 'payment' as const, label: 'Thanh toán' },
+    { value: 'deposit' as const, label: 'Tiền cọc' },
+] as const;
+
 function formatInputCurrency(value: number): string {
     if (!value) return '';
     return value.toLocaleString('vi-VN');
@@ -64,6 +80,38 @@ function formatInputCurrency(value: number): string {
 
 function parseInputCurrency(value: string): number {
     return parseInt(value.replace(/[^\d]/g, ''), 10) || 0;
+}
+
+function getChildProducts(order: CustomerDebtOrderRow): CustomerDebtProductRow[] {
+    const all = order.products || [];
+    const children = all.filter((p) => p.product_code !== order.order_code);
+    return children.length > 0 ? children : all;
+}
+
+function getProductNeedCollect(p: CustomerDebtProductRow): number {
+    if (p.remaining_debt != null && p.remaining_debt >= 0) return p.remaining_debt;
+    const collected = Math.max(p.paid_amount || 0, p.deposit_amount || 0);
+    return Math.max(0, p.total_amount - collected);
+}
+
+function buildProductRows(orders: CustomerDebtOrderRow[]): ProductPayRow[] {
+    const sorted = [...orders].sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+    const rows: ProductPayRow[] = [];
+    for (const o of sorted) {
+        for (const p of getChildProducts(o)) {
+            rows.push({
+                key: p.id,
+                orderId: o.id,
+                orderCode: o.order_code,
+                orderCreatedAt: o.created_at,
+                product: p,
+                needCollect: getProductNeedCollect(p),
+            });
+        }
+    }
+    return rows;
 }
 
 export function CustomerCollectPaymentDialog({
@@ -76,76 +124,140 @@ export function CustomerCollectPaymentDialog({
     orders,
     onSuccess,
 }: CustomerCollectPaymentDialogProps) {
-    const openOrders = useMemo(
-        () => orders.filter((o) => o.remaining_debt > 0).sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+    const sortedOrders = useMemo(
+        () => [...orders].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
         [orders]
     );
+
+    const productRows = useMemo(() => buildProductRows(orders), [orders]);
 
     const [paidAt, setPaidAt] = useState('');
     const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'zalopay'>('cash');
     const [notes, setNotes] = useState('');
-    const [amounts, setAmounts] = useState<Record<string, number>>({});
-    const [showConfirm, setShowConfirm] = useState(false);
+    const [totalAmount, setTotalAmount] = useState(0);
+    const [rowAmounts, setRowAmounts] = useState<Record<string, number>>({});
+    const [paymentKinds, setPaymentKinds] = useState<Record<string, PaymentKind>>({});
+    const [submitting, setSubmitting] = useState(false);
     const [detailOrder, setDetailOrder] = useState<CustomerDebtOrderRow | null>(null);
 
     useEffect(() => {
-        if (!open) {
-            setShowConfirm(false);
-            return;
-        }
+        if (!open) return;
         const now = new Date();
         const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
         setPaidAt(local);
         setPaymentMethod('cash');
         setNotes('');
-        const initial: Record<string, number> = {};
-        openOrders.forEach((o) => {
-            initial[o.id] = o.remaining_debt;
+        setTotalAmount(0);
+        const initialAmounts: Record<string, number> = {};
+        const initialKinds: Record<string, PaymentKind> = {};
+        productRows.forEach((r) => {
+            initialAmounts[r.key] = 0;
+            initialKinds[r.key] = 'payment';
         });
-        setAmounts(initial);
-    }, [open, openOrders]);
+        setRowAmounts(initialAmounts);
+        setPaymentKinds(initialKinds);
+    }, [open, productRows]);
 
-    const allocSum = useMemo(
-        () => Object.values(amounts).reduce((s, v) => s + (v || 0), 0),
-        [amounts]
+    const rowSum = useMemo(
+        () => Object.values(rowAmounts).reduce((s, v) => s + (v || 0), 0),
+        [rowAmounts]
     );
 
-    const distributeFullFifo = () => {
-        const next: Record<string, number> = {};
-        openOrders.forEach((o) => {
-            next[o.id] = o.remaining_debt;
+    const tableTotals = useMemo(() => {
+        let invoiceValue = 0;
+        let deposit = 0;
+        let needCollect = 0;
+        for (const r of productRows) {
+            invoiceValue += r.product.total_amount || 0;
+            deposit += r.product.deposit_amount || 0;
+            needCollect += r.needCollect;
+        }
+        return { invoiceValue, deposit, needCollect, payThisTime: rowSum };
+    }, [productRows, rowSum]);
+
+    const updateRowAmount = (key: string, val: number) => {
+        setRowAmounts((prev) => {
+            const next = { ...prev, [key]: val };
+            const sum = Object.values(next).reduce((s, v) => s + (v || 0), 0);
+            setTotalAmount(sum);
+            return next;
         });
-        setAmounts(next);
     };
 
-    const handleOpenConfirm = () => {
-        if (allocSum <= 0) {
-            toast.error('Nhập số tiền thanh toán vào từng đơn');
-            return;
+    const distributeFromTotal = (total: number) => {
+        let left = Math.max(0, total);
+        const next: Record<string, number> = {};
+        productRows.forEach((r) => {
+            next[r.key] = 0;
+        });
+        for (const r of productRows) {
+            if (left <= 0) break;
+            if (r.needCollect <= 0) continue;
+            const assign = Math.min(left, r.needCollect);
+            next[r.key] = assign;
+            left -= assign;
         }
-        if (allocSum > totalDebt) {
-            toast.error('Tổng phân bổ không được vượt quá nợ hiện tại');
-            return;
-        }
-        const hasAllocation = openOrders.some((o) => (amounts[o.id] || 0) > 0);
-        if (!hasAllocation) {
-            toast.error('Phân bổ ít nhất một đơn');
-            return;
-        }
-        setShowConfirm(true);
+        setRowAmounts(next);
+        const sum = Object.values(next).reduce((s, v) => s + (v || 0), 0);
+        setTotalAmount(sum);
     };
 
-    const handleSuccess = () => {
-        setShowConfirm(false);
-        onSuccess();
-        onOpenChange(false);
+    const handleTotalChange = (value: number) => {
+        const capped = Math.min(Math.max(0, value), totalDebt);
+        setTotalAmount(capped);
+        distributeFromTotal(capped);
+    };
+
+    const handleSubmit = async () => {
+        const payTotal = rowSum > 0 ? rowSum : totalAmount;
+        if (payTotal <= 0) {
+            toast.error('Nhập số tiền thanh toán lần này hoặc phân bổ vào từng SP');
+            return;
+        }
+        if (rowSum > 0 && totalAmount > 0 && rowSum !== totalAmount) {
+            toast.error(`Tổng phân bổ (${formatCurrency(rowSum)}) phải bằng số tiền lần này (${formatCurrency(totalAmount)})`);
+            return;
+        }
+
+        const allocations = productRows
+            .filter((r) => (rowAmounts[r.key] || 0) > 0)
+            .map((r) => ({
+                order_id: r.orderId,
+                order_product_id: r.product.id,
+                amount: rowAmounts[r.key] || 0,
+                payment_kind: paymentKinds[r.key] || 'payment',
+            }));
+
+        if (allocations.length === 0) {
+            toast.error('Phân bổ thanh toán cho ít nhất một sản phẩm');
+            return;
+        }
+
+        setSubmitting(true);
+        try {
+            await customersApi.collectPayment(customerId, {
+                amount: payTotal,
+                payment_method: paymentMethod,
+                notes: notes || undefined,
+                content: `Thanh toán công nợ - ${customerName}`,
+                allocations,
+            });
+            toast.success('Đã tạo phiếu thu');
+            onSuccess();
+            onOpenChange(false);
+        } catch (err: unknown) {
+            const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+            toast.error(msg || 'Lỗi khi ghi nhận thanh toán');
+        } finally {
+            setSubmitting(false);
+        }
     };
 
     return (
         <>
-            <Dialog open={open && !showConfirm} onOpenChange={onOpenChange}>
-                <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
-                    <DialogHeader>
+            <Dialog open={open} onOpenChange={onOpenChange}>
+                <DialogContent className="max-w-5xl max-h-[94vh] overflow-y-auto p-0 gap-0">
+                    <DialogHeader className="px-6 pt-6 pb-3 border-b">
                         <DialogTitle>Thanh toán</DialogTitle>
                         <DialogDescription>
                             {customerName}
@@ -155,140 +267,294 @@ export function CustomerCollectPaymentDialog({
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div className="space-y-1.5">
-                            <Label className="text-xs">Thời gian</Label>
-                            <Input type="datetime-local" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
+                    <div className="px-6 py-4 space-y-4">
+                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-12">
+                            <div className="lg:col-span-3 space-y-1.5">
+                                <Label className="text-xs font-medium">Thời gian</Label>
+                                <Input type="datetime-local" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
+                            </div>
+                            <div className="lg:col-span-3 space-y-1.5">
+                                <Label className="text-xs font-medium">Phương thức</Label>
+                                <Select
+                                    value={paymentMethod}
+                                    onValueChange={(v) => setPaymentMethod(v as typeof paymentMethod)}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {PAYMENT_METHODS.map((m) => (
+                                            <SelectItem key={m.value} value={m.value}>
+                                                {m.label}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="lg:col-span-6 space-y-1.5">
+                                <Label className="text-xs font-medium text-primary">Số tiền (lần thanh toán này)</Label>
+                                <Input
+                                    type="text"
+                                    className="h-11 text-lg font-semibold text-right border-primary/40"
+                                    placeholder="0"
+                                    value={formatInputCurrency(totalAmount)}
+                                    onFocus={(e) => e.target.select()}
+                                    onChange={(e) => handleTotalChange(parseInputCurrency(e.target.value))}
+                                />
+                                <p className="text-right text-sm">
+                                    <span className="text-muted-foreground">Tổng từ các dòng SP: </span>
+                                    <strong className="text-green-700 tabular-nums">{formatCurrency(rowSum)}</strong>
+                                </p>
+                            </div>
                         </div>
-                        <div className="space-y-1.5">
-                            <Label className="text-xs">Phương thức</Label>
-                            <Select value={paymentMethod} onValueChange={(v) => setPaymentMethod(v as typeof paymentMethod)}>
-                                <SelectTrigger>
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {PAYMENT_METHODS.map((m) => (
-                                        <SelectItem key={m.value} value={m.value}>
-                                            {m.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">
+                            <div>
+                                <p className="text-[11px] text-muted-foreground uppercase">Tổng giá trị HĐ</p>
+                                <p className="font-semibold tabular-nums">{formatCurrency(tableTotals.invoiceValue)}</p>
+                            </div>
+                            <div>
+                                <p className="text-[11px] text-muted-foreground uppercase">Tổng cọc</p>
+                                <p className="font-semibold tabular-nums text-amber-800">{formatCurrency(tableTotals.deposit)}</p>
+                            </div>
+                            <div>
+                                <p className="text-[11px] text-muted-foreground uppercase">Tổng cần thu</p>
+                                <p className="font-semibold tabular-nums text-red-600">{formatCurrency(tableTotals.needCollect)}</p>
+                            </div>
+                            <div className="col-span-2 sm:col-span-1 sm:text-right border-t sm:border-t-0 sm:border-l border-primary/15 pt-2 sm:pt-0 sm:pl-3">
+                                <p className="text-[11px] text-primary font-medium uppercase">Tổng thanh toán lần này</p>
+                                <p className="text-xl font-bold tabular-nums text-green-700">{formatCurrency(tableTotals.payThisTime)}</p>
+                            </div>
                         </div>
-                    </div>
 
-                    <div className="space-y-1.5">
-                        <Label className="text-xs">Ghi chú</Label>
-                        <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
-                    </div>
+                        <div className="space-y-1.5">
+                            <Label className="text-xs font-medium">Ghi chú</Label>
+                            <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+                        </div>
 
-                    <div className="rounded-lg border overflow-hidden">
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm min-w-[640px]">
-                                <thead className="bg-muted/60 text-xs uppercase">
-                                    <tr>
-                                        <th className="p-2 text-left font-semibold">Mã hóa đơn</th>
-                                        <th className="p-2 text-right font-semibold">Giá trị HĐ</th>
-                                        <th className="p-2 text-right font-semibold">Đã cọc</th>
-                                        <th className="p-2 text-right font-semibold">Đã thu trước</th>
-                                        <th className="p-2 text-right font-semibold">Còn cần thu</th>
-                                        <th className="p-2 text-right font-semibold w-36">Thanh toán</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {openOrders.length === 0 ? (
+                        <div className="rounded-lg border overflow-hidden">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm min-w-[880px]">
+                                    <thead className="bg-muted/60 text-xs uppercase">
                                         <tr>
-                                            <td colSpan={6} className="p-6 text-center text-muted-foreground">
-                                                Không có đơn còn nợ
-                                            </td>
+                                            <th className="p-2.5 text-left font-semibold min-w-[140px]">Mã hóa đơn</th>
+                                            <th className="p-2.5 text-right font-semibold">Giá trị HĐ</th>
+                                            <th className="p-2.5 text-right font-semibold text-amber-800">Cọc</th>
+                                            <th className="p-2.5 text-right font-semibold">Cần thu</th>
+                                            <th className="p-2.5 text-center font-semibold w-28">Loại TT</th>
+                                            <th className="p-2.5 text-right font-semibold w-36">Thanh toán</th>
                                         </tr>
-                                    ) : (
-                                        openOrders.map((o) => (
-                                            <tr key={o.id} className="border-t">
-                                                <td className="p-2">
-                                                    <div className="font-semibold text-primary">{o.order_code}</div>
-                                                    <div className="text-[11px] text-muted-foreground">{formatDateTime(o.created_at)}</div>
-                                                </td>
-                                                <td className="p-2 text-right tabular-nums">{formatCurrency(o.total_amount)}</td>
-                                                <td className="p-2 text-right tabular-nums text-amber-700">
-                                                    {o.deposit_amount > 0 ? formatCurrency(o.deposit_amount) : '—'}
-                                                </td>
-                                                <td className="p-2 text-right tabular-nums">
-                                                    {o.paid_amount > 0 ? (
-                                                        <button
-                                                            type="button"
-                                                            className={cn(
-                                                                'font-medium text-green-700 hover:text-green-900',
-                                                                'hover:underline underline-offset-2 cursor-pointer'
-                                                            )}
-                                                            onClick={() => setDetailOrder(o)}
-                                                            title="Xem chi tiết phiếu thu"
-                                                        >
-                                                            {formatCurrency(o.paid_amount)}
-                                                        </button>
-                                                    ) : (
-                                                        <span className="text-muted-foreground">—</span>
-                                                    )}
-                                                </td>
-                                                <td className="p-2 text-right tabular-nums font-medium">{formatCurrency(o.remaining_debt)}</td>
-                                                <td className="p-2">
-                                                    <Input
-                                                        type="text"
-                                                        className="h-9 text-right"
-                                                        value={formatInputCurrency(amounts[o.id] || 0)}
-                                                        onFocus={(e) => e.target.select()}
-                                                        onChange={(e) => {
-                                                            const val = parseInputCurrency(e.target.value);
-                                                            setAmounts((prev) => ({
-                                                                ...prev,
-                                                                [o.id]: Math.min(o.remaining_debt, val),
-                                                            }));
-                                                        }}
-                                                    />
+                                    </thead>
+                                    <tbody>
+                                        {sortedOrders.length === 0 ? (
+                                            <tr>
+                                                <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                                                    Chưa có đơn hàng
                                                 </td>
                                             </tr>
-                                        ))
+                                        ) : (
+                                            sortedOrders.map((o) => {
+                                                const children = getChildProducts(o);
+                                                const orderDeposit = children.reduce(
+                                                    (s, p) => s + (p.deposit_amount || 0),
+                                                    0
+                                                );
+                                                const orderNeedCollect = children.reduce(
+                                                    (s, p) => s + getProductNeedCollect(p),
+                                                    0
+                                                );
+                                                const childPaySum = children.reduce(
+                                                    (s, p) => s + (rowAmounts[p.id] || 0),
+                                                    0
+                                                );
+
+                                                return (
+                                                    <Fragment key={o.id}>
+                                                        <tr
+                                                            className="border-t bg-muted/40 font-medium"
+                                                        >
+                                                            <td className="p-2.5">
+                                                                <div className="text-primary">{o.order_code}</div>
+                                                                <div className="text-[11px] text-muted-foreground font-normal">
+                                                                    {formatDateTime(o.created_at)}
+                                                                </div>
+                                                            </td>
+                                                            <td className="p-2.5 text-right tabular-nums">
+                                                                {formatCurrency(o.total_amount)}
+                                                            </td>
+                                                            <td className="p-2.5 text-right tabular-nums text-amber-700">
+                                                                {orderDeposit > 0 ? formatCurrency(orderDeposit) : '—'}
+                                                            </td>
+                                                            <td className="p-2.5 text-right tabular-nums text-red-600">
+                                                                {formatCurrency(orderNeedCollect)}
+                                                            </td>
+                                                            <td className="p-2.5" />
+                                                            <td className="p-2.5 text-right tabular-nums text-green-700">
+                                                                {childPaySum > 0 ? formatCurrency(childPaySum) : '—'}
+                                                            </td>
+                                                        </tr>
+                                                        {children.map((p) => {
+                                                            const need = getProductNeedCollect(p);
+                                                            const rowKey = p.id;
+                                                            return (
+                                                                <tr
+                                                                    key={rowKey}
+                                                                    className="border-t hover:bg-muted/15"
+                                                                >
+                                                                    <td className="p-2.5 pl-8">
+                                                                        <div className="font-mono font-semibold text-primary text-[13px]">
+                                                                            {p.product_code}
+                                                                        </div>
+                                                                        <div className="text-[11px] text-muted-foreground truncate max-w-[200px]">
+                                                                            {p.name}
+                                                                        </div>
+                                                                    </td>
+                                                                    <td className="p-2.5 text-right tabular-nums">
+                                                                        {formatCurrency(p.total_amount)}
+                                                                    </td>
+                                                                    <td className="p-2.5 text-right tabular-nums text-amber-700">
+                                                                        {p.deposit_amount > 0
+                                                                            ? formatCurrency(p.deposit_amount)
+                                                                            : '—'}
+                                                                    </td>
+                                                                    <td className="p-2.5 text-right tabular-nums font-medium">
+                                                                        {need > 0 ? (
+                                                                            <span className="text-red-600">
+                                                                                {formatCurrency(need)}
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span className="text-green-600">0</span>
+                                                                        )}
+                                                                    </td>
+                                                                    <td className="p-2.5">
+                                                                        <Select
+                                                                            value={paymentKinds[rowKey] || 'payment'}
+                                                                            onValueChange={(v) =>
+                                                                                setPaymentKinds((prev) => ({
+                                                                                    ...prev,
+                                                                                    [rowKey]: v as PaymentKind,
+                                                                                }))
+                                                                            }
+                                                                        >
+                                                                            <SelectTrigger className="h-8 text-xs">
+                                                                                <SelectValue />
+                                                                            </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                {PAYMENT_KINDS.map((k) => (
+                                                                                    <SelectItem key={k.value} value={k.value}>
+                                                                                        {k.label}
+                                                                                    </SelectItem>
+                                                                                ))}
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                    </td>
+                                                                    <td className="p-2.5">
+                                                                        <Input
+                                                                            type="text"
+                                                                            className={cn(
+                                                                                'h-9 text-right',
+                                                                                need <= 0 && 'bg-muted/50'
+                                                                            )}
+                                                                            disabled={need <= 0}
+                                                                            value={formatInputCurrency(rowAmounts[rowKey] || 0)}
+                                                                            onFocus={(e) => e.target.select()}
+                                                                            onChange={(e) => {
+                                                                                const val = Math.min(
+                                                                                    need,
+                                                                                    parseInputCurrency(e.target.value)
+                                                                                );
+                                                                                updateRowAmount(rowKey, val);
+                                                                            }}
+                                                                        />
+                                                                    </td>
+                                                                </tr>
+                                                            );
+                                                        })}
+                                                    </Fragment>
+                                                );
+                                            })
+                                        )}
+                                    </tbody>
+                                    {productRows.length > 0 && (
+                                        <tfoot className="bg-slate-100 border-t-2 border-slate-300 text-sm font-bold">
+                                            <tr>
+                                                <td className="p-3 uppercase text-slate-700">Tổng cộng</td>
+                                                <td className="p-3 text-right tabular-nums">
+                                                    {formatCurrency(tableTotals.invoiceValue)}
+                                                </td>
+                                                <td className="p-3 text-right tabular-nums text-amber-800">
+                                                    {formatCurrency(tableTotals.deposit)}
+                                                </td>
+                                                <td className="p-3 text-right tabular-nums text-red-600">
+                                                    {formatCurrency(tableTotals.needCollect)}
+                                                </td>
+                                                <td className="p-3" />
+                                                <td className="p-3 text-right tabular-nums text-green-700 text-base">
+                                                    {formatCurrency(tableTotals.payThisTime)}
+                                                </td>
+                                            </tr>
+                                        </tfoot>
                                     )}
-                                </tbody>
-                            </table>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-sm border-t pt-3">
+                            <div className="space-y-0.5">
+                                <p className="text-muted-foreground">
+                                    Tổng phân bổ dòng SP:{' '}
+                                    <strong
+                                        className={cn(
+                                            rowSum > 0 && rowSum === (totalAmount || rowSum)
+                                                ? 'text-green-600'
+                                                : 'text-red-600'
+                                        )}
+                                    >
+                                        {formatCurrency(rowSum)}
+                                    </strong>
+                                </p>
+                                {totalAmount > 0 && rowSum !== totalAmount && (
+                                    <p className="text-xs text-red-600">
+                                        Phải khớp số tiền lần này ({formatCurrency(totalAmount)})
+                                    </p>
+                                )}
+                            </div>
+                            <div className="flex gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleTotalChange(totalDebt)}
+                                >
+                                    Phân bổ hết nợ
+                                </Button>
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => distributeFromTotal(totalAmount)}
+                                >
+                                    Phân bổ theo số tiền trên
+                                </Button>
+                            </div>
                         </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                        <span className="text-muted-foreground">
-                            Tổng phân bổ:{' '}
-                            <strong className={allocSum > 0 && allocSum <= totalDebt ? 'text-green-600' : 'text-red-600'}>
-                                {formatCurrency(allocSum)}
-                            </strong>
-                        </span>
-                        <Button type="button" variant="outline" size="sm" onClick={distributeFullFifo}>
-                            Phân bổ theo thứ tự đơn
-                        </Button>
-                    </div>
-
-                    <DialogFooter className="gap-2 sm:gap-0">
-                        <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                    <DialogFooter className="px-6 py-4 border-t gap-2 sm:gap-2">
+                        <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
                             Bỏ qua
                         </Button>
-                        <Button type="button" onClick={handleOpenConfirm} disabled={openOrders.length === 0}>
+                        <Button
+                            type="button"
+                            onClick={handleSubmit}
+                            disabled={submitting || productRows.length === 0}
+                        >
+                            {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                             Tạo phiếu thu
                         </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
-
-            <CustomerCollectPaymentConfirmDialog
-                open={showConfirm}
-                onOpenChange={setShowConfirm}
-                onBack={() => setShowConfirm(false)}
-                customerId={customerId}
-                customerName={customerName}
-                paymentMethod={paymentMethod}
-                notes={notes}
-                orders={openOrders}
-                amounts={amounts}
-                onSuccess={handleSuccess}
-            />
 
             <CustomerOrderPaymentDetailDialog
                 open={!!detailOrder}

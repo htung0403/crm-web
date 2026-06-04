@@ -14,6 +14,12 @@ export const VIEW_DEFINITIONS: ViewDefinition[] = [
     { id: 'reports', label: 'Báo cáo', group: 'Tổng quan', pathPrefixes: ['reports'] },
     { id: 'leads', label: 'Leads', group: 'CRM', pathPrefixes: ['leads'] },
     { id: 'customers', label: 'Khách hàng', group: 'CRM', pathPrefixes: ['customers'] },
+    {
+        id: 'customers/view-phone',
+        label: 'Xem SĐT khách hàng',
+        group: 'CRM',
+        pathPrefixes: [],
+    },
     { id: 'interactions', label: 'Tương tác', group: 'CRM', pathPrefixes: ['interactions'] },
     { id: 'orders', label: 'Đơn hàng', group: 'Bán hàng', pathPrefixes: ['orders'] },
     { id: 'orders/upsell-tickets', label: 'Mục phê duyệt (Upsell)', group: 'Bán hàng', pathPrefixes: ['orders/upsell-tickets'] },
@@ -83,20 +89,45 @@ export function bypassesCustomViewPermissions(role: UserRole): boolean {
 }
 
 export function canAccessView(
-    user: Pick<User, 'role' | 'allowed_views'>,
+    user: Pick<User, 'role' | 'allowed_views' | 'uses_role_defaults'>,
     viewId: string,
     roleAllowed: boolean,
 ): boolean {
-    if (!roleAllowed) return false;
     if (bypassesCustomViewPermissions(user.role)) return true;
-    if (user.allowed_views === undefined || user.allowed_views === null) {
-        return true;
+
+    const usesDefaults =
+        user.uses_role_defaults === true ||
+        (user.uses_role_defaults !== false && (user.allowed_views === undefined || user.allowed_views === null));
+
+    if (usesDefaults) {
+        return roleAllowed;
     }
-    return user.allowed_views.includes(viewId);
+
+    return (user.allowed_views ?? []).includes(viewId);
 }
 
-export function getDefaultHomePath(user: Pick<User, 'role' | 'allowed_views'>): string {
-    if (bypassesCustomViewPermissions(user.role) || user.allowed_views == null) {
+export function canAccessAnyView(
+    user: Pick<User, 'role' | 'allowed_views' | 'uses_role_defaults'>,
+    viewIds: string[],
+    roleAllowed: boolean,
+): boolean {
+    return viewIds.some((viewId) => canAccessView(user, viewId, roleAllowed));
+}
+
+/** Quyền xem màn hình / capability (vd. xem giá phụ kiện trên Upsell) */
+export function hasViewGrant(
+    user: Pick<User, 'role' | 'allowed_views'> | null | undefined,
+    viewId: string,
+): boolean {
+    if (!user) return false;
+    return canAccessView(user, viewId, false);
+}
+
+export function getDefaultHomePath(user: Pick<User, 'role' | 'allowed_views' | 'uses_role_defaults'>): string {
+    const usesDefaults =
+        user.uses_role_defaults === true ||
+        (user.uses_role_defaults !== false && (user.allowed_views === undefined || user.allowed_views === null));
+    if (bypassesCustomViewPermissions(user.role) || usesDefaults) {
         return '/dashboard';
     }
     const first = VIEW_DEFINITIONS.find((v) => user.allowed_views!.includes(v.id) && v.pathPrefixes.length > 0);
@@ -118,7 +149,19 @@ const VIEW_ROLE_EDIT: Partial<Record<string, UserRole[]>> = {
     expense: ['admin', 'manager', 'accountant', 'sale'],
     employees: ['admin', 'manager'],
     'employee-settings': ['admin', 'manager'],
+    workflows: ['admin', 'manager', 'technician'],
+    'workflow-board': ['admin', 'manager', 'technician'],
+    tasks: ['admin', 'manager', 'technician'],
+    departments: ['admin', 'manager'],
 };
+
+/** Màn hình kỹ thuật: Sale mặc định chỉ xem (không sửa) nếu không được cấp quyền Sửa */
+const TECH_VIEWS_RESTRICT_SALE_EDIT = new Set([
+    'workflows',
+    'workflow-board',
+    'tasks',
+    'departments',
+]);
 
 const VIEW_ROLE_DELETE: Partial<Record<string, UserRole[]>> = {
     leads: ['admin', 'manager'],
@@ -135,6 +178,7 @@ function roleAllowsAction(role: UserRole, viewId: string, action: ViewActionType
     const map = action === 'edit' ? VIEW_ROLE_EDIT : VIEW_ROLE_DELETE;
     const roles = map[viewId];
     if (roles) return roles.includes(role);
+    if (action === 'edit' && TECH_VIEWS_RESTRICT_SALE_EDIT.has(viewId)) return false;
     return action === 'edit';
 }
 

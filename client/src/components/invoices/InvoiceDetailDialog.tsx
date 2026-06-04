@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { FileText, Calculator, XCircle, CheckCircle, Package, Gift, Clock, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils';
+import { CancelInvoiceDialog } from './CancelInvoiceDialog';
 
 export interface Invoice {
     id: string;
@@ -32,7 +33,11 @@ interface InvoiceDetailDialogProps {
     invoice: Invoice | null;
     open: boolean;
     onClose: () => void;
-    onStatusChange?: (id: string, status: string) => void;
+    onStatusChange?: (
+        id: string,
+        status: string,
+        options?: { cancel_related_payments?: boolean },
+    ) => void | Promise<void>;
     onPayButtonClick?: (invoice: Invoice) => void;
     onDelete?: (invoiceId: string) => void;
     canEdit?: boolean;
@@ -91,9 +96,13 @@ export function InvoiceDetailDialog({
     canEdit = false,
     canDelete = false,
 }: InvoiceDetailDialogProps) {
+    const [showCancelDialog, setShowCancelDialog] = useState(false);
+
     if (!invoice) return null;
 
     const receipts = invoice.transactions?.filter(t => t.id.startsWith('p-') || t.code?.startsWith('PT')) || [];
+    const paidFromReceipts = receipts.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    const hasRelatedPayments = paidFromReceipts > 0 || invoice.status === 'paid';
     const expenses = invoice.transactions?.filter(t => t.code?.startsWith('PC')) || [];
 
     const statusConfig: Record<string, { label: string; variant: 'success' | 'warning' | 'danger' | 'secondary' | 'info' }> = {
@@ -543,9 +552,9 @@ export function InvoiceDetailDialog({
                 </Tabs>
 
                 {/* Actions */}
-                {(canEdit || canDelete) && invoice.status !== 'paid' && (
+                {(canEdit || canDelete) && invoice.status !== 'cancelled' && (
                     <div className="flex flex-nowrap items-center justify-end gap-1 border-t px-3 py-2 sm:gap-2 sm:px-6 sm:pb-4">
-                        {canDelete && onDelete && (
+                        {canDelete && onDelete && invoice.status !== 'paid' && (
                             <Button
                                 variant="outline"
                                 size="sm"
@@ -556,36 +565,48 @@ export function InvoiceDetailDialog({
                                 Xóa
                             </Button>
                         )}
-                        {canEdit && invoice.status !== 'cancelled' && (
+                        {canEdit && (
                             <>
                                 <Button
                                     variant="outline"
                                     size="sm"
                                     className="h-7 shrink-0 gap-1 border-red-200 px-2 text-xs text-red-600 hover:bg-red-50"
-                                    onClick={() => {
-                                        onStatusChange?.(invoice.id, 'cancelled');
-                                        onClose();
-                                    }}
+                                    onClick={() => setShowCancelDialog(true)}
                                 >
                                     <XCircle className="h-3.5 w-3.5" />
-                                    Hủy
+                                    {invoice.status === 'paid' ? 'Hủy bỏ' : 'Hủy'}
                                 </Button>
-                                <Button
-                                    size="sm"
-                                    className="h-7 shrink-0 gap-1 bg-green-600 px-2 text-xs hover:bg-green-700"
-                                    onClick={() => {
-                                        onPayButtonClick?.(invoice);
-                                        onClose();
-                                    }}
-                                >
-                                    <CheckCircle className="h-3.5 w-3.5" />
-                                    Thanh toán
-                                </Button>
+                                {invoice.status !== 'paid' && (
+                                    <Button
+                                        size="sm"
+                                        className="h-7 shrink-0 gap-1 bg-green-600 px-2 text-xs hover:bg-green-700"
+                                        onClick={() => {
+                                            onPayButtonClick?.(invoice);
+                                            onClose();
+                                        }}
+                                    >
+                                        <CheckCircle className="h-3.5 w-3.5" />
+                                        Thanh toán
+                                    </Button>
+                                )}
                             </>
                         )}
                     </div>
                 )}
             </DialogContent>
+
+            <CancelInvoiceDialog
+                open={showCancelDialog}
+                invoiceCode={invoice.invoice_code}
+                hasPayments={hasRelatedPayments}
+                onClose={() => setShowCancelDialog(false)}
+                onConfirm={async (cancelRelatedPayments) => {
+                    await onStatusChange?.(invoice.id, 'cancelled', {
+                        cancel_related_payments: cancelRelatedPayments,
+                    });
+                    onClose();
+                }}
+            />
         </Dialog>
     );
 }

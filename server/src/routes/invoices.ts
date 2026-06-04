@@ -3,7 +3,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireAccountant } from '../middleware/auth.js';
 import { syncOrderPayment } from '../utils/orderHelper.js';
-import { processInvoicePayment } from '../utils/billingHelper.js';
+import { processInvoicePayment, processInvoiceCancellation } from '../utils/billingHelper.js';
 import { notifyFinanceEvent } from '../utils/financeNotifications.js';
 
 
@@ -249,11 +249,55 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
 router.patch('/:id/status', authenticate, requireAccountant, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { status } = req.body;
+        const { status, cancel_related_payments } = req.body as {
+            status?: string;
+            cancel_related_payments?: boolean;
+        };
 
         const validStatuses = ['draft', 'pending', 'paid', 'cancelled'];
-        if (!validStatuses.includes(status)) {
+        if (!status || !validStatuses.includes(status)) {
             throw new ApiError('Trạng thái không hợp lệ', 400);
+        }
+
+        const { data: existing, error: fetchError } = await supabaseAdmin
+            .from('invoices')
+            .select('id, invoice_code, status, order_id')
+            .eq('id', id)
+            .single();
+
+        if (fetchError || !existing) {
+            throw new ApiError('Không tìm thấy hóa đơn', 404);
+        }
+
+        if (existing.status === 'cancelled') {
+            throw new ApiError('Hóa đơn đã được hủy trước đó', 400);
+        }
+
+        if (status === 'cancelled' && (existing.status === 'paid' || existing.status === 'pending')) {
+            const shouldCancelPayments = cancel_related_payments !== false;
+            if (!shouldCancelPayments && existing.order_id) {
+                const [{ count: payCount }, { count: transCount }] = await Promise.all([
+                    supabaseAdmin
+                        .from('payment_records')
+                        .select('*', { count: 'exact', head: true })
+                        .eq('order_id', existing.order_id)
+                        .eq('transaction_status', 'approved'),
+                    supabaseAdmin
+                        .from('transactions')
+                        .select('*', { count: 'exact', head: true })
+                        .eq('order_id', existing.order_id)
+                        .eq('status', 'approved'),
+                ]);
+                if ((payCount || 0) > 0 || (transCount || 0) > 0) {
+                    throw new ApiError(
+                        'Hóa đơn đã có thanh toán. Vui lòng chọn hủy các phiếu thanh toán liên quan.',
+                        400,
+                    );
+                }
+            }
+            if (shouldCancelPayments) {
+                await processInvoiceCancellation(id, { cancelRelatedPayments: true });
+            }
         }
 
         const updateData: Record<string, any> = {
@@ -263,6 +307,10 @@ router.patch('/:id/status', authenticate, requireAccountant, async (req: Authent
 
         if (status === 'paid') {
             updateData.paid_at = new Date().toISOString();
+        }
+
+        if (status === 'cancelled') {
+            updateData.paid_at = null;
         }
 
         const { data: invoice, error } = await supabaseAdmin
@@ -281,6 +329,10 @@ router.patch('/:id/status', authenticate, requireAccountant, async (req: Authent
         // to avoid double-counting and ensure all services are finished.
         if (status === 'paid') {
             await processInvoicePayment(id);
+        }
+
+        if (status === 'cancelled' && invoice?.order_id) {
+            await syncOrderPayment(invoice.order_id);
         }
 
         if (status === 'cancelled' && invoice) {

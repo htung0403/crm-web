@@ -60,6 +60,49 @@ export async function getAllowedViewsForUser(userId: string, role: string): Prom
     return profile.allowed_views;
 }
 
+export function canAccessViewFromProfile(
+    profile: UserViewPermissionProfile,
+    role: string,
+    viewId: string,
+    roleAllowed: boolean,
+): boolean {
+    if (role === 'admin') return true;
+    if (!profile.uses_role_defaults && profile.allowed_views !== null) {
+        return profile.allowed_views.includes(viewId);
+    }
+    return roleAllowed;
+}
+
+/** Cho phép nếu có ít nhất một view trong danh sách (vd. Upsell + Yêu cầu dùng chung API requests) */
+export function canAccessAnyViewFromProfile(
+    profile: UserViewPermissionProfile,
+    role: string,
+    viewIds: string[],
+    roleAllowed: boolean,
+): boolean {
+    return viewIds.some((viewId) => canAccessViewFromProfile(profile, role, viewId, roleAllowed));
+}
+
+export function canPerformViewActionFromProfile(
+    profile: UserViewPermissionProfile,
+    role: string,
+    viewId: string,
+    action: 'edit' | 'delete',
+    roleAllowed: boolean,
+): boolean {
+    if (role === 'admin' || role === 'manager') return true;
+
+    if (profile.uses_role_defaults) {
+        if (!roleAllowed) return false;
+        return action === 'edit';
+    }
+
+    if (!profile.allowed_views?.includes(viewId)) return false;
+    const flags = profile.view_actions?.[viewId];
+    if (!flags) return false;
+    return action === 'edit' ? Boolean(flags.edit) : Boolean(flags.delete);
+}
+
 export function sanitizeViewActionsInput(
     allowedViews: string[],
     viewActions: unknown,

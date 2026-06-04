@@ -129,7 +129,7 @@ export function ViewPermissionsPanel({ embedded = false }: { embedded?: boolean 
                 payload[viewId] = draftActions[viewId] ?? emptyActions();
             }
             await employeeViewPermissionsApi.save(selectedUserId, draftViews, payload);
-            toast.success(`Đã lưu phân quyền cho ${selected.email}`);
+            toast.success(`Đã lưu phân quyền cho ${selected.email}. Nhân viên cần tải lại trang hoặc đăng nhập lại.`);
             await load();
         } catch (err: unknown) {
             const ax = err as { response?: { data?: { message?: string } } };

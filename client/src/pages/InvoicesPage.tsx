@@ -297,11 +297,29 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
         loadData();
     }, [fetchInvoices, fetchOrders]);
 
-    const handleStatusChange = async (id: string, status: string) => {
+    const handleStatusChange = async (
+        id: string,
+        status: string,
+        options?: { cancel_related_payments?: boolean },
+    ) => {
         try {
-            await invoicesApi.updateStatus(id, status);
-            toast.success(status === 'paid' ? 'Đã xác nhận thanh toán!' : 'Đã hủy hóa đơn!');
+            await invoicesApi.updateStatus(id, status, options);
+            if (status === 'paid') {
+                toast.success('Đã xác nhận thanh toán!');
+            } else if (status === 'cancelled') {
+                toast.success(
+                    options?.cancel_related_payments !== false
+                        ? 'Đã hủy hóa đơn và các phiếu thanh toán liên quan'
+                        : 'Đã hủy hóa đơn!',
+                );
+            } else {
+                toast.success('Đã cập nhật trạng thái hóa đơn');
+            }
             fetchInvoices();
+            if (selectedInvoice?.id === id) {
+                const detail = await invoicesApi.getById(id);
+                if (detail.data.data?.invoice) setSelectedInvoice(detail.data.data.invoice);
+            }
         } catch (err: any) {
             toast.error(err.response?.data?.message || 'Lỗi khi cập nhật trạng thái');
         }

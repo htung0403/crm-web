@@ -1,8 +1,8 @@
 import { supabaseAdmin } from '../config/supabase.js';
 
 /**
- * Synchronizes an order's payment info (paid_amount, remaining_debt, payment_status)
- * based on all 'paid' invoices associated with it.
+ * Đồng bộ paid_amount / công nợ đơn từ nguồn còn hiệu lực:
+ * phiếu thu (payment_records) → phiếu thu/chi (transactions) → hóa đơn status=paid (không tính HĐ đã hủy).
  */
 export async function syncOrderPayment(orderId: string): Promise<void> {
     try {
@@ -20,19 +20,45 @@ export async function syncOrderPayment(orderId: string): Promise<void> {
             return;
         }
 
-        // 2. Fetch all PAID invoices for this order
-        const { data: invoices, error: invError } = await supabaseAdmin
-            .from('invoices')
-            .select('total_amount')
-            .eq('order_id', orderId)
-            .eq('status', 'paid');
+        let totalPaid = 0;
 
-        if (invError) {
-            console.error('[PaymentSync] Error fetching invoices:', invError);
-            return;
+        const { data: records, error: recError } = await supabaseAdmin
+            .from('payment_records')
+            .select('amount')
+            .eq('order_id', orderId)
+            .eq('transaction_status', 'approved');
+
+        if (recError) {
+            console.error('[PaymentSync] payment_records:', recError);
+        } else {
+            totalPaid = (records || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
         }
 
-        const totalPaid = (invoices || []).reduce((sum, inv) => sum + (Number(inv.total_amount) || 0), 0);
+        if (totalPaid === 0) {
+            const { data: trans } = await supabaseAdmin
+                .from('transactions')
+                .select('amount')
+                .eq('order_id', orderId)
+                .eq('type', 'income')
+                .eq('status', 'approved');
+            totalPaid = (trans || []).reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+        }
+
+        if (totalPaid === 0) {
+            const { data: invoices, error: invError } = await supabaseAdmin
+                .from('invoices')
+                .select('total_amount')
+                .eq('order_id', orderId)
+                .eq('status', 'paid');
+
+            if (invError) {
+                console.error('[PaymentSync] Error fetching invoices:', invError);
+                return;
+            }
+
+            totalPaid = (invoices || []).reduce((sum, inv) => sum + (Number(inv.total_amount) || 0), 0);
+        }
+
         const remainingDebt = Math.max(0, (order.total_amount || 0) - totalPaid);
         
         // Determine payment status

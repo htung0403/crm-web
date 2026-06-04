@@ -17,6 +17,7 @@ import { BackwardMoveDialog } from '@/components/orders/BackwardMoveDialog';
 import { toast } from 'sonner';
 import { getWorkflowRequestLogDisplay, isWorkflowRequestLogAction } from '../workflowRequestLog';
 import { useAuth } from '@/contexts/AuthContext';
+import { canOperateWorkflow } from '@/lib/sensitivePermissions';
 import {
     MobileKanbanColumnTabs,
     MobileKanbanMoveBar,
@@ -222,7 +223,7 @@ const WorkflowCard = memo(({
                                 disabledMessage={
                                     isSlaPaused
                                         ? 'Đang chờ duyệt — không thể chuyển bước'
-                                        : 'Chỉ Sale/Quản lý mới chuyển bước trên Kanban'
+                                        : 'Chỉ Kỹ thuật/Quản lý mới chuyển bước trên Kanban'
                                 }
                                 sourceIndex={index}
                                 embedded
@@ -252,14 +253,15 @@ const WorkflowCard = memo(({
                             <div className="mt-3 pt-2 border-t border-gray-100 grid grid-cols-3 gap-1">
                                 <button
                                     type="button"
+                                    disabled={!canDragWorkflow}
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        if (leadItem) {
-                                            handleOpenAccessory(leadItem);
-                                        }
+                                        if (!canDragWorkflow || !leadItem) return;
+                                        handleOpenAccessory(leadItem);
                                     }}
                                     className={cn(
                                         "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",
+                                        !canDragWorkflow && "opacity-50 cursor-not-allowed",
                                         (leadItem as any)?.accessory?.status === 'requested' ? "bg-amber-50 text-amber-600 border-amber-200 animate-pulse" :
                                             "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
                                     )}
@@ -271,14 +273,15 @@ const WorkflowCard = memo(({
                                 </button>
                                 <button
                                     type="button"
+                                    disabled={!canDragWorkflow}
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        if (leadItem) {
-                                            handleOpenPartner(leadItem);
-                                        }
+                                        if (!canDragWorkflow || !leadItem) return;
+                                        handleOpenPartner(leadItem);
                                     }}
                                     className={cn(
                                         "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",
+                                        !canDragWorkflow && "opacity-50 cursor-not-allowed",
                                         (leadItem as any)?.partner?.status === 'requested' ? "bg-amber-50 text-amber-600 border-amber-200 animate-pulse" :
                                             "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
                                     )}
@@ -290,14 +293,15 @@ const WorkflowCard = memo(({
                                 </button>
                                 <button
                                     type="button"
+                                    disabled={!canDragWorkflow}
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        if (leadItem) {
-                                            handleOpenExtension(leadItem);
-                                        }
+                                        if (!canDragWorkflow || !leadItem) return;
+                                        handleOpenExtension(leadItem);
                                     }}
                                     className={cn(
                                         "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",
+                                        !canDragWorkflow && "opacity-50 cursor-not-allowed",
                                         (extensionRequest?.status === 'pending' || extensionRequest?.status === 'requested') ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 animate-pulse" :
                                             extensionRequest?.status === 'manager_approved' ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" :
                                                 "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
@@ -312,11 +316,16 @@ const WorkflowCard = memo(({
                                 {roomId === 'waiting' && (
                                     <button
                                         type="button"
+                                        disabled={!canDragWorkflow}
                                         onClick={(e) => {
                                             e.stopPropagation();
+                                            if (!canDragWorkflow) return;
                                             handleOpenBackwardMove(group);
                                         }}
-                                        className="col-span-3 mt-1 inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7 bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100"
+                                        className={cn(
+                                            "col-span-3 mt-1 inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7 bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100",
+                                            !canDragWorkflow && "opacity-50 cursor-not-allowed",
+                                        )}
                                     >
                                         <ExternalLink className="h-3 w-3 mr-1" />
                                         <span className="truncate">Trả về Sales</span>
@@ -508,7 +517,7 @@ export function WorkflowTab({
     const [mobileRoomId, setMobileRoomId] = useState('waiting');
     const mobileScrollRef = useRef<HTMLDivElement>(null);
 
-    const canDragWorkflow = user?.role === 'admin' || user?.role === 'manager' || user?.role === 'sale';
+    const canDragWorkflow = canOperateWorkflow(user);
 
     const scrollToWorkflowRoom = useCallback((roomId: string) => {
         setMobileRoomId(roomId);

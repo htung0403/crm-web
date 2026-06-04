@@ -82,6 +82,7 @@ const pagePermissions: Record<string, UserRole[]> = {
   salary: ['admin', 'manager', 'accountant'],
   reports: ['admin', 'manager', 'accountant'],
   'upsell-management': ['admin', 'manager'],
+  requests: ['admin', 'manager', 'sale', 'technician'],
   settings: ['admin', 'manager'],
   'leave-requests': ['admin', 'manager', 'accountant', 'sale', 'technician'],
   'attendance-mobile': ['admin', 'manager', 'accountant', 'sale', 'technician'],
@@ -119,7 +120,7 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode;
   const roleAllowed = !allowedRoles || !user || allowedRoles.includes(user.role);
   const viewAllowed = !viewId || !user || canAccessView(user, viewId, roleAllowed);
 
-  if (!roleAllowed || !viewAllowed) {
+  if (!viewAllowed) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
         <div className="h-20 w-20 rounded-2xl bg-red-100 flex items-center justify-center mb-4">
@@ -127,7 +128,7 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode;
         </div>
         <h2 className="text-2xl font-bold text-foreground mb-2">Không có quyền truy cập</h2>
         <p className="text-muted-foreground max-w-md">
-          Bạn không có quyền truy cập trang này. Vui lòng liên hệ quản trị viên.
+          Bạn không có quyền truy cập trang này. Vui lòng liên hệ quản trị viên hoặc đăng nhập lại sau khi được cấp quyền.
         </p>
       </div>
     );

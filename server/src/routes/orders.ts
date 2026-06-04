@@ -4,10 +4,15 @@ import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireSale } from '../middleware/auth.js';
 import { checkAndCompleteOrder } from '../utils/orderHelper.js';
 import { autoCreateInvoice, syncInvoiceWithOrder } from '../utils/billingHelper.js';
+import {
+    createOrderIncomeTransaction,
+    distributeDepositAcrossCustomerItems,
+    recordProductDepositPayments,
+} from '../utils/paymentRecordsHelper.js';
 import { notifyFinanceEvent } from '../utils/financeNotifications.js';
 import { notifyCrmMaster } from '../utils/webhookNotifier.js';
 import { buildCrmOrderUrl, getManagerRecipients, notifyCrmMasterUser } from '../utils/n8nCrmEvents.js';
-import { fetchOrderPaymentRecords } from '../utils/paymentRecordsHelper.js';
+import { fetchOrderPaymentRecords, insertPaymentRecord } from '../utils/paymentRecordsHelper.js';
 
 
 const router = Router();
@@ -736,7 +741,7 @@ router.get('/:id/kanban-logs', authenticate, async (req: AuthenticatedRequest, r
         if (tab === 'aftersale') {
             const { data: logs, error } = await supabaseAdmin
                 .from('order_after_sale_stage_log')
-                .select('id, from_stage, to_stage, created_by, created_at, created_by_user:users!order_after_sale_stage_log_created_by_fkey(id, name)')
+                .select('id, entity_type, entity_id, from_stage, to_stage, created_by, created_at, created_by_user:users!order_after_sale_stage_log_created_by_fkey(id, name)')
                 .eq('order_id', orderId)
                 .order('created_at', { ascending: false })
                 .limit(100);
@@ -815,7 +820,7 @@ router.get('/:id/kanban-logs', authenticate, async (req: AuthenticatedRequest, r
         if (tab === 'care') {
             const { data: logs, error } = await supabaseAdmin
                 .from('order_care_warranty_log')
-                .select('id, from_stage, to_stage, flow_type, created_by, created_at, created_by_user:users!order_care_warranty_log_created_by_fkey(id, name)')
+                .select('id, entity_type, entity_id, from_stage, to_stage, flow_type, created_by, created_at, created_by_user:users!order_care_warranty_log_created_by_fkey(id, name)')
                 .eq('order_id', orderId)
                 .order('created_at', { ascending: false })
                 .limit(100);
@@ -892,7 +897,25 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
         }
 
         const totalAmount = Math.max(0, subtotal - discountAmount + totalSurchargesAmount);
-        const paidAmountValue = Number(paid_amount) || 0;
+
+        let depositFromItems = 0;
+        if (finalCustomerItems && Array.isArray(finalCustomerItems)) {
+            for (const item of finalCustomerItems) {
+                if (!item.services || !Array.isArray(item.services)) continue;
+                for (const svc of item.services) {
+                    depositFromItems += Math.max(0, Number(svc.deposit_amount) || 0);
+                }
+            }
+        }
+
+        const paidAmountFromBody = Number(paid_amount) || 0;
+        if (depositFromItems <= 0 && paidAmountFromBody > 0 && finalCustomerItems && Array.isArray(finalCustomerItems)) {
+            depositFromItems = distributeDepositAcrossCustomerItems(finalCustomerItems, paidAmountFromBody);
+        }
+
+        const paidAmountValue = depositFromItems > 0
+            ? depositFromItems
+            : paidAmountFromBody;
         const remainingDebt = Math.max(0, totalAmount - paidAmountValue);
 
         // 2. Generate Order Code
@@ -928,6 +951,7 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
 
         // 4. Create Customer Items (order_products) and their services
         const createdCustomerItems = [];
+        const productDepositLines: Array<{ order_product_id: string; product_code: string; amount: number }> = [];
         if (finalCustomerItems && Array.isArray(finalCustomerItems)) {
             for (let i = 0; i < finalCustomerItems.length; i++) {
                 const item = finalCustomerItems[i];
@@ -1087,6 +1111,20 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
                     }
                 }
 
+                let productDepositTotal = 0;
+                if (item.services && Array.isArray(item.services)) {
+                    for (const svc of item.services) {
+                        productDepositTotal += Math.max(0, Number(svc.deposit_amount) || 0);
+                    }
+                }
+                if (productDepositTotal > 0) {
+                    productDepositLines.push({
+                        order_product_id: orderProduct.id,
+                        product_code: productCode,
+                        amount: productDepositTotal,
+                    });
+                }
+
                 createdCustomerItems.push({ ...orderProduct, qr_code: productCode });
             }
         }
@@ -1157,29 +1195,88 @@ router.post('/', authenticate, requireSale, async (req: AuthenticatedRequest, re
             }
         }
 
-        // 6. Create Transaction record for payment
-        if (paidAmountValue > 0) {
-            const { data: lastTrans } = await supabaseAdmin.from('transactions').select('code').like('code', 'PT%').order('created_at', { ascending: false }).limit(1);
-            let tCodeValue = 'PT000001';
-            if (lastTrans && lastTrans.length > 0) {
-                const lNum = parseInt(lastTrans[0].code.replace('PT', ''), 10);
-                tCodeValue = `PT${String(lNum + 1).padStart(6, '0')}`;
-            }
+        const { data: customerRow } = await supabaseAdmin
+            .from('customers')
+            .select('name')
+            .eq('id', customer_id)
+            .single();
+        const customerName = customerRow?.name || 'Khách hàng';
 
-            await supabaseAdmin.from('transactions').insert({
-                code: tCodeValue,
-                type: 'income',
-                category: 'Thanh toán đơn hàng',
-                amount: paidAmountValue,
-                payment_method: payment_method || 'cash',
+        if (productDepositLines.length === 0 && paidAmountValue > 0 && createdCustomerItems.length > 0) {
+            const productTotals = new Map<string, number>();
+            for (let i = 0; i < finalCustomerItems.length; i++) {
+                const item = finalCustomerItems[i];
+                const created = createdCustomerItems[i];
+                if (!created?.id || !item?.services) continue;
+                let sum = 0;
+                for (const svc of item.services) {
+                    sum += Math.max(0, Number(svc.deposit_amount) || 0);
+                }
+                if (sum > 0) productTotals.set(created.id, sum);
+            }
+            if (productTotals.size === 0) {
+                const perProduct = Math.floor(paidAmountValue / createdCustomerItems.length);
+                let remainder = paidAmountValue - perProduct * createdCustomerItems.length;
+                for (const cp of createdCustomerItems) {
+                    const amt = perProduct + (remainder > 0 ? 1 : 0);
+                    if (remainder > 0) remainder--;
+                    if (amt > 0) {
+                        productDepositLines.push({
+                            order_product_id: cp.id,
+                            product_code: cp.product_code || cp.qr_code,
+                            amount: amt,
+                        });
+                    }
+                }
+            }
+        }
+
+        if (productDepositLines.length > 0) {
+            const { total: depositRecorded } = await recordProductDepositPayments({
+                orderId: order.id,
+                orderCode,
+                customerName,
+                paymentMethod: payment_method || 'cash',
+                createdBy: req.user!.id,
+                lines: productDepositLines,
+                notes: 'Tiền cọc khi tạo đơn',
+            });
+
+            const finalPaid = depositRecorded;
+            const finalRemaining = Math.max(0, totalAmount - finalPaid);
+            const finalPaymentStatus = finalRemaining <= 0 ? 'paid' : (finalPaid > 0 ? 'partial' : 'unpaid');
+
+            await supabaseAdmin
+                .from('orders')
+                .update({
+                    paid_amount: finalPaid,
+                    remaining_debt: finalRemaining,
+                    payment_status: finalPaymentStatus,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', order.id);
+
+            order.paid_amount = finalPaid;
+            order.remaining_debt = finalRemaining;
+            order.payment_status = finalPaymentStatus;
+
+            await createOrderIncomeTransaction({
+                orderId: order.id,
+                orderCode,
+                amount: finalPaid,
+                paymentMethod: payment_method || 'cash',
                 notes: `Phiếu thu cọc đơn hàng - ${orderCode}`,
-                date: new Date().toISOString().split('T')[0],
-                order_id: order.id,
-                order_code: orderCode,
-                status: 'approved',
-                created_by: req.user!.id,
-                approved_by: req.user!.id,
-                approved_at: new Date().toISOString(),
+                createdBy: req.user!.id,
+                category: 'Tiền cọc',
+            });
+        } else if (paidAmountValue > 0) {
+            await createOrderIncomeTransaction({
+                orderId: order.id,
+                orderCode,
+                amount: paidAmountValue,
+                paymentMethod: payment_method || 'cash',
+                notes: `Phiếu thu đơn hàng - ${orderCode}`,
+                createdBy: req.user!.id,
             });
         }
 
@@ -2183,24 +2280,21 @@ router.post('/:id/payments', authenticate, async (req: AuthenticatedRequest, res
             throw new ApiError('Không tìm thấy đơn hàng', 404);
         }
 
-        // Create payment record
-        const { data: payment, error: paymentError } = await supabaseAdmin
-            .from('payment_records')
-            .insert({
-                order_id: order.id,
-                order_code: order.order_code,
-                content,
-                amount,
-                payment_method: payment_method || 'cash',
-                image_url,
-                notes,
-                transaction_type: 'income',
-                transaction_category: 'Thanh toán đơn hàng',
-                transaction_status: 'approved',
-                created_by: req.user!.id,
-            })
-            .select('*, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id), sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)')
-            .single();
+        // Create payment record (no direct payment_records → customers FK in schema)
+        const { data: payment, error: paymentError } = await insertPaymentRecord({
+            order_id: order.id,
+            order_code: order.order_code,
+            content,
+            amount,
+            payment_method: payment_method || 'cash',
+            image_url: image_url || null,
+            notes: notes || null,
+            transaction_type: 'income',
+            transaction_category: 'Thanh toán đơn hàng',
+            transaction_status: 'approved',
+            created_by: req.user!.id,
+            payment_kind: 'payment',
+        });
 
         if (paymentError) {
             console.error('Error creating payment:', paymentError);

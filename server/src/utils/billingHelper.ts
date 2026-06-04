@@ -314,3 +314,104 @@ export async function syncInvoiceWithOrder(orderId: string, paymentMethod?: stri
         console.error('[BillingHelper] Unexpected error in syncInvoiceWithOrder:', error);
     }
 }
+
+/** @deprecated Dùng syncOrderPayment — cùng logic đồng bộ công nợ (không tính HĐ/phiếu đã hủy). */
+export async function recalcOrderPaymentFromRecords(orderId: string): Promise<void> {
+    await syncOrderPayment(orderId);
+}
+
+/**
+ * Hủy phiếu thu/chi liên quan đơn + hoàn trạng thái thanh toán dòng hàng trên hóa đơn.
+ */
+export async function cancelRelatedPaymentsForInvoice(invoice: {
+    id: string;
+    invoice_code: string;
+    order_id: string;
+    order_item_ids?: string[] | null;
+    order_product_service_ids?: string[] | null;
+    order?: { order_code?: string } | null;
+}): Promise<void> {
+    const orderId = invoice.order_id;
+    const orderCode = invoice.order?.order_code;
+    const invoiceCode = invoice.invoice_code || '';
+    const now = new Date().toISOString();
+
+    // Phiếu thu ghi trong đơn — chỉ hủy bản ghi nhắc mã HĐ (tránh hủy nhầm phiếu khác trên cùng đơn)
+    if (invoiceCode) {
+        const { data: payRows } = await supabaseAdmin
+            .from('payment_records')
+            .select('id, content, notes')
+            .eq('order_id', orderId)
+            .eq('transaction_status', 'approved');
+
+        const payIds = (payRows || [])
+            .filter((p) => {
+                const text = `${p.content || ''} ${p.notes || ''}`;
+                return text.includes(invoiceCode);
+            })
+            .map((p) => p.id);
+
+        if (payIds.length > 0) {
+            await supabaseAdmin
+                .from('payment_records')
+                .update({ transaction_status: 'cancelled', updated_at: now })
+                .in('id', payIds);
+        }
+    }
+
+    // Phiếu thu/chi — chỉ bản ghi ghi rõ mã hóa đơn (không hủy toàn bộ PT của đơn)
+    if (invoiceCode) {
+        await supabaseAdmin
+            .from('transactions')
+            .update({ status: 'cancelled', updated_at: now })
+            .eq('order_id', orderId)
+            .ilike('notes', `%${invoiceCode}%`)
+            .in('status', ['approved', 'pending']);
+    }
+
+    await supabaseAdmin
+        .from('finance_transactions')
+        .update({ status: 'cancelled', updated_at: now })
+        .eq('invoice_id', invoice.id)
+        .in('status', ['approved', 'pending']);
+
+    const itemIds = Array.isArray(invoice.order_item_ids) ? invoice.order_item_ids : [];
+    if (itemIds.length > 0) {
+        await supabaseAdmin
+            .from('order_items')
+            .update({ payment_status: 'unpaid' })
+            .in('id', itemIds);
+    }
+
+    const serviceIds = Array.isArray(invoice.order_product_service_ids) ? invoice.order_product_service_ids : [];
+    if (serviceIds.length > 0) {
+        await supabaseAdmin
+            .from('order_product_services')
+            .update({ payment_status: 'unpaid' })
+            .in('id', serviceIds);
+    }
+
+    console.log(`[BillingHelper] Cancelled related payments for invoice ${invoice.invoice_code}`);
+}
+
+export async function processInvoiceCancellation(
+    invoiceId: string,
+    options: { cancelRelatedPayments?: boolean } = {},
+): Promise<void> {
+    const { data: invoice, error } = await supabaseAdmin
+        .from('invoices')
+        .select(
+            'id, invoice_code, order_id, status, order_item_ids, order_product_service_ids, order:orders(order_code)',
+        )
+        .eq('id', invoiceId)
+        .single();
+
+    if (error || !invoice) {
+        console.error('[BillingHelper] processInvoiceCancellation invoice not found:', error);
+        return;
+    }
+
+    if (options.cancelRelatedPayments !== false && invoice.order_id) {
+        await cancelRelatedPaymentsForInvoice(invoice as Parameters<typeof cancelRelatedPaymentsForInvoice>[0]);
+    }
+}

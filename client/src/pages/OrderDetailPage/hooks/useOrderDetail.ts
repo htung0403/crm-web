@@ -80,6 +80,7 @@ export function useOrderDetail(id: string | undefined) {
                 if (orderData.items) {
                     fetchWorkflowSteps(orderData.items);
                 }
+                await fetchKanbanLogs(orderData.id);
                 return orderData;
             }
             return null;
@@ -87,7 +88,7 @@ export function useOrderDetail(id: string | undefined) {
             console.error('Error reloading order');
             return null;
         }
-    }, [id, fetchWorkflowSteps]);
+    }, [id, fetchWorkflowSteps, fetchKanbanLogs]);
 
     // Initial fetch
     useEffect(() => {

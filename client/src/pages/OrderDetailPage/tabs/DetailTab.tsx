@@ -21,6 +21,7 @@ import {
     getCustomerProductTypeLabel,
     getStatusVariant,
 } from '../utils';
+import { CustomerPhone } from '@/components/customers/CustomerPhone';
 import { OrderDetailMobileDetail } from '../components/OrderDetailMobileDetail';
 import { OrderItemPhotos, isCustomerProductItem } from '../components/OrderItemPhotos';
 
@@ -93,7 +94,9 @@ export function DetailTab({
                                 </Avatar>
                                 <div className="flex-1">
                                     <p className="font-semibold text-lg">{order.customer?.name || 'N/A'}</p>
-                                    <p className="text-muted-foreground">{order.customer?.phone || 'Không có SĐT'}</p>
+                                    <p className="text-muted-foreground">
+                                        <CustomerPhone phone={order.customer?.phone} />
+                                    </p>
                                 </div>
                                 {order.customer && (
                                     <Button variant="outline" size="sm" onClick={() => navigate(`/customers?id=${order.customer?.id}`)}>

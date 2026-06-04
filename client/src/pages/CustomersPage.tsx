@@ -25,6 +25,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { CreateCustomerDialog } from '@/components/customers/CreateCustomerDialog';
 import { MobileCustomersList } from '@/components/customers';
+import { CustomerPhone } from '@/components/customers/CustomerPhone';
 
 // Customer types imported from hook
 
@@ -318,7 +319,7 @@ function CustomerDetailDialog({
                                 <p className="text-xs text-muted-foreground">Điện thoại</p>
                                 <p className="font-medium flex items-center gap-2">
                                     <Phone className="h-4 w-4 text-muted-foreground" />
-                                    {customer.phone}
+                                    <CustomerPhone phone={customer.phone} linkable />
                                 </p>
                             </div>
                             <div className="space-y-1">
@@ -985,7 +986,9 @@ export function CustomersPage() {
                                             </td>
                                             <td className="p-3">
                                                 <p className="text-sm">{customer.email || '-'}</p>
-                                                <p className="text-xs text-muted-foreground">{customer.phone}</p>
+                                                <p className="text-xs text-muted-foreground">
+                                                    <CustomerPhone phone={customer.phone} />
+                                                </p>
                                             </td>
                                             <td className="p-3">
                                                 <Badge variant="outline">{customer.source || '-'}</Badge>

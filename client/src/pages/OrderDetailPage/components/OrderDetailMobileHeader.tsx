@@ -10,6 +10,7 @@ import {
     ThumbsUp,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { CustomerPhone } from '@/components/customers/CustomerPhone';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -97,7 +98,8 @@ export function OrderDetailMobileHeader({
                         </div>
                         <p className="mt-1 truncate text-sm text-slate-300">
                             {order.customer?.name || 'Khách lẻ'}
-                            {order.customer?.phone ? ` · ${order.customer.phone}` : ''}
+                            {' · '}
+                            <CustomerPhone phone={order.customer?.phone} className="inline" />
                         </p>
                     </div>
                     <DropdownMenu>

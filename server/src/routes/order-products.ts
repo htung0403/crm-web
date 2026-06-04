@@ -128,6 +128,14 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
             throw new ApiError('Trạng thái không hợp lệ', 400);
         }
 
+        const userId = req.user?.id;
+        const { data: beforeProduct } = await supabaseAdmin
+            .from('order_products')
+            .select('status, order_id, care_warranty_flow, care_warranty_stage')
+            .eq('id', id)
+            .single();
+        const oldStatus = beforeProduct?.status ?? null;
+
         const updateData: any = {
             status,
             updated_at: new Date().toISOString()
@@ -180,6 +188,24 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
                     item: { id: product.id, service_name: product.name, deadline_at: product.due_at || null },
                     product_image_url: Array.isArray(product.images) ? product.images[0] || null : null,
                 });
+            }
+        }
+
+        if (beforeProduct?.order_id && oldStatus !== status) {
+            try {
+                await supabaseAdmin.from('order_item_status_log').insert({
+                    order_id: beforeProduct.order_id,
+                    entity_type: 'order_product',
+                    entity_id: id,
+                    from_status: oldStatus,
+                    to_status: status,
+                    reason: reason || null,
+                    notes: warranty_code ? `Tạo HD Bảo hành: ${warranty_code}` : null,
+                    photos: [],
+                    created_by: userId ?? null,
+                });
+            } catch (logErr) {
+                console.error('order_item_status_log insert error (order_product):', logErr);
             }
         }
 
@@ -664,7 +690,9 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
         if (care_warranty_flow !== undefined) updatePayload.care_warranty_flow = care_warranty_flow;
         if (care_warranty_stage !== undefined) updatePayload.care_warranty_stage = care_warranty_stage;
 
-        const { data: currentItem } = await supabaseAdmin.from('order_products').select('after_sale_stage, order_id, current_phase').eq('id', id).single();
+        const { data: currentItem } = await supabaseAdmin.from('order_products').select('after_sale_stage, order_id, current_phase, care_warranty_flow, care_warranty_stage').eq('id', id).single();
+        const oldCareFlow = currentItem?.care_warranty_flow ?? null;
+        const oldCareStage = currentItem?.care_warranty_stage ?? null;
 
         if (care_warranty_flow !== undefined) {
             if (care_warranty_flow === 'warranty') {
@@ -742,6 +770,41 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
                 to_stage: stage,
                 created_by: userId
             });
+        }
+
+        const newCareFlow = care_warranty_flow !== undefined ? (care_warranty_flow || null) : oldCareFlow;
+        const newCareStage = care_warranty_stage !== undefined ? (care_warranty_stage || null) : oldCareStage;
+        const careChanged = (care_warranty_flow !== undefined || care_warranty_stage !== undefined)
+            && (oldCareFlow !== newCareFlow || oldCareStage !== newCareStage)
+            && newCareStage;
+        if (careChanged && product.order_id) {
+            const flowType = newCareFlow === 'warranty' || ['war1', 'war2', 'war3'].includes(newCareStage)
+                ? 'warranty'
+                : 'care';
+            try {
+                const careRow: Record<string, unknown> = {
+                    order_id: product.order_id,
+                    entity_type: 'order_product',
+                    entity_id: id,
+                    from_stage: oldCareStage,
+                    to_stage: newCareStage,
+                    flow_type: flowType,
+                    created_by: userId ?? null,
+                };
+                await supabaseAdmin.from('order_care_warranty_log').insert(careRow);
+            } catch (logErr) {
+                try {
+                    await supabaseAdmin.from('order_care_warranty_log').insert({
+                        order_id: product.order_id,
+                        from_stage: oldCareStage,
+                        to_stage: newCareStage,
+                        flow_type: flowType,
+                        created_by: userId ?? null,
+                    });
+                } catch (fallbackErr) {
+                    console.error('order_care_warranty_log insert error (order_product):', logErr, fallbackErr);
+                }
+            }
         }
 
         // Set debt_start_at on parent order when product transitions to after1_debt (only if not already set)

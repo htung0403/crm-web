@@ -42,6 +42,8 @@ interface Transaction {
     status: TransactionStatus;
     order_id?: string;
     order_code?: string;
+    order_product_id?: string;
+    order_product?: { id?: string; product_code: string; name?: string | null };
     order?: {
         id: string;
         order_code: string;
@@ -85,9 +87,22 @@ const expenseCategories = [
     'Tiền điện',
     'Tiền nước',
     'Tiền thuê mặt bằng',
+    'Mua phụ kiện',
     'Mua vật tư',
     'Chi phí vận hành',
     'Phí ship nhận hàng',
+    'Phí ship gửi đối tác',
+    'Thanh toán phí đối tác',
+    'Chi khác',
+];
+
+const expenseCategoriesWithOrder = [
+    'Mua phụ kiện',
+    'Mua vật tư',
+    'Phí ship nhận hàng',
+    'Phí ship gửi đối tác',
+    'Thanh toán phí đối tác',
+    'Chi phí vận hành',
     'Chi khác',
 ];
 
@@ -110,11 +125,20 @@ function TransactionForm({ type, initialCategory, onClose, onSubmit, loading }: 
     const [imageUrl, setImageUrl] = useState('');
     const [orderCode, setOrderCode] = useState('');
     const [orderId, setOrderId] = useState<string | undefined>(undefined);
+    const [orderProductId, setOrderProductId] = useState<string | undefined>(undefined);
+    const [orderProducts, setOrderProducts] = useState<Array<{ id: string; product_code: string; name: string }>>([]);
+    const [loadingProducts, setLoadingProducts] = useState(false);
     const [orderSuggestions, setOrderSuggestions] = useState<any[]>([]);
     const [searchingOrders, setSearchingOrders] = useState(false);
     const [showSuggestions, setShowSuggestions] = useState(false);
 
     const isMachineRecoveryIncome = type === 'income' && category === 'Thu hồi máy';
+    const showOrderLink =
+        type === 'expense'
+            ? expenseCategoriesWithOrder.includes(category)
+            : ['Thanh toán đơn hàng', 'Đặt cọc', 'Phí giao hàng', 'Thu hồi máy'].includes(category);
+    const requireProductOnExpense =
+        type === 'expense' && expenseCategoriesWithOrder.includes(category);
 
     useEffect(() => {
         if (initialCategory) {
@@ -155,6 +179,49 @@ function TransactionForm({ type, initialCategory, onClose, onSubmit, loading }: 
         return () => clearTimeout(timer);
     }, [orderCode, orderId]);
 
+    useEffect(() => {
+        if (!orderId) {
+            setOrderProducts([]);
+            setOrderProductId(undefined);
+            return;
+        }
+
+        let cancelled = false;
+        setLoadingProducts(true);
+        ordersApi
+            .getById(orderId)
+            .then((res) => {
+                if (cancelled) return;
+                const order = res.data.data?.order;
+                const items = (order?.customer_items || []) as Array<{
+                    id: string;
+                    product_code: string;
+                    name?: string;
+                }>;
+                const code = order?.order_code || orderCode;
+                const children = items.filter((p) => p.product_code !== code);
+                const list = (children.length > 0 ? children : items).map((p) => ({
+                    id: p.id,
+                    product_code: p.product_code,
+                    name: p.name || p.product_code,
+                }));
+                setOrderProducts(list);
+                if (list.length === 1) {
+                    setOrderProductId(list[0].id);
+                }
+            })
+            .catch(() => {
+                if (!cancelled) setOrderProducts([]);
+            })
+            .finally(() => {
+                if (!cancelled) setLoadingProducts(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [orderId, orderCode]);
+
     const categories = type === 'income' ? incomeCategories : expenseCategories;
 
     const handleSubmit = async () => {
@@ -172,8 +239,16 @@ function TransactionForm({ type, initialCategory, onClose, onSubmit, loading }: 
             return;
         }
 
+        if (requireProductOnExpense && orderId && !orderProductId) {
+            toast.error('Chọn sản phẩm (VD: HĐ74.1) cho phiếu chi');
+            return;
+        }
+
+        const selectedProduct = orderProducts.find((p) => p.id === orderProductId);
+        const productPrefix = selectedProduct ? `[${selectedProduct.product_code}] ` : '';
+
         const carrierNote = isMachineRecoveryIncome ? `Đơn vị VC: ${resolvedCarrier}` : '';
-        const mergedNotes = [carrierNote, notes.trim()].filter(Boolean).join('. ') || undefined;
+        const mergedNotes = [carrierNote, `${productPrefix}${notes.trim()}`.trim()].filter(Boolean).join('. ') || undefined;
 
         await onSubmit({
             type,
@@ -185,9 +260,15 @@ function TransactionForm({ type, initialCategory, onClose, onSubmit, loading }: 
             image_url: imageUrl || undefined,
             order_code: orderCode || undefined,
             order_id: orderId,
-            metadata: isMachineRecoveryIncome
-                ? { transport_carrier: resolvedCarrier, transport_unit: resolvedCarrier }
-                : undefined,
+            order_product_id: orderProductId,
+            metadata: {
+                ...(isMachineRecoveryIncome
+                    ? { transport_carrier: resolvedCarrier, transport_unit: resolvedCarrier }
+                    : {}),
+                ...(selectedProduct
+                    ? { product_code: selectedProduct.product_code, product_name: selectedProduct.name }
+                    : {}),
+            },
         });
     };
 
@@ -280,10 +361,10 @@ function TransactionForm({ type, initialCategory, onClose, onSubmit, loading }: 
                     </div>
                 )}
 
-                {/* Order Code - Only for specific income categories */}
-                {type === 'income' && ['Thanh toán đơn hàng', 'Đặt cọc', 'Phí giao hàng', 'Thu hồi máy'].includes(category) && (
+                {/* Đơn hàng + sản phẩm (phiếu chi theo SP: HĐ74.1, …) */}
+                {showOrderLink && (
                     <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300 relative">
-                        <Label>Mã đơn hàng</Label>
+                        <Label>Mã đơn hàng{type === 'expense' ? ' (HĐ)' : ''}</Label>
                         <div className="relative group/input">
                             <Input
                                 placeholder="Nhập mã đơn hàng (VD: HĐ123)"
@@ -326,6 +407,7 @@ function TransactionForm({ type, initialCategory, onClose, onSubmit, loading }: 
                                                     onClick={() => {
                                                         setOrderCode(order.order_code);
                                                         setOrderId(order.id);
+                                                        setOrderProductId(undefined);
                                                         setShowSuggestions(false);
                                                     }}
                                                 >
@@ -353,6 +435,39 @@ function TransactionForm({ type, initialCategory, onClose, onSubmit, loading }: 
                                     </div>
                                 )}
                             </div>
+                        )}
+                    </div>
+                )}
+
+                {showOrderLink && orderId && (
+                    <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                        <Label>
+                            Sản phẩm {requireProductOnExpense ? '*' : ''}
+                            <span className="text-muted-foreground font-normal ml-1">(HĐxx.1, HĐxx.2…)</span>
+                        </Label>
+                        {loadingProducts ? (
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Đang tải sản phẩm…
+                            </div>
+                        ) : orderProducts.length === 0 ? (
+                            <p className="text-sm text-amber-700">Đơn này chưa có sản phẩm khách gửi.</p>
+                        ) : (
+                            <Select
+                                value={orderProductId || undefined}
+                                onValueChange={setOrderProductId}
+                            >
+                                <SelectTrigger className={cn(orderProductId && 'border-green-500 bg-green-50/30')}>
+                                    <SelectValue placeholder="Chọn mã SP (VD: HĐ74.1)" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {orderProducts.map((p) => (
+                                        <SelectItem key={p.id} value={p.id}>
+                                            {p.product_code} — {p.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         )}
                     </div>
                 )}
@@ -574,8 +689,14 @@ function TransactionTable({
                                         )}>
                                             {formatCurrency(trans.amount)}
                                         </td>
-                                        <td className="p-3 max-w-[200px] truncate text-muted-foreground italic">
-                                            {trans.notes || '---'}
+                                        <td className="p-3 max-w-[220px] text-muted-foreground">
+                                            {(trans.order_product?.product_code || trans.metadata?.product_code) && (
+                                                <p className="font-mono text-xs font-bold text-primary truncate">
+                                                    {trans.order_product?.product_code || trans.metadata?.product_code}
+                                                    {trans.order_code ? ` · ${trans.order_code}` : ''}
+                                                </p>
+                                            )}
+                                            <p className="truncate italic text-sm">{trans.notes || '---'}</p>
                                         </td>
                                         <td className="p-3">
                                             <Badge variant={statusLabels[trans.status].variant} className="rounded-full px-3">
@@ -640,20 +761,26 @@ function TransactionTable({
                                                             <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Phương thức</p>
                                                             <p className="font-medium">{paymentMethodLabels[trans.payment_method]}</p>
                                                         </div>
-                                                        {trans.order_code && (
+                                                        {(trans.order_code || trans.order_product?.product_code) && (
                                                             <div>
-                                                                <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Ghi chú liên kết</p>
-                                                                <p className="text-xs text-[#64748b]">
-                                                                    Tự động được tạo gắn với hóa đơn{' '}
-                                                                    <span
-                                                                        className="font-bold text-blue-600 underline cursor-pointer hover:text-blue-700"
-                                                                        onClick={(e) => {
-                                                                            e.stopPropagation();
-                                                                            onInvoiceClick(trans.order_code!);
-                                                                        }}
-                                                                    >
-                                                                        {trans.order_code}
-                                                                    </span>
+                                                                <p className="text-[12px] font-bold text-muted-foreground uppercase mb-1">Liên kết đơn / SP</p>
+                                                                <p className="text-xs text-[#64748b] space-y-0.5">
+                                                                    {trans.order_product?.product_code && (
+                                                                        <span className="block font-mono font-bold text-primary">
+                                                                            SP: {trans.order_product.product_code}
+                                                                        </span>
+                                                                    )}
+                                                                    {trans.order_code && (
+                                                                        <span
+                                                                            className="font-bold text-blue-600 underline cursor-pointer hover:text-blue-700"
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                onInvoiceClick(trans.order_code!);
+                                                                            }}
+                                                                        >
+                                                                            HĐ: {trans.order_code}
+                                                                        </span>
+                                                                    )}
                                                                 </p>
                                                             </div>
                                                         )}
@@ -771,6 +898,30 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState(false);
     const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+
+    const handleInvoiceStatusChange = async (
+        invoiceId: string,
+        status: string,
+        options?: { cancel_related_payments?: boolean },
+    ) => {
+        try {
+            await invoicesApi.updateStatus(invoiceId, status, options);
+            if (status === 'cancelled') {
+                toast.success(
+                    options?.cancel_related_payments !== false
+                        ? 'Đã hủy hóa đơn và các phiếu thanh toán liên quan'
+                        : 'Đã hủy hóa đơn!',
+                );
+            } else {
+                toast.success('Đã cập nhật trạng thái hóa đơn');
+            }
+            const detailResponse = await invoicesApi.getById(invoiceId);
+            setSelectedInvoice(detailResponse.data.data?.invoice);
+            fetchTransactions();
+        } catch (err: any) {
+            toast.error(err.response?.data?.message || 'Lỗi khi cập nhật trạng thái hóa đơn');
+        }
+    };
 
     const handleOpenInvoiceDetail = async (orderCode: string) => {
         setLoadingInvoice(true);
@@ -1326,7 +1477,7 @@ export function FinancePage({ currentUser, initialTab = 'income', onTabChange }:
                 invoice={selectedInvoice}
                 open={showInvoiceDetail}
                 onClose={() => setShowInvoiceDetail(false)}
-                onStatusChange={() => {}} // Read-only from here usually or implement if needed
+                onStatusChange={incomeActions.canEdit ? handleInvoiceStatusChange : undefined}
                 onPayButtonClick={() => {}}
                 canEdit={incomeActions.canEdit}
             />

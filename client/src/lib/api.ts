@@ -485,8 +485,13 @@ export const invoicesApi = {
     }) => api.post<ApiResponse<{ invoice: any }>>('/invoices', data),
 
 
-    updateStatus: (id: string, status: string) =>
-        api.patch<ApiResponse<{ invoice: any }>>(`/invoices/${id}/status`, { status }),
+    updateStatus: (id: string, status: string, options?: { cancel_related_payments?: boolean }) =>
+        api.patch<ApiResponse<{ invoice: any }>>(`/invoices/${id}/status`, {
+            status,
+            ...(options?.cancel_related_payments !== undefined
+                ? { cancel_related_payments: options.cancel_related_payments }
+                : {}),
+        }),
 
     delete: (id: string) => api.delete<ApiResponse<{ id: string; invoice_code: string }>>(`/invoices/${id}`),
 };
@@ -912,6 +917,7 @@ export const transactionsApi = {
         date?: string;
         order_id?: string;
         order_code?: string;
+        order_product_id?: string;
         status?: string;
         metadata?: any;
     }) => api.post<ApiResponse<{ transaction: any }>>('/transactions', data),

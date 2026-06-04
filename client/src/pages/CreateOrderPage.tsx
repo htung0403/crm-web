@@ -1103,6 +1103,36 @@ export function CreateOrderPage() {
     );
     const hasServices = products.some(p => p.services.length > 0);
 
+    const handleSetProductDeposit = (productIndex: number, totalDeposit: number) => {
+        setProducts(prev => prev.map((p, i) => {
+            if (i !== productIndex) return p;
+            const maxProductDeposit = p.services.reduce((ss, s) => ss + (s.price || 0), 0);
+            const amount = Math.min(Math.max(0, totalDeposit), maxProductDeposit);
+            if (p.services.length === 0) return p;
+
+            const totalPrice = p.services.reduce((a, s) => a + (s.price || 0), 0);
+            const capped = Math.min(amount, totalPrice);
+            let remaining = capped;
+            const shares = p.services.map((s, idx) => {
+                if (idx === p.services.length - 1) return remaining;
+                const share = totalPrice > 0 ? Math.floor((capped * (s.price || 0)) / totalPrice) : 0;
+                remaining -= share;
+                return share;
+            });
+
+            return {
+                ...p,
+                services: p.services.map((s, si) => ({
+                    ...s,
+                    deposit_amount: shares[si],
+                })),
+            };
+        }));
+    };
+
+    const getProductDepositTotal = (product: CustomerProduct) =>
+        product.services.reduce((ss, s) => ss + (s.deposit_amount || 0), 0);
+
     const handleSetTotalServiceDeposit = (totalDeposit: number) => {
         const amount = Math.min(Math.max(0, totalDeposit), maxServiceDeposit);
         setProducts(prev => {
@@ -1424,7 +1454,13 @@ export function CreateOrderPage() {
         (sum, p) => sum + p.services.reduce((ss, s) => ss + (s.deposit_amount || 0), 0),
         0
     );
-    const remainingDebt = total - paidAmount;
+    const remainingDebt = total - (totalServiceDeposits > 0 ? totalServiceDeposits : paidAmount);
+
+    useEffect(() => {
+        if (totalServiceDeposits > 0) {
+            setPaidAmount(totalServiceDeposits);
+        }
+    }, [totalServiceDeposits]);
 
     // Helper to format number with dots for display
     const formatInputCurrency = (value: number): string => {
@@ -1608,10 +1644,40 @@ export function CreateOrderPage() {
         setSubmitting(true);
         setConfirmDialogOpen(false);
         try {
+            const effectiveDepositTotal =
+                totalServiceDeposits > 0 ? totalServiceDeposits : paidAmount > 0 ? paidAmount : 0;
+
+            const productsForSubmit =
+                effectiveDepositTotal > 0 && totalServiceDeposits === 0
+                    ? (() => {
+                        const entries = products.flatMap((p) =>
+                            p.services.map((s) => ({ price: s.price || 0 }))
+                        );
+                        const totalPrice = entries.reduce((a, e) => a + e.price, 0);
+                        const capped = Math.min(effectiveDepositTotal, totalPrice);
+                        let remaining = capped;
+                        const shares = entries.map((e, idx) => {
+                            if (idx === entries.length - 1) return remaining;
+                            const share =
+                                totalPrice > 0 ? Math.floor((capped * e.price) / totalPrice) : 0;
+                            remaining -= share;
+                            return share;
+                        });
+                        let shareIdx = 0;
+                        return products.map((p) => ({
+                            ...p,
+                            services: p.services.map((s) => ({
+                                ...s,
+                                deposit_amount: shares[shareIdx++],
+                            })),
+                        }));
+                    })()
+                    : products;
+
             const payload = {
                 customer_id: customerId,
                 status: isEditMode ? undefined : status, // keep status if editing, or handle separately
-                customer_items: products.map(p => {
+                customer_items: productsForSubmit.map(p => {
                     const servicesPrice = p.services.reduce((ssum, s) => ssum + s.price, 0);
                     const surchargeAmount = (p.surcharges || []).reduce((ssum, s) => {
                         return ssum + (s.isPercent ? Math.round(servicesPrice * (s.value || 0) / 100) : (s.value || 0));
@@ -1682,7 +1748,7 @@ export function CreateOrderPage() {
                     is_percent: s.isPercent,
                     amount: s.isPercent ? Math.round(subtotal * s.value / 100) : s.value
                 })),
-                paid_amount: paidAmount,
+                paid_amount: effectiveDepositTotal,
                 payment_method: paymentMethod,
 
             };
@@ -2259,6 +2325,37 @@ export function CreateOrderPage() {
                                                     </div>
                                                 )}
 
+                                                {/* Tiền cọc theo SP */}
+                                                {(isCurrent || isConfirmed) && product.services.length > 0 && (
+                                                    <div className="border-t pt-3 space-y-2 rounded-lg border border-amber-200 bg-amber-50/40 p-3">
+                                                        <Label className="text-xs font-bold uppercase text-amber-800">
+                                                            Tiền cọc sản phẩm ({nextOrderCode || 'HĐ'}.{productNumber})
+                                                        </Label>
+                                                        <Input
+                                                            type="text"
+                                                            value={getProductDepositTotal(product) ? formatInputCurrency(getProductDepositTotal(product)) : ''}
+                                                            onFocus={(e) => e.target.select()}
+                                                            onChange={(e) => handleSetProductDeposit(index, parseInputCurrency(e.target.value))}
+                                                            placeholder="VD: 500.000"
+                                                            className="h-9 border-amber-200 bg-white focus-visible:ring-amber-400"
+                                                            disabled={false}
+                                                        />
+                                                        {getProductDepositTotal(product) > 0 && (
+                                                            <p className="text-[10px] text-amber-800">
+                                                                Đã cọc: {formatCurrency(getProductDepositTotal(product))}
+                                                                {' · '}
+                                                                Còn lại dịch vụ: {formatCurrency(
+                                                                    Math.max(
+                                                                        0,
+                                                                        product.services.reduce((s, sv) => s + sv.price, 0) -
+                                                                            getProductDepositTotal(product)
+                                                                    )
+                                                                )}
+                                                            </p>
+                                                        )}
+                                                    </div>
+                                                )}
+
                                                 {/* Service selection for confirmed products */}
                                                 {isConfirmed && (
                                                     <div className="border-t pt-3 space-y-3">
@@ -2272,15 +2369,41 @@ export function CreateOrderPage() {
                                                                         <div className="flex items-center justify-between">
                                                                             <div className="flex-1 min-w-0">
                                                                                 <p className="text-sm font-medium">{s.name}</p>
-                                                                                <div className="flex items-center gap-1 mt-0.5">
-                                                                                    <Input
-                                                                                        type="text"
-                                                                                        value={formatInputCurrency(s.price)}
-                                                                                        onFocus={(e) => e.target.select()}
-                                                                                        onChange={(e) => handleUpdateServicePrice(index, si, parseInputCurrency(e.target.value))}
-                                                                                        className="h-6 w-28 text-xs text-green-600 font-semibold px-1.5 border-dashed focus:border-solid"
-                                                                                    />
-                                                                                    <span className="text-[10px] text-green-600">đ</span>
+                                                                                <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                                                                                    <div className="flex items-center gap-1">
+                                                                                        <Input
+                                                                                            type="text"
+                                                                                            value={formatInputCurrency(s.price)}
+                                                                                            onFocus={(e) => e.target.select()}
+                                                                                            onChange={(e) => handleUpdateServicePrice(index, si, parseInputCurrency(e.target.value))}
+                                                                                            className="h-6 w-28 text-xs text-green-600 font-semibold px-1.5 border-dashed focus:border-solid"
+                                                                                        />
+                                                                                        <span className="text-[10px] text-green-600">đ</span>
+                                                                                    </div>
+                                                                                    <div className="flex items-center gap-1">
+                                                                                        <span className="text-[10px] text-amber-700">Cọc:</span>
+                                                                                        <Input
+                                                                                            type="text"
+                                                                                            value={s.deposit_amount ? formatInputCurrency(s.deposit_amount) : ''}
+                                                                                            onFocus={(e) => e.target.select()}
+                                                                                            onChange={(e) => {
+                                                                                                const val = Math.min(
+                                                                                                    parseInputCurrency(e.target.value),
+                                                                                                    s.price || 0
+                                                                                                );
+                                                                                                setProducts(prev => prev.map((p, pi) => {
+                                                                                                    if (pi !== index) return p;
+                                                                                                    return {
+                                                                                                        ...p,
+                                                                                                        services: p.services.map((svc, sii) =>
+                                                                                                            sii === si ? { ...svc, deposit_amount: val } : svc
+                                                                                                        ),
+                                                                                                    };
+                                                                                                }));
+                                                                                            }}
+                                                                                            className="h-6 w-24 text-xs text-amber-700 font-semibold px-1.5 border-amber-200"
+                                                                                        />
+                                                                                    </div>
                                                                                 </div>
                                                                             </div>
                                                                             <Button
@@ -2749,9 +2872,14 @@ export function CreateOrderPage() {
                                                                         </div>
                                                                     )}
                                                                 </div>
-                                                                <div className="shrink-0 text-right">
+                                                                <div className="shrink-0 text-right space-y-0.5">
                                                                     <p className="text-[10px] uppercase text-muted-foreground">Giá dịch vụ</p>
                                                                     <p className="text-base font-bold text-green-600 sm:text-lg">{formatCurrency(s.price)}</p>
+                                                                    {(s.deposit_amount || 0) > 0 && (
+                                                                        <p className="text-xs font-semibold text-amber-700">
+                                                                            Cọc: {formatCurrency(s.deposit_amount || 0)}
+                                                                        </p>
+                                                                    )}
                                                                 </div>
                                                             </div>
                                                         ))}

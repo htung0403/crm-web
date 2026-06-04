@@ -42,6 +42,12 @@ import {
     MobileKanbanMoveBar,
     type MobileKanbanColumn,
 } from '@/components/kanban/mobileKanban';
+import { useAuth } from '@/contexts/AuthContext';
+import {
+    canViewAccessoryPurchasePrice,
+    canViewPartnerFeePrice,
+    isSensitivePriceField,
+} from '@/lib/sensitivePermissions';
 
 const ACCESSORY_COLUMNS = Object.entries(ACCESSORY_LABELS)
     .filter(([id]) => id !== 'requested' && id !== 'rejected')
@@ -913,6 +919,9 @@ function ExtensionKanban({
 export function RequestsPage() {
     const navigate = useNavigate();
     const location = useLocation();
+    const { user } = useAuth();
+    const showAccessoryPrice = canViewAccessoryPurchasePrice(user);
+    const showPartnerPrice = canViewPartnerFeePrice(user);
     const [loading, setLoading] = useState(true);
     const [accessories, setAccessories] = useState<any[]>([]);
     const [partners, setPartners] = useState<any[]>([]);
@@ -975,6 +984,25 @@ export function RequestsPage() {
             req.order_product?.order?.id ||
             req.order_product_service?.order_product?.order?.id ||
             req.metadata?.order_id;
+    };
+
+    const getOrderProductId = (req: any): string | undefined => {
+        if (!req) return undefined;
+        return (
+            req.order_product_id ||
+            req.order_product?.id ||
+            req.order_product_service?.order_product_id ||
+            req.order_product_service?.order_product?.id ||
+            undefined
+        );
+    };
+
+    const expenseProductNote = (req: any, base: string) => {
+        const code =
+            req.order_product?.product_code ||
+            req.order_product_service?.order_product?.product_code ||
+            req.metadata?.product_code;
+        return code ? `[${code}] ${base}` : base;
     };
 
     const loadAll = async () => {
@@ -1191,16 +1219,20 @@ export function RequestsPage() {
                             category: 'Mua phụ kiện',
                             amount,
                             payment_method: accessoryMeta.payment_type || 'transfer',
-                            notes: `Chi mua: ${accessoryMeta.item_name || 'phụ kiện'} (Yêu cầu #${accessoryRow.id.slice(0, 8)}). Người chi: ${accessoryMeta.payment_by || 'N/A'}`,
+                            notes: expenseProductNote(
+                                accessoryRow,
+                                `Chi mua: ${accessoryMeta.item_name || 'phụ kiện'} (Yêu cầu #${accessoryRow.id.slice(0, 8)}). Người chi: ${accessoryMeta.payment_by || 'N/A'}`
+                            ),
                             order_id: getOrderId(accessoryRow),
                             order_code: getOrderCode(accessoryRow),
+                            order_product_id: getOrderProductId(accessoryRow),
                             date: new Date().toISOString(),
                             status: 'approved',
                             metadata: {
                                 type: 'accessory_purchase',
                                 purchase_photos: accessoryMeta.photos_purchase || [],
-                                transfer_photos: accessoryMeta.photos_transfer || []
-                            }
+                                transfer_photos: accessoryMeta.photos_transfer || [],
+                            },
                         });
                         toast.success('Đã tự động tạo phiếu chi mua phụ kiện');
                     }
@@ -1219,15 +1251,19 @@ export function RequestsPage() {
                             category: 'Phí ship nhận hàng',
                             amount,
                             payment_method: accessoryMeta.payment_type || 'transfer',
-                            notes: `Phí ship: ${accessoryRow.metadata?.item_name || 'phụ kiện'} (Yêu cầu #${accessoryRow.id.slice(0, 8)}). Người chi: ${accessoryMeta.payment_by || 'N/A'}`,
+                            notes: expenseProductNote(
+                                accessoryRow,
+                                `Phí ship: ${accessoryRow.metadata?.item_name || 'phụ kiện'} (Yêu cầu #${accessoryRow.id.slice(0, 8)}). Người chi: ${accessoryMeta.payment_by || 'N/A'}`
+                            ),
                             order_id: getOrderId(accessoryRow),
                             order_code: getOrderCode(accessoryRow),
+                            order_product_id: getOrderProductId(accessoryRow),
                             date: new Date().toISOString(),
                             status: 'approved',
                             metadata: {
                                 type: 'accessory_shipping',
-                                arrival_photos: accessoryMeta.photos_arrival || []
-                            }
+                                arrival_photos: accessoryMeta.photos_arrival || [],
+                            },
                         });
                         toast.success('Đã tự động tạo phiếu chi phí ship');
                     }
@@ -1291,15 +1327,19 @@ export function RequestsPage() {
                             category: 'Phí ship gửi đối tác',
                             amount,
                             payment_method: partnerMeta.shipping_payment_type || 'transfer',
-                            notes: `Phí ship gửi: ${partnerRow.order_item?.item_name ?? partnerRow.order_product_service?.order_product?.name ?? partnerRow.order_product?.name ?? 'sản phẩm'} (Yêu cầu #${partnerRow.id.slice(0, 8)}). Người gửi: ${partnerMeta.sender_staff || 'N/A'}. Người chi: ${partnerMeta.shipping_sender_staff || 'N/A'}`,
+                            notes: expenseProductNote(
+                                partnerRow,
+                                `Phí ship gửi: ${partnerRow.order_item?.item_name ?? partnerRow.order_product_service?.order_product?.name ?? partnerRow.order_product?.name ?? 'sản phẩm'} (Yêu cầu #${partnerRow.id.slice(0, 8)}). Người gửi: ${partnerMeta.sender_staff || 'N/A'}. Người chi: ${partnerMeta.shipping_sender_staff || 'N/A'}`
+                            ),
                             order_id: getOrderId(partnerRow),
                             order_code: getOrderCode(partnerRow),
+                            order_product_id: getOrderProductId(partnerRow),
                             date: new Date().toISOString(),
                             status: 'approved',
                             metadata: {
                                 type: 'partner_shipping_out',
-                                package_photos: partnerMeta.photos_package || []
-                            }
+                                package_photos: partnerMeta.photos_package || [],
+                            },
                         });
                         toast.success('Đã tự động tạo phiếu chi phí ship gửi đi');
                     }
@@ -1322,15 +1362,19 @@ export function RequestsPage() {
                             category: 'Phí ship gửi đối tác',
                             amount: shipAmount,
                             payment_method: partnerMeta.shipping_payment_type_back || 'transfer',
-                            notes: `Phí ship trả: ${itemName} (Yêu cầu #${reqId}). Người chi: ${partnerMeta.shipping_sender_staff_back || 'N/A'}`,
+                            notes: expenseProductNote(
+                                partnerRow,
+                                `Phí ship trả: ${itemName} (Yêu cầu #${reqId}). Người chi: ${partnerMeta.shipping_sender_staff_back || 'N/A'}`
+                            ),
                             order_id: getOrderId(partnerRow),
                             order_code: getOrderCode(partnerRow),
+                            order_product_id: getOrderProductId(partnerRow),
                             date: new Date().toISOString(),
                             status: 'approved',
                             metadata: {
                                 type: 'partner_shipping_back',
-                                package_photos: partnerMeta.photos_package_back || []
-                            }
+                                package_photos: partnerMeta.photos_package_back || [],
+                            },
                         });
                     }
 
@@ -1342,15 +1386,19 @@ export function RequestsPage() {
                             category: 'Thanh toán phí đối tác',
                             amount: partnerFee,
                             payment_method: partnerMeta.partner_payment_type || 'transfer',
-                            notes: `Thanh toán phí: ${itemName} (Yêu cầu #${reqId}). Người chi: ${partnerMeta.partner_fee_sender_staff || 'N/A'}`,
+                            notes: expenseProductNote(
+                                partnerRow,
+                                `Thanh toán phí: ${itemName} (Yêu cầu #${reqId}). Người chi: ${partnerMeta.partner_fee_sender_staff || 'N/A'}`
+                            ),
                             order_id: getOrderId(partnerRow),
                             order_code: getOrderCode(partnerRow),
+                            order_product_id: getOrderProductId(partnerRow),
                             date: new Date().toISOString(),
                             status: 'approved',
                             metadata: {
                                 type: 'partner_repair_fee',
-                                photos_storage: partnerMeta.photos_storage || []
-                            }
+                                photos_storage: partnerMeta.photos_storage || [],
+                            },
                         });
                     }
 
@@ -1704,27 +1752,34 @@ export function RequestsPage() {
                                             <p className="text-[10px] font-bold text-slate-400 uppercase">Số lượng</p>
                                             <p className="text-sm font-bold text-slate-700">{accessoryRow.metadata?.quantity || '1'}</p>
                                         </div>
-                                        <div>
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase">Giá</p>
-                                            {accessoryRow.status === 'need_buy' ? (
-                                                <div className="relative mt-1">
-                                                    <Input
-                                                        type="text"
-                                                        value={String(accessoryMeta.price_estimate || '').replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ".")}
-                                                        onChange={(e) => {
-                                                            const val = e.target.value.replace(/\./g, "");
-                                                            if (/^\d*$/.test(val)) {
-                                                                setAccessoryMeta({ ...accessoryMeta, price_estimate: val });
-                                                            }
-                                                        }}
-                                                        className="h-8 text-sm font-bold text-emerald-600 pr-6 border-emerald-100 bg-emerald-50/30 focus-visible:ring-emerald-500 text-right"
-                                                    />
-                                                    <span className="absolute right-2 top-1.5 text-[10px] font-bold text-emerald-600">₫</span>
-                                                </div>
-                                            ) : (
-                                                <p className="text-sm font-bold text-emerald-600">{formatCurrency(Number(String(accessoryMeta.price_estimate || 0).replace(/\D/g, '')))}</p>
-                                            )}
-                                        </div>
+                                        {showAccessoryPrice ? (
+                                            <div>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase">Giá</p>
+                                                {accessoryRow.status === 'need_buy' ? (
+                                                    <div className="relative mt-1">
+                                                        <Input
+                                                            type="text"
+                                                            value={String(accessoryMeta.price_estimate || '').replace(/\D/g, '').replace(/\B(?=(\d{3})+(?!\d))/g, ".")}
+                                                            onChange={(e) => {
+                                                                const val = e.target.value.replace(/\./g, "");
+                                                                if (/^\d*$/.test(val)) {
+                                                                    setAccessoryMeta({ ...accessoryMeta, price_estimate: val });
+                                                                }
+                                                            }}
+                                                            className="h-8 text-sm font-bold text-emerald-600 pr-6 border-emerald-100 bg-emerald-50/30 focus-visible:ring-emerald-500 text-right"
+                                                        />
+                                                        <span className="absolute right-2 top-1.5 text-[10px] font-bold text-emerald-600">₫</span>
+                                                    </div>
+                                                ) : (
+                                                    <p className="text-sm font-bold text-emerald-600">{formatCurrency(Number(String(accessoryMeta.price_estimate || 0).replace(/\D/g, '')))}</p>
+                                                )}
+                                            </div>
+                                        ) : (
+                                            <div>
+                                                <p className="text-[10px] font-bold text-slate-400 uppercase">Giá</p>
+                                                <p className="text-sm font-bold text-slate-400">Không có quyền xem</p>
+                                            </div>
+                                        )}
                                     </div>
                                     {accessoryRow.notes && (
                                         <div className="pt-2 border-t text-left">
@@ -1735,7 +1790,9 @@ export function RequestsPage() {
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                                    {ACCESSORY_TRANSITIONS[accessoryRow.status]?.fields.map((field) => (
+                                    {ACCESSORY_TRANSITIONS[accessoryRow.status]?.fields
+                                        .filter((field) => showAccessoryPrice || !isSensitivePriceField(field.name))
+                                        .map((field) => (
                                         <div key={field.name} className={`space-y-1.5 text-left ${field.type === 'photo' || field.name === 'payment_by' || field.name === 'payment_type' ? 'col-span-1' : 'col-span-2'}`}>
                                             <div className="flex items-center justify-between">
                                                 <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">
@@ -1868,7 +1925,9 @@ export function RequestsPage() {
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-                                    {PARTNER_TRANSITIONS[partnerRow.status]?.fields.map((field) => (
+                                    {PARTNER_TRANSITIONS[partnerRow.status]?.fields
+                                        .filter((field) => showPartnerPrice || !isSensitivePriceField(field.name))
+                                        .map((field) => (
                                         <div key={field.name} className={`space-y-1.5 text-left ${['sender_staff', 'shipping_sender_staff', 'shipping_cost_out', 'shipping_payment_type', 'shipping_cost_back', 'shipping_sender_staff_back', 'shipping_payment_type_back', 'partner_fee_amount', 'partner_fee_sender_staff', 'partner_payment_type', 'photos_package_back', 'photos_storage'].includes(field.name) ? 'col-span-1' : 'col-span-2'}`}>
                                             <div className="flex items-center justify-between">
                                                 <Label className="text-[11px] font-bold text-slate-500 uppercase tracking-tight">

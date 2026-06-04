@@ -1,6 +1,7 @@
 import { Router, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
+import { requireAnyViewAccess } from '../middleware/viewAccess.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
 import { notifyCrmMasterUser } from '../utils/n8nCrmEvents.js';
@@ -12,15 +13,6 @@ import {
 
 const router = Router();
 console.log('🚀 Requests Router Loaded');
-
-function requireAdminOrManager(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-    console.log('🛡️ requireAdminOrManager check - Role:', req.user?.role);
-    const role = req.user?.role;
-    if (role !== 'admin' && role !== 'manager') {
-        return next(new ApiError('Chỉ admin hoặc quản lý mới xem được trang yêu cầu', 403));
-    }
-    next();
-}
 
 router.use(authenticate);
 
@@ -193,7 +185,11 @@ router.patch('/partners/:id', authenticate, async (req: AuthenticatedRequest, re
 
 router.get('/test', (req, res) => res.json({ status: 'ok', msg: 'Requests router is working' }));
 
-router.use(requireAdminOrManager);
+router.use(
+    requireAnyViewAccess(['requests', 'orders/upsell-tickets'], {
+        fallbackRoles: ['admin', 'manager', 'sale'],
+    }),
+);
 
 // GET /api/requests/accessories - Danh sách yêu cầu Mua phụ kiện (V1 + V2)
 router.get('/accessories', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {

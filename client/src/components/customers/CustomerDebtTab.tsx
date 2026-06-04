@@ -91,14 +91,14 @@ export function CustomerDebtTab({ customerId, customerName, customerPhone }: Cus
                 </Card>
                 <Card className="border-amber-100 bg-amber-50/40">
                     <CardContent className="p-4">
-                        <p className="text-xs text-muted-foreground">Tổng cọc đã nhận</p>
+                        <p className="text-xs text-muted-foreground">Tổng cọc SP (tất cả đơn)</p>
                         <p className="text-xl font-bold text-amber-800">{formatCurrency(summary?.total_deposit || 0)}</p>
                     </CardContent>
                 </Card>
             </div>
 
             <div className="flex flex-wrap gap-2">
-                <Button onClick={() => setShowPayDialog(true)} disabled={(summary?.total_debt || 0) <= 0}>
+                <Button onClick={() => setShowPayDialog(true)} disabled={orders.length === 0}>
                     <Wallet className="mr-2 h-4 w-4" />
                     Thanh toán
                 </Button>
@@ -143,7 +143,14 @@ export function CustomerDebtTab({ customerId, customerName, customerPhone }: Cus
                                             <td className="p-3 text-muted-foreground">{formatDateTime(o.created_at)}</td>
                                             <td className="p-3 text-right tabular-nums">{formatCurrency(o.total_amount)}</td>
                                             <td className="p-3 text-right tabular-nums text-amber-700">
-                                                {o.deposit_amount > 0 ? formatCurrency(o.deposit_amount) : '—'}
+                                                {(() => {
+                                                    const productDeposit = (o.products || []).reduce(
+                                                        (s, p) => s + (p.deposit_amount || 0),
+                                                        0
+                                                    );
+                                                    const val = productDeposit > 0 ? productDeposit : o.deposit_amount;
+                                                    return val > 0 ? formatCurrency(val) : '—';
+                                                })()}
                                             </td>
                                             <td className="p-3 text-right tabular-nums text-green-700">{formatCurrency(o.paid_amount)}</td>
                                             <td className="p-3 text-right">

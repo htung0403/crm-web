@@ -5,6 +5,9 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { formatCurrency, cn } from '@/lib/utils';
 import type { Customer } from '@/hooks/useCustomers';
+import { useAuth } from '@/contexts/AuthContext';
+import { canViewCustomerPhone } from '@/lib/sensitivePermissions';
+import { CustomerPhone } from '@/components/customers/CustomerPhone';
 
 interface MobileCustomersListProps {
     customers: Customer[];
@@ -19,6 +22,9 @@ export function MobileCustomersList({
     onView,
     onEdit,
 }: MobileCustomersListProps) {
+    const { user } = useAuth();
+    const canCall = canViewCustomerPhone(user);
+
     if (loading) {
         return (
             <div className="space-y-2">
@@ -74,7 +80,7 @@ export function MobileCustomersList({
                                                 {customer.name}
                                             </p>
                                             <p className="mt-0.5 text-xs text-muted-foreground">
-                                                {orders} đơn · {formatCurrency(spent)}
+                                                <CustomerPhone phone={customer.phone} /> · {orders} đơn
                                             </p>
                                         </div>
                                         <Badge
@@ -90,18 +96,20 @@ export function MobileCustomersList({
                                         </Badge>
                                     </div>
 
-                                    <div className="grid grid-cols-3 gap-1.5">
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="h-8 gap-1 px-0 text-xs"
-                                            asChild
-                                        >
-                                            <a href={`tel:${customer.phone}`}>
-                                                <Phone className="h-3.5 w-3.5" />
-                                                Gọi
-                                            </a>
-                                        </Button>
+                                    <div className={cn('grid gap-1.5', canCall && customer.phone ? 'grid-cols-3' : 'grid-cols-2')}>
+                                        {canCall && customer.phone ? (
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-8 gap-1 px-0 text-xs"
+                                                asChild
+                                            >
+                                                <a href={`tel:${customer.phone}`}>
+                                                    <Phone className="h-3.5 w-3.5" />
+                                                    Gọi
+                                                </a>
+                                            </Button>
+                                        ) : null}
                                         <Button
                                             variant="outline"
                                             size="sm"

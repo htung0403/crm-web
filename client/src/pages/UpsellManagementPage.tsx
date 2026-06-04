@@ -41,9 +41,7 @@ import { Label } from '@/components/ui/label';
 import { ordersApi, upsellTicketsApi, requestsApi, leaveRequestsApi, transactionsApi, usersApi } from '@/lib/api';
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
-
-const ACCESSORY_PRICE_PERMISSION = 'orders/upsell-tickets/accessory-price';
-const PARTNER_PRICE_PERMISSION = 'orders/upsell-tickets/partner-price';
+import { canViewAccessoryPurchasePrice, canViewPartnerFeePrice } from '@/lib/sensitivePermissions';
 
 const parseMoneyAmount = (value: unknown): number | null => {
     if (typeof value === 'number' && Number.isFinite(value)) {
@@ -84,26 +82,19 @@ export function UpsellManagementPage() {
     const [rejectItem, setRejectItem] = useState<{ id: string; type: 'upsell' | 'order_edit' | 'accessory' | 'partner' | 'extension' | 'leave' | 'voucher' } | null>(null);
     const [rejectionReason, setRejectionReason] = useState('');
 
-    const hasExplicitPricePermission = (permissionId: string) => {
-        if (!user) return false;
-        if (user.role === 'admin') return true;
-        return Array.isArray(user.allowed_views) && user.allowed_views.includes(permissionId);
-    };
-
-    const canViewAccessoryPrice = hasExplicitPricePermission(ACCESSORY_PRICE_PERMISSION);
-    const canViewPartnerPrice = hasExplicitPricePermission(PARTNER_PRICE_PERMISSION);
+    const canViewAccessoryPrice = canViewAccessoryPurchasePrice(user);
+    const canViewPartnerPrice = canViewPartnerFeePrice(user);
 
     const loadData = async () => {
         setLoading(true);
         try {
-            const [upsellRes, accRes, partRes, extRes, leaveRes, voucherRes, usersRes] = await Promise.all([
+            const [upsellRes, accRes, partRes, extRes, leaveRes, voucherRes] = await Promise.all([
                 upsellTicketsApi.getAll(),
                 requestsApi.getAccessories(),
                 requestsApi.getPartners(),
                 requestsApi.getExtensions(),
                 leaveRequestsApi.getAll({ role: user?.role }),
                 transactionsApi.getAll({ status: 'pending' }),
-                usersApi.getAll()
             ]);
 
             setUpsellTickets(upsellRes.data?.data?.filter((t: any) => t.status === 'pending') || []);
@@ -115,7 +106,14 @@ export function UpsellManagementPage() {
             setTotalAccessoriesCount(accRes.data?.data?.length || 0);
 
             const map: Record<string, string> = {};
-            ((usersRes.data as any)?.data?.users || []).forEach((u: any) => { if (u.id) map[u.id] = u.name || u.id; });
+            try {
+                const usersRes = await usersApi.getAll();
+                ((usersRes.data as any)?.data?.users || []).forEach((u: any) => {
+                    if (u.id) map[u.id] = u.name || u.id;
+                });
+            } catch {
+                // Sale không gọi được danh sách toàn bộ NV — vẫn hiển thị tab phê duyệt
+            }
             setUsersMap(map);
         } catch (error: any) {
             toast.error(error.response?.data?.message || 'Không thể tải danh sách phê duyệt');

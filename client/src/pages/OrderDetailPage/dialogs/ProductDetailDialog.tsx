@@ -44,6 +44,8 @@ import { useUsers } from '@/hooks/useUsers';
 import { uploadFile } from '@/lib/supabase';
 import { DELIVERY_CARRIER_OPTIONS } from '@/constants/deliveryCarriers';
 import { useAuth } from '@/contexts/AuthContext';
+import { canOperateWorkflow } from '@/lib/sensitivePermissions';
+import { StaffNameSelect } from '@/components/common/StaffNameSelect';
 
 
 interface ProductDetailDialogProps {
@@ -55,7 +57,7 @@ interface ProductDetailDialogProps {
     order?: Order | null;
     onUpdateOrder?: (patch: Partial<Order>) => Promise<void>;
     onUpdateItemAfterSaleData?: (itemId: string, isCustomerItem: boolean, data: any) => Promise<void>;
-    onReloadOrder?: () => void;
+    onReloadOrder?: () => void | Promise<void>;
     setActiveTab?: (tab: string) => void;
     highlightMessageId?: string;
     salesLogs?: any[];
@@ -319,12 +321,17 @@ export function ProductDetailDialog({
         (order?.sales_user?.id && order.sales_user.id === user?.id);
 
     const isAdminOrManager = user?.role === 'admin' || user?.role === 'manager';
+    const canOperateTech = canOperateWorkflow(user);
+    const isTechnicalRoom = !isSalesStep && !isAftersale && !isCareFlow;
 
     const canEditDueDate = isAdminOrManager || isSaleOfOrder || isAssignedTech;
+    const canEditTechnicalFields = canOperateTech || isAssignedTech || isAdminOrManager;
 
     const currentExtensionRequest = (product as any)?.extension_request || (services[0] as any)?.extension_request;
     const hasPendingRequest = currentExtensionRequest?.status === 'requested';
-    const isInputDisabled = !canEditDueDate || hasPendingRequest;
+    const isInputDisabled =
+        hasPendingRequest ||
+        (isTechnicalRoom ? !canEditTechnicalFields : !canEditDueDate);
 
     // Build image lists
     const originalImages = [...(productItem?.product_images ?? (productItem?.product?.image ? [productItem.product.image] : []))];
@@ -694,7 +701,16 @@ export function ProductDetailDialog({
         );
         const allLogs = [...salesLogs, ...filteredWorkflowLogs, ...aftersaleLogs, ...careLogs];
         const sortedLogs = allLogs
-            .filter(log => (log.entity_id && groupEntityIds.has(log.entity_id)) || log.order_item_step_id) // include product + service-bound workflow requests
+            .filter((log) => {
+                if (log.order_item_step_id) {
+                    return !log.entity_id || groupEntityIds.has(log.entity_id);
+                }
+                if (log.entity_id) {
+                    return groupEntityIds.has(log.entity_id);
+                }
+                // Legacy order-level care/aftersale logs (no entity_id)
+                return log.from_stage != null || log.to_stage != null;
+            })
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
         const requestTypeMap: Record<string, string> = {
@@ -1456,19 +1472,14 @@ export function ProductDetailDialog({
                                                     Người chụp After
                                                     {(roomId === 'after1' || roomId === 'after4') && <span className="text-rose-500">*</span>}
                                                 </Label>
-                                                <Select
+                                                <StaffNameSelect
+                                                    className="bg-white h-9"
                                                     value={formData.aftersale_receiver_name || ''}
                                                     onValueChange={(val) => setFormData(prev => ({ ...prev, aftersale_receiver_name: val }))}
-                                                >
-                                                    <SelectTrigger className="bg-white h-9">
-                                                        <SelectValue placeholder="Chọn nhân viên..." />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {users.map(u => (
-                                                            <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
+                                                    users={users}
+                                                    placeholder="Chọn nhân viên..."
+                                                    disabled={isInputDisabled}
+                                                />
                                             </div>
                                         </div>
                                     )}
@@ -1730,19 +1741,14 @@ export function ProductDetailDialog({
                                                         Người thu tiền
                                                         {(roomId.startsWith('after1_debt') || roomId === 'after4') && <span className="text-rose-500">*</span>}
                                                     </Label>
-                                                    <Select
+                                                    <StaffNameSelect
+                                                        className="bg-white h-9"
                                                         value={formData.debt_checked_by_name || ''}
                                                         onValueChange={(val) => setFormData(prev => ({ ...prev, debt_checked_by_name: val }))}
-                                                    >
-                                                        <SelectTrigger className="bg-white h-9">
-                                                            <SelectValue placeholder="Chọn nhân viên..." />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            {users.map(u => (
-                                                                <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
+                                                        users={users}
+                                                        placeholder="Chọn nhân viên..."
+                                                        disabled={isInputDisabled}
+                                                    />
                                                 </div>
                                             </div>
                                         </div>
@@ -1801,19 +1807,13 @@ export function ProductDetailDialog({
                                                                         <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
                                                                             NV GIAO ĐỒ <span className="text-red-500">*</span>
                                                                         </Label>
-                                                                        <Select
+                                                                        <StaffNameSelect
+                                                                            className="h-9 bg-white"
                                                                             value={formData.delivery_staff_name || ''}
                                                                             onValueChange={(val) => setFormData(prev => ({ ...prev, delivery_staff_name: val }))}
-                                                                        >
-                                                                            <SelectTrigger className="h-9 bg-white">
-                                                                                <SelectValue placeholder="Chọn..." />
-                                                                            </SelectTrigger>
-                                                                            <SelectContent>
-                                                                                {users.map(u => (
-                                                                                    <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
-                                                                                ))}
-                                                                            </SelectContent>
-                                                                        </Select>
+                                                                            users={users}
+                                                                            disabled={isInputDisabled}
+                                                                        />
                                                                     </div>
                                                                     <div className="space-y-2">
                                                                         <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
@@ -1835,19 +1835,13 @@ export function ProductDetailDialog({
                                                                         <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
                                                                             NV TẠO ĐƠN <span className="text-red-500">*</span>
                                                                         </Label>
-                                                                        <Select
+                                                                        <StaffNameSelect
+                                                                            className="h-9 bg-white"
                                                                             value={formData.delivery_creator_name || ''}
                                                                             onValueChange={(val) => setFormData(prev => ({ ...prev, delivery_creator_name: val }))}
-                                                                        >
-                                                                            <SelectTrigger className="h-9 bg-white">
-                                                                                <SelectValue placeholder="Chọn..." />
-                                                                            </SelectTrigger>
-                                                                            <SelectContent>
-                                                                                {users.map(u => (
-                                                                                    <SelectItem key={u.id} value={u.name}>{u.name}</SelectItem>
-                                                                                ))}
-                                                                            </SelectContent>
-                                                                        </Select>
+                                                                            users={users}
+                                                                            disabled={isInputDisabled}
+                                                                        />
                                                                     </div>
                                                                     <div className="space-y-2">
                                                                         <Label className="text-[10px] font-black text-blue-600 uppercase tracking-tight flex items-center gap-1">
@@ -2369,17 +2363,20 @@ export function ProductDetailDialog({
                                                         const warrantyCode = `HDBH${order?.order_code || ''}.${entityId.slice(-4)}.${seq}`;
 
                                                         await apiModule.updateStatus(entityId, 'step1', 'Bảo hành lại', warrantyCode);
-                                                        
-                                                        await apiModule.updateAfterSaleData(entityId, { care_warranty_stage: 'war3' });
+
+                                                        await apiModule.updateAfterSaleData(entityId, {
+                                                            care_warranty_flow: 'warranty',
+                                                            care_warranty_stage: 'war3',
+                                                        });
 
                                                         if (isCustomerItem) {
                                                             await orderProductsApi.resetServices(entityId);
                                                         }
-                                                        
+
                                                         toast.success(`Đã tạo HD Bảo hành: ${warrantyCode} và chuyển về Nhận đồ & Chụp ảnh`);
+                                                        await onReloadOrder?.();
                                                         onOpenChange(false);
                                                         if (setActiveTab) setActiveTab('sales');
-                                                        onReloadOrder();
                                                     } catch (error: any) {
                                                         toast.error(error?.response?.data?.message || 'Lỗi khi tạo HD Bảo hành');
                                                     } finally {

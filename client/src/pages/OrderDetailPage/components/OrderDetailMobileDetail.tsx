@@ -16,7 +16,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatCurrency, cn } from '@/lib/utils';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import { columns } from '@/components/orders/constants';
+import { CustomerPhone } from '@/components/customers/CustomerPhone';
 import { MobileProductPhotos } from './MobileProductPhotos';
+import { useAuth } from '@/contexts/AuthContext';
+import { canViewCustomerPhone } from '@/lib/sensitivePermissions';
 
 interface OrderDetailMobileDetailProps {
     order: Order;
@@ -215,6 +218,8 @@ export function OrderDetailMobileDetail({
     onEditOrder,
 }: OrderDetailMobileDetailProps) {
     const navigate = useNavigate();
+    const { user } = useAuth();
+    const showPhoneLink = canViewCustomerPhone(user) && !!order.customer?.phone?.trim();
     const remaining =
         order.remaining_debt ?? Math.max(0, (order.total_amount || 0) - (order.paid_amount || 0));
     const statusTitle = columns.find((c) => c.id === order.status)?.title || order.status;
@@ -374,12 +379,12 @@ export function OrderDetailMobileDetail({
                     <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold">{order.customer?.name || 'N/A'}</p>
                         <p className="truncate text-xs text-muted-foreground">
-                            {order.customer?.phone || 'Không có SĐT'}
+                            <CustomerPhone phone={order.customer?.phone} />
                         </p>
                     </div>
-                    {order.customer?.phone && (
+                    {showPhoneLink && (
                         <Button variant="outline" size="icon" className="h-9 w-9 shrink-0 bg-white" asChild>
-                            <a href={`tel:${order.customer.phone}`}>
+                            <a href={`tel:${order.customer!.phone}`}>
                                 <Phone className="h-4 w-4" />
                             </a>
                         </Button>

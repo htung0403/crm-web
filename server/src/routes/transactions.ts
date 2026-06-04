@@ -65,7 +65,14 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
         // Enrich transactions with order + customer data (batch fetch)
         const enrichedTransactions = transactions || [];
         const orderIds = [...new Set(enrichedTransactions.filter(t => t.order_id).map(t => t.order_id))];
-        
+        const productIds = [
+            ...new Set(
+                enrichedTransactions
+                    .map((t) => t.order_product_id as string | undefined)
+                    .filter(Boolean) as string[]
+            ),
+        ];
+
         if (orderIds.length > 0) {
             const { data: orders, error: ordersError } = await supabaseAdmin
                 .from('orders')
@@ -91,6 +98,26 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
                     if (trans.order_id && orderMap.has(trans.order_id)) {
                         (trans as any).order = orderMap.get(trans.order_id);
                     }
+                }
+            }
+        }
+
+        if (productIds.length > 0) {
+            const { data: products } = await supabaseAdmin
+                .from('order_products')
+                .select('id, product_code, name, images')
+                .in('id', productIds);
+
+            const productMap = new Map((products || []).map((p) => [p.id, p]));
+            for (const trans of enrichedTransactions) {
+                const pid = trans.order_product_id as string | undefined;
+                if (pid && productMap.has(pid)) {
+                    (trans as any).order_product = productMap.get(pid);
+                } else if (trans.metadata?.product_code) {
+                    (trans as any).order_product = {
+                        product_code: trans.metadata.product_code,
+                        name: trans.metadata.product_name || null,
+                    };
                 }
             }
         }
@@ -228,7 +255,19 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 // Create transaction
 router.post('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { type, category, amount, payment_method, notes, image_url, date, order_id, order_code, metadata } = req.body;
+        const {
+            type,
+            category,
+            amount,
+            payment_method,
+            notes,
+            image_url,
+            date,
+            order_id,
+            order_code,
+            order_product_id,
+            metadata,
+        } = req.body;
 
         if (!type || !category || !amount) {
             throw new ApiError('Loại, danh mục và số tiền là bắt buộc', 400);
@@ -240,30 +279,76 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
 
         const code = await generateTransactionCode(type);
 
-        const { data: transaction, error } = await supabaseAdmin
+        let resolvedOrderId = order_id || null;
+        let resolvedOrderCode = order_code || null;
+        let resolvedProductId = order_product_id || null;
+        let productCode: string | null = null;
+
+        if (resolvedProductId) {
+            const { data: op } = await supabaseAdmin
+                .from('order_products')
+                .select('id, product_code, order_id, order:orders(id, order_code)')
+                .eq('id', resolvedProductId)
+                .single();
+
+            if (!op) {
+                throw new ApiError('Không tìm thấy sản phẩm đơn hàng', 400);
+            }
+            productCode = op.product_code;
+            resolvedProductId = op.id;
+            resolvedOrderId = op.order_id;
+            const orderRow = Array.isArray(op.order) ? op.order[0] : op.order;
+            resolvedOrderCode = orderRow?.order_code || resolvedOrderCode;
+        }
+
+        const mergedMetadata =
+            metadata && typeof metadata === 'object'
+                ? { ...metadata, ...(productCode ? { product_code: productCode } : {}) }
+                : productCode
+                  ? { product_code: productCode }
+                  : {};
+
+        const insertPayload: Record<string, unknown> = {
+            code,
+            type,
+            category,
+            amount,
+            payment_method: payment_method || 'cash',
+            notes,
+            image_url,
+            date: date || new Date().toISOString().split('T')[0],
+            order_id: resolvedOrderId,
+            order_code: resolvedOrderCode,
+            order_product_id: resolvedProductId,
+            metadata: mergedMetadata,
+            status: req.body.status || 'pending',
+            created_by: req.user!.id,
+            approved_by: req.body.status === 'approved' ? req.user!.id : null,
+            approved_at: req.body.status === 'approved' ? new Date().toISOString() : null,
+        };
+
+        let { data: transaction, error } = await supabaseAdmin
             .from('transactions')
-            .insert({
-                code,
-                type,
-                category,
-                amount,
-                payment_method: payment_method || 'cash',
-                notes,
-                image_url,
-                date: date || new Date().toISOString().split('T')[0],
-                order_id,
-                order_code,
-                metadata: metadata && typeof metadata === 'object' ? metadata : {},
-                status: req.body.status || 'pending',
-                created_by: req.user!.id,
-                approved_by: req.body.status === 'approved' ? req.user!.id : null,
-                approved_at: req.body.status === 'approved' ? new Date().toISOString() : null,
-            })
+            .insert(insertPayload)
             .select(`
                 *,
                 created_by_user:users!transactions_created_by_fkey(id, name, avatar)
             `)
             .single();
+
+        if (error && String(error.message || '').includes('order_product_id')) {
+            const { order_product_id: _op, ...legacyPayload } = insertPayload;
+            const retry = await supabaseAdmin
+                .from('transactions')
+                .insert(legacyPayload)
+                .select(`
+                    *,
+                    created_by_user:users!transactions_created_by_fkey(id, name, avatar)
+                `)
+                .single();
+            transaction = retry.data;
+            error = retry.error;
+        }
 
         if (error) {
             console.error('Error creating transaction:', error);

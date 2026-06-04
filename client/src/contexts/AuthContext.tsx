@@ -39,28 +39,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return mappedUser;
     }, []);
 
-    // Load user from localStorage on mount + refresh quyền xem
+    // Load user from localStorage on mount + refresh quyền xem (chờ getMe để tránh quyền cũ trong cache)
     useEffect(() => {
-        const storedToken = localStorage.getItem('token');
-        const storedUser = localStorage.getItem('user');
+        let cancelled = false;
 
-        if (storedToken && storedUser) {
+        const init = async () => {
+            const storedToken = localStorage.getItem('token');
+            const storedUser = localStorage.getItem('user');
+
+            if (!storedToken || !storedUser) {
+                if (!cancelled) setIsLoading(false);
+                return;
+            }
+
             setToken(storedToken);
             try {
                 setUser(JSON.parse(storedUser));
             } catch {
                 localStorage.removeItem('user');
+                localStorage.removeItem('token');
+                if (!cancelled) setIsLoading(false);
+                return;
             }
-            authApi
-                .getMe()
-                .then((res) => {
-                    if (res.data?.status === 'success' && res.data.data?.user) {
-                        applyUserFromApi(res.data.data.user);
-                    }
-                })
-                .catch(() => {});
-        }
-        setIsLoading(false);
+
+            try {
+                const res = await authApi.getMe();
+                if (!cancelled && res.data?.status === 'success' && res.data.data?.user) {
+                    applyUserFromApi(res.data.data.user);
+                }
+            } catch {
+                // Giữ user cache nếu mạng lỗi tạm thời
+            } finally {
+                if (!cancelled) setIsLoading(false);
+            }
+        };
+
+        void init();
+        return () => {
+            cancelled = true;
+        };
     }, [applyUserFromApi]);
 
     const login = useCallback(async (email: string, password: string) => {

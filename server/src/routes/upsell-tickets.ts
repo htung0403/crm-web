@@ -1,6 +1,7 @@
 import { Router, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
+import { requireViewAccess } from '../middleware/viewAccess.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
 import { applyFullOrderUpdate } from '../utils/orderFullUpdate.js';
@@ -8,19 +9,12 @@ import { notifyCrmMasterUser } from '../utils/n8nCrmEvents.js';
 
 const router = Router();
 
-// Middleware to check for Admin or Manager
-function requireAdminOrManager(req: AuthenticatedRequest, res: Response, next: NextFunction) {
-    const role = req.user?.role;
-    if (role !== 'admin' && role !== 'manager') {
-        return next(new ApiError('Chỉ admin hoặc quản lý mới có quyền thực hiện hành động này', 403));
-    }
-    next();
-}
+const UPSELL_VIEW = 'orders/upsell-tickets';
 
 router.use(authenticate);
 
 // GET /api/upsell-tickets - List tickets
-router.get('/', requireAdminOrManager, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+router.get('/', requireViewAccess(UPSELL_VIEW, { fallbackRoles: ['admin', 'manager'] }), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
         const { data, error } = await supabaseAdmin
             .from('upsell_tickets')
@@ -41,7 +35,10 @@ router.get('/', requireAdminOrManager, async (req: AuthenticatedRequest, res: Re
 });
 
 // POST /api/upsell-tickets/:id/approve - Approve ticket
-router.post('/:id/approve', requireAdminOrManager, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+router.post(
+    '/:id/approve',
+    requireViewAccess(UPSELL_VIEW, { fallbackRoles: ['admin', 'manager'], requireAction: 'edit' }),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
         const { id: ticketId } = req.params;
         const userId = req.user!.id;
@@ -418,7 +415,10 @@ router.post('/:id/approve', requireAdminOrManager, async (req: AuthenticatedRequ
 });
 
 // POST /api/upsell-tickets/:id/reject - Reject ticket
-router.post('/:id/reject', requireAdminOrManager, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+router.post(
+    '/:id/reject',
+    requireViewAccess(UPSELL_VIEW, { fallbackRoles: ['admin', 'manager'], requireAction: 'edit' }),
+    async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
         const { id } = req.params;
         const { reason } = req.body || {};
