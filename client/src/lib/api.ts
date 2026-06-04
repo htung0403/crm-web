@@ -259,6 +259,7 @@ export const ordersApi = {
         payment_method?: 'cash' | 'transfer' | 'zalopay';
         image_url?: string;
         notes?: string;
+        order_product_id?: string;
     }) => api.post<ApiResponse<{ payment: any; order: any }>>(`/orders/${orderId}/payments`, data),
 
     upsell: (id: string, data: { customer_items?: any[]; sale_items?: any[] }) =>

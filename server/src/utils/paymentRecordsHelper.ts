@@ -200,7 +200,7 @@ export async function sumPaymentTotalsByOrder(orderIds: string[]): Promise<{
         return { paidByOrder, depositByOrder, depositByProduct, paidByProduct };
     }
 
-    let result = await supabaseAdmin
+    let result: any = await supabaseAdmin
         .from('payment_records')
         .select('order_id, order_product_id, amount, payment_kind, transaction_category, content')
         .in('order_id', orderIds);

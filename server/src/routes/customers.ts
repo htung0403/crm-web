@@ -252,7 +252,7 @@ router.get('/:id/debt', authenticate, async (req: AuthenticatedRequest, res, nex
         }> = [];
 
         if (orderIds.length > 0) {
-            let payResult = await supabaseAdmin
+            let payResult: any = await supabaseAdmin
                 .from('payment_records')
                 .select('id, order_id, order_code, amount, payment_method, content, created_at, payment_kind, transaction_category')
                 .in('order_id', orderIds)

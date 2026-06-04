@@ -539,7 +539,7 @@ export function ProductDetailDialog({
         }
 
         // Validation: Require payment proof photos when collecting debt
-        if (isAftersale && (roomId.startsWith('after1_debt') || roomId === 'after4')) {
+        if (isAftersale) {
             if ((formData as any).debt_collect_amount && (formData as any).debt_collect_amount > 0) {
                 const hasPaymentPhotos = (formData as any).debt_payment_photos && (formData as any).debt_payment_photos.length > 0;
                 if (!hasPaymentPhotos) {
@@ -600,8 +600,11 @@ export function ProductDetailDialog({
                 });
             }
 
-            toast.success('Đã cập nhật thông tin thành công');
-            if (onReloadOrder) onReloadOrder();
+            // Nếu có pending move (drag-and-drop yêu cầu thông tin), tự động chuyển trạng thái trước khi tạo phiếu thu
+            if (onConfirmAndMove) {
+                await onConfirmAndMove();
+                onOpenChange(false);
+            }
             
             // Nếu có phí ship và đang ở các bước liên quan đến giao hàng thì tạo phiếu thu
             if (formData.delivery_fee && formData.delivery_fee > 0 && order && (roomId.startsWith('after2') || roomId.startsWith('after4'))) {
@@ -619,8 +622,8 @@ export function ProductDetailDialog({
                 }
             }
 
-            // Tạo phiếu thu khi kiểm nợ
-            if ((formData as any).debt_collect_amount && (formData as any).debt_collect_amount > 0 && order && (roomId.startsWith('after1_debt') || roomId === 'after4')) {
+            // Tạo phiếu thu khi có số tiền thu ở bất kỳ bước hậu mãi nào
+            if ((formData as any).debt_collect_amount && (formData as any).debt_collect_amount > 0 && order && isAftersale) {
                 const { ordersApi } = await import('@/lib/api');
                 try {
                     await ordersApi.createPayment(order.id, {
@@ -628,18 +631,20 @@ export function ProductDetailDialog({
                         amount: (formData as any).debt_collect_amount,
                         notes: `Thu nợ cho đơn ${order.order_code || order.id} (Bước: ${getAfterSaleStageLabel(roomId)})`,
                         payment_method: (formData as any).debt_payment_method || 'cash',
+                        image_url: ((formData as any).debt_payment_photos || [])[0] || undefined,
+                        order_product_id: product?.id,
                     });
                     toast.success('Đã tạo phiếu thu nợ và cập nhật công nợ');
+                    setFormData(prev => ({ ...prev, debt_collect_amount: 0 } as any));
                 } catch (error) {
                     console.error('Lỗi tạo phiếu thu nợ:', error);
+                    toast.error('Lỗi khi tạo phiếu thu nợ. Vui lòng thử lại trước khi chuyển bước.');
+                    return;
                 }
             }
 
-            // Nếu có pending move (drag-and-drop yêu cầu thông tin), tự động chuyển trạng thái và đóng dialog
-            if (onConfirmAndMove) {
-                await onConfirmAndMove();
-                onOpenChange(false);
-            }
+            toast.success('Đã cập nhật thông tin thành công');
+            if (onReloadOrder) await onReloadOrder();
         } catch (error: any) {
             toast.error(error?.message || 'Lỗi khi cập nhật thông tin');
         } finally {
@@ -1442,6 +1447,38 @@ export function ProductDetailDialog({
                                 <div className="flex-1 flex flex-col gap-4">
                                     {(roomId.startsWith('after1') || roomId.startsWith('after4')) && (
                                         <div className="space-y-3">
+                                            {/* Received Product Photos */}
+                                            <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100 shadow-sm space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="h-7 w-7 rounded-lg bg-blue-100 flex items-center justify-center">
+                                                            <Camera className="h-4 w-4 text-blue-600" />
+                                                        </div>
+                                                        <div className="flex flex-col">
+                                                            <span className="text-[11px] font-black text-blue-900 uppercase tracking-tight">ẢNH SẢN PHẨM LÚC NHẬN</span>
+                                                            <span className="text-[9px] text-blue-500 font-medium italic">Đối chiếu góc chụp trước khi chụp ảnh hoàn thiện</span>
+                                                        </div>
+                                                    </div>
+                                                    <Badge variant="outline" className="text-[9px] bg-white text-blue-600 border-blue-200">
+                                                        {originalImages.length} ảnh/video
+                                                    </Badge>
+                                                </div>
+
+                                                {originalImages.length > 0 ? (
+                                                    <MultiMediaUpload
+                                                        value={originalImages}
+                                                        onChange={() => undefined}
+                                                        disabled
+                                                        bucket="orders"
+                                                        folder="received"
+                                                    />
+                                                ) : (
+                                                    <div className="rounded-xl border border-dashed border-blue-100 bg-white/70 p-4 text-center text-[10px] font-semibold text-blue-300">
+                                                        Chưa có ảnh sản phẩm lúc nhận
+                                                    </div>
+                                                )}
+                                            </div>
+
                                             {/* Proof Photos */}
                                             <div className="bg-purple-50/50 p-4 rounded-2xl border border-purple-100 shadow-sm space-y-3">
                                                 <div className="flex items-center justify-between">

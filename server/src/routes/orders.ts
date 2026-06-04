@@ -2263,7 +2263,7 @@ router.get('/:id/payments', authenticate, async (req: AuthenticatedRequest, res,
 router.post('/:id/payments', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { content, amount, payment_method, image_url, notes } = req.body;
+        const { content, amount, payment_method, image_url, notes, order_product_id } = req.body;
 
         if (!content || !amount || amount <= 0) {
             throw new ApiError('Nội dung và số tiền là bắt buộc', 400);
@@ -2293,6 +2293,7 @@ router.post('/:id/payments', authenticate, async (req: AuthenticatedRequest, res
             transaction_category: 'Thanh toán đơn hàng',
             transaction_status: 'approved',
             created_by: req.user!.id,
+            order_product_id: order_product_id || null,
             payment_kind: 'payment',
         });
 
