@@ -222,9 +222,9 @@ router.get('/:id/debt', authenticate, async (req: AuthenticatedRequest, res, nex
             const paidFromOrder = Number(o.paid_amount) || 0;
             const paidFromRecords = paymentTotals.paidByOrder[o.id] || 0;
             const paid = Math.max(paidFromOrder, paidFromRecords);
-            const remaining = Number(o.remaining_debt) ?? Math.max(0, total - paid);
             const products = productsByOrder[o.id] || [];
             const depositTotal = products.reduce((s, p) => s + (p.deposit_amount || 0), 0);
+            const collected = Math.max(paid, depositTotal);
             return {
                 id: o.id,
                 order_code: o.order_code,
@@ -232,7 +232,7 @@ router.get('/:id/debt', authenticate, async (req: AuthenticatedRequest, res, nex
                 total_amount: total,
                 paid_amount: paid,
                 deposit_amount: depositTotal,
-                remaining_debt: Math.max(0, total - paid),
+                remaining_debt: Math.max(0, total - collected),
                 payment_status: o.payment_status,
                 status: o.status,
                 products,

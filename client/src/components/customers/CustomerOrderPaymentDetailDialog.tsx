@@ -206,7 +206,8 @@ export function CustomerOrderPaymentDetailDialog({
             const productPayments = payments.filter((p) => p.order_product_id === product.id);
             const paidFromRecords = productPayments.reduce((s, p) => s + p.amount, 0);
             const paid = product.paid_amount ?? paidFromRecords;
-            const remaining = product.remaining_debt ?? Math.max(0, product.total_amount - paidFromRecords);
+            const collected = Math.max(paid, product.deposit_amount || 0);
+            const remaining = Math.max(0, product.total_amount - collected);
 
             return {
                 key: product.id,
