@@ -1565,7 +1565,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
 
         // Resolve id: V1 = order_items, V2 = order_product_services
         const { data: v1Item } = await supabaseAdmin.from('order_items').select('id').eq('id', id).maybeSingle();
-        const { data: v2Item } = await supabaseAdmin.from('order_product_services').select('id').eq('id', id).maybeSingle();
+        const { data: v2Item } = await supabaseAdmin.from('order_product_services').select('id, order_product_id').eq('id', id).maybeSingle();
         const isV1 = !!v1Item;
         const isV2 = !!v2Item;
         if (!isV1 && !isV2) {
@@ -1574,6 +1574,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
 
         const payload = {
             order_item_id: isV1 ? id : null,
+            order_product_id: isV2 ? v2Item?.order_product_id || metadata?.order_product_id || null : metadata?.order_product_id || null,
             order_product_service_id: isV2 ? id : null,
             status,
             notes: notes || null,
@@ -1596,6 +1597,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
             const { data: updated, error } = await supabaseAdmin
                 .from('order_item_accessories')
                 .update({ 
+                    order_product_id: payload.order_product_id,
                     status, 
                     notes: notes || null, 
                     metadata: metadata ? { ...(existing.metadata || {}), ...metadata } : (existing.metadata || {}),
@@ -1622,6 +1624,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
                     new_status: status,
                     notes: notes || null,
                     order_item_id: isV1 ? id : null,
+                    order_product_id: payload.order_product_id,
                     order_product_service_id: isV2 ? id : null,
                 });
             }
@@ -1651,7 +1654,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
         if (status === 'requested') {
             const itemName = metadata?.item_name || 'Phụ kiện';
             await logAccessoryStatusChange(
-                { order_item_id: isV1 ? id : null, order_product_service_id: isV2 ? id : null },
+                { order_item_id: isV1 ? id : null, order_product_id: payload.order_product_id, order_product_service_id: isV2 ? id : null },
                 undefined,
                 status,
                 `${itemName}${notes ? ': ' + notes : ''}`,
@@ -1705,7 +1708,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
 
         // Resolve id: V1 = order_items, V2 = order_product_services
         const { data: v1Item } = await supabaseAdmin.from('order_items').select('id').eq('id', id).maybeSingle();
-        const { data: v2Item } = await supabaseAdmin.from('order_product_services').select('id').eq('id', id).maybeSingle();
+        const { data: v2Item } = await supabaseAdmin.from('order_product_services').select('id, order_product_id').eq('id', id).maybeSingle();
         const isV1 = !!v1Item;
         const isV2 = !!v2Item;
         if (!isV1 && !isV2) {
@@ -1714,6 +1717,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
 
         const payload = {
             order_item_id: isV1 ? id : null,
+            order_product_id: isV2 ? v2Item?.order_product_id || metadata?.order_product_id || null : metadata?.order_product_id || null,
             order_product_service_id: isV2 ? id : null,
             status,
             notes: notes || null,
@@ -1736,6 +1740,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
             const { data: updated, error } = await supabaseAdmin
                 .from('order_item_partner')
                 .update({ 
+                    order_product_id: payload.order_product_id,
                     status, 
                     notes: notes || null, 
                     metadata: metadata ? { ...(existing.metadata || {}), ...metadata } : (existing.metadata || {}),
@@ -1749,7 +1754,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
 
             if (status !== oldStatus) {
                 await logPartnerStatusChange(
-                    { order_item_id: isV1 ? id : null, order_product_service_id: isV2 ? id : null },
+                    { order_item_id: isV1 ? id : null, order_product_id: payload.order_product_id, order_product_service_id: isV2 ? id : null },
                     oldStatus,
                     status,
                     notes,
@@ -1789,7 +1794,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
 
         if (status === 'requested') {
             await logPartnerStatusChange(
-                { order_item_id: isV1 ? id : null, order_product_service_id: isV2 ? id : null },
+                { order_item_id: isV1 ? id : null, order_product_id: payload.order_product_id, order_product_service_id: isV2 ? id : null },
                 undefined,
                 status,
                 notes,

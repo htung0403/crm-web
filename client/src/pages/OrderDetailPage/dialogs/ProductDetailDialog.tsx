@@ -741,7 +741,43 @@ export function ProductDetailDialog({
         const filteredWorkflowLogs = workflowLogs.filter(log => 
             log.action === 'assigned' || log.action === 'failed' || isWorkflowRequestLogAction(log.action)
         );
-        const allLogs = [...salesLogs, ...filteredWorkflowLogs, ...aftersaleLogs, ...careLogs];
+        const requestStatusLogs = [product, ...services].flatMap((item: any) => {
+            if (!item?.id) return [];
+            const logs: any[] = [];
+            const accessory = item.accessory;
+            const partner = item.partner;
+
+            if (accessory?.status) {
+                const action = accessory.status === 'requested' ? 'accessory_requested' : `accessory_${accessory.status}`;
+                logs.push({
+                    id: `request-accessory-${accessory.id || item.id}-${accessory.status}`,
+                    entity_id: item.id,
+                    action,
+                    step_name: 'Mua phụ kiện',
+                    notes: accessory.notes || accessory.metadata?.item_name || 'Cập nhật mua phụ kiện',
+                    created_at: accessory.updated_at || accessory.created_at || new Date().toISOString(),
+                    created_by_user: accessory.updated_by_user || accessory.created_by_user,
+                    _synthetic: true,
+                });
+            }
+
+            if (partner?.status) {
+                const action = partner.status === 'requested' ? 'partner_requested' : `partner_${partner.status}`;
+                logs.push({
+                    id: `request-partner-${partner.id || item.id}-${partner.status}`,
+                    entity_id: item.id,
+                    action,
+                    step_name: 'Gửi đối tác',
+                    notes: partner.notes || partner.metadata?.partner_name || 'Cập nhật gửi đối tác',
+                    created_at: partner.updated_at || partner.created_at || new Date().toISOString(),
+                    created_by_user: partner.updated_by_user || partner.created_by_user,
+                    _synthetic: true,
+                });
+            }
+
+            return logs;
+        });
+        const allLogs = [...salesLogs, ...filteredWorkflowLogs, ...requestStatusLogs, ...aftersaleLogs, ...careLogs];
         const sortedLogs = allLogs
             .filter((log) => {
                 if (log.order_item_step_id) {
@@ -752,6 +788,10 @@ export function ProductDetailDialog({
                 }
                 // Legacy order-level care/aftersale logs (no entity_id)
                 return log.from_stage != null || log.to_stage != null;
+            })
+            .filter((log, index, arr) => {
+                if (!log._synthetic) return true;
+                return !arr.some((candidate) => !candidate._synthetic && candidate.entity_id === log.entity_id && candidate.action === log.action);
             })
             .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
@@ -820,6 +860,12 @@ export function ProductDetailDialog({
         return null;
     };
 
+    const getWorkflowRequestIcon = (action: string) => {
+        if (action.startsWith('accessory_')) return <ShoppingBag className="h-3.5 w-3.5" />;
+        if (action.startsWith('partner_')) return <Truck className="h-3.5 w-3.5" />;
+        return <Clock className="h-3.5 w-3.5" />;
+    };
+
     const renderWorkflowRequestBox = (log: any, config: { icon: React.ReactNode; label: string; className: string }) => (
         <div className={cn('mt-1.5 rounded-xl border p-3 shadow-sm', config.className)}>
             <div className="flex items-start justify-between gap-3">
@@ -831,6 +877,11 @@ export function ProductDetailDialog({
                         <div className="flex flex-wrap items-center gap-2">
                             <span className="font-bold leading-none">{config.label}</span>
                             {renderRequestOutcomeBadge(log)}
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-500">
+                            <span>{formatDateTime(log.created_at)}</span>
+                            <span>•</span>
+                            <span>{log.created_by_user?.name || 'Hệ thống'}</span>
                         </div>
                         {log.notes && <div className="mt-2 text-xs leading-relaxed text-slate-700">{log.notes}</div>}
                     </div>
@@ -923,44 +974,14 @@ export function ProductDetailDialog({
                 </div>
             )}
 
-            {log.action === 'accessory_requested' && (
-                renderWorkflowRequestBox(log, {
-                    icon: <ShoppingBag className="h-3.5 w-3.5" />,
-                    label: 'Yêu cầu mua phụ kiện',
-                    className: 'border-amber-200 bg-amber-50/80 text-amber-800',
-                })
-            )}
-
-            {log.action === 'partner_requested' && (
-                renderWorkflowRequestBox(log, {
-                    icon: <Truck className="h-3.5 w-3.5" />,
-                    label: 'Yêu cầu gửi đối tác',
-                    className: 'border-violet-200 bg-violet-50/80 text-violet-800',
-                })
-            )}
-
-            {log.action === 'extension_requested' && (
-                renderWorkflowRequestBox(log, {
-                    icon: <Clock className="h-3.5 w-3.5" />,
-                    label: 'Xin gia hạn',
-                    className: 'border-blue-200 bg-blue-50/80 text-blue-800',
-                })
-            )}
-
-            {['partner_approved', 'partner_rejected', 'accessory_approved', 'accessory_rejected', 'extension_approved', 'extension_rejected'].includes(log.action) && (() => {
+            {isWorkflowRequestLog && (() => {
                 const display = getWorkflowRequestLogDisplay(log.action);
                 if (!display) return null;
-                return (
-                    <div className={cn('mt-1.5 p-2 rounded-lg border', display.boxClass)}>
-                        <div className="flex items-center gap-1.5 font-medium">
-                            <span>{display.emoji}</span>
-                            <span>{display.label}</span>
-                        </div>
-                        {(log.reason || log.notes) && (
-                            <div className="text-xs mt-1">{log.reason || log.notes}</div>
-                        )}
-                    </div>
-                );
+                return renderWorkflowRequestBox(log, {
+                    icon: getWorkflowRequestIcon(log.action),
+                    label: display.label,
+                    className: display.boxClass,
+                });
             })()}
 
             <Button 

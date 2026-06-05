@@ -86,6 +86,7 @@ router.patch('/accessories/:id', authenticate, async (req: AuthenticatedRequest,
             await logAccessoryStatusChange(
                 {
                     order_item_id: current.order_item_id,
+                    order_product_id: current.order_product_id,
                     order_product_service_id: current.order_product_service_id,
                 },
                 current.status,
@@ -130,7 +131,7 @@ router.patch('/partners/:id', authenticate, async (req: AuthenticatedRequest, re
 
         const { data: current, error: fetchError } = await supabaseAdmin
             .from('order_item_partner')
-            .select('id, status, notes, order_item_id, order_product_service_id')
+            .select('id, status, notes, order_item_id, order_product_id, order_product_service_id')
             .eq('id', id)
             .single();
 
@@ -159,6 +160,7 @@ router.patch('/partners/:id', authenticate, async (req: AuthenticatedRequest, re
             await logPartnerStatusChange(
                 {
                     order_item_id: current.order_item_id,
+                    order_product_id: current.order_product_id,
                     order_product_service_id: current.order_product_service_id,
                 },
                 current.status,

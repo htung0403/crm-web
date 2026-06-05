@@ -678,12 +678,12 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
                 supabaseAdmin
                     .from('order_item_accessories')
                     .select('*')
-                    .or(itemIds.map((id: string) => `order_item_id.eq.${id},order_product_service_id.eq.${id}`).join(','))
+                    .or(itemIds.map((id: string) => `order_item_id.eq.${id},order_product_id.eq.${id},order_product_service_id.eq.${id}`).join(','))
                     .order('updated_at', { ascending: false }),
                 supabaseAdmin
                     .from('order_item_partner')
                     .select('*')
-                    .or(itemIds.map((id: string) => `order_item_id.eq.${id},order_product_service_id.eq.${id}`).join(','))
+                    .or(itemIds.map((id: string) => `order_item_id.eq.${id},order_product_id.eq.${id},order_product_service_id.eq.${id}`).join(','))
                     .order('updated_at', { ascending: false }),
             ]);
 
@@ -691,8 +691,8 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
             for (const item of order.items) {
                 const itemId = item.id;
                 if (!itemId) continue;
-                (item as any).accessory = allAccessories?.find((a: any) => a.order_item_id === itemId || a.order_product_service_id === itemId) || null;
-                (item as any).partner = allPartners?.find((p: any) => p.order_item_id === itemId || p.order_product_service_id === itemId) || null;
+                (item as any).accessory = allAccessories?.find((a: any) => a.order_item_id === itemId || a.order_product_id === itemId || a.order_product_service_id === itemId) || null;
+                (item as any).partner = allPartners?.find((p: any) => p.order_item_id === itemId || p.order_product_id === itemId || p.order_product_service_id === itemId) || null;
                 (item as any).extension_request = extRequests?.find((e: any) => e.order_item_id === itemId || e.order_product_service_id === itemId) || null;
             }
         }
@@ -795,7 +795,7 @@ router.get('/:id/kanban-logs', authenticate, async (req: AuthenticatedRequest, r
                 console.log('[Workflow] No step IDs, skipping step log query');
             }
 
-            const allEntityIds = [...orderItemIds, ...serviceIds];
+            const allEntityIds = [...orderItemIds, ...opIds, ...serviceIds];
             if (allEntityIds.length > 0) {
                 console.log('[Workflow] Querying by entity IDs:', allEntityIds);
                 const entityLogsResult = await supabaseAdmin

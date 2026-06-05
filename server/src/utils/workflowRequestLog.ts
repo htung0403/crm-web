@@ -25,13 +25,33 @@ export async function logWorkflowRequest(params: {
 
 export function resolveRequestEntityId(row: {
     order_item_id?: string | null;
+    order_product_id?: string | null;
     order_product_service_id?: string | null;
 }): string | null {
-    return row.order_item_id || row.order_product_service_id || null;
+    return row.order_product_id || row.order_item_id || row.order_product_service_id || null;
 }
 
+const ACCESSORY_STATUS_LOGS: Record<string, { action: string; stepName: string; notes: string }> = {
+    requested: { action: 'accessory_requested', stepName: 'Yêu cầu mua phụ kiện', notes: 'Yêu cầu mua phụ kiện' },
+    need_buy: { action: 'accessory_need_buy', stepName: 'Mua phụ kiện', notes: 'QL đã duyệt mua phụ kiện' },
+    bought: { action: 'accessory_bought', stepName: 'Mua phụ kiện', notes: 'Đã mua xong phụ kiện' },
+    waiting_ship: { action: 'accessory_waiting_ship', stepName: 'Mua phụ kiện', notes: 'Phụ kiện đang chờ ship' },
+    shipped: { action: 'accessory_shipped', stepName: 'Mua phụ kiện', notes: 'Đã nhận phụ kiện' },
+    delivered_to_tech: { action: 'accessory_delivered_to_tech', stepName: 'Mua phụ kiện', notes: 'Đã giao phụ kiện cho kỹ thuật' },
+    rejected: { action: 'accessory_rejected', stepName: 'Mua phụ kiện', notes: 'QL từ chối yêu cầu mua phụ kiện' },
+};
+
+const PARTNER_STATUS_LOGS: Record<string, { action: string; stepName: string; notes: string }> = {
+    requested: { action: 'partner_requested', stepName: 'Gửi đối tác', notes: 'Yêu cầu gửi đối tác' },
+    ship_to_partner: { action: 'partner_ship_to_partner', stepName: 'Gửi đối tác', notes: 'QL đã duyệt gửi đối tác' },
+    partner_doing: { action: 'partner_partner_doing', stepName: 'Gửi đối tác', notes: 'Đối tác đang xử lý' },
+    ship_back: { action: 'partner_ship_back', stepName: 'Gửi đối tác', notes: 'Đối tác gửi trả sản phẩm' },
+    done: { action: 'partner_done', stepName: 'Gửi đối tác', notes: 'Hoàn tất gửi đối tác' },
+    rejected: { action: 'partner_rejected', stepName: 'Gửi đối tác', notes: 'QL từ chối yêu cầu gửi đối tác' },
+};
+
 export async function logPartnerStatusChange(
-    row: { order_item_id?: string | null; order_product_service_id?: string | null },
+    row: { order_item_id?: string | null; order_product_id?: string | null; order_product_service_id?: string | null },
     oldStatus: string | undefined,
     newStatus: string,
     notes: string | null | undefined,
@@ -39,43 +59,21 @@ export async function logPartnerStatusChange(
 ): Promise<void> {
     const entityId = resolveRequestEntityId(row);
     if (!entityId || oldStatus === newStatus) return;
+    const config = PARTNER_STATUS_LOGS[newStatus];
+    if (!config) return;
 
-    if (newStatus === 'requested') {
-        await logWorkflowRequest({
-            entityId,
-            action: 'partner_requested',
-            stepName: 'Gửi đối tác',
-            notes: notes || 'Yêu cầu gửi đối tác',
-            createdBy,
-        });
-        return;
-    }
-
-    if (newStatus === 'rejected') {
-        await logWorkflowRequest({
-            entityId,
-            action: 'partner_rejected',
-            stepName: 'Gửi đối tác',
-            notes: notes || 'QL từ chối yêu cầu gửi đối tác',
-            reason: notes,
-            createdBy,
-        });
-        return;
-    }
-
-    if (newStatus === 'ship_to_partner' && oldStatus === 'requested') {
-        await logWorkflowRequest({
-            entityId,
-            action: 'partner_approved',
-            stepName: 'Gửi đối tác',
-            notes: notes || 'QL đã duyệt gửi đối tác',
-            createdBy,
-        });
-    }
+    await logWorkflowRequest({
+        entityId,
+        action: oldStatus === 'requested' && newStatus === 'ship_to_partner' ? 'partner_approved' : config.action,
+        stepName: config.stepName,
+        notes: notes || config.notes,
+        reason: newStatus === 'rejected' ? notes : null,
+        createdBy,
+    });
 }
 
 export async function logAccessoryStatusChange(
-    row: { order_item_id?: string | null; order_product_service_id?: string | null },
+    row: { order_item_id?: string | null; order_product_id?: string | null; order_product_service_id?: string | null },
     oldStatus: string | undefined,
     newStatus: string,
     notes: string | null | undefined,
@@ -83,39 +81,17 @@ export async function logAccessoryStatusChange(
 ): Promise<void> {
     const entityId = resolveRequestEntityId(row);
     if (!entityId || oldStatus === newStatus) return;
+    const config = ACCESSORY_STATUS_LOGS[newStatus];
+    if (!config) return;
 
-    if (newStatus === 'requested') {
-        await logWorkflowRequest({
-            entityId,
-            action: 'accessory_requested',
-            stepName: 'Yêu cầu mua phụ kiện',
-            notes: notes || 'Yêu cầu mua phụ kiện',
-            createdBy,
-        });
-        return;
-    }
-
-    if (newStatus === 'rejected') {
-        await logWorkflowRequest({
-            entityId,
-            action: 'accessory_rejected',
-            stepName: 'Mua phụ kiện',
-            notes: notes || 'QL từ chối yêu cầu mua phụ kiện',
-            reason: notes,
-            createdBy,
-        });
-        return;
-    }
-
-    if (newStatus === 'need_buy' && oldStatus === 'requested') {
-        await logWorkflowRequest({
-            entityId,
-            action: 'accessory_approved',
-            stepName: 'Mua phụ kiện',
-            notes: notes || 'QL đã duyệt mua phụ kiện',
-            createdBy,
-        });
-    }
+    await logWorkflowRequest({
+        entityId,
+        action: oldStatus === 'requested' && newStatus === 'need_buy' ? 'accessory_approved' : config.action,
+        stepName: config.stepName,
+        notes: notes || config.notes,
+        reason: newStatus === 'rejected' ? notes : null,
+        createdBy,
+    });
 }
 
 export async function logExtensionStatusChange(
