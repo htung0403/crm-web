@@ -2457,12 +2457,12 @@ export function ProductDetailDialog({
                                                         const seq = `${now.getFullYear().toString().slice(-2)}${(now.getMonth() + 1).toString().padStart(2, '0')}${now.getDate().toString().padStart(2, '0')}`;
                                                         const warrantyCode = `HDBH${order?.order_code || ''}.${entityId.slice(-4)}.${seq}`;
 
-                                                        await apiModule.updateStatus(entityId, 'step1', 'Bảo hành lại', warrantyCode);
-
                                                         await apiModule.updateAfterSaleData(entityId, {
                                                             care_warranty_flow: 'warranty',
                                                             care_warranty_stage: 'war3',
                                                         });
+
+                                                        await apiModule.updateStatus(entityId, 'step1', 'Bảo hành lại', warrantyCode);
 
                                                         if (isCustomerItem) {
                                                             await orderProductsApi.resetServices(entityId);
