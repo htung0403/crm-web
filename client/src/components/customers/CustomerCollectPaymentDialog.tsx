@@ -89,9 +89,8 @@ function getChildProducts(order: CustomerDebtOrderRow): CustomerDebtProductRow[]
 }
 
 function getProductNeedCollect(p: CustomerDebtProductRow): number {
-    if (p.remaining_debt != null && p.remaining_debt >= 0) return p.remaining_debt;
     const collected = Math.max(p.paid_amount || 0, p.deposit_amount || 0);
-    return Math.max(0, p.total_amount - collected);
+    return Math.max(0, (p.total_amount || 0) - collected);
 }
 
 function buildProductRows(orders: CustomerDebtOrderRow[]): ProductPayRow[] {
