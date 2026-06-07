@@ -61,8 +61,10 @@ export function useWorkflowKanban(
     const getItemCurrentStep = useCallback((itemId: string): CurrentStepInfo | null => {
         const steps = allWorkflowSteps.filter((s: any) => s.item_id === itemId || s.order_item_id === itemId || s.order_product_service_id === itemId);
         const inProgress = steps.find((s: any) => s.status === 'in_progress');
-        const firstPending = steps.find((s: any) => s.status === 'pending' || s.status === 'assigned');
-        const step = inProgress || firstPending;
+        const activePending = steps
+            .filter((s: any) => s.status === 'pending' || s.status === 'assigned')
+            .sort((a: any, b: any) => (a.step_order ?? 0) - (b.step_order ?? 0));
+        const step = inProgress || activePending[0];
         return step ? { 
             id: step.id, 
             step_name: step.step_name, 
@@ -185,10 +187,11 @@ export function useWorkflowKanban(
         if (steps.length === 0) return 'waiting';
 
         const inProgress = steps.find((s: any) => s.status === 'in_progress');
-        const assigned = steps.find((s: any) => s.status === 'assigned');
-        const firstPending = steps.find((s: any) => s.status === 'pending');
-        
-        const step = inProgress || assigned || firstPending;
+        const activePending = steps
+            .filter((s: any) => s.status === 'pending' || s.status === 'assigned')
+            .sort((a: any, b: any) => (a.step_order ?? 0) - (b.step_order ?? 0));
+
+        const step = inProgress || activePending[0];
 
         if (!step) {
             // Check if all steps are completed or skipped

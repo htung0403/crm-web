@@ -137,6 +137,29 @@ router.get('/sales', authenticate, async (req: AuthenticatedRequest, res, next) 
     }
 });
 
+// Danh sách nhân viên để @ nhắc tên trong chat (mọi user đã đăng nhập)
+router.get('/mentionable', authenticate, async (req: AuthenticatedRequest, res, next) => {
+    try {
+        const { data: users, error } = await supabaseAdmin
+            .from('users')
+            .select('id, name, avatar, role')
+            .eq('status', 'active')
+            .in('role', ['sale', 'technician', 'manager', 'admin', 'accountant', 'cashier'])
+            .order('name', { ascending: true });
+
+        if (error) {
+            throw new ApiError('Lỗi khi lấy danh sách nhân viên', 500);
+        }
+
+        res.json({
+            status: 'success',
+            data: { users: users || [] },
+        });
+    } catch (error) {
+        next(error);
+    }
+});
+
 // Get all users (chỉ manager)
 router.get('/', authenticate, requireManager, async (req: AuthenticatedRequest, res, next) => {
     try {

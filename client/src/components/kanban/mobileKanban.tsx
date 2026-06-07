@@ -94,6 +94,8 @@ export function MobileKanbanMoveBar({
     embedded = false,
     /** true = hiện dropdown chọn cột bất kỳ (nhảy cóc), dùng cho tab Quy trình */
     allowColumnJump = false,
+    /** false = ẩn nút lùi bước (after-sale, care, …) */
+    allowBackward = false,
 }: {
     columns: MobileKanbanColumn[];
     currentColumnId: string;
@@ -105,6 +107,7 @@ export function MobileKanbanMoveBar({
     className?: string;
     embedded?: boolean;
     allowColumnJump?: boolean;
+    allowBackward?: boolean;
 }) {
     const idx = columns.findIndex((c) => c.id === currentColumnId);
     const prev = idx > 0 ? columns[idx - 1] : null;
@@ -135,7 +138,7 @@ export function MobileKanbanMoveBar({
                 Chuyển trạng thái
             </p>
             <div className="flex gap-2">
-                {prev && (
+                {allowBackward && prev && (
                     <Button
                         type="button"
                         variant="outline"

@@ -32,6 +32,13 @@ export function canViewPartnerFeePrice(
     return canAccessView(user, PARTNER_PRICE_VIEW, roleAllowed);
 }
 
+/** Phê duyệt trong Mục phê duyệt (Upsell, Sửa đơn, PK, ĐT, Gia hạn, Nghỉ/Muộn, Thu Chi) */
+export function canApproveInApprovalCenter(
+    user: Pick<User, 'role'> | null | undefined,
+): boolean {
+    return user?.role === 'admin' || user?.role === 'manager';
+}
+
 /** Thao tác Kanban / form kỹ thuật (kéo thả, mua PK, gửi ĐT, …) — Sale mặc định chỉ xem */
 export function canOperateWorkflow(
     user: Pick<User, 'role' | 'allowed_views' | 'uses_role_defaults' | 'view_actions'> | null | undefined,

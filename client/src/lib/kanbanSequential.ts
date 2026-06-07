@@ -4,6 +4,14 @@ import { toast } from 'sonner';
 export const SEQUENTIAL_KANBAN_MOVE_MESSAGE =
     'Chỉ được chuyển sang bước liền kề, không được nhảy cóc';
 
+export const BACKWARD_KANBAN_MOVE_MESSAGE =
+    'Không được quay ngược quy trình';
+
+export type KanbanMovePolicy = {
+    /** Mặc định false — Sales/Workflow có thể bật để mở dialog lùi bước */
+    allowBackward?: boolean;
+};
+
 export const ORDER_KANBAN_COLUMN_IDS = [
     'before_sale',
     'in_progress',
@@ -36,7 +44,7 @@ export const CARE_WARRANTY_COLUMN_IDS = [
     'care-custom',
 ] as const;
 
-export function isSequentialKanbanMove(
+export function isForwardKanbanMove(
     columnIds: readonly string[],
     sourceId: string,
     destId: string
@@ -45,16 +53,53 @@ export function isSequentialKanbanMove(
     const sourceIdx = columnIds.indexOf(sourceId);
     const destIdx = columnIds.indexOf(destId);
     if (sourceIdx < 0 || destIdx < 0) return false;
-    return Math.abs(destIdx - sourceIdx) === 1;
+    return destIdx === sourceIdx + 1;
+}
+
+/** @deprecated Dùng isForwardKanbanMove */
+export function isSequentialKanbanMove(
+    columnIds: readonly string[],
+    sourceId: string,
+    destId: string
+): boolean {
+    return isForwardKanbanMove(columnIds, sourceId, destId);
 }
 
 /** @returns true if move was rejected (caller should return early) */
 export function rejectNonSequentialKanbanMove(
     columnIds: readonly string[],
     sourceId: string,
-    destId: string
+    destId: string,
+    policy: KanbanMovePolicy = {}
 ): boolean {
-    if (isSequentialKanbanMove(columnIds, sourceId, destId)) return false;
-    toast.error(SEQUENTIAL_KANBAN_MOVE_MESSAGE);
-    return true;
+    if (sourceId === destId) return false;
+
+    const sourceIdx = columnIds.indexOf(sourceId);
+    const destIdx = columnIds.indexOf(destId);
+    if (sourceIdx < 0 || destIdx < 0) {
+        toast.error(SEQUENTIAL_KANBAN_MOVE_MESSAGE);
+        return true;
+    }
+
+    if (!policy.allowBackward && destIdx < sourceIdx) {
+        toast.error(BACKWARD_KANBAN_MOVE_MESSAGE);
+        return true;
+    }
+
+    if (policy.allowBackward) {
+        if (Math.abs(destIdx - sourceIdx) !== 1) {
+            toast.error(SEQUENTIAL_KANBAN_MOVE_MESSAGE);
+            return true;
+        }
+        return false;
+    }
+
+    if (!isForwardKanbanMove(columnIds, sourceId, destId)) {
+        toast.error(
+            destIdx < sourceIdx ? BACKWARD_KANBAN_MOVE_MESSAGE : SEQUENTIAL_KANBAN_MOVE_MESSAGE
+        );
+        return true;
+    }
+
+    return false;
 }

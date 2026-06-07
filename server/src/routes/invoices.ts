@@ -20,7 +20,7 @@ router.use((req, res, next) => {
 // Get all invoices
 router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
-        const { status, customer_id, page = 1, limit = 20 } = req.query;
+        const { status, customer_id, from_date, to_date, page = 1, limit = 20 } = req.query;
         const offset = (Number(page) - 1) * Number(limit);
 
         let query = supabaseAdmin
@@ -36,6 +36,17 @@ router.get('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
 
         if (status) query = query.eq('status', status);
         if (customer_id) query = query.eq('customer_id', customer_id);
+
+        if (from_date && typeof from_date === 'string') {
+            const from = new Date(from_date);
+            from.setHours(0, 0, 0, 0);
+            query = query.gte('created_at', from.toISOString());
+        }
+        if (to_date && typeof to_date === 'string') {
+            const to = new Date(to_date);
+            to.setHours(23, 59, 59, 999);
+            query = query.lte('created_at', to.toISOString());
+        }
 
         const { data: invoices, error, count } = await query;
 

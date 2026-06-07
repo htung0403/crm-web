@@ -470,7 +470,14 @@ export const upsellTicketsApi = {
 
 // Invoices API
 export const invoicesApi = {
-    getAll: (params?: { status?: string; customer_id?: string; page?: number; limit?: number }) =>
+    getAll: (params?: {
+        status?: string;
+        customer_id?: string;
+        from_date?: string;
+        to_date?: string;
+        page?: number;
+        limit?: number;
+    }) =>
         api.get<PaginatedResponse<{ invoices: any[] }>>('/invoices', { params }),
 
     getById: (id: string) =>
@@ -825,6 +832,9 @@ export const interactionsApi = {
 export const usersApi = {
     getAll: (params?: { role?: string; department?: string; status?: string; search?: string }) =>
         api.get<ApiResponse<{ users: any[] }>>('/users', { params }),
+
+    getMentionable: () =>
+        api.get<ApiResponse<{ users: Array<{ id: string; name: string; avatar?: string; role?: string }> }>>('/users/mentionable'),
 
     getById: (id: string) =>
         api.get<ApiResponse<{ user: any }>>(`/users/${id}`),

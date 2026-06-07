@@ -10,7 +10,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
-import { productChatsApi, usersApi } from '@/lib/api';
+import { api, productChatsApi, usersApi } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { formatDateTime } from '@/lib/utils';
 import { uploadFile } from '@/lib/supabase';
@@ -101,12 +101,28 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
 
     const fetchUsers = async () => {
         try {
-            const response = await usersApi.getAll();
-            if (response.data?.data?.users) {
-                setAllUsers(response.data.data.users);
+            const response = await usersApi.getMentionable();
+            const users = response.data?.data?.users;
+            if (Array.isArray(users)) {
+                setAllUsers(users);
             }
         } catch (error) {
-            console.error('Error fetching users:', error);
+            console.error('Error fetching mentionable users:', error);
+            try {
+                const [techRes, salesRes] = await Promise.all([
+                    api.get('/users/technicians'),
+                    api.get('/users/sales'),
+                ]);
+                const merged = [
+                    ...(techRes.data?.data?.users ?? []),
+                    ...(salesRes.data?.data?.users ?? []),
+                ] as UserInfo[];
+                const byId = new Map<string, UserInfo>();
+                merged.forEach((u) => byId.set(u.id, u));
+                setAllUsers([...byId.values()]);
+            } catch (fallbackErr) {
+                console.error('Fallback mention users failed:', fallbackErr);
+            }
         }
     };
 
@@ -218,7 +234,7 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
                     normalizeVn(u.name).includes(normalizeVn(search))
                 );
 
-                if (matches.length > 0 || search === '') {
+                if (matches.length > 0 || search === '' || allUsers.length === 0) {
                     setMentionSearch(search);
                     setShowMentionList(true);
                     return;

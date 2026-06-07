@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Plus, Trash2, Search, AlertCircle, FileText, X, Calculator, Loader2, Eye, Pencil, CheckCircle, XCircle, Clock, Package, Gift, CreditCard } from 'lucide-react';
+import { Plus, Trash2, Search, FileText, Loader2, Eye, Pencil, CheckCircle, XCircle, Clock, Calendar } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,6 +17,12 @@ import { InvoiceDetailDialog, MobileInvoicesList } from '@/components/invoices';
 import type { User } from '@/types';
 import type { Invoice } from '@/components/invoices/InvoiceDetailDialog';
 import { useViewActionForRoles } from '@/hooks/useViewAction';
+import {
+    DATE_RANGE_PRESET_OPTIONS,
+    detectPresetFromRange,
+    getDateRangeForPreset,
+    type DateRangePreset,
+} from '@/lib/dateRangePresets';
 
 interface Order {
     id: string;
@@ -249,19 +255,91 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
     const [paymentRecordData, setPaymentRecordData] = useState<{orderId: string, orderCode: string, remainingDebt: number} | null>(null);
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [searchQuery, setSearchQuery] = useState('');
+    const [fromDate, setFromDate] = useState('');
+    const [toDate, setToDate] = useState('');
+    const [datePreset, setDatePreset] = useState<DateRangePreset>('all');
 
     const { canEdit, canDelete } = useViewActionForRoles('invoices', ['manager', 'admin', 'accountant', 'sale']);
 
     const fetchInvoices = useCallback(async () => {
         try {
-            const params: any = {};
+            const params: Record<string, string | number> = { limit: 200 };
             if (statusFilter !== 'all') params.status = statusFilter;
+            if (fromDate) params.from_date = fromDate;
+            if (toDate) params.to_date = toDate;
             const response = await invoicesApi.getAll(params);
             setInvoices(response.data.data?.invoices || []);
         } catch (err: any) {
             setError(err.response?.data?.message || 'Lỗi khi tải danh sách hóa đơn');
         }
-    }, [statusFilter]);
+    }, [statusFilter, fromDate, toDate]);
+
+    const handleDatePresetChange = (preset: DateRangePreset) => {
+        setDatePreset(preset);
+        if (preset === 'all') {
+            setFromDate('');
+            setToDate('');
+            return;
+        }
+        if (preset === 'custom') return;
+        const range = getDateRangeForPreset(preset);
+        if (range) {
+            setFromDate(range.from);
+            setToDate(range.to);
+        }
+    };
+
+    const handleFromDateChange = (value: string) => {
+        setFromDate(value);
+        setDatePreset(detectPresetFromRange(value, toDate));
+    };
+
+    const handleToDateChange = (value: string) => {
+        setToDate(value);
+        setDatePreset(detectPresetFromRange(fromDate, value));
+    };
+
+    const dateRangeFilter = (compact?: boolean) => (
+        <div className={cn('flex flex-wrap items-center gap-2', compact && 'text-xs')}>
+            <div className="flex items-center gap-1.5">
+                <span className={cn('text-muted-foreground whitespace-nowrap', compact ? 'text-[10px]' : 'text-sm')}>Từ</span>
+                <input
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => handleFromDateChange(e.target.value)}
+                    className={cn(
+                        'rounded-md border border-input bg-background',
+                        compact ? 'h-8 px-2 text-xs' : 'h-9 px-3 text-sm',
+                    )}
+                />
+            </div>
+            <div className="flex items-center gap-1.5">
+                <span className={cn('text-muted-foreground whitespace-nowrap', compact ? 'text-[10px]' : 'text-sm')}>Đến</span>
+                <input
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => handleToDateChange(e.target.value)}
+                    className={cn(
+                        'rounded-md border border-input bg-background',
+                        compact ? 'h-8 px-2 text-xs' : 'h-9 px-3 text-sm',
+                    )}
+                />
+            </div>
+            <Select value={datePreset} onValueChange={(v) => handleDatePresetChange(v as DateRangePreset)}>
+                <SelectTrigger className={cn(compact ? 'h-8 w-[120px] text-xs' : 'h-9 w-[140px]')}>
+                    <Calendar className={cn('mr-1.5 shrink-0 text-muted-foreground', compact ? 'h-3 w-3' : 'h-4 w-4')} />
+                    <SelectValue placeholder="Lọc nhanh" />
+                </SelectTrigger>
+                <SelectContent>
+                    {DATE_RANGE_PRESET_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                        </SelectItem>
+                    ))}
+                </SelectContent>
+            </Select>
+        </div>
+    );
 
     const fetchOrders = useCallback(async () => {
         try {
@@ -525,6 +603,7 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
                             </SelectContent>
                         </Select>
                     </div>
+                    {dateRangeFilter(true)}
                     <MobileInvoicesList
                         invoices={filteredInvoices}
                         loading={false}
@@ -536,28 +615,31 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
 
                 <Card className="hidden lg:block">
                     <CardContent className="p-4">
-                        <div className="mb-4 flex flex-col gap-4 sm:flex-row">
-                            <div className="relative flex-1">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                                <Input
-                                    placeholder="Tìm kiếm mã hóa đơn, khách hàng..."
-                                    className="pl-9"
-                                    value={searchQuery}
-                                    onChange={(e) => setSearchQuery(e.target.value)}
-                                />
+                        <div className="mb-4 space-y-3">
+                            <div className="flex flex-col gap-4 sm:flex-row">
+                                <div className="relative flex-1">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                    <Input
+                                        placeholder="Tìm kiếm mã hóa đơn, khách hàng..."
+                                        className="pl-9"
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                    />
+                                </div>
+                                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                                    <SelectTrigger className="w-full sm:w-[180px]">
+                                        <SelectValue placeholder="Trạng thái" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">Tất cả trạng thái</SelectItem>
+                                        <SelectItem value="draft">Nháp</SelectItem>
+                                        <SelectItem value="pending">Chờ thanh toán</SelectItem>
+                                        <SelectItem value="paid">Đã thanh toán</SelectItem>
+                                        <SelectItem value="cancelled">Đã hủy</SelectItem>
+                                    </SelectContent>
+                                </Select>
                             </div>
-                            <Select value={statusFilter} onValueChange={setStatusFilter}>
-                                <SelectTrigger className="w-full sm:w-[180px]">
-                                    <SelectValue placeholder="Trạng thái" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">Tất cả trạng thái</SelectItem>
-                                    <SelectItem value="draft">Nháp</SelectItem>
-                                    <SelectItem value="pending">Chờ thanh toán</SelectItem>
-                                    <SelectItem value="paid">Đã thanh toán</SelectItem>
-                                    <SelectItem value="cancelled">Đã hủy</SelectItem>
-                                </SelectContent>
-                            </Select>
+                            {dateRangeFilter()}
                         </div>
 
                         <div className="rounded-md border overflow-x-auto">

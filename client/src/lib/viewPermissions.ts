@@ -22,6 +22,7 @@ export const VIEW_DEFINITIONS: ViewDefinition[] = [
     },
     { id: 'interactions', label: 'Tương tác', group: 'CRM', pathPrefixes: ['interactions'] },
     { id: 'orders', label: 'Đơn hàng', group: 'Bán hàng', pathPrefixes: ['orders'] },
+    { id: 'requests', label: 'Tất cả yêu cầu', group: 'Bán hàng', pathPrefixes: ['requests'] },
     { id: 'orders/upsell-tickets', label: 'Mục phê duyệt (Upsell)', group: 'Bán hàng', pathPrefixes: ['orders/upsell-tickets'] },
     {
         id: 'orders/upsell-tickets/accessory-price',
@@ -35,7 +36,6 @@ export const VIEW_DEFINITIONS: ViewDefinition[] = [
         group: 'Bán hàng',
         pathPrefixes: [],
     },
-    { id: 'requests', label: 'Yêu cầu', group: 'Bán hàng', pathPrefixes: ['requests'] },
     { id: 'invoices', label: 'Hóa đơn', group: 'Bán hàng', pathPrefixes: ['invoices'] },
     { id: 'income', label: 'Phiếu thu', group: 'Sổ quỹ', pathPrefixes: ['income'] },
     { id: 'expense', label: 'Phiếu chi', group: 'Sổ quỹ', pathPrefixes: ['expense'] },
@@ -144,6 +144,7 @@ const VIEW_ROLE_EDIT: Partial<Record<string, UserRole[]>> = {
     leads: ['admin', 'manager', 'sale'],
     customers: ['admin', 'manager', 'sale'],
     orders: ['admin', 'manager', 'accountant', 'sale', 'technician'],
+    requests: ['admin', 'manager', 'sale', 'technician'],
     invoices: ['admin', 'manager', 'accountant'],
     income: ['admin', 'manager', 'accountant', 'sale'],
     expense: ['admin', 'manager', 'accountant', 'sale'],

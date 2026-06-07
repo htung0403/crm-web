@@ -1,6 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
-import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
+import { authenticate, AuthenticatedRequest, requireManager } from '../middleware/auth.js';
 import { requireViewAccess } from '../middleware/viewAccess.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
@@ -14,7 +14,7 @@ const UPSELL_VIEW = 'orders/upsell-tickets';
 router.use(authenticate);
 
 // GET /api/upsell-tickets - List tickets
-router.get('/', requireViewAccess(UPSELL_VIEW, { fallbackRoles: ['admin', 'manager'] }), async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+router.get('/', requireViewAccess(UPSELL_VIEW, { fallbackRoles: ['admin', 'manager'] }), requireManager, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
         const { data, error } = await supabaseAdmin
             .from('upsell_tickets')
@@ -38,6 +38,7 @@ router.get('/', requireViewAccess(UPSELL_VIEW, { fallbackRoles: ['admin', 'manag
 router.post(
     '/:id/approve',
     requireViewAccess(UPSELL_VIEW, { fallbackRoles: ['admin', 'manager'], requireAction: 'edit' }),
+    requireManager,
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
         const { id: ticketId } = req.params;
@@ -418,6 +419,7 @@ router.post(
 router.post(
     '/:id/reject',
     requireViewAccess(UPSELL_VIEW, { fallbackRoles: ['admin', 'manager'], requireAction: 'edit' }),
+    requireManager,
     async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {
         const { id } = req.params;

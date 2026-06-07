@@ -10,6 +10,7 @@ import {
     logExtensionStatusChange,
     logPartnerStatusChange,
 } from '../utils/workflowRequestLog.js';
+import { assertManagerQueueApproval } from '../utils/approvalPermissions.js';
 
 const router = Router();
 console.log('🚀 Requests Router Loaded');
@@ -49,6 +50,8 @@ router.patch('/accessories/:id', authenticate, async (req: AuthenticatedRequest,
         if (fetchError || !current) {
             throw new ApiError('Không tìm thấy yêu cầu: ' + (fetchError?.message || ''), 404);
         }
+
+        assertManagerQueueApproval(req, current.status, status);
 
         // Validate if changing status
         if (status && status !== current.status && status !== 'rejected' && status !== 'cancelled') {
@@ -139,6 +142,8 @@ router.patch('/partners/:id', authenticate, async (req: AuthenticatedRequest, re
             throw new ApiError('Không tìm thấy yêu cầu gửi đối tác', 404);
         }
 
+        assertManagerQueueApproval(req, current.status, status);
+
         const { data, error } = await supabaseAdmin
             .from('order_item_partner')
             .update({
@@ -189,7 +194,7 @@ router.get('/test', (req, res) => res.json({ status: 'ok', msg: 'Requests router
 
 router.use(
     requireAnyViewAccess(['requests', 'orders/upsell-tickets'], {
-        fallbackRoles: ['admin', 'manager', 'sale'],
+        fallbackRoles: ['admin', 'manager', 'sale', 'technician'],
     }),
 );
 
@@ -315,6 +320,8 @@ router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, 
         if (fetchError || !current) {
             throw new ApiError('Không tìm thấy yêu cầu gia hạn', 404);
         }
+
+        assertManagerQueueApproval(req, current.status, status);
 
         const updatePayload: Record<string, any> = {
             status: status || undefined,

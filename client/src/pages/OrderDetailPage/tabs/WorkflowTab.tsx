@@ -73,6 +73,7 @@ const WorkflowCard = memo(({
     const cardKey = group.product?.id ?? group.services.map((s) => s.id).join('-');
 
     const leadItem = group.services.find((s) => getItemCurrentStep(s.id)) ?? group.services[0];
+    const workflowActionItem = group.product || leadItem;
     // Isolation logic: only use orderExtensionRequest if it's truly global (no item IDs)
     const extensionRequest = productItem?.extension_request || (leadItem as any)?.extension_request || orderExtensionRequest;
     const stepDeadline = leadItem ? getStepDeadlineDisplay(leadItem.id) : { label: 'N/A', dueAt: null };
@@ -263,12 +264,12 @@ const WorkflowCard = memo(({
                                     className={cn(
                                         "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",
                                         !canDragWorkflow && "opacity-50 cursor-not-allowed",
-                                        (leadItem as any)?.accessory?.status === 'requested' ? "bg-amber-50 text-amber-600 border-amber-200 animate-pulse" :
+                                        (workflowActionItem as any)?.accessory?.status === 'requested' ? "bg-amber-50 text-amber-600 border-amber-200 animate-pulse" :
                                             "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
                                     )}
                                 >
                                     <span className="truncate">
-                                        {(leadItem as any)?.accessory?.status === 'requested' ? 'Đang chờ PK' :
+                                        {(workflowActionItem as any)?.accessory?.status === 'requested' ? 'Đang chờ PK' :
                                             'Mua PK'}
                                     </span>
                                 </button>
@@ -284,12 +285,12 @@ const WorkflowCard = memo(({
                                     className={cn(
                                         "inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7",
                                         !canDragWorkflow && "opacity-50 cursor-not-allowed",
-                                        (leadItem as any)?.partner?.status === 'requested' ? "bg-amber-50 text-amber-600 border-amber-200 animate-pulse" :
+                                        (workflowActionItem as any)?.partner?.status === 'requested' ? "bg-amber-50 text-amber-600 border-amber-200 animate-pulse" :
                                             "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
                                     )}
                                 >
                                     <span className="truncate">
-                                        {(leadItem as any)?.partner?.status === 'requested' ? 'Đang chờ ĐT' :
+                                        {(workflowActionItem as any)?.partner?.status === 'requested' ? 'Đang chờ ĐT' :
                                             'Gửi ĐT'}
                                     </span>
                                 </button>

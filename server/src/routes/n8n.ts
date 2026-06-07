@@ -93,10 +93,9 @@ function normalizeService(service: any, orderProduct: any, order: any) {
     const serviceSales = (service.sales || [])
         .map((row: any) => normalizeUser(firstRelation(row.sale)))
         .filter(Boolean);
-    const orderSalesUser = normalizeUser(firstRelation(order?.sales_user));
     const uniqueSalesUsers = new Map<string, any>();
 
-    for (const sale of [...serviceSales, orderSalesUser].filter(Boolean)) uniqueSalesUsers.set(sale.id, sale);
+    for (const sale of serviceSales) uniqueSalesUsers.set(sale.id, sale);
 
     const technicianList = Array.from(uniqueTechnicians.values());
     const salesUserList = Array.from(uniqueSalesUsers.values());

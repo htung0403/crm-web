@@ -12,6 +12,17 @@ import {
     getServiceNotificationContext,
     notifyCrmMasterUser,
 } from '../utils/n8nCrmEvents.js';
+import {
+    AFTER_SALE_STAGE_ORDER,
+    CARE_STAGE_ORDER,
+    WARRANTY_STAGE_ORDER,
+    assertDebtCheckCompleteForStageMove,
+    assertForwardStageMove,
+} from '../utils/kanbanStageValidation.js';
+import {
+    collectAssignedSalesFromServices,
+    firePickupInfoWebhook,
+} from '../utils/orderStaffHelper.js';
 
 function derivePhaseFromStatus(status: string): { current_phase: string; phase_stage: string } {
     if (['step1', 'step2', 'step3', 'step4'].includes(status)) {
@@ -1013,6 +1024,12 @@ router.patch('/:id/sales-step-data', authenticate, async (req: AuthenticatedRequ
 
             if (error) throw new ApiError('Lỗi cập nhật dữ liệu: ' + error.message, 500);
 
+            try {
+                await firePickupInfoWebhook(supabaseAdmin, id, merged);
+            } catch (whErr) {
+                console.error('pickup_info.saved webhook error:', whErr);
+            }
+
             return res.json({
                 status: 'success',
                 data: updated,
@@ -1045,6 +1062,12 @@ router.patch('/:id/sales-step-data', authenticate, async (req: AuthenticatedRequ
                     .single();
 
                 if (error) throw new ApiError('Lỗi cập nhật dữ liệu: ' + error.message, 500);
+
+                try {
+                    await firePickupInfoWebhook(supabaseAdmin, v2Service.order_product_id, merged);
+                } catch (whErr) {
+                    console.error('pickup_info.saved webhook error:', whErr);
+                }
 
                 return res.json({
                     status: 'success',
@@ -1549,6 +1572,47 @@ router.patch('/steps/:stepId/skip', authenticate, async (req: AuthenticatedReque
     }
 });
 
+type ResolvedOrderEntity = {
+    isV1: boolean;
+    isV2Service: boolean;
+    isV2Product: boolean;
+    order_item_id: string | null;
+    order_product_id: string | null;
+    order_product_service_id: string | null;
+};
+
+async function resolveOrderEntityId(
+    id: string,
+    metadata?: { order_product_id?: string },
+): Promise<ResolvedOrderEntity> {
+    const [{ data: v1Item }, { data: v2Service }, { data: v2Product }] = await Promise.all([
+        supabaseAdmin.from('order_items').select('id').eq('id', id).maybeSingle(),
+        supabaseAdmin.from('order_product_services').select('id, order_product_id').eq('id', id).maybeSingle(),
+        supabaseAdmin.from('order_products').select('id').eq('id', id).maybeSingle(),
+    ]);
+
+    const isV1 = !!v1Item;
+    const isV2Service = !!v2Service;
+    const isV2Product = !!v2Product;
+
+    if (!isV1 && !isV2Service && !isV2Product) {
+        throw new ApiError('Không tìm thấy hạng mục đơn hàng', 404);
+    }
+
+    return {
+        isV1,
+        isV2Service,
+        isV2Product,
+        order_item_id: isV1 ? id : null,
+        order_product_id: isV2Service
+            ? v2Service?.order_product_id || metadata?.order_product_id || null
+            : isV2Product
+              ? id
+              : metadata?.order_product_id || null,
+        order_product_service_id: isV2Service ? id : null,
+    };
+}
+
 // =====================================================
 // ORDER ITEM ACCESSORIES (Mua phụ kiện)
 // =====================================================
@@ -1563,19 +1627,12 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
             throw new ApiError('Trạng thái không hợp lệ. Chọn: requested, rejected, need_buy, bought, waiting_ship, shipped, delivered_to_tech', 400);
         }
 
-        // Resolve id: V1 = order_items, V2 = order_product_services
-        const { data: v1Item } = await supabaseAdmin.from('order_items').select('id').eq('id', id).maybeSingle();
-        const { data: v2Item } = await supabaseAdmin.from('order_product_services').select('id, order_product_id').eq('id', id).maybeSingle();
-        const isV1 = !!v1Item;
-        const isV2 = !!v2Item;
-        if (!isV1 && !isV2) {
-            throw new ApiError('Không tìm thấy hạng mục đơn hàng', 404);
-        }
+        const entity = await resolveOrderEntityId(id, metadata);
 
         const payload = {
-            order_item_id: isV1 ? id : null,
-            order_product_id: isV2 ? v2Item?.order_product_id || metadata?.order_product_id || null : metadata?.order_product_id || null,
-            order_product_service_id: isV2 ? id : null,
+            order_item_id: entity.order_item_id,
+            order_product_id: entity.order_product_id,
+            order_product_service_id: entity.order_product_service_id,
             status,
             notes: notes || null,
             metadata: metadata || {},
@@ -1587,9 +1644,17 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
             .select('id, status, metadata')
             .order('updated_at', { ascending: false })
             .limit(1);
-        const existingResult = isV1
-            ? await existingQuery.eq('order_item_id', id).maybeSingle()
-            : await existingQuery.eq('order_product_service_id', id).maybeSingle();
+        let existingResult;
+        if (entity.isV1) {
+            existingResult = await existingQuery.eq('order_item_id', id).maybeSingle();
+        } else if (entity.isV2Service) {
+            existingResult = await existingQuery.eq('order_product_service_id', id).maybeSingle();
+        } else {
+            existingResult = await existingQuery
+                .eq('order_product_id', id)
+                .is('order_product_service_id', null)
+                .maybeSingle();
+        }
         const { data: existing } = existingResult;
 
         if (existing) {
@@ -1611,7 +1676,11 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
 
             if (status !== oldStatus) {
                 await logAccessoryStatusChange(
-                    { order_item_id: isV1 ? id : null, order_product_service_id: isV2 ? id : null },
+                    {
+                        order_item_id: entity.order_item_id,
+                        order_product_id: entity.order_product_id,
+                        order_product_service_id: entity.order_product_service_id,
+                    },
                     oldStatus,
                     status,
                     notes,
@@ -1623,17 +1692,17 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
                     old_status: oldStatus || null,
                     new_status: status,
                     notes: notes || null,
-                    order_item_id: isV1 ? id : null,
+                    order_item_id: entity.order_item_id,
                     order_product_id: payload.order_product_id,
-                    order_product_service_id: isV2 ? id : null,
+                    order_product_service_id: entity.order_product_service_id,
                 });
             }
 
             if (status === 'requested' && oldStatus !== 'requested') {
                 fireWebhook('accessory.requested', {
                     accessory_id: existing.id,
-                    order_item_id: isV1 ? id : null,
-                    order_product_service_id: isV2 ? id : null,
+                    order_item_id: entity.order_item_id,
+                    order_product_service_id: entity.order_product_service_id,
                     accessory_name: metadata?.item_name || (existing.metadata as any)?.item_name || 'Phụ kiện',
                     notes: notes || null,
                     metadata: metadata || existing.metadata || {},
@@ -1654,7 +1723,11 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
         if (status === 'requested') {
             const itemName = metadata?.item_name || 'Phụ kiện';
             await logAccessoryStatusChange(
-                { order_item_id: isV1 ? id : null, order_product_id: payload.order_product_id, order_product_service_id: isV2 ? id : null },
+                {
+                    order_item_id: entity.order_item_id,
+                    order_product_id: payload.order_product_id,
+                    order_product_service_id: entity.order_product_service_id,
+                },
                 undefined,
                 status,
                 `${itemName}${notes ? ': ' + notes : ''}`,
@@ -1663,8 +1736,8 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
 
             fireWebhook('accessory.requested', {
                 accessory_id: inserted.id,
-                order_item_id: isV1 ? id : null,
-                order_product_service_id: isV2 ? id : null,
+                order_item_id: entity.order_item_id,
+                order_product_service_id: entity.order_product_service_id,
                 accessory_name: itemName,
                 notes: notes || null,
                 metadata: metadata || {},
@@ -1706,19 +1779,12 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
             throw new ApiError('Trạng thái không hợp lệ. Chọn: requested, rejected, ship_to_partner, partner_doing, ship_back, done', 400);
         }
 
-        // Resolve id: V1 = order_items, V2 = order_product_services
-        const { data: v1Item } = await supabaseAdmin.from('order_items').select('id').eq('id', id).maybeSingle();
-        const { data: v2Item } = await supabaseAdmin.from('order_product_services').select('id, order_product_id').eq('id', id).maybeSingle();
-        const isV1 = !!v1Item;
-        const isV2 = !!v2Item;
-        if (!isV1 && !isV2) {
-            throw new ApiError('Không tìm thấy hạng mục đơn hàng', 404);
-        }
+        const entity = await resolveOrderEntityId(id, metadata);
 
         const payload = {
-            order_item_id: isV1 ? id : null,
-            order_product_id: isV2 ? v2Item?.order_product_id || metadata?.order_product_id || null : metadata?.order_product_id || null,
-            order_product_service_id: isV2 ? id : null,
+            order_item_id: entity.order_item_id,
+            order_product_id: entity.order_product_id,
+            order_product_service_id: entity.order_product_service_id,
             status,
             notes: notes || null,
             metadata: metadata || {},
@@ -1730,9 +1796,17 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
             .select('id, status, metadata')
             .order('updated_at', { ascending: false })
             .limit(1);
-        const existingResult = isV1
-            ? await existingQuery.eq('order_item_id', id).maybeSingle()
-            : await existingQuery.eq('order_product_service_id', id).maybeSingle();
+        let existingResult;
+        if (entity.isV1) {
+            existingResult = await existingQuery.eq('order_item_id', id).maybeSingle();
+        } else if (entity.isV2Service) {
+            existingResult = await existingQuery.eq('order_product_service_id', id).maybeSingle();
+        } else {
+            existingResult = await existingQuery
+                .eq('order_product_id', id)
+                .is('order_product_service_id', null)
+                .maybeSingle();
+        }
         const { data: existing } = existingResult;
 
         if (existing) {
@@ -1754,7 +1828,11 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
 
             if (status !== oldStatus) {
                 await logPartnerStatusChange(
-                    { order_item_id: isV1 ? id : null, order_product_id: payload.order_product_id, order_product_service_id: isV2 ? id : null },
+                    {
+                        order_item_id: entity.order_item_id,
+                        order_product_id: payload.order_product_id,
+                        order_product_service_id: entity.order_product_service_id,
+                    },
                     oldStatus,
                     status,
                     notes,
@@ -1766,16 +1844,16 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
                     old_status: oldStatus || null,
                     new_status: status,
                     notes: notes || null,
-                    order_item_id: isV1 ? id : null,
-                    order_product_service_id: isV2 ? id : null,
+                    order_item_id: entity.order_item_id,
+                    order_product_service_id: entity.order_product_service_id,
                 });
             }
 
             if (status === 'requested' && oldStatus !== 'requested') {
                 fireWebhook('partner.requested', {
                     partner_id: existing.id,
-                    order_item_id: isV1 ? id : null,
-                    order_product_service_id: isV2 ? id : null,
+                    order_item_id: entity.order_item_id,
+                    order_product_service_id: entity.order_product_service_id,
                     notes: notes || null,
                     metadata: metadata || existing.metadata || {},
                     requested_by: req.user?.id || null,
@@ -1794,7 +1872,11 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
 
         if (status === 'requested') {
             await logPartnerStatusChange(
-                { order_item_id: isV1 ? id : null, order_product_id: payload.order_product_id, order_product_service_id: isV2 ? id : null },
+                {
+                    order_item_id: entity.order_item_id,
+                    order_product_id: payload.order_product_id,
+                    order_product_service_id: entity.order_product_service_id,
+                },
                 undefined,
                 status,
                 notes,
@@ -1803,8 +1885,8 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
 
             fireWebhook('partner.requested', {
                 partner_id: inserted.id,
-                order_item_id: isV1 ? id : null,
-                order_product_service_id: isV2 ? id : null,
+                order_item_id: entity.order_item_id,
+                order_product_service_id: entity.order_product_service_id,
                 notes: notes || null,
                 metadata: metadata || {},
                 requested_by: req.user?.id || null,
@@ -2257,6 +2339,29 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
         }
         const oldStage = currentItem?.after_sale_stage || 'after1';
 
+        if (stage !== undefined && stage !== oldStage) {
+            assertForwardStageMove(AFTER_SALE_STAGE_ORDER, oldStage, stage);
+            if (oldStage === 'after1_debt' && stage === 'after2' && currentItem?.order_id) {
+                const { data: orderRow } = await supabaseAdmin
+                    .from('orders')
+                    .select('debt_checked, debt_checked_by_name')
+                    .eq('id', currentItem.order_id)
+                    .single();
+                assertDebtCheckCompleteForStageMove(oldStage, stage, orderRow);
+            }
+        }
+
+        const newCareFlowForCheck = care_warranty_flow !== undefined ? care_warranty_flow : oldCareFlow;
+        if (
+            care_warranty_stage !== undefined
+            && care_warranty_stage !== oldCareStage
+            && newCareFlowForCheck
+            && newCareFlowForCheck === oldCareFlow
+        ) {
+            const cols = newCareFlowForCheck === 'warranty' ? WARRANTY_STAGE_ORDER : CARE_STAGE_ORDER;
+            assertForwardStageMove(cols, oldCareStage, care_warranty_stage);
+        }
+
         const { data: item, error } = await supabaseAdmin
             .from('order_items')
             .update(updatePayload)
@@ -2338,10 +2443,24 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
             try {
                 const { data: orderCtx } = await supabaseAdmin
                     .from('orders')
-                    .select('order_code, sales_user:users!orders_sales_id_fkey(id, name, telegram_chat_id)')
+                    .select('order_code')
                     .eq('id', item.order_id)
                     .maybeSingle();
-                const salesUser = Array.isArray((orderCtx as any)?.sales_user) ? (orderCtx as any).sales_user[0] : (orderCtx as any)?.sales_user;
+
+                const { data: serviceRow } = await supabaseAdmin
+                    .from('order_product_services')
+                    .select(`
+                        id, item_name,
+                        sales:order_product_service_sales(
+                            sale:users!order_product_service_sales_sale_id_fkey(id, name, telegram_chat_id)
+                        )
+                    `)
+                    .eq('id', item.id)
+                    .maybeSingle();
+
+                const assignedSales = serviceRow
+                    ? collectAssignedSalesFromServices([serviceRow])
+                    : [];
 
                 fireWebhook('sale.commission_ready', {
                     order_id: item.order_id,
@@ -2349,9 +2468,10 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
                     item_id: item.id,
                     item_name: item.item_name || item.item_code || 'N/A',
                     stage: 'after1_debt',
-                    sale_id: salesUser?.id || null,
-                    sale_name: salesUser?.name || null,
-                    tele_id_sale: salesUser?.telegram_chat_id || null,
+                    sales_users: assignedSales,
+                    sale_id: assignedSales[0]?.id || null,
+                    sale_name: assignedSales.map((s) => s.name).join(', ') || null,
+                    tele_id_sale: assignedSales[0]?.telegram_chat_id || null,
                 });
             } catch (commissionWhErr) {
                 console.error('Error firing sale.commission_ready webhook for order item:', commissionWhErr);

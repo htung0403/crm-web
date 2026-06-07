@@ -396,6 +396,13 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
             throw new ApiError('Trạng thái không hợp lệ', 400);
         }
 
+        if (status === 'approved' || status === 'cancelled') {
+            const role = req.user?.role;
+            if (role !== 'admin' && role !== 'manager') {
+                throw new ApiError('Chỉ quản lý mới được duyệt/hủy phiếu thu chi', 403);
+            }
+        }
+
         const updateData: any = {
             status,
             updated_at: new Date().toISOString(),

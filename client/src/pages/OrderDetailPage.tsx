@@ -500,17 +500,28 @@ export function OrderDetailPage() {
     };
 
     const handleSubmitPartner = async () => {
-        if (!partnerItem) return;
+        if (!partnerItem || !order) return;
         setPartnerLoading(true);
         try {
+            let order_product_id: string | undefined;
+            if ((partnerItem as any).is_customer_item) {
+                if ((partnerItem as any).item_type === 'product') {
+                    order_product_id = partnerItem.id;
+                } else {
+                    order_product_id =
+                        (partnerItem as any).order_product_id || (partnerItem as any).order_product?.id;
+                }
+            }
+
             await orderItemsApi.updatePartner(partnerItem.id, {
                 status: 'requested',
                 notes: partnerNotes || undefined,
                 metadata: {
-                    order_product_id: (partnerItem as any).is_customer_item && (partnerItem as any).item_type === 'product'
-                        ? partnerItem.id
-                        : (partnerItem as any).order_product_id || (partnerItem as any).order_product?.id,
-                    order_product_code: (partnerItem as any).product_code || (partnerItem as any).order_product?.product_code,
+                    item_name: partnerItem.item_name,
+                    order_code: order.order_code,
+                    order_product_id,
+                    order_product_code:
+                        (partnerItem as any).product_code || (partnerItem as any).order_product?.product_code,
                 },
             });
             toast.success('Đã cập nhật trạng thái gửi đối tác');
@@ -1420,6 +1431,7 @@ export function OrderDetailPage() {
                 workflowLogs={workflowLogs}
                 aftersaleLogs={aftersaleLogs}
                 careLogs={careLogs}
+                fetchKanbanLogs={fetchKanbanLogs}
                 onConfirmAndMove={pendingMoveCallback || undefined}
                 onRoomChange={setCurrentRoomId}
             />

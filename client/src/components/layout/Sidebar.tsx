@@ -76,7 +76,7 @@ const menuItems: MenuItem[] = [
         roles: ['admin', 'manager', 'sale', 'technician'],
         children: [
             { id: 'requests', label: 'Tất cả yêu cầu', roles: ['admin', 'manager', 'sale', 'technician'] },
-            { id: 'orders/upsell-tickets', label: 'Mục phê duyệt', roles: ['admin', 'manager', 'sale'] },
+            { id: 'orders/upsell-tickets', label: 'Mục phê duyệt', roles: ['admin', 'manager'] },
         ],
     },
     {

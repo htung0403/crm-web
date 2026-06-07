@@ -10,6 +10,18 @@ import {
     notifyCrmMasterUser,
 } from '../utils/n8nCrmEvents.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
+import { fetchProductServicesStaff, firePickupInfoWebhook } from '../utils/orderStaffHelper.js';
+import {
+    AFTER_SALE_STAGE_ORDER,
+    CARE_STAGE_ORDER,
+    WARRANTY_STAGE_ORDER,
+    assertDebtCheckCompleteForStageMove,
+    assertForwardStageMove,
+} from '../utils/kanbanStageValidation.js';
+import {
+    clonePendingWorkflowStepsForService,
+    isServiceActivelyInWorkflow,
+} from '../utils/warrantyReentryHelper.js';
 
 const router = Router();
 
@@ -219,49 +231,77 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
     }
 });
 
-// Reset all services of an order_product to step1 (for warranty re-entry)
+// Reset services of one order_product for warranty re-entry (không đụng SP/dịch vụ khác trên đơn)
 router.patch('/:id/reset-services', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        
-        // Fetch all service IDs for this product
+
+        const { data: product, error: productError } = await supabaseAdmin
+            .from('order_products')
+            .select('id, order_id, product_code')
+            .eq('id', id)
+            .single();
+
+        if (productError || !product) {
+            throw new ApiError('Không tìm thấy sản phẩm', 404);
+        }
+
         const { data: services, error: fetchError } = await supabaseAdmin
             .from('order_product_services')
-            .select('id')
+            .select('id, status, current_phase, item_type, service_id, package_id')
             .eq('order_product_id', id);
-        
+
         if (fetchError) throw new ApiError('Không thể lấy danh sách services', 500);
-        
+
         if (!services || services.length === 0) {
             return res.json({ status: 'success', data: [], message: 'Không có services nào' });
         }
-        
-        const serviceIds = services.map(s => s.id);
-        
+
+        const toReset = services.filter((s) => !isServiceActivelyInWorkflow(s));
+        const skipped = services.filter((s) => isServiceActivelyInWorkflow(s));
+
+        if (toReset.length === 0) {
+            return res.json({
+                status: 'success',
+                data: [],
+                message: skipped.length > 0
+                    ? `Giữ nguyên ${skipped.length} dịch vụ đang chạy trên Kanban kỹ thuật`
+                    : 'Không có dịch vụ nào cần reset',
+            });
+        }
+
+        const resetIds = toReset.map((s) => s.id);
+
         const { data: updated, error: updateError } = await supabaseAdmin
             .from('order_product_services')
-            .update({ status: 'step1', current_phase: 'sales', phase_stage: 'step1', completed_at: null })
-            .in('id', serviceIds)
+            .update({
+                status: 'step1',
+                current_phase: 'sales',
+                phase_stage: 'step1',
+                completed_at: null,
+                started_at: null,
+                updated_at: new Date().toISOString(),
+            })
+            .in('id', resetIds)
             .select();
-        
+
         if (updateError) {
             console.error('reset-services update failed:', updateError.message, updateError.details, updateError.hint);
             throw new ApiError(`Không thể reset services: ${updateError.message}`, 500);
         }
 
-        const { error: stepsError } = await supabaseAdmin
-            .from('order_item_steps')
-            .update({ status: 'pending', completed_at: null, started_at: null, technician_id: null, updated_at: new Date().toISOString() })
-            .in('order_product_service_id', serviceIds);
-        
-        if (stepsError) {
-            console.error('reset-steps failed:', stepsError.message, stepsError.details, stepsError.hint);
+        let clonedSteps = 0;
+        for (const svc of toReset) {
+            clonedSteps += await clonePendingWorkflowStepsForService(svc);
         }
-        
+
         res.json({
             status: 'success',
             data: updated,
-            message: `Đã reset ${updated?.length || 0} services về step1`
+            skipped_count: skipped.length,
+            message: `Đã reset ${updated?.length || 0} dịch vụ về step1${
+                skipped.length > 0 ? ` (giữ ${skipped.length} DV đang ở phòng kỹ thuật)` : ''
+            }${clonedSteps > 0 ? `, tạo ${clonedSteps} bước mới` : ''}`,
         });
     } catch (error) {
         next(error);
@@ -715,6 +755,29 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
         }
         const oldStage = currentItem?.after_sale_stage || 'after1';
 
+        if (stage !== undefined && stage !== oldStage) {
+            assertForwardStageMove(AFTER_SALE_STAGE_ORDER, oldStage, stage);
+            if (oldStage === 'after1_debt' && stage === 'after2' && currentItem?.order_id) {
+                const { data: orderRow } = await supabaseAdmin
+                    .from('orders')
+                    .select('debt_checked, debt_checked_by_name')
+                    .eq('id', currentItem.order_id)
+                    .single();
+                assertDebtCheckCompleteForStageMove(oldStage, stage, orderRow);
+            }
+        }
+
+        const newCareFlowForCheck = care_warranty_flow !== undefined ? care_warranty_flow : oldCareFlow;
+        if (
+            care_warranty_stage !== undefined
+            && care_warranty_stage !== oldCareStage
+            && newCareFlowForCheck
+            && newCareFlowForCheck === oldCareFlow
+        ) {
+            const cols = newCareFlowForCheck === 'warranty' ? WARRANTY_STAGE_ORDER : CARE_STAGE_ORDER;
+            assertForwardStageMove(cols, oldCareStage, care_warranty_stage);
+        }
+
         const { data: product, error } = await supabaseAdmin
             .from('order_products')
             .update(updatePayload)
@@ -741,23 +804,12 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
 
         // 🔔 WH1: Fire webhook — Lưu thông tin nhận đồ (khi sales_step_data được cập nhật)
         if (sales_step_data !== undefined) {
-            // Lấy thông tin order để bắn webhook
-            const { data: orderInfo } = await supabaseAdmin
-                .from('orders')
-                .select('order_code, customer:customers(name)')
-                .eq('id', product.order_id)
-                .single();
-
-            const customerName = (orderInfo?.customer as any)?.name || 'N/A';
             const stepDataObj = typeof sales_step_data === 'object' ? sales_step_data : {};
-
-            fireWebhook('pickup_info.saved', {
-                order_code: orderInfo?.order_code,
-                product_code: product.product_code,
-                product_name: product.name,
-                customer_name: customerName,
-                step_data: stepDataObj,
-            });
+            try {
+                await firePickupInfoWebhook(supabaseAdmin, id, stepDataObj);
+            } catch (whErr) {
+                console.error('pickup_info.saved webhook error:', whErr);
+            }
         }
 
         // Record log if stage changed
@@ -831,10 +883,11 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
             try {
                 const { data: orderCtx } = await supabaseAdmin
                     .from('orders')
-                    .select('order_code, sales_user:users!orders_sales_id_fkey(id, name, telegram_chat_id)')
+                    .select('order_code')
                     .eq('id', product.order_id)
                     .maybeSingle();
-                const salesUser = Array.isArray((orderCtx as any)?.sales_user) ? (orderCtx as any).sales_user[0] : (orderCtx as any)?.sales_user;
+                const staff = await fetchProductServicesStaff(supabaseAdmin, product.id);
+                const assignedSales = staff.sales;
 
                 fireWebhook('sale.commission_ready', {
                     order_id: product.order_id,
@@ -843,9 +896,10 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
                     product_code: product.product_code || null,
                     product_name: product.name || 'N/A',
                     stage: 'after1_debt',
-                    sale_id: salesUser?.id || null,
-                    sale_name: salesUser?.name || null,
-                    tele_id_sale: salesUser?.telegram_chat_id || null,
+                    sales_users: assignedSales,
+                    sale_id: assignedSales[0]?.id || null,
+                    sale_name: assignedSales.map((s) => s.name).join(', ') || null,
+                    tele_id_sale: assignedSales[0]?.telegram_chat_id || null,
                 });
             } catch (commissionWhErr) {
                 console.error('Error firing sale.commission_ready webhook for order product:', commissionWhErr);

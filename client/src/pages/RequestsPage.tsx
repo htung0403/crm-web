@@ -43,6 +43,7 @@ import {
     type MobileKanbanColumn,
 } from '@/components/kanban/mobileKanban';
 import { useAuth } from '@/contexts/AuthContext';
+import { useViewActionForRoles } from '@/hooks/useViewAction';
 import {
     canViewAccessoryPurchasePrice,
     canViewPartnerFeePrice,
@@ -920,6 +921,12 @@ export function RequestsPage() {
     const navigate = useNavigate();
     const location = useLocation();
     const { user } = useAuth();
+    const { canEdit: canEditRequests } = useViewActionForRoles('requests', [
+        'admin',
+        'manager',
+        'sale',
+        'technician',
+    ]);
     const showAccessoryPrice = canViewAccessoryPurchasePrice(user);
     const showPartnerPrice = canViewPartnerFeePrice(user);
     const [loading, setLoading] = useState(true);
@@ -1099,6 +1106,10 @@ export function RequestsPage() {
     };
 
     const handleAccessoryDragEnd = (result: DropResult) => {
+        if (!canEditRequests) {
+            toast.error('Bạn không có quyền sửa trên màn Tất cả yêu cầu');
+            return;
+        }
         if (!result.destination || result.source.droppableId === result.destination.droppableId) return;
         const row = accessories.find((r: any) => r.id === result.draggableId);
         if (!row) return;
@@ -1131,6 +1142,10 @@ export function RequestsPage() {
     };
 
     const handlePartnerDragEnd = (result: DropResult) => {
+        if (!canEditRequests) {
+            toast.error('Bạn không có quyền sửa trên màn Tất cả yêu cầu');
+            return;
+        }
         if (!result.destination || result.source.droppableId === result.destination.droppableId) return;
         const row = partners.find((r: any) => r.id === result.draggableId);
         if (!row) return;
@@ -1163,6 +1178,10 @@ export function RequestsPage() {
     };
 
     const handleExtensionDragEnd = (result: DropResult) => {
+        if (!canEditRequests) {
+            toast.error('Bạn không có quyền sửa trên màn Tất cả yêu cầu');
+            return;
+        }
         if (!result.destination || result.source.droppableId === result.destination.droppableId) return;
         const row = extensions.find((r: any) => r.id === result.draggableId);
         if (!row?.id) return;

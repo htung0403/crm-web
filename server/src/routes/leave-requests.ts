@@ -1,6 +1,7 @@
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
+import { authenticate, requireManager } from '../middleware/auth.js';
 
 dotenv.config();
 
@@ -82,7 +83,7 @@ router.post('/', async (req, res) => {
 });
 
 // PATCH to approve or reject a request
-router.patch('/:id/status', async (req, res) => {
+router.patch('/:id/status', authenticate, requireManager, async (req, res) => {
     try {
         const { id } = req.params;
         const { status, approved_by } = req.body;

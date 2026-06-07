@@ -41,7 +41,7 @@ import { Label } from '@/components/ui/label';
 import { ordersApi, upsellTicketsApi, requestsApi, leaveRequestsApi, transactionsApi, usersApi } from '@/lib/api';
 import { formatCurrency, formatDateTime, cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/AuthContext';
-import { canViewAccessoryPurchasePrice, canViewPartnerFeePrice } from '@/lib/sensitivePermissions';
+import { canApproveInApprovalCenter, canViewAccessoryPurchasePrice, canViewPartnerFeePrice } from '@/lib/sensitivePermissions';
 
 const parseMoneyAmount = (value: unknown): number | null => {
     if (typeof value === 'number' && Number.isFinite(value)) {
@@ -84,6 +84,7 @@ export function UpsellManagementPage() {
 
     const canViewAccessoryPrice = canViewAccessoryPurchasePrice(user);
     const canViewPartnerPrice = canViewPartnerFeePrice(user);
+    const canApprove = canApproveInApprovalCenter(user);
 
     const loadData = async () => {
         setLoading(true);
@@ -527,6 +528,10 @@ export function UpsellManagementPage() {
             </CardContent>
         </Card>
     );
+
+    if (user && !canApprove) {
+        return null;
+    }
 
     return (
         <div className="space-y-6">

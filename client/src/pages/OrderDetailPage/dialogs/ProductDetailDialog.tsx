@@ -45,7 +45,43 @@ import { uploadFile } from '@/lib/supabase';
 import { DELIVERY_CARRIER_OPTIONS } from '@/constants/deliveryCarriers';
 import { useAuth } from '@/contexts/AuthContext';
 import { canOperateWorkflow } from '@/lib/sensitivePermissions';
+import { getAssignedSaleNames, getAssignedTechnicianNames } from '../utils/staff';
 import { StaffNameSelect } from '@/components/common/StaffNameSelect';
+
+function parsePhotoUrls(photos: unknown): string[] {
+    if (Array.isArray(photos)) {
+        return photos.filter((url): url is string => typeof url === 'string' && url.length > 0);
+    }
+    if (typeof photos === 'string') {
+        if (photos.startsWith('[')) {
+            try {
+                const parsed = JSON.parse(photos);
+                return Array.isArray(parsed)
+                    ? parsed.filter((url): url is string => typeof url === 'string' && url.length > 0)
+                    : [];
+            } catch {
+                return [];
+            }
+        }
+        if (photos.length > 0) return [photos];
+    }
+    return [];
+}
+
+/** Ảnh/video lúc nhận đồ — ưu tiên bằng chứng bước 1 (Nhận đồ & Chụp ảnh). */
+function getReceivedProductImages(item: unknown): string[] {
+    if (!item || typeof item !== 'object') return [];
+    const row = item as Record<string, unknown>;
+    const stepData = (row.sales_step_data || {}) as Record<string, unknown>;
+    const urls = [
+        ...parsePhotoUrls(stepData.step1_evidence_photos),
+        ...parsePhotoUrls(row.product_images),
+        ...parsePhotoUrls(row.images),
+    ];
+    const catalogImage = (row.product as { image?: string } | undefined)?.image;
+    if (catalogImage) urls.push(catalogImage);
+    return [...new Set(urls)];
+}
 
 
 interface ProductDetailDialogProps {
@@ -64,6 +100,7 @@ interface ProductDetailDialogProps {
     workflowLogs?: any[];
     aftersaleLogs?: any[];
     careLogs?: any[];
+    fetchKanbanLogs?: (orderId: string) => Promise<void>;
     /** Callback được gọi sau khi xác nhận thành công — dùng để tự động chuyển trạng thái card */
     onConfirmAndMove?: () => Promise<void>;
     onRoomChange?: (roomId: string) => void;
@@ -184,6 +221,7 @@ export function ProductDetailDialog({
     workflowLogs = [],
     aftersaleLogs = [],
     careLogs = [],
+    fetchKanbanLogs,
     onConfirmAndMove,
     onRoomChange,
 }: ProductDetailDialogProps) {
@@ -300,6 +338,8 @@ export function ProductDetailDialog({
     const services = group?.services || [];
     const productName = product?.item_name ?? services[0]?.item_name ?? '—';
     const productItem = product as any;
+    const assignedSaleNames = getAssignedSaleNames(services);
+    const assignedTechnicianNames = getAssignedTechnicianNames(services);
 
     const entityId = product?.id ?? services[0]?.id;
     const groupEntityIds = new Set([
@@ -333,8 +373,9 @@ export function ProductDetailDialog({
         hasPendingRequest ||
         (isTechnicalRoom ? !canEditTechnicalFields : !canEditDueDate);
 
-    // Build image lists
-    const originalImages = [...(productItem?.product_images ?? (productItem?.product?.image ? [productItem.product.image] : []))];
+    // Build image lists — ảnh lúc nhận lấy từ step1_evidence_photos (bước Nhận đồ & Chụp ảnh)
+    const leadItemForPhotos = product || services[0];
+    const originalImages = getReceivedProductImages(leadItemForPhotos);
     let completionImages: string[] = [];
     let packagingImages: string[] = [];
 
@@ -560,8 +601,20 @@ export function ProductDetailDialog({
     };
 
     const handleSave = async () => {
-        // Validation: If debt_checked is true, require names and at least one image in completion_photos (in Aftersale steps)
-        if (isAftersale && roomId.startsWith('after1')) {
+        // Kiểm nợ: bắt buộc tick xác nhận trước khi lưu / chuyển bước
+        if (isAftersale && roomId.startsWith('after1_debt')) {
+            if (!formData.debt_checked) {
+                toast.error('Vui lòng tick "Xác nhận đã kiểm nợ" trước khi lưu hoặc chuyển bước');
+                return;
+            }
+            if (!formData.debt_checked_by_name?.trim()) {
+                toast.error('Vui lòng chọn Người thu tiền');
+                return;
+            }
+        }
+
+        // Ảnh hoàn thiện (after1): yêu cầu người chụp + ảnh khi đã tick kiểm nợ (nếu có)
+        if (isAftersale && roomId === 'after1') {
             if (formData.debt_checked) {
                 if (!formData.debt_checked_by_name || !formData.aftersale_receiver_name) {
                     toast.error("Vui lòng chọn Người thu tiền và Người chụp After");
@@ -738,8 +791,11 @@ export function ProductDetailDialog({
     };
 
     const getRoomLogs = () => {
-        const filteredWorkflowLogs = workflowLogs.filter(log => 
-            log.action === 'assigned' || log.action === 'failed' || isWorkflowRequestLogAction(log.action)
+        const filteredWorkflowLogs = workflowLogs.filter(log =>
+            log.action === 'assigned'
+            || log.action === 'completed'
+            || log.action === 'failed'
+            || isWorkflowRequestLogAction(log.action)
         );
         const requestStatusLogs = [product, ...services].flatMap((item: any) => {
             if (!item?.id) return [];
@@ -890,14 +946,19 @@ export function ProductDetailDialog({
         </div>
     );
 
+    const openLogDetail = (log: any) => {
+        setSelectedLogDetail(log);
+        setShowLogDetailDialog(true);
+    };
+
     const renderLogItem = (log: any) => {
         const isWorkflowRequestLog = isWorkflowRequestLogAction(log.action);
 
         return (
-        <div key={log.id} className="text-[11px] border-b border-gray-50 pb-2 last:border-0 relative">
+        <div key={log.id} className="text-[11px] border-b border-gray-50 pb-3 last:border-0">
             {!isWorkflowRequestLog && (
-                <div className="flex justify-between items-start mb-1">
-                    <span className="font-bold text-gray-700 uppercase">
+                <div className="flex justify-between items-start gap-2 mb-1">
+                    <span className="font-bold text-gray-700 uppercase min-w-0">
                         {log.order_item_step_id ? (
                             <span className={log.action === 'failed' ? "text-red-500" : "text-blue-700"}>
                                 {log.action === 'failed' && <span className="mr-1">THẤT BẠI:</span>}
@@ -911,7 +972,21 @@ export function ProductDetailDialog({
                             </span>
                         )}
                     </span>
-                    <span className="text-[9px] text-gray-400 tabular-nums">{formatDateTime(log.created_at)}</span>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span className="text-[9px] text-gray-400 tabular-nums">{formatDateTime(log.created_at)}</span>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-[10px] text-primary hover:bg-primary/10 font-bold border border-primary/20 rounded-md"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                openLogDetail(log);
+                            }}
+                        >
+                            <Maximize2 className="h-3 w-3 mr-1" />
+                            Xem chi tiết
+                        </Button>
+                    </div>
                 </div>
             )}
             {!isWorkflowRequestLog && (
@@ -977,37 +1052,30 @@ export function ProductDetailDialog({
             {isWorkflowRequestLog && (() => {
                 const display = getWorkflowRequestLogDisplay(log.action);
                 if (!display) return null;
-                return renderWorkflowRequestBox(log, {
-                    icon: getWorkflowRequestIcon(log.action),
-                    label: display.label,
-                    className: display.boxClass,
-                });
+                return (
+                    <div className="space-y-2">
+                        {renderWorkflowRequestBox(log, {
+                            icon: getWorkflowRequestIcon(log.action),
+                            label: display.label,
+                            className: display.boxClass,
+                        })}
+                        <div className="flex justify-end">
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-[10px] text-primary hover:bg-primary/10 font-bold border border-primary/20 rounded-md"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    openLogDetail(log);
+                                }}
+                            >
+                                <Maximize2 className="h-3 w-3 mr-1" />
+                                Xem chi tiết
+                            </Button>
+                        </div>
+                    </div>
+                );
             })()}
-
-            <Button 
-                variant="ghost" 
-                size="sm" 
-                className="h-6 px-2 absolute top-1 right-1 text-[10px] text-primary hover:bg-primary/10 font-bold border border-primary/20 rounded-md"
-                onClick={() => {
-                    const targetRoom = log.from_status || log.from_stage;
-                    if (onRoomChange && targetRoom) {
-                        onRoomChange(targetRoom);
-                    } else if (log.order_item_step_id) {
-                        setSelectedLogDetail(log);
-                        setShowLogDetailDialog(true);
-                    } else {
-                        setViewLogData({
-                            reason: log.reason || (['failed', 'backward_move'].includes(log.action) ? 'Lùi bước' : 'Chuyển bước'),
-                            photos: log.photos || [],
-                            notes: log.notes || '',
-                            itemName: productName
-                        });
-                    }
-                }}
-            >
-                <Maximize2 className="h-3 w-3 mr-1" />
-                Xem chi tiết
-            </Button>
         </div>
         );
     };
@@ -1363,10 +1431,10 @@ export function ProductDetailDialog({
                                         </div>
                                         <div className="flex flex-col min-w-0">
                                             <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tight">SALE CHỐT</span>
-                                            <span className="text-xs font-bold text-gray-800 truncate">{order?.sales_user?.name || 'N/A'}</span>
+                                            <span className="text-xs font-bold text-gray-800 truncate">{assignedSaleNames || 'Chưa gán'}</span>
                                         </div>
                                     </div>
-                                    {services.some(s => (s as any).technician) && (
+                                    {assignedTechnicianNames && (
                                         <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex items-center gap-3 sm:col-span-2">
                                             <div className="h-8 w-8 rounded-lg bg-purple-50 flex items-center justify-center shrink-0">
                                                 <Wrench className="h-4 w-4 text-purple-500" />
@@ -1374,7 +1442,7 @@ export function ProductDetailDialog({
                                             <div className="flex flex-col min-w-0">
                                                 <span className="text-[9px] font-bold text-gray-400 uppercase tracking-tight">KỸ THUẬT VIÊN</span>
                                                 <span className="text-xs font-bold text-gray-800 truncate">
-                                                    {Array.from(new Set(services.filter(s => (s as any).technician).map(s => (s as any).technician.name))).join(', ')}
+                                                    {assignedTechnicianNames}
                                                 </span>
                                             </div>
                                         </div>
@@ -1692,6 +1760,16 @@ export function ProductDetailDialog({
                                                                                     toast.error('Sản phẩm chưa qua Kiểm nợ — hoàn thành ảnh hoàn thiện và chuyển sang Kiểm nợ trước');
                                                                                     return;
                                                                                 }
+                                                                                if (checked) {
+                                                                                    if (!formData.debt_checked) {
+                                                                                        toast.error('Vui lòng tick "Xác nhận đã kiểm nợ" trước khi bàn giao sản phẩm');
+                                                                                        return;
+                                                                                    }
+                                                                                    if (!formData.debt_checked_by_name?.trim()) {
+                                                                                        toast.error('Vui lòng chọn Người thu tiền');
+                                                                                        return;
+                                                                                    }
+                                                                                }
                                                                                 const nextStage = checked ? 'after2' : 'after1_debt';
                                                                                 const previousStage = currentStage;
 
@@ -1712,6 +1790,15 @@ export function ProductDetailDialog({
                                                                                 if (!onUpdateItemAfterSaleData) return;
 
                                                                                 try {
+                                                                                    if (checked && onUpdateOrder) {
+                                                                                        await onUpdateOrder(
+                                                                                            pickOrderLevelAfterSalePatch({
+                                                                                                debt_checked: formData.debt_checked,
+                                                                                                debt_checked_notes: formData.debt_checked_notes,
+                                                                                                debt_checked_by_name: formData.debt_checked_by_name,
+                                                                                            }),
+                                                                                        );
+                                                                                    }
                                                                                     await onUpdateItemAfterSaleData(item.id, !!(item as any).is_customer_item, { stage: nextStage });
                                                                                     onReloadOrder?.();
                                                                                 } catch (error) {
@@ -2304,7 +2391,9 @@ export function ProductDetailDialog({
                                                 disabled={saving}
                                             >
                                                 {saving ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Save className="h-5 w-5 mr-2" />}
-                                                {roomId.startsWith('after2')
+                                                {roomId.startsWith('after1_debt')
+                                                    ? 'Xác nhận kiểm nợ & Lưu'
+                                                    : roomId.startsWith('after2')
                                                     ? 'Xác nhận trả phụ kiện & Lưu'
                                                     : 'Cập nhật thông tin'}
                                             </Button>
@@ -2466,6 +2555,10 @@ export function ProductDetailDialog({
 
                                                         if (isCustomerItem) {
                                                             await orderProductsApi.resetServices(entityId);
+                                                        }
+
+                                                        if (order?.id && fetchKanbanLogs) {
+                                                            await fetchKanbanLogs(order.id);
                                                         }
 
                                                         toast.success(`Đã tạo HD Bảo hành: ${warrantyCode} và chuyển về Nhận đồ & Chụp ảnh`);

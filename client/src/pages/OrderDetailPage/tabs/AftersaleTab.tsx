@@ -152,7 +152,6 @@ const AftersaleCard = memo(({
     const isLate = slaDisplay?.isLate ?? (product?.due_at && new Date(product.due_at) < new Date());
 
     const colIdx = afterColumns.findIndex((c) => c.id === col.id);
-    const prevCol = colIdx > 0 ? afterColumns[colIdx - 1] : null;
     const nextCol =
         colIdx >= 0 && colIdx < afterColumns.length - 1 ? afterColumns[colIdx + 1] : null;
 
@@ -314,16 +313,6 @@ const AftersaleCard = memo(({
                                 </div>
                             ) : (
                                 <div className="mt-1 flex gap-1.5" onClick={(e) => e.stopPropagation()}>
-                                    {prevCol && (
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="h-8 min-w-0 flex-1 px-1 text-[9px] font-semibold"
-                                            onClick={() => tryMove(prevCol.id)}
-                                        >
-                                            <span className="truncate">← {prevCol.title}</span>
-                                        </Button>
-                                    )}
                                     {stepActionButton('min-w-0 flex-1 px-1 text-[9px]')}
                                     {nextCol && col.id !== 'after3' && (
                                         <Button
@@ -704,7 +693,7 @@ export function AftersaleTab({
                             After sale – Quy trình sau kỹ thuật
                         </CardTitle>
                         <p className="hidden text-sm text-muted-foreground md:block">
-                            Ảnh → Kiểm nợ → Đóng gói & Giao hàng → Nhắn HD & Feedback → Lưu trữ. Kéo thả thẻ đơn vào cột để chuyển bước.
+                            Ảnh → Kiểm nợ → Đóng gói & Giao hàng → Nhắn HD & Feedback → Lưu trữ. Chỉ chuyển tiến từng bước, không kéo ngược.
                         </p>
                         <p className="text-xs text-muted-foreground md:hidden">
                             Vuốt ngang: Ảnh hoàn thiện → Kiểm nợ → Đóng gói → Feedback → Lưu trữ

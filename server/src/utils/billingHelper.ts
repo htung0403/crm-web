@@ -332,42 +332,31 @@ export async function cancelRelatedPaymentsForInvoice(invoice: {
     order?: { order_code?: string } | null;
 }): Promise<void> {
     const orderId = invoice.order_id;
-    const orderCode = invoice.order?.order_code;
+    const orderCode = (invoice.order as { order_code?: string } | null)?.order_code;
     const invoiceCode = invoice.invoice_code || '';
     const now = new Date().toISOString();
 
-    // Phiếu thu ghi trong đơn — chỉ hủy bản ghi nhắc mã HĐ (tránh hủy nhầm phiếu khác trên cùng đơn)
+    // Phiếu thu ghi trong đơn (payment_records) — cùng phạm vi hiển thị trên chi tiết HĐ
+    await supabaseAdmin
+        .from('payment_records')
+        .update({ transaction_status: 'cancelled', updated_at: now })
+        .eq('order_id', orderId)
+        .eq('transaction_status', 'approved');
+
+    // Phiếu thu Số Quỹ (transactions) — liên kết order_id / order_code, không có mã HĐ trong notes
+    const transClauses = [`order_id.eq.${orderId}`];
+    if (orderCode) {
+        transClauses.push(`order_code.eq.${orderCode}`);
+    }
     if (invoiceCode) {
-        const { data: payRows } = await supabaseAdmin
-            .from('payment_records')
-            .select('id, content, notes')
-            .eq('order_id', orderId)
-            .eq('transaction_status', 'approved');
-
-        const payIds = (payRows || [])
-            .filter((p) => {
-                const text = `${p.content || ''} ${p.notes || ''}`;
-                return text.includes(invoiceCode);
-            })
-            .map((p) => p.id);
-
-        if (payIds.length > 0) {
-            await supabaseAdmin
-                .from('payment_records')
-                .update({ transaction_status: 'cancelled', updated_at: now })
-                .in('id', payIds);
-        }
+        transClauses.push(`notes.ilike.%${invoiceCode}%`);
     }
 
-    // Phiếu thu/chi — chỉ bản ghi ghi rõ mã hóa đơn (không hủy toàn bộ PT của đơn)
-    if (invoiceCode) {
-        await supabaseAdmin
-            .from('transactions')
-            .update({ status: 'cancelled', updated_at: now })
-            .eq('order_id', orderId)
-            .ilike('notes', `%${invoiceCode}%`)
-            .in('status', ['approved', 'pending']);
-    }
+    await supabaseAdmin
+        .from('transactions')
+        .update({ status: 'cancelled', updated_at: now })
+        .or(transClauses.join(','))
+        .in('status', ['approved', 'pending']);
 
     await supabaseAdmin
         .from('finance_transactions')

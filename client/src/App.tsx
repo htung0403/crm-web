@@ -97,7 +97,7 @@ const pagePermissions: Record<string, UserRole[]> = {
 };
 
 // Protected Route Component
-function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: UserRole[] }) {
+function ProtectedRoute({ children, allowedRoles, managerOnly }: { children: React.ReactNode; allowedRoles?: UserRole[]; managerOnly?: boolean }) {
   const { user, isAuthenticated, isLoading } = useAuth();
   const location = useLocation();
 
@@ -114,6 +114,10 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode;
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
+  if (managerOnly && user && user.role !== 'admin' && user.role !== 'manager') {
+    return <Navigate to="/requests" replace />;
   }
 
   const viewId = resolveViewKeyFromPath(location.pathname);
@@ -344,7 +348,7 @@ function AppContent() {
             } />
 
             <Route path="/orders/upsell-tickets" element={
-              <ProtectedRoute allowedRoles={pagePermissions['upsell-management']}>
+              <ProtectedRoute allowedRoles={pagePermissions['upsell-management']} managerOnly>
                 <UpsellManagementPage />
               </ProtectedRoute>
             } />

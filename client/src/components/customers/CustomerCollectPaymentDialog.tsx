@@ -88,6 +88,12 @@ function getChildProducts(order: CustomerDebtOrderRow): CustomerDebtProductRow[]
     return children.length > 0 ? children : all;
 }
 
+function getProductPaymentPaid(p: CustomerDebtProductRow): number {
+    const paid = p.paid_amount || 0;
+    const deposit = p.deposit_amount || 0;
+    return Math.max(0, paid - deposit);
+}
+
 function getProductNeedCollect(p: CustomerDebtProductRow): number {
     const collected = Math.max(p.paid_amount || 0, p.deposit_amount || 0);
     return Math.max(0, (p.total_amount || 0) - collected);
@@ -165,13 +171,15 @@ export function CustomerCollectPaymentDialog({
     const tableTotals = useMemo(() => {
         let invoiceValue = 0;
         let deposit = 0;
+        let paymentPaid = 0;
         let needCollect = 0;
         for (const r of productRows) {
             invoiceValue += r.product.total_amount || 0;
             deposit += r.product.deposit_amount || 0;
+            paymentPaid += getProductPaymentPaid(r.product);
             needCollect += r.needCollect;
         }
-        return { invoiceValue, deposit, needCollect, payThisTime: rowSum };
+        return { invoiceValue, deposit, paymentPaid, needCollect, payThisTime: rowSum };
     }, [productRows, rowSum]);
 
     const updateRowAmount = (key: string, val: number) => {
@@ -307,7 +315,7 @@ export function CustomerCollectPaymentDialog({
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">
                             <div>
                                 <p className="text-[11px] text-muted-foreground uppercase">Tổng giá trị HĐ</p>
                                 <p className="font-semibold tabular-nums">{formatCurrency(tableTotals.invoiceValue)}</p>
@@ -315,6 +323,10 @@ export function CustomerCollectPaymentDialog({
                             <div>
                                 <p className="text-[11px] text-muted-foreground uppercase">Tổng cọc</p>
                                 <p className="font-semibold tabular-nums text-amber-800">{formatCurrency(tableTotals.deposit)}</p>
+                            </div>
+                            <div>
+                                <p className="text-[11px] text-muted-foreground uppercase">Tổng thanh toán</p>
+                                <p className="font-semibold tabular-nums text-green-700">{formatCurrency(tableTotals.paymentPaid)}</p>
                             </div>
                             <div>
                                 <p className="text-[11px] text-muted-foreground uppercase">Tổng cần thu</p>
@@ -333,21 +345,22 @@ export function CustomerCollectPaymentDialog({
 
                         <div className="rounded-lg border overflow-hidden">
                             <div className="overflow-x-auto">
-                                <table className="w-full text-sm min-w-[880px]">
+                                <table className="w-full text-sm min-w-[980px]">
                                     <thead className="bg-muted/60 text-xs uppercase">
                                         <tr>
                                             <th className="p-2.5 text-left font-semibold min-w-[140px]">Mã hóa đơn</th>
                                             <th className="p-2.5 text-right font-semibold">Giá trị HĐ</th>
                                             <th className="p-2.5 text-right font-semibold text-amber-800">Cọc</th>
+                                            <th className="p-2.5 text-right font-semibold text-green-700">Thanh toán</th>
                                             <th className="p-2.5 text-right font-semibold">Cần thu</th>
                                             <th className="p-2.5 text-center font-semibold w-28">Loại TT</th>
-                                            <th className="p-2.5 text-right font-semibold w-36">Thanh toán</th>
+                                            <th className="p-2.5 text-right font-semibold w-36">Thu lần này</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {sortedOrders.length === 0 ? (
                                             <tr>
-                                                <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                                                <td colSpan={7} className="p-8 text-center text-muted-foreground">
                                                     Chưa có đơn hàng
                                                 </td>
                                             </tr>
@@ -356,6 +369,10 @@ export function CustomerCollectPaymentDialog({
                                                 const children = getChildProducts(o);
                                                 const orderDeposit = children.reduce(
                                                     (s, p) => s + (p.deposit_amount || 0),
+                                                    0
+                                                );
+                                                const orderPaymentPaid = children.reduce(
+                                                    (s, p) => s + getProductPaymentPaid(p),
                                                     0
                                                 );
                                                 const orderNeedCollect = children.reduce(
@@ -384,6 +401,9 @@ export function CustomerCollectPaymentDialog({
                                                             <td className="p-2.5 text-right tabular-nums text-amber-700">
                                                                 {orderDeposit > 0 ? formatCurrency(orderDeposit) : '—'}
                                                             </td>
+                                                            <td className="p-2.5 text-right tabular-nums text-green-700">
+                                                                {orderPaymentPaid > 0 ? formatCurrency(orderPaymentPaid) : '—'}
+                                                            </td>
                                                             <td className="p-2.5 text-right tabular-nums text-red-600">
                                                                 {formatCurrency(orderNeedCollect)}
                                                             </td>
@@ -394,6 +414,7 @@ export function CustomerCollectPaymentDialog({
                                                         </tr>
                                                         {children.map((p) => {
                                                             const need = getProductNeedCollect(p);
+                                                            const paymentPaid = getProductPaymentPaid(p);
                                                             const rowKey = p.id;
                                                             return (
                                                                 <tr
@@ -415,6 +436,12 @@ export function CustomerCollectPaymentDialog({
                                                                         {p.deposit_amount > 0
                                                                             ? formatCurrency(p.deposit_amount)
                                                                             : '—'}
+                                                                    </td>
+                                                                    <td className="p-2.5 text-right tabular-nums text-green-700">
+                                                                        {(() => {
+                                                                            const paid = getProductPaymentPaid(p);
+                                                                            return paid > 0 ? formatCurrency(paid) : '—';
+                                                                        })()}
                                                                     </td>
                                                                     <td className="p-2.5 text-right tabular-nums font-medium">
                                                                         {need > 0 ? (

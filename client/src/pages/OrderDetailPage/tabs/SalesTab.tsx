@@ -491,7 +491,8 @@ export function SalesTab({
                                                 if (rejectNonSequentialKanbanMove(
                                                     SALES_COLUMN_IDS,
                                                     result.source.droppableId,
-                                                    result.destination.droppableId
+                                                    result.destination.droppableId,
+                                                    { allowBackward: true }
                                                 )) {
                                                     return;
                                                 }
@@ -573,7 +574,8 @@ export function SalesTab({
                                         if (rejectNonSequentialKanbanMove(
                                             SALES_COLUMN_IDS,
                                             result.source.droppableId,
-                                            result.destination.droppableId
+                                            result.destination.droppableId,
+                                            { allowBackward: true }
                                         )) {
                                             return;
                                         }
