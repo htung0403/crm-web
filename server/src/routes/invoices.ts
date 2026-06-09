@@ -284,7 +284,7 @@ router.patch('/:id/status', authenticate, requireAccountant, async (req: Authent
             throw new ApiError('Hóa đơn đã được hủy trước đó', 400);
         }
 
-        if (status === 'cancelled' && (existing.status === 'paid' || existing.status === 'pending')) {
+        if (status === 'cancelled') {
             const shouldCancelPayments = cancel_related_payments !== false;
             if (!shouldCancelPayments && existing.order_id) {
                 const [{ count: payCount }, { count: transCount }] = await Promise.all([
@@ -382,7 +382,7 @@ router.delete('/:id', authenticate, requireAccountant, async (req: Authenticated
 
         const { data: invoice, error: fetchError } = await supabaseAdmin
             .from('invoices')
-            .select('id, invoice_code, status')
+            .select('id, invoice_code, status, order_id')
             .eq('id', id)
             .single();
 
@@ -392,6 +392,11 @@ router.delete('/:id', authenticate, requireAccountant, async (req: Authenticated
 
         if (invoice.status === 'paid') {
             throw new ApiError('Không thể xóa hóa đơn đã thanh toán', 400);
+        }
+
+        if (invoice.order_id) {
+            await processInvoiceCancellation(id, { cancelRelatedPayments: true });
+            await syncOrderPayment(invoice.order_id);
         }
 
         const { error } = await supabaseAdmin.from('invoices').delete().eq('id', id);

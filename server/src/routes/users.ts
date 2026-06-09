@@ -144,7 +144,7 @@ router.get('/mentionable', authenticate, async (req: AuthenticatedRequest, res, 
             .from('users')
             .select('id, name, avatar, role')
             .eq('status', 'active')
-            .in('role', ['sale', 'technician', 'manager', 'admin', 'accountant', 'cashier'])
+            .in('role', ['sale', 'technician', 'tech', 'manager', 'admin', 'accountant', 'cashier'])
             .order('name', { ascending: true });
 
         if (error) {

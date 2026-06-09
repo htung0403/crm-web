@@ -23,6 +23,46 @@ import {
     collectAssignedSalesFromServices,
     firePickupInfoWebhook,
 } from '../utils/orderStaffHelper.js';
+import { extractSalesStepLogContent } from '../utils/salesStepLogContent.js';
+
+async function resolveSalesStepData(
+    entityType: 'order_item' | 'order_product_service' | 'order_product',
+    entityId: string
+): Promise<Record<string, unknown>> {
+    if (entityType === 'order_item') {
+        const { data } = await supabaseAdmin
+            .from('order_items')
+            .select('sales_step_data')
+            .eq('id', entityId)
+            .maybeSingle();
+        return (data?.sales_step_data as Record<string, unknown>) || {};
+    }
+
+    if (entityType === 'order_product') {
+        const { data } = await supabaseAdmin
+            .from('order_products')
+            .select('sales_step_data')
+            .eq('id', entityId)
+            .maybeSingle();
+        return (data?.sales_step_data as Record<string, unknown>) || {};
+    }
+
+    const { data: service } = await supabaseAdmin
+        .from('order_product_services')
+        .select('order_product_id')
+        .eq('id', entityId)
+        .maybeSingle();
+
+    if (!service?.order_product_id) return {};
+
+    const { data: parent } = await supabaseAdmin
+        .from('order_products')
+        .select('sales_step_data')
+        .eq('id', service.order_product_id)
+        .maybeSingle();
+
+    return (parent?.sales_step_data as Record<string, unknown>) || {};
+}
 
 function derivePhaseFromStatus(status: string): { current_phase: string; phase_stage: string } {
     if (['step1', 'step2', 'step3', 'step4'].includes(status)) {
@@ -619,15 +659,27 @@ router.patch('/:id/status', authenticate, async (req: AuthenticatedRequest, res,
         // Lịch sử Sales Kanban: ghi log chuyển bước (step1-step5 hoặc bất kỳ status)
         if (orderIdForLog && entityType && (oldStatus !== status)) {
             try {
+                let logReason = reason || null;
+                let logNotes = notes || null;
+                let logPhotos = Array.isArray(photos) ? photos : [];
+
+                if (!logReason && !logNotes && logPhotos.length === 0 && oldStatus?.startsWith('step')) {
+                    const salesStepData = await resolveSalesStepData(entityType, id);
+                    const extracted = extractSalesStepLogContent(oldStatus, salesStepData);
+                    logReason = extracted.reason || null;
+                    logNotes = extracted.notes || null;
+                    logPhotos = extracted.photos;
+                }
+
                 await supabaseAdmin.from('order_item_status_log').insert({
                     order_id: orderIdForLog,
                     entity_type: entityType,
                     entity_id: id,
                     from_status: oldStatus,
                     to_status: status,
-                    reason: reason || null,
-                    notes: notes || null,
-                    photos: Array.isArray(photos) ? photos : [],
+                    reason: logReason,
+                    notes: logNotes,
+                    photos: logPhotos,
                     created_by: userId ?? null
                 });
             } catch (logErr) {

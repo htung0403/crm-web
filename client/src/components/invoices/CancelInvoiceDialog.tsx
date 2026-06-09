@@ -8,8 +8,6 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Label } from '@/components/ui/label';
 import { Loader2 } from 'lucide-react';
 
 interface CancelInvoiceDialogProps {
@@ -27,13 +25,12 @@ export function CancelInvoiceDialog({
     onClose,
     onConfirm,
 }: CancelInvoiceDialogProps) {
-    const [cancelPayments, setCancelPayments] = useState(true);
     const [submitting, setSubmitting] = useState(false);
 
     const handleConfirm = async () => {
         setSubmitting(true);
         try {
-            await onConfirm(cancelPayments);
+            await onConfirm(true);
             onClose();
         } finally {
             setSubmitting(false);
@@ -50,24 +47,11 @@ export function CancelInvoiceDialog({
                     </DialogDescription>
                 </DialogHeader>
 
-                {hasPayments && (
-                    <div className="space-y-2">
-                        <p className="text-xs text-muted-foreground leading-snug">
-                            Hóa đơn hủy sẽ không còn tính vào doanh thu. Công nợ khách được tính lại theo phiếu thu và HĐ còn hiệu lực.
-                        </p>
-                        <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50/80 p-3">
-                            <Checkbox
-                                id="cancel-related-payments"
-                                checked={cancelPayments}
-                                onCheckedChange={(v) => setCancelPayments(v === true)}
-                                disabled={submitting}
-                            />
-                            <Label htmlFor="cancel-related-payments" className="text-sm font-medium leading-snug cursor-pointer">
-                                Hủy các Phiếu thanh toán có liên quan
-                            </Label>
-                        </div>
-                    </div>
-                )}
+                <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-3 text-xs leading-snug text-amber-900">
+                    {hasPayments
+                        ? 'Các phiếu thu liên quan đến đơn hàng này sẽ được hủy tự động. Công nợ khách được tính lại theo phiếu thu và HĐ còn hiệu lực.'
+                        : 'Hóa đơn hủy sẽ không còn tính vào doanh thu. Nếu có phiếu thu liên quan, hệ thống cũng sẽ hủy chúng.'}
+                </div>
 
                 <DialogFooter className="gap-2 sm:gap-0">
                     <Button variant="outline" onClick={onClose} disabled={submitting}>
@@ -76,7 +60,7 @@ export function CancelInvoiceDialog({
                     <Button
                         variant="destructive"
                         onClick={handleConfirm}
-                        disabled={submitting || (hasPayments && !cancelPayments)}
+                        disabled={submitting}
                     >
                         {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Đồng ý'}
                     </Button>

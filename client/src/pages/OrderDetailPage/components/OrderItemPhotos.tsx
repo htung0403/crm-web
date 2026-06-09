@@ -22,7 +22,7 @@ interface OrderItemPhotosProps {
     item: OrderItem;
     canEdit: boolean;
     onUpdated: () => void;
-    variant?: 'block' | 'table';
+    variant?: 'block' | 'table' | 'compact';
 }
 
 export function OrderItemPhotos({
@@ -72,7 +72,10 @@ export function OrderItemPhotos({
         }
     };
 
-    const thumbSize = variant === 'table' ? 'h-10 w-10' : 'aspect-square w-full';
+    const thumbSize =
+        variant === 'table' || variant === 'compact'
+            ? 'h-10 w-10'
+            : 'aspect-square w-full';
 
     const addControl = canEdit ? (
         <label
@@ -80,11 +83,16 @@ export function OrderItemPhotos({
                 'cursor-pointer',
                 variant === 'table'
                     ? 'mt-1.5 flex h-7 w-full items-center justify-center gap-1 rounded-md border border-dashed border-slate-300 bg-slate-50 text-[10px] font-medium text-slate-600 hover:border-primary/40 hover:bg-primary/5'
-                    : cn(
-                          'flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-200 bg-slate-50/80',
-                          thumbSize,
-                          uploading && 'pointer-events-none opacity-50',
-                      ),
+                    : variant === 'compact'
+                      ? cn(
+                            'flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-md border border-dashed border-slate-200 bg-slate-50/80',
+                            uploading && 'pointer-events-none opacity-50',
+                        )
+                      : cn(
+                            'flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-200 bg-slate-50/80',
+                            thumbSize,
+                            uploading && 'pointer-events-none opacity-50',
+                        ),
             )}
         >
             {uploading ? (
@@ -96,6 +104,8 @@ export function OrderItemPhotos({
                     <Plus className="h-3 w-3 shrink-0" />
                     Thêm ảnh
                 </>
+            ) : variant === 'compact' ? (
+                <Plus className="h-3.5 w-3.5 text-slate-400" />
             ) : (
                 <>
                     <ImageIcon className="h-5 w-5 text-slate-400" />
@@ -114,16 +124,28 @@ export function OrderItemPhotos({
     ) : null;
 
     return (
-        <div className={cn(variant === 'block' && 'mt-2 border-t border-slate-100 pt-2')}>
+        <div
+            className={cn(
+                variant === 'block' && 'mt-2 border-t border-slate-100 pt-2',
+                variant === 'compact' && 'border-t border-slate-100/80 pt-1.5',
+            )}
+        >
             {variant === 'block' && (
                 <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                     Ảnh sản phẩm
                 </p>
             )}
+            {variant === 'compact' && (
+                <p className="mb-1 text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+                    Ảnh {images.length > 0 ? `(${images.length})` : ''}
+                </p>
+            )}
 
             <div
                 className={cn(
-                    variant === 'table' ? 'flex flex-wrap gap-1' : 'grid grid-cols-4 gap-1.5',
+                    variant === 'table' || variant === 'compact'
+                        ? 'flex flex-wrap gap-1'
+                        : 'grid grid-cols-4 gap-1.5',
                 )}
             >
                 {images.map((url, i) => (
@@ -158,7 +180,7 @@ export function OrderItemPhotos({
                         )}
                     </button>
                 ))}
-                {variant === 'block' && addControl}
+                {(variant === 'block' || variant === 'compact') && addControl}
             </div>
 
             {variant === 'table' && addControl}

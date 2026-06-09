@@ -281,3 +281,45 @@ body {
   box-shadow: 0 2px 8px -2px currentColor;
 }
 
+/* Product detail dialog — layout + touch scroll */
+.product-detail-info-panel {
+  -webkit-overflow-scrolling: touch;
+}
+
+.product-detail-form-panel {
+  min-height: 0;
+}
+
+.product-detail-scroll-area {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Let vertical pan reach the scroll container even when touching form controls */
+.product-detail-scroll-area input,
+.product-detail-scroll-area textarea,
+.product-detail-scroll-area select,
+.product-detail-scroll-area [role="combobox"],
+.product-detail-scroll-area [data-radix-select-trigger],
+.product-detail-scroll-area label,
+.product-detail-scroll-area button:not([type="submit"]),
+.product-detail-scroll-area [data-radix-scroll-area-viewport],
+.product-detail-scroll-area .product-detail-form-card {
+  touch-action: pan-y;
+}
+
+@media (max-width: 767px) {
+  .product-detail-info-panel {
+    flex: none;
+    max-height: 26vh;
+    min-height: 0;
+  }
+
+  .product-detail-form-panel {
+    flex: 1 1 0%;
+    min-height: 0;
+  }
+}
+

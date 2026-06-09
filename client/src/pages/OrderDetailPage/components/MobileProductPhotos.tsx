@@ -8,5 +8,5 @@ interface MobileProductPhotosProps {
 }
 
 export function MobileProductPhotos({ item, canEdit, onUpdated }: MobileProductPhotosProps) {
-    return <OrderItemPhotos item={item} canEdit={canEdit} onUpdated={onUpdated} variant="block" />;
+    return <OrderItemPhotos item={item} canEdit={canEdit} onUpdated={onUpdated} variant="compact" />;
 }

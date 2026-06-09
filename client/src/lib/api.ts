@@ -496,9 +496,11 @@ export const invoicesApi = {
     updateStatus: (id: string, status: string, options?: { cancel_related_payments?: boolean }) =>
         api.patch<ApiResponse<{ invoice: any }>>(`/invoices/${id}/status`, {
             status,
-            ...(options?.cancel_related_payments !== undefined
-                ? { cancel_related_payments: options.cancel_related_payments }
-                : {}),
+            ...(status === 'cancelled'
+                ? { cancel_related_payments: options?.cancel_related_payments !== false }
+                : options?.cancel_related_payments !== undefined
+                    ? { cancel_related_payments: options.cancel_related_payments }
+                    : {}),
         }),
 
     delete: (id: string) => api.delete<ApiResponse<{ id: string; invoice_code: string }>>(`/invoices/${id}`),

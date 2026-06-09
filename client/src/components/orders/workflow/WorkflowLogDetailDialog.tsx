@@ -20,6 +20,7 @@ import {
     getAfterSaleStageLabel,
     getCareWarrantyStageLabel,
 } from '@/pages/OrderDetailPage/constants';
+import { enrichSalesTransitionLog } from '@/lib/salesStepLogContent';
 
 interface WorkflowLogDetailDialogProps {
     open: boolean;
@@ -63,43 +64,48 @@ export function WorkflowLogDetailDialog({
 }: WorkflowLogDetailDialogProps) {
     if (!log) return null;
 
-    const isRequestLog = isWorkflowRequestLogAction(log.action);
-    const requestDisplay = isRequestLog ? getWorkflowRequestLogDisplay(log.action) : null;
-    const isWorkflowStep = !!log.order_item_step_id;
+    const enrichedLog = enrichSalesTransitionLog(
+        log,
+        log._sales_step_data as Record<string, unknown> | undefined
+    ) || log;
+
+    const isRequestLog = isWorkflowRequestLogAction(enrichedLog.action);
+    const requestDisplay = isRequestLog ? getWorkflowRequestLogDisplay(enrichedLog.action) : null;
+    const isWorkflowStep = !!enrichedLog.order_item_step_id;
     const isTransitionLog = !isRequestLog && !isWorkflowStep
-        && (log.from_status || log.from_stage || log.to_status || log.to_stage);
+        && (enrichedLog.from_status || enrichedLog.from_stage || enrichedLog.to_status || enrichedLog.to_stage);
 
-    const { reason, note, deadline, technician } = parseAssignmentNotes(log.notes || '');
+    const { reason, note, deadline, technician } = parseAssignmentNotes(enrichedLog.notes || '');
 
-    const transitionFrom = getLogStepLabel(log.from_status || log.from_stage);
-    const transitionTo = getLogStepLabel(log.to_status || log.to_stage);
+    const transitionFrom = getLogStepLabel(enrichedLog.from_status || enrichedLog.from_stage);
+    const transitionTo = getLogStepLabel(enrichedLog.to_status || enrichedLog.to_stage);
 
     const actionBadge = (() => {
         if (isRequestLog && requestDisplay) return requestDisplay.label;
-        if (log.action === 'completed') return 'HOÀN THÀNH';
-        if (log.action === 'failed') return 'THẤT BẠI';
-        if (log.action === 'skipped') return 'BỎ QUA';
-        if (log.action === 'backward_move') return 'LÙI BƯỚC';
-        if (log.action === 'assigned') return 'PHÂN CÔNG';
+        if (enrichedLog.action === 'completed') return 'HOÀN THÀNH';
+        if (enrichedLog.action === 'failed') return 'THẤT BẠI';
+        if (enrichedLog.action === 'skipped') return 'BỎ QUA';
+        if (enrichedLog.action === 'backward_move') return 'LÙI BƯỚC';
+        if (enrichedLog.action === 'assigned') return 'PHÂN CÔNG';
         if (isTransitionLog) return 'CHUYỂN BƯỚC';
-        return (log.action || 'CHI TIẾT').toUpperCase();
+        return (enrichedLog.action || 'CHI TIẾT').toUpperCase();
     })();
 
     const badgeClass = (() => {
-        if (log._outcome === 'rejected' || log.action?.includes('rejected')) {
+        if (enrichedLog._outcome === 'rejected' || enrichedLog.action?.includes('rejected')) {
             return 'bg-red-100 text-red-700 hover:bg-red-100';
         }
-        if (log._outcome === 'approved' || log.action === 'completed' || log.action?.includes('approved')) {
+        if (enrichedLog._outcome === 'approved' || enrichedLog.action === 'completed' || enrichedLog.action?.includes('approved')) {
             return 'bg-green-100 text-green-700 hover:bg-green-100';
         }
-        if (log.action === 'failed') return 'bg-red-100 text-red-700 hover:bg-red-100';
-        if (log.action === 'skipped') return 'bg-orange-100 text-orange-700 hover:bg-orange-100';
+        if (enrichedLog.action === 'failed') return 'bg-red-100 text-red-700 hover:bg-red-100';
+        if (enrichedLog.action === 'skipped') return 'bg-orange-100 text-orange-700 hover:bg-orange-100';
         return 'bg-blue-100 text-blue-700 hover:bg-blue-100';
     })();
 
-    const displayReason = log.reason || reason || (log.action === 'backward_move' ? 'Lùi bước' : '');
-    const displayNote = log.notes && !isWorkflowStep ? log.notes : note;
-    const displayPhotos = Array.isArray(log.photos) ? log.photos : [];
+    const displayReason = enrichedLog.reason || reason || (enrichedLog.action === 'backward_move' ? 'Lùi bước' : '');
+    const displayNote = enrichedLog.notes && !isWorkflowStep ? enrichedLog.notes : note;
+    const displayPhotos = Array.isArray(enrichedLog.photos) ? enrichedLog.photos : [];
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -109,8 +115,8 @@ export function WorkflowLogDetailDialog({
                         <Badge className={cn('text-[10px] font-bold px-2 py-0.5', badgeClass)}>
                             {actionBadge}
                         </Badge>
-                        {isWorkflowStep && log.step_name && (
-                            <span className="text-sm font-bold text-gray-700">{log.step_name}</span>
+                        {isWorkflowStep && enrichedLog.step_name && (
+                            <span className="text-sm font-bold text-gray-700">{enrichedLog.step_name}</span>
                         )}
                         {isTransitionLog && (
                             <span className="text-sm font-bold text-gray-700">
@@ -132,25 +138,25 @@ export function WorkflowLogDetailDialog({
                             <div className="flex items-center gap-2 text-xs">
                                 <User className="h-3.5 w-3.5 text-gray-400" />
                                 <span className="text-gray-500">Thực hiện bởi:</span>
-                                <span className="font-bold text-gray-800">{log.created_by_user?.name || 'Hệ thống'}</span>
+                                <span className="font-bold text-gray-800">{enrichedLog.created_by_user?.name || 'Hệ thống'}</span>
                             </div>
                             <div className="flex items-center gap-2 text-xs">
                                 <Clock className="h-3.5 w-3.5 text-gray-400" />
                                 <span className="text-gray-500">Vào lúc:</span>
-                                <span className="font-medium text-gray-800">{formatDateTime(log.created_at)}</span>
+                                <span className="font-medium text-gray-800">{formatDateTime(enrichedLog.created_at)}</span>
                             </div>
-                            {log.assigned_tech?.name && (
+                            {enrichedLog.assigned_tech?.name && (
                                 <div className="flex items-center gap-2 text-xs">
                                     <Wrench className="h-3.5 w-3.5 text-gray-400" />
                                     <span className="text-gray-500">KTV:</span>
-                                    <span className="font-medium text-gray-800">{log.assigned_tech.name}</span>
+                                    <span className="font-medium text-gray-800">{enrichedLog.assigned_tech.name}</span>
                                 </div>
                             )}
-                            {log.deadline_days > 0 && (
+                            {enrichedLog.deadline_days > 0 && (
                                 <div className="flex items-center gap-2 text-xs">
                                     <Calendar className="h-3.5 w-3.5 text-gray-400" />
                                     <span className="text-gray-500">Hạn:</span>
-                                    <span className="font-medium text-gray-800">{log.deadline_days} ngày</span>
+                                    <span className="font-medium text-gray-800">{enrichedLog.deadline_days} ngày</span>
                                 </div>
                             )}
                         </div>

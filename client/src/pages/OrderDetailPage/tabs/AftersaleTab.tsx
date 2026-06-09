@@ -17,6 +17,11 @@ import type { Order, OrderItem } from '@/hooks/useOrders';
 import type { WorkflowKanbanGroup } from '../types';
 import { getGroupAfterSaleStage } from '../constants';
 import {
+    getAfter1DebtToAfter2ValidationErrors,
+    getAfter1ToDebtValidationErrors,
+    showAfterSaleValidationToast,
+} from '../afterSaleValidation';
+import {
     MobileKanbanColumnTabs,
     MobileKanbanMoveBar,
     buildKanbanDropResult,
@@ -557,15 +562,10 @@ export function AftersaleTab({
         const isCustomerItem = !!draggedGroup.product.is_customer_item;
 
         if (result.source.droppableId === 'after1' && newStage === 'after1_debt') {
-            const hasPhotos = draggedGroup.product.completion_photos && draggedGroup.product.completion_photos.length > 0;
-            const hasReceiver = order.aftersale_receiver_name;
+            const validationErrors = getAfter1ToDebtValidationErrors(order, draggedGroup.product);
 
-            if (!hasReceiver || !hasPhotos) {
-                let errorMsg = "Vui lòng hoàn thành để chuyển bước:";
-                if (!hasReceiver) errorMsg += "\n- Cần điền tên \"Người chụp After\"";
-                if (!hasPhotos) errorMsg += "\n- Cần upload ít nhất một \"Ảnh hoàn thiện\"";
-                
-                toast.error(errorMsg, { duration: 5000 });
+            if (validationErrors.length > 0) {
+                showAfterSaleValidationToast(validationErrors);
                 // Mở dialog kèm move callback — sau khi confirm thành công sẽ tự chuyển bước
                 const moveAction = async () => {
                     const api = isCustomerItem
@@ -589,15 +589,10 @@ export function AftersaleTab({
         }
 
         if (result.source.droppableId === 'after1_debt' && newStage === 'after2') {
-            const hasNames = order.debt_checked_by_name;
-            const isDebtChecked = order.debt_checked;
+            const validationErrors = getAfter1DebtToAfter2ValidationErrors(order);
 
-            if (!isDebtChecked || !hasNames) {
-                let errorMsg = "Vui lòng hoàn thành để chuyển bước:";
-                if (!isDebtChecked) errorMsg += "\n- Cần \"Xác nhận đã kiểm nợ\"";
-                if (!hasNames) errorMsg += "\n- Phải điền tên \"Người thu tiền\"";
-                
-                toast.error(errorMsg, { duration: 5000 });
+            if (validationErrors.length > 0) {
+                showAfterSaleValidationToast(validationErrors);
                 // Mở dialog kèm move callback
                 const moveAction = async () => {
                     const api = isCustomerItem

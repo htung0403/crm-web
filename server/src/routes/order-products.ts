@@ -280,7 +280,6 @@ router.patch('/:id/reset-services', authenticate, async (req: AuthenticatedReque
                 phase_stage: 'step1',
                 completed_at: null,
                 started_at: null,
-                updated_at: new Date().toISOString(),
             })
             .in('id', resetIds)
             .select();
@@ -797,7 +796,6 @@ router.patch('/:id/after-sale-data', authenticate, async (req: AuthenticatedRequ
                     current_phase: 'after_sale',
                     phase_stage: stage,
                     after_sale_stage: stage,
-                    updated_at: new Date().toISOString(),
                 })
                 .eq('order_product_id', id);
         }

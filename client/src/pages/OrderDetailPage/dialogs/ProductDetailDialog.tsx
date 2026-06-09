@@ -22,7 +22,6 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { ProductChat } from '@/components/orders/workflow/ProductChat';
@@ -36,6 +35,11 @@ import {
     getItemAfterSaleStage as resolveItemAfterSaleStage,
     pickOrderLevelAfterSalePatch,
 } from '../constants';
+import {
+    getAfter1DebtToAfter2ValidationErrors,
+    getAfter1ToDebtValidationErrors,
+    showAfterSaleValidationToast,
+} from '../afterSaleValidation';
 import { getWorkflowRequestLogDisplay, isWorkflowRequestLogAction } from '../workflowRequestLog';
 import { orderItemsApi, orderProductsApi, productChatsApi } from '@/lib/api';
 import { toast } from 'sonner';
@@ -248,7 +252,7 @@ export function ProductDetailDialog({
             fetchSales();
             fetchTechnicians();
             // Reset scroll position to top when dialog opens or room changes
-            const viewport = document.querySelector('.product-detail-scroll-area [data-radix-scroll-area-viewport]');
+            const viewport = document.querySelector('.product-detail-scroll-area');
             if (viewport) viewport.scrollTop = 0;
         }
     }, [open, fetchUsers, fetchSales, fetchTechnicians, roomId]);
@@ -409,6 +413,35 @@ export function ProductDetailDialog({
     const [savingStepData, setSavingStepData] = useState(false);
     const [showAccessoriesWarning, setShowAccessoriesWarning] = useState(false);
     const [showAccessoriesReturnWarning, setShowAccessoriesReturnWarning] = useState(false);
+
+    const pendingMoveValidationErrors = useMemo(() => {
+        if (!onConfirmAndMove || !isAftersale) return [];
+        const item = product || services[0];
+        if (roomId === 'after1') {
+            return getAfter1ToDebtValidationErrors(order, item, {
+                aftersale_receiver_name: formData.aftersale_receiver_name,
+                completion_photos: Array.isArray(formData.completion_photos) ? formData.completion_photos : [],
+            });
+        }
+        if (roomId === 'after1_debt') {
+            return getAfter1DebtToAfter2ValidationErrors(order, {
+                debt_checked: formData.debt_checked,
+                debt_checked_by_name: formData.debt_checked_by_name,
+            });
+        }
+        return [];
+    }, [
+        onConfirmAndMove,
+        isAftersale,
+        roomId,
+        order,
+        product,
+        services,
+        formData.aftersale_receiver_name,
+        formData.completion_photos,
+        formData.debt_checked,
+        formData.debt_checked_by_name,
+    ]);
 
     // Load sales_step_data from item when opening or when data updates
     useEffect(() => {
@@ -601,6 +634,34 @@ export function ProductDetailDialog({
     };
 
     const handleSave = async () => {
+        const itemForValidation = product || services[0];
+
+        if (isAftersale && onConfirmAndMove) {
+            if (roomId === 'after1') {
+                const errors = getAfter1ToDebtValidationErrors(order, itemForValidation, {
+                    aftersale_receiver_name: formData.aftersale_receiver_name,
+                    completion_photos: Array.isArray(formData.completion_photos)
+                        ? formData.completion_photos
+                        : [],
+                });
+                if (errors.length > 0) {
+                    showAfterSaleValidationToast(errors);
+                    return;
+                }
+            }
+
+            if (roomId === 'after1_debt') {
+                const errors = getAfter1DebtToAfter2ValidationErrors(order, {
+                    debt_checked: formData.debt_checked,
+                    debt_checked_by_name: formData.debt_checked_by_name,
+                });
+                if (errors.length > 0) {
+                    showAfterSaleValidationToast(errors);
+                    return;
+                }
+            }
+        }
+
         // Kiểm nợ: bắt buộc tick xác nhận trước khi lưu / chuyển bước
         if (isAftersale && roomId.startsWith('after1_debt')) {
             if (!formData.debt_checked) {
@@ -610,21 +671,6 @@ export function ProductDetailDialog({
             if (!formData.debt_checked_by_name?.trim()) {
                 toast.error('Vui lòng chọn Người thu tiền');
                 return;
-            }
-        }
-
-        // Ảnh hoàn thiện (after1): yêu cầu người chụp + ảnh khi đã tick kiểm nợ (nếu có)
-        if (isAftersale && roomId === 'after1') {
-            if (formData.debt_checked) {
-                if (!formData.debt_checked_by_name || !formData.aftersale_receiver_name) {
-                    toast.error("Vui lòng chọn Người thu tiền và Người chụp After");
-                    return;
-                }
-                const hasPhotos = formData.completion_photos && formData.completion_photos.length > 0;
-                if (!hasPhotos) {
-                    toast.error("Vui lòng upload ảnh hoàn thiện/kiểm nợ làm bằng chứng");
-                    return;
-                }
             }
         }
 
@@ -947,7 +993,11 @@ export function ProductDetailDialog({
     );
 
     const openLogDetail = (log: any) => {
-        setSelectedLogDetail(log);
+        const item = (product || services[0]) as { sales_step_data?: Record<string, unknown> } | undefined;
+        setSelectedLogDetail({
+            ...log,
+            _sales_step_data: item?.sales_step_data || null,
+        });
         setShowLogDetailDialog(true);
     };
 
@@ -1232,14 +1282,14 @@ export function ProductDetailDialog({
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="max-w-none w-screen h-screen p-0 overflow-hidden flex flex-col rounded-none border-none">
-                <DialogHeader className="p-4 border-b">
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <div className="bg-primary/10 p-2 rounded-lg shrink-0">
-                                <ShoppingBag className="h-5 w-5 text-primary" />
+                <DialogHeader className="shrink-0 p-3 md:p-4 border-b">
+                    <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 md:gap-3 min-w-0">
+                            <div className="bg-primary/10 p-1.5 md:p-2 rounded-lg shrink-0">
+                                <ShoppingBag className="h-4 w-4 md:h-5 md:w-5 text-primary" />
                             </div>
-                            <div className="space-y-0.5">
-                                <DialogTitle className="text-xl font-bold tracking-tight">
+                            <div className="space-y-0.5 min-w-0">
+                                <DialogTitle className="text-base md:text-xl font-bold tracking-tight truncate">
                                     {productName}
                                 </DialogTitle>
                                 <DialogDescription className="text-xs">
@@ -1274,15 +1324,32 @@ export function ProductDetailDialog({
                     </div>
                 </DialogHeader>
 
-                <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-                    {/* Product Info - Left Side */}
-                    <ScrollArea className="flex-1 p-4 md:max-w-[50%] border-r">
-                        <div className="space-y-4">
+                <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
+                    {/* Product Info - compact on mobile, sidebar on desktop */}
+                    <div className="product-detail-info-panel shrink-0 md:w-[38%] md:max-w-[440px] min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain touch-pan-y p-3 md:p-4 border-b md:border-b-0 md:border-r">
+                        <div className="space-y-3 md:space-y-4">
                             {allImages?.length > 0 && (
-                                <div className="flex flex-col xl:flex-row gap-4">
+                                <>
+                                {/* Mobile: compact horizontal thumbnails */}
+                                <div className="flex md:hidden gap-2 overflow-x-auto touch-pan-x overscroll-x-contain pb-1 -mx-1 px-1">
+                                    {allImages.map((img: string, idx: number) => (
+                                        <button
+                                            key={`mob-${idx}`}
+                                            type="button"
+                                            onClick={() => { setActiveImageIdx(idx); setMainPreviewUrl(img); }}
+                                            className={cn(
+                                                "w-14 h-14 shrink-0 rounded-lg overflow-hidden border-2 transition-all",
+                                                activeImageIdx === idx ? "border-primary ring-2 ring-primary/20" : "border-gray-100 opacity-70"
+                                            )}
+                                        >
+                                            <img src={img} alt="" className="w-full h-full object-cover" />
+                                        </button>
+                                    ))}
+                                </div>
+                                <div className="hidden md:flex flex-col xl:flex-row gap-4">
                                     {/* Main Large Image */}
                                     <div 
-                                        className="flex-[3] rounded-2xl overflow-hidden border-4 border-white shadow-xl bg-gray-50 max-h-[400px] xl:max-h-[500px] aspect-video relative group shrink-0 cursor-zoom-in"
+                                        className="flex-[3] rounded-2xl overflow-hidden border-4 border-white shadow-xl bg-gray-50 max-h-[220px] lg:max-h-[280px] aspect-video relative group shrink-0 cursor-zoom-in"
                                         onClick={() => setMainPreviewUrl(allImages[activeImageIdx])}
                                     >
                                         <img
@@ -1296,7 +1363,7 @@ export function ProductDetailDialog({
                                     </div>
 
                                     {/* Scrollable Thumbnails Right Side */}
-                                    <div className="flex-1 space-y-4 max-h-[400px] xl:max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                                    <div className="flex-1 space-y-4 max-h-[220px] lg:max-h-[280px] overflow-y-auto pr-2 custom-scrollbar">
                                         {/* Row 1: Original Product Photos */}
                                         {originalImages.length > 0 && (
                                             <div className="space-y-1.5">
@@ -1376,9 +1443,10 @@ export function ProductDetailDialog({
                                         )}
                                     </div>
                                 </div>
+                                </>
                             )}
 
-                            <div className="space-y-3">
+                            <div className="space-y-3 max-md:hidden">
                                 <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Thông tin chi tiết</h3>
                                 <div className="grid grid-cols-1 gap-3 text-sm bg-gray-50/50 p-3 rounded-xl border border-gray-100">
                                     {productItem?.product_type && (
@@ -1413,7 +1481,7 @@ export function ProductDetailDialog({
                             </div>
 
                             {/* Staff Info Card */}
-                            <div className="space-y-3">
+                            <div className="space-y-3 max-md:hidden">
                                 <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Nhân sự phụ trách</h3>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                     <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm flex items-center gap-3">
@@ -1451,7 +1519,7 @@ export function ProductDetailDialog({
                             </div>
 
                             {/* Stage Instructions Card */}
-                            <div className="bg-primary/5 p-4 rounded-xl border border-primary/10 space-y-2">
+                            <div className="bg-primary/5 p-4 rounded-xl border border-primary/10 space-y-2 max-md:hidden">
                                 <div className="flex items-center gap-2">
                                     <Sparkles className="h-4 w-4 text-primary" />
                                     <h3 className="font-bold text-xs uppercase tracking-tight text-primary">Hướng dẫn Giai đoạn này</h3>
@@ -1461,7 +1529,7 @@ export function ProductDetailDialog({
                                 </p>
                             </div>
 
-                            <div className="space-y-3">
+                            <div className="space-y-3 max-md:hidden">
                                     <Button
                                         variant="outline"
                                         size="sm"
@@ -1472,7 +1540,7 @@ export function ProductDetailDialog({
                                         UPSALE
                                     </Button>
                                 </div>
-                                <div className="space-y-2">
+                                <div className="space-y-2 max-md:hidden">
                                     {services.map((svc) => (
                                         <div key={svc.id} className="p-3.5 rounded-xl border bg-white shadow-sm hover:shadow-md transition-shadow group">
                                             <div className="flex items-center gap-2.5 font-bold text-sm text-gray-800">
@@ -1491,14 +1559,15 @@ export function ProductDetailDialog({
                                     ))}
                             </div>
                         </div>
-                    </ScrollArea>
+                    </div>
 
-                    {/* Contextual Right Sidebar */}
-                    <ScrollArea className="flex-1 bg-gray-50/40 product-detail-scroll-area">
-                        <div className="p-4 flex flex-col gap-4 min-h-full">
+                    {/* Form panel — takes remaining height, especially on mobile */}
+                    <div className="product-detail-form-panel flex-1 min-h-0 flex flex-col overflow-hidden bg-gray-50/40 md:min-w-0">
+                        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-y-contain touch-pan-y product-detail-scroll-area">
+                        <div className="p-3 md:p-4 flex flex-col gap-3 md:gap-4 min-h-0 pb-6">
                             {/* Consolidated Due Date / Pickup Block */}
                             <div className={cn(
-                                "p-4 rounded-2xl border shadow-sm space-y-3",
+                                "product-detail-form-card p-3 md:p-4 rounded-2xl border shadow-sm space-y-3 shrink-0",
                                 isAftersale ? "bg-blue-50/50 border-blue-100" : "bg-white border-gray-100"
                             )}>
                                 <div className={cn(
@@ -1571,6 +1640,16 @@ export function ProductDetailDialog({
 
                             {isAftersale && order ? (
                                 <div className="flex-1 flex flex-col gap-4">
+                                    {pendingMoveValidationErrors.length > 0 && (
+                                        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">
+                                            <p className="font-bold mb-1.5">Cần hoàn thành trước khi chuyển bước:</p>
+                                            <ul className="list-disc pl-4 space-y-0.5">
+                                                {pendingMoveValidationErrors.map((line) => (
+                                                    <li key={line}>{line}</li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
                                     {(roomId.startsWith('after1') || roomId.startsWith('after4')) && (
                                         <div className="space-y-3">
                                             {/* Received Product Photos */}
@@ -2351,8 +2430,8 @@ export function ProductDetailDialog({
                                     )}
 
                                     {isAftersale && (
-                                        <div className="flex-1 flex flex-col min-h-[400px] gap-6 pt-6 border-t mt-4">
-                                            <div className="flex-1 flex flex-col min-h-[250px]">
+                                        <div className="flex flex-col min-h-0 gap-4 md:gap-6 pt-4 md:pt-6 border-t mt-2 md:mt-4">
+                                            <div className="flex flex-col min-h-0 max-md:max-h-[200px] md:min-h-[220px]">
                                                 <div className="flex items-center gap-2 mb-2">
                                                     <MessageSquare className="h-3.5 w-3.5 text-gray-400" />
                                                     <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Thảo luận nội bộ</h4>
@@ -2367,18 +2446,18 @@ export function ProductDetailDialog({
                                                 />
                                             </div>
 
-                                            <div className="flex-1 flex flex-col min-h-[150px]">
+                                            <div className="flex flex-col min-h-0">
                                                 <div className="flex items-center gap-2 mb-2">
                                                     <History className="h-3.5 w-3.5 text-gray-400" />
                                                     <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Lịch sử thay đổi</h4>
                                                 </div>
-                                                <ScrollArea className="flex-1 bg-white rounded-xl border border-gray-100 p-3">
+                                                <div className="flex-1 min-h-0 max-h-[180px] md:max-h-[240px] overflow-y-auto touch-pan-y overscroll-y-contain bg-white rounded-xl border border-gray-100 p-3">
                                                     <div className="space-y-3">
                                                         {roomLogs.length > 0 ? roomLogs.map(renderLogItem) : (
                                                             <div className="text-center py-8 text-gray-400 italic text-[11px]">Chưa có lịch sử thay đổi</div>
                                                         )}
                                                     </div>
-                                                </ScrollArea>
+                                                </div>
                                             </div>
                                         </div>
                                     )}
@@ -2498,8 +2577,8 @@ export function ProductDetailDialog({
                                         </div>
                                     </div>
 
-                                    <div className="flex-1 flex flex-col min-h-[400px] gap-6 pt-6 border-t mt-4">
-                                        <div className="flex-1 flex flex-col min-h-[250px]">
+                                    <div className="flex flex-col min-h-0 gap-4 md:gap-6 pt-4 md:pt-6 border-t mt-2 md:mt-4">
+                                        <div className="flex flex-col min-h-0 max-md:max-h-[200px] md:min-h-[220px]">
                                             <div className="flex items-center gap-2 mb-2">
                                                 <MessageSquare className="h-3.5 w-3.5 text-gray-400" />
                                                 <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Thảo luận nội bộ</h4>
@@ -2514,18 +2593,18 @@ export function ProductDetailDialog({
                                             />
                                         </div>
 
-                                        <div className="flex-1 flex flex-col min-h-[150px]">
+                                        <div className="flex flex-col min-h-0">
                                             <div className="flex items-center gap-2 mb-2">
                                                 <History className="h-3.5 w-3.5 text-gray-400" />
                                                 <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Lịch sử thay đổi</h4>
                                             </div>
-                                            <ScrollArea className="flex-1 bg-white rounded-xl border border-gray-100 p-3">
+                                            <div className="flex-1 min-h-0 max-h-[180px] md:max-h-[240px] overflow-y-auto touch-pan-y overscroll-y-contain bg-white rounded-xl border border-gray-100 p-3">
                                                 <div className="space-y-3">
                                                     {roomLogs.length > 0 ? roomLogs.map(renderLogItem) : (
                                                         <div className="text-center py-8 text-gray-400 italic text-[11px]">Chưa có lịch sử thay đổi</div>
                                                     )}
                                                 </div>
-                                            </ScrollArea>
+                                            </div>
                                         </div>
                                     </div>
                                     <div className="sticky bottom-0 -mx-4 -mb-4 mt-auto p-4 bg-white/95 backdrop-blur-sm border-t border-gray-200/50 shadow-[0_-10px_20px_-10px_rgba(0,0,0,0.05)] z-50 order-last space-y-3">
@@ -2606,7 +2685,7 @@ export function ProductDetailDialog({
                                     {/* Step 1: Nhận đồ - Receiver Info */}
                                     {roomId === 'step1' && (
                                         <>
-                                            <div className="bg-white p-5 rounded-2xl border border-blue-100 shadow-sm space-y-4">
+                                            <div className="product-detail-form-card bg-white p-4 md:p-5 rounded-2xl border border-blue-100 shadow-sm space-y-4">
                                                 <div className="flex items-center gap-2 text-blue-700 mb-1">
                                                     <UserIcon className="h-4 w-4" />
                                                     <span className="text-xs font-black uppercase tracking-tight">Thông tin người nhận đồ</span>
@@ -2716,7 +2795,7 @@ export function ProductDetailDialog({
                                     {/* Step 2: TAGS + FORM TÚI + SHOESTREE */}
                                     {roomId === 'step2' && (
                                         <>
-                                            <div className="bg-white p-5 rounded-2xl border border-green-100 shadow-sm space-y-4">
+                                            <div className="product-detail-form-card bg-white p-4 md:p-5 rounded-2xl border border-green-100 shadow-sm space-y-4">
                                                 <div className="flex items-center gap-2 text-green-700 mb-1">
                                                     <Tag className="h-4 w-4" />
                                                     <span className="text-xs font-black uppercase tracking-tight">Gắn Tags & Phụ kiện bảo quản</span>
@@ -2760,7 +2839,7 @@ export function ProductDetailDialog({
                                     {/* Step 3: Trao đổi KT - Technician Exchange */}
                                     {roomId === 'step3' && (
                                         <>
-                                            <div className="bg-white p-5 rounded-2xl border border-orange-100 shadow-sm space-y-4">
+                                            <div className="product-detail-form-card bg-white p-4 md:p-5 rounded-2xl border border-orange-100 shadow-sm space-y-4">
                                                 <div className="flex items-center gap-2 text-orange-700 mb-1">
                                                     <ClipboardList className="h-4 w-4" />
                                                     <span className="text-xs font-black uppercase tracking-tight">Trao đổi với Kỹ thuật</span>
@@ -2868,8 +2947,8 @@ export function ProductDetailDialog({
                                         </>
                                     )}
 
-                                        <div className="flex-1 flex flex-col min-h-[250px] gap-4">
-                                            <div className="flex-1 flex flex-col min-h-[250px]">
+                                        <div className="flex flex-col min-h-0 gap-4">
+                                            <div className="flex flex-col min-h-0 max-md:max-h-[200px] md:min-h-[220px]">
                                                 <div className="flex items-center gap-2 mb-2">
                                                     <MessageSquare className="h-3.5 w-3.5 text-gray-400" />
                                                     <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Trao đổi nội bộ</h4>
@@ -2884,24 +2963,24 @@ export function ProductDetailDialog({
                                                 />
                                             </div>
 
-                                            <div className="flex-1 flex flex-col min-h-[150px]">
+                                            <div className="flex flex-col min-h-0">
                                                 <div className="flex items-center gap-2 mb-2">
                                                     <History className="h-3.5 w-3.5 text-gray-400" />
                                                     <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Lịch sử thay đổi</h4>
                                                 </div>
-                                                <ScrollArea className="flex-1 bg-white rounded-xl border border-gray-100 p-3">
+                                                <div className="flex-1 min-h-0 max-h-[180px] md:max-h-[240px] overflow-y-auto touch-pan-y overscroll-y-contain bg-white rounded-xl border border-gray-100 p-3">
                                                     <div className="space-y-3">
                                                         {roomLogs.length > 0 ? roomLogs.map(renderLogItem) : (
                                                             <div className="text-center py-8 text-gray-400 italic text-[11px]">Chưa có lịch sử thay đổi</div>
                                                         )}
                                                     </div>
-                                                </ScrollArea>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
                                 ) : (
                                 <div className="flex-1 flex flex-col gap-4 min-h-0">
-                                    <div className="flex-1 flex flex-col min-h-[250px]">
+                                    <div className="flex flex-col min-h-0 max-md:max-h-[200px] md:min-h-[220px]">
                                         <div className="flex items-center justify-between mb-2">
                                             <h3 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Trao đổi nội bộ</h3>
                                             <Badge variant="secondary" className="text-[10px] px-2 py-0 font-bold">
@@ -2921,18 +3000,18 @@ export function ProductDetailDialog({
                                         )}
                                     </div>
 
-                                    <div className="flex-1 flex flex-col min-h-[150px]">
+                                    <div className="flex flex-col min-h-0">
                                         <div className="flex items-center gap-2 mb-2">
                                             <History className="h-3.5 w-3.5 text-gray-400" />
                                             <h4 className="font-semibold text-xs uppercase tracking-[0.2em] text-gray-400">Lịch sử thay đổi</h4>
                                         </div>
-                                        <ScrollArea className="flex-1 bg-white rounded-xl border border-gray-100 p-3">
+                                        <div className="flex-1 min-h-0 max-h-[180px] md:max-h-[240px] overflow-y-auto touch-pan-y overscroll-y-contain bg-white rounded-xl border border-gray-100 p-3">
                                             <div className="space-y-3">
                                                 {roomLogs.length > 0 ? roomLogs.map(renderLogItem) : (
                                                     <div className="text-center py-8 text-gray-400 italic text-[11px]">Chưa có lịch sử thay đổi</div>
                                                 )}
                                             </div>
-                                        </ScrollArea>
+                                        </div>
                                     </div>
 
                                     {/* Mark Failed Button - Only for Workflow stages */}
@@ -2953,7 +3032,8 @@ export function ProductDetailDialog({
                                 </div>
                             )}
                         </div>
-                    </ScrollArea>
+                        </div>
+                    </div>
                 </div>
 
             <WorkflowLogDetailDialog 

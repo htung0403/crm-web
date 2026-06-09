@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Send, User, Loader2, Image as ImageIcon, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
     Dialog,
@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { api, productChatsApi, usersApi } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
-import { formatDateTime } from '@/lib/utils';
+import { formatDateTime, cn } from '@/lib/utils';
 import { uploadFile } from '@/lib/supabase';
 import { toast } from 'sonner';
 
@@ -76,7 +76,9 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
     const [allUsers, setAllUsers] = useState<UserInfo[]>([]);
     const [mentionSearch, setMentionSearch] = useState('');
     const [showMentionList, setShowMentionList] = useState(false);
-    const [mentionPosition, setMentionPosition] = useState({ top: 0, left: 0 });
+    const [mentionAnchor, setMentionAnchor] = useState<{ top: number; left: number; width: number } | null>(null);
+    const [cursorPosition, setCursorPosition] = useState(0);
+    const [selectedMentionIndex, setSelectedMentionIndex] = useState(0);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -103,28 +105,44 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
         try {
             const response = await usersApi.getMentionable();
             const users = response.data?.data?.users;
-            if (Array.isArray(users)) {
+            if (Array.isArray(users) && users.length > 0) {
                 setAllUsers(users);
+                return;
             }
         } catch (error) {
             console.error('Error fetching mentionable users:', error);
-            try {
-                const [techRes, salesRes] = await Promise.all([
-                    api.get('/users/technicians'),
-                    api.get('/users/sales'),
-                ]);
-                const merged = [
-                    ...(techRes.data?.data?.users ?? []),
-                    ...(salesRes.data?.data?.users ?? []),
-                ] as UserInfo[];
-                const byId = new Map<string, UserInfo>();
-                merged.forEach((u) => byId.set(u.id, u));
-                setAllUsers([...byId.values()]);
-            } catch (fallbackErr) {
-                console.error('Fallback mention users failed:', fallbackErr);
-            }
+        }
+
+        try {
+            const [techRes, salesRes] = await Promise.all([
+                api.get('/users/technicians'),
+                api.get('/users/sales'),
+            ]);
+            const merged = [
+                ...(techRes.data?.data?.users ?? []),
+                ...(salesRes.data?.data?.users ?? []),
+            ] as UserInfo[];
+            const byId = new Map<string, UserInfo>();
+            merged.forEach((u) => byId.set(u.id, u));
+            setAllUsers([...byId.values()]);
+        } catch (fallbackErr) {
+            console.error('Fallback mention users failed:', fallbackErr);
         }
     };
+
+    const updateMentionAnchor = useCallback(() => {
+        if (!inputRef.current) return;
+        const rect = inputRef.current.getBoundingClientRect();
+        setMentionAnchor({
+            top: rect.top,
+            left: rect.left,
+            width: rect.width,
+        });
+    }, []);
+
+    const filteredMentionUsers = allUsers.filter((u) =>
+        normalizeVn(u.name).includes(normalizeVn(mentionSearch))
+    );
 
     useEffect(() => {
         fetchMessages(true);
@@ -217,47 +235,51 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
         }
     };
 
-    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const value = e.target.value;
-        setNewMessage(value);
-
-        // Detect mention
-        const cursorPosition = e.target.selectionStart || 0;
-        const textBeforeCursor = value.substring(0, cursorPosition);
+    const syncMentionState = (value: string, caret: number) => {
+        setCursorPosition(caret);
+        const textBeforeCursor = value.substring(0, caret);
         const lastAt = textBeforeCursor.lastIndexOf('@');
 
         if (lastAt !== -1) {
             const search = textBeforeCursor.substring(lastAt + 1);
-            // Only show if it's the start of word or after space
-            if (lastAt === 0 || textBeforeCursor[lastAt - 1] === ' ') {
-                const matches = allUsers.filter(u =>
-                    normalizeVn(u.name).includes(normalizeVn(search))
-                );
+            const isAtStartOrAfterSpace = lastAt === 0 || textBeforeCursor[lastAt - 1] === ' ';
 
-                if (matches.length > 0 || search === '' || allUsers.length === 0) {
-                    setMentionSearch(search);
-                    setShowMentionList(true);
-                    return;
-                }
+            if (isAtStartOrAfterSpace && !search.includes(' ')) {
+                setMentionSearch(search);
+                setShowMentionList(true);
+                setSelectedMentionIndex(0);
+                updateMentionAnchor();
+                return;
             }
         }
+
         setShowMentionList(false);
+        setMentionAnchor(null);
+    };
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value;
+        const caret = e.target.selectionStart || 0;
+        setNewMessage(value);
+        syncMentionState(value, caret);
     };
 
     const handleMentionSelect = (user: UserInfo) => {
-        const cursorPosition = inputRef.current?.selectionStart || 0;
         const textBeforeCursor = newMessage.substring(0, cursorPosition);
         const textAfterCursor = newMessage.substring(cursorPosition);
         const lastAt = textBeforeCursor.lastIndexOf('@');
+        if (lastAt === -1) return;
 
-        const newText = textBeforeCursor.substring(0, lastAt) + '@' + user.name + ' ' + textAfterCursor;
+        const newText = `${textBeforeCursor.substring(0, lastAt)}@${user.name} ${textAfterCursor}`;
+        const newCursorPos = lastAt + user.name.length + 2;
+
         setNewMessage(newText);
         setShowMentionList(false);
+        setMentionAnchor(null);
+        setCursorPosition(newCursorPos);
 
-        // Focus back to input
         setTimeout(() => {
             inputRef.current?.focus();
-            const newCursorPos = lastAt + user.name.length + 2;
             inputRef.current?.setSelectionRange(newCursorPos, newCursorPos);
         }, 0);
     };
@@ -364,7 +386,7 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
                 50% { background-color: rgba(250, 204, 21, 0.35); }
             }
         `}</style>
-            <div className="flex flex-col flex-1 border rounded-lg bg-gray-50/50 overflow-hidden min-h-0">
+            <div className="flex flex-col flex-1 border rounded-lg bg-gray-50/50 min-h-0">
                 <div className="p-3 border-b bg-white rounded-t-lg">
                     <h4 className="text-sm font-semibold flex items-center gap-2">
                         <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
@@ -372,7 +394,7 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
                     </h4>
                 </div>
 
-                <ScrollArea className="flex-1 min-h-0 p-4">
+                <div className="flex-1 min-h-0 overflow-y-auto overscroll-y-contain touch-pan-y p-4">
                     <div className="space-y-4">
                         {messages.length === 0 ? (
                             <div className="text-center py-8 text-muted-foreground text-sm italic">
@@ -423,7 +445,7 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
                         )}
                         <div ref={scrollRef} />
                     </div>
-                </ScrollArea>
+                </div>
 
                 {selectedImage && (
                     <div className="px-3 py-2 bg-gray-50 border-t flex items-center gap-2">
@@ -440,7 +462,7 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
                     </div>
                 )}
 
-                <form onSubmit={handleSend} className="p-3 bg-white border-t rounded-b-lg flex gap-2 items-center">
+                <form onSubmit={handleSend} className="relative z-20 p-3 bg-white border-t rounded-b-lg flex gap-2 items-center overflow-visible">
                     <input
                         ref={fileInputRef}
                         type="file"
@@ -459,46 +481,78 @@ export function ProductChat({ orderId, entityId, entityType, roomId, currentUser
                     >
                         {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImageIcon className="h-4 w-4" />}
                     </Button>
-                    <div className="flex-1 relative">
-                        {showMentionList && (
-                            <div className="absolute bottom-full left-0 mb-2 w-64 max-h-48 bg-white border rounded-lg shadow-xl overflow-y-auto z-50">
+                    <div className="flex-1 relative overflow-visible">
+                        {showMentionList && mentionAnchor && typeof document !== 'undefined' && createPortal(
+                            <div
+                                className="fixed z-[300] w-64 max-h-48 bg-white border rounded-lg shadow-2xl overflow-y-auto"
+                                style={{
+                                    top: mentionAnchor.top - 8,
+                                    left: mentionAnchor.left,
+                                    transform: 'translateY(-100%)',
+                                }}
+                            >
                                 <div className="p-2 text-[10px] font-bold text-gray-400 border-b bg-gray-50 uppercase tracking-wider">
                                     Nhắc tên đồng nghiệp
                                 </div>
-                                {allUsers
-                                    .filter(u => normalizeVn(u.name).includes(normalizeVn(mentionSearch)))
-                                    .map(u => (
-                                        <button
-                                            key={u.id}
-                                            type="button"
-                                            onClick={() => handleMentionSelect(u)}
-                                            className="w-full text-left px-3 py-2 hover:bg-primary/10 flex items-center gap-2 transition-colors border-b last:border-0"
-                                        >
-                                            <Avatar className="h-6 w-6">
-                                                <AvatarImage src={u.avatar} />
-                                                <AvatarFallback><User className="h-3 w-3" /></AvatarFallback>
-                                            </Avatar>
-                                            <div className="flex flex-col">
-                                                <span className="text-sm font-medium">{u.name}</span>
-                                                <span className="text-[10px] text-gray-500 uppercase">{u.role}</span>
-                                            </div>
-                                        </button>
-                                    ))
-                                }
-                                {allUsers.filter(u => normalizeVn(u.name).includes(normalizeVn(mentionSearch))).length === 0 && (
-                                    <div className="p-4 text-center text-xs text-gray-400">Không tìm thấy người dùng</div>
+                                {filteredMentionUsers.map((u, index) => (
+                                    <button
+                                        key={u.id}
+                                        type="button"
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onClick={() => handleMentionSelect(u)}
+                                        className={cn(
+                                            'w-full text-left px-3 py-2 flex items-center gap-2 transition-colors border-b last:border-0',
+                                            index === selectedMentionIndex ? 'bg-primary/10 text-primary' : 'hover:bg-primary/10'
+                                        )}
+                                    >
+                                        <Avatar className="h-6 w-6">
+                                            <AvatarImage src={u.avatar} />
+                                            <AvatarFallback><User className="h-3 w-3" /></AvatarFallback>
+                                        </Avatar>
+                                        <div className="flex flex-col">
+                                            <span className="text-sm font-medium">{u.name}</span>
+                                            <span className="text-[10px] text-gray-500 uppercase">{u.role}</span>
+                                        </div>
+                                    </button>
+                                ))}
+                                {filteredMentionUsers.length === 0 && (
+                                    <div className="p-4 text-center text-xs text-gray-400">
+                                        {allUsers.length === 0 ? 'Đang tải danh sách nhân viên...' : 'Không tìm thấy người dùng'}
+                                    </div>
                                 )}
-                            </div>
+                            </div>,
+                            document.body
                         )}
                         <Input
                             ref={inputRef}
                             placeholder="Nhập tin nhắn... (Gõ @ để nhắc tên)"
                             value={newMessage}
                             onChange={handleInputChange}
+                            onClick={(e) => syncMentionState(newMessage, e.currentTarget.selectionStart || 0)}
+                            onKeyUp={(e) => syncMentionState(newMessage, e.currentTarget.selectionStart || 0)}
                             className="w-full"
                             disabled={sending}
                             onKeyDown={(e) => {
-                                if (e.key === 'Escape') setShowMentionList(false);
+                                if (!showMentionList) return;
+
+                                if (e.key === 'Escape') {
+                                    setShowMentionList(false);
+                                    setMentionAnchor(null);
+                                    return;
+                                }
+
+                                if (e.key === 'ArrowDown' && filteredMentionUsers.length > 0) {
+                                    e.preventDefault();
+                                    setSelectedMentionIndex((prev) => (prev + 1) % filteredMentionUsers.length);
+                                } else if (e.key === 'ArrowUp' && filteredMentionUsers.length > 0) {
+                                    e.preventDefault();
+                                    setSelectedMentionIndex((prev) =>
+                                        prev <= 0 ? filteredMentionUsers.length - 1 : prev - 1
+                                    );
+                                } else if ((e.key === 'Enter' || e.key === 'Tab') && filteredMentionUsers.length > 0) {
+                                    e.preventDefault();
+                                    handleMentionSelect(filteredMentionUsers[selectedMentionIndex]);
+                                }
                             }}
                         />
                     </div>

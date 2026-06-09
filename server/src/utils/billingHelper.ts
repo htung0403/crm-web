@@ -320,6 +320,19 @@ export async function recalcOrderPaymentFromRecords(orderId: string): Promise<vo
     await syncOrderPayment(orderId);
 }
 
+async function cancelActiveTransactions(
+    applyFilter: (query: any) => any,
+): Promise<void> {
+    const now = new Date().toISOString();
+    const { error } = await applyFilter(
+        supabaseAdmin.from('transactions').update({ status: 'cancelled', updated_at: now }),
+    ).in('status', ['approved', 'pending']);
+
+    if (error) {
+        console.error('[BillingHelper] cancelActiveTransactions error:', error);
+    }
+}
+
 /**
  * Hủy phiếu thu/chi liên quan đơn + hoàn trạng thái thanh toán dòng hàng trên hóa đơn.
  */
@@ -332,37 +345,51 @@ export async function cancelRelatedPaymentsForInvoice(invoice: {
     order?: { order_code?: string } | null;
 }): Promise<void> {
     const orderId = invoice.order_id;
-    const orderCode = (invoice.order as { order_code?: string } | null)?.order_code;
+    let orderCode = (invoice.order as { order_code?: string } | null)?.order_code;
     const invoiceCode = invoice.invoice_code || '';
     const now = new Date().toISOString();
 
+    if (!orderCode && orderId) {
+        const { data: orderRow } = await supabaseAdmin
+            .from('orders')
+            .select('order_code')
+            .eq('id', orderId)
+            .maybeSingle();
+        orderCode = orderRow?.order_code;
+    }
+
     // Phiếu thu ghi trong đơn (payment_records) — cùng phạm vi hiển thị trên chi tiết HĐ
-    await supabaseAdmin
+    const { error: paymentRecordsError } = await supabaseAdmin
         .from('payment_records')
         .update({ transaction_status: 'cancelled', updated_at: now })
         .eq('order_id', orderId)
         .eq('transaction_status', 'approved');
 
-    // Phiếu thu Số Quỹ (transactions) — liên kết order_id / order_code, không có mã HĐ trong notes
-    const transClauses = [`order_id.eq.${orderId}`];
+    if (paymentRecordsError) {
+        console.error('[BillingHelper] cancel payment_records error:', paymentRecordsError);
+    }
+
+    // Phiếu thu Số Quỹ (transactions) — hủy theo từng tiêu chí để tránh lỗi .or()
+    await cancelActiveTransactions((query) => query.eq('order_id', orderId));
+
     if (orderCode) {
-        transClauses.push(`order_code.eq.${orderCode}`);
+        await cancelActiveTransactions((query) => query.eq('order_code', orderCode));
+        await cancelActiveTransactions((query) => query.ilike('notes', `%${orderCode}%`));
     }
+
     if (invoiceCode) {
-        transClauses.push(`notes.ilike.%${invoiceCode}%`);
+        await cancelActiveTransactions((query) => query.ilike('notes', `%${invoiceCode}%`));
     }
 
-    await supabaseAdmin
-        .from('transactions')
-        .update({ status: 'cancelled', updated_at: now })
-        .or(transClauses.join(','))
-        .in('status', ['approved', 'pending']);
-
-    await supabaseAdmin
+    const { error: financeError } = await supabaseAdmin
         .from('finance_transactions')
         .update({ status: 'cancelled', updated_at: now })
         .eq('invoice_id', invoice.id)
         .in('status', ['approved', 'pending']);
+
+    if (financeError) {
+        console.error('[BillingHelper] cancel finance_transactions error:', financeError);
+    }
 
     const itemIds = Array.isArray(invoice.order_item_ids) ? invoice.order_item_ids : [];
     if (itemIds.length > 0) {
