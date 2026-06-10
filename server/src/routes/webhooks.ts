@@ -303,13 +303,23 @@ router.get('/orders/overdue-pickup', verifyWebhookSecret, async (req: Request, r
                 id,
                 product_code,
                 name,
+                images,
                 due_at,
                 after_sale_stage,
+                services:order_product_services(
+                    id,
+                    item_name,
+                    status,
+                    technician_id,
+                    technician:users!order_product_services_technician_id_fkey(id, name, telegram_chat_id)
+                ),
                 order:orders!inner(
                     id,
                     order_code,
-                    customer:customers!inner(id, name, phone),
-                    sales_user:users!orders_sales_id_fkey(id, name, telegram_chat_id)
+                    sales_id,
+                    due_at,
+                    customer:customers!inner(id, name, phone, zalo_user_id, customer_zalo_user_id),
+                    sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)
                 )
             `)
             .lt('due_at', now)
@@ -345,20 +355,81 @@ router.get('/orders/overdue-pickup', verifyWebhookSecret, async (req: Request, r
 
         // 3. Format response
         const results = (overdueProducts || []).map((p: any) => {
-            const order = p.order;
-            const customerPhone = order?.customer?.phone;
+            const order = Array.isArray(p.order) ? p.order[0] : p.order;
+            const customer = Array.isArray(order?.customer) ? order.customer[0] : order?.customer;
+            const saleUser = Array.isArray(order?.sales_user) ? order.sales_user[0] : order?.sales_user;
+            const services = Array.isArray(p.services) ? p.services : [];
+            const primaryService = services[0] || null;
+            const technician = Array.isArray(primaryService?.technician) ? primaryService.technician[0] : primaryService?.technician;
+            const productImageUrl = Array.isArray(p.images)
+                ? p.images[0] || null
+                : (typeof p.images === 'string' ? p.images : null);
+            const customerPhone = customer?.phone;
             const pancakeId = customerPhone ? leadsByPhone[customerPhone] : null;
+            const orderCode = order?.order_code || null;
+            const productCode = p.product_code || null;
+            const productName = p.name || null;
+            const customerName = customer?.name || null;
+            const serviceName = primaryService?.item_name || productName;
 
             return {
-                order_code: order?.order_code,
-                product_code: p.product_code,
-                product_name: p.name,
-                customer_name: order?.customer?.name,
+                event: 'technical.deadline.overdue',
+                order_id: order?.id || null,
+                order_code: orderCode,
+                hd_code: orderCode,
+                invoice_code: orderCode,
+                product_id: p.id,
+                product_code: productCode,
+                sp_code: productCode,
+                product_name: productName,
+                service_name: serviceName,
+                customer_id: customer?.id || null,
+                customer_name: customerName,
                 customer_phone: customerPhone,
-                sale_name: order?.sales_user?.name || 'N/A',
-                sale_telegram_id: order?.sales_user?.telegram_chat_id || null,
+                customer_zalo_user_id: customer?.zalo_user_id || customer?.customer_zalo_user_id || null,
+                sale_id: order?.sales_id || null,
+                sale_name: saleUser?.name || 'N/A',
+                sale_telegram_id: saleUser?.telegram_chat_id || null,
+                technician_id: primaryService?.technician_id || null,
+                technician_name: technician?.name || null,
+                technician_telegram_id: technician?.telegram_chat_id || null,
                 due_at: p.due_at,
+                deadline_at: p.due_at,
                 after_sale_stage: p.after_sale_stage,
+                product_image_url: productImageUrl,
+                order: {
+                    id: order?.id || null,
+                    order_code: orderCode,
+                    due_at: order?.due_at || null,
+                    return_due_at: p.due_at || order?.due_at || null,
+                },
+                item: {
+                    id: p.id,
+                    product_code: productCode,
+                    product_name: productName,
+                    service_name: serviceName,
+                    deadline_at: p.due_at,
+                    after_sale_stage: p.after_sale_stage,
+                },
+                customer: {
+                    id: customer?.id || null,
+                    name: customerName,
+                    phone: customerPhone,
+                    zalo_user_id: customer?.zalo_user_id || customer?.customer_zalo_user_id || null,
+                },
+                staff: {
+                    sale: saleUser ? {
+                        id: saleUser.id,
+                        name: saleUser.name,
+                        role: saleUser.role || 'sale',
+                        telegram_chat_id: saleUser.telegram_chat_id || null,
+                    } : null,
+                    technician: technician ? {
+                        id: technician.id,
+                        name: technician.name,
+                        telegram_chat_id: technician.telegram_chat_id || null,
+                    } : null,
+                },
                 pancake_link: pancakeId
                     ? `https://pages.pancake.vn/conversations/${pancakeId}`
                     : null,
