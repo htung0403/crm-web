@@ -66,6 +66,39 @@ function notifyOrderSalesUser(event: string, context: any, extra: Record<string,
     });
 }
 
+function notifyOrderCustomerZalo(event: string, context: any, extra: Record<string, any> = {}) {
+    const zaloUserId = context?.customer?.zalo_user_id || context?.customer?.customer_zalo_user_id;
+    if (!zaloUserId) {
+        console.warn(`[OrderNotify] Skip ${event}: customer has no zalo_user_id`);
+        if (context?.salesUser?.id || context?.order?.sales_id) {
+            notifyOrderSalesUser('customer.zalo_user_id.missing', context, {
+                missing_event: event,
+                target_role: context.salesUser?.role || 'sale',
+            });
+        }
+        return;
+    }
+
+    notifyCrmMasterUser(event, {
+        target_user_id: zaloUserId,
+        target_role: 'customer',
+        channel: 'zalo',
+        order: {
+            id: context.order.id,
+            order_code: context.order.order_code,
+            return_due_at: context.order.due_at || null,
+        },
+        customer: context.customer ? {
+            id: context.customer.id,
+            name: context.customer.name,
+            phone: context.customer.phone,
+            zalo_user_id: zaloUserId,
+        } : null,
+        links: {},
+        ...extra,
+    });
+}
+
 // =====================================================
 // ORDER CODE GENERATION HELPERS
 // =====================================================
@@ -2080,29 +2113,29 @@ router.patch('/:id', authenticate, async (req: AuthenticatedRequest, res, next) 
         }
 
         const orderCustomer = Array.isArray((order as any).customer) ? (order as any).customer[0] : (order as any).customer;
-        const customerZaloUserId = orderCustomer?.zalo_user_id || orderCustomer?.customer_zalo_user_id || null;
+        const orderSalesUser = Array.isArray((order as any).sales_user) ? (order as any).sales_user[0] : (order as any).sales_user;
+        const orderNotifyContext = { order, customer: orderCustomer, salesUser: orderSalesUser };
 
-        if (delivery_code !== undefined && delivery_code && customerZaloUserId) {
-            notifyCrmMasterUser('shipping.tracking_code.updated', {
-                target_user_id: order.customer_id,
-                target_role: 'customer',
-                channel: 'zalo',
-                order: { id: order.id, order_code: order.order_code, return_due_at: order.due_at || null },
-                customer: { name: orderCustomer?.name || null, phone: orderCustomer?.phone || null, zalo_user_id: customerZaloUserId },
-                tracking_code: delivery_code,
-                delivery_carrier: delivery_carrier || order.delivery_carrier || null,
-                links: { crm_url: buildCrmOrderUrl(order.order_code || order.id) },
+        if (delivery_code !== undefined && delivery_code) {
+            notifyOrderCustomerZalo('shipping.tracking_code.updated', orderNotifyContext, {
+                shipping: {
+                    tracking_code: delivery_code,
+                    carrier_name: delivery_carrier || order.delivery_carrier || null,
+                    shipped_at: order.updated_at || new Date().toISOString(),
+                    note: delivery_notes || order.delivery_notes || null,
+                },
+                sale_id: order.sales_id || null,
             });
         }
 
-        if ((feedback_requested === true || hd_sent === true) && customerZaloUserId) {
-            notifyCrmMasterUser('aftersale.care_feedback.started', {
-                target_user_id: order.customer_id,
-                target_role: 'customer',
-                channel: 'zalo',
-                order: { id: order.id, order_code: order.order_code, return_due_at: order.due_at || null },
-                customer: { name: orderCustomer?.name || null, phone: orderCustomer?.phone || null, zalo_user_id: customerZaloUserId },
-                links: { crm_url: buildCrmOrderUrl(order.order_code || order.id) },
+        if (feedback_requested === true || hd_sent === true) {
+            notifyOrderCustomerZalo('aftersale.care_feedback.started', orderNotifyContext, {
+                aftersale: {
+                    care_type: 'care_feedback',
+                    template_code: 'care_feedback_default',
+                    scheduled_at: new Date().toISOString(),
+                },
+                sale_id: order.sales_id || null,
             });
         }
 

@@ -357,13 +357,15 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
 
         const transactionLabel = type === 'income' ? 'phiếu thu' : 'phiếu chi';
         notifyFinanceEvent({
-            event: 'transaction.created',
+            event: type === 'income' ? 'receipt.created' : 'payment_voucher.created',
             title: type === 'income' ? 'Phiếu thu mới' : 'Phiếu chi mới',
             message: `${req.user!.name} đã tạo ${transactionLabel} ${transaction.code}`,
             actor: req.user!,
             recipientUserIds: [transaction.created_by],
             data: {
                 transaction_id: transaction.id,
+                receipt_id: type === 'income' ? transaction.id : null,
+                payment_voucher_id: type === 'expense' ? transaction.id : null,
                 code: transaction.code,
                 type: transaction.type,
                 category: transaction.category,
