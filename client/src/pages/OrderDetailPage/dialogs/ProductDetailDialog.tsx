@@ -419,14 +419,14 @@ export function ProductDetailDialog({
         const item = product || services[0];
         if (roomId === 'after1') {
             return getAfter1ToDebtValidationErrors(order, item, {
-                aftersale_receiver_name: formData.aftersale_receiver_name,
+                aftersale_receiver_name: formData.aftersale_receiver_name ?? undefined,
                 completion_photos: Array.isArray(formData.completion_photos) ? formData.completion_photos : [],
             });
         }
         if (roomId === 'after1_debt') {
             return getAfter1DebtToAfter2ValidationErrors(order, {
                 debt_checked: formData.debt_checked,
-                debt_checked_by_name: formData.debt_checked_by_name,
+                debt_checked_by_name: formData.debt_checked_by_name ?? undefined,
             });
         }
         return [];
@@ -639,7 +639,7 @@ export function ProductDetailDialog({
         if (isAftersale && onConfirmAndMove) {
             if (roomId === 'after1') {
                 const errors = getAfter1ToDebtValidationErrors(order, itemForValidation, {
-                    aftersale_receiver_name: formData.aftersale_receiver_name,
+                    aftersale_receiver_name: formData.aftersale_receiver_name ?? undefined,
                     completion_photos: Array.isArray(formData.completion_photos)
                         ? formData.completion_photos
                         : [],
@@ -653,7 +653,7 @@ export function ProductDetailDialog({
             if (roomId === 'after1_debt') {
                 const errors = getAfter1DebtToAfter2ValidationErrors(order, {
                     debt_checked: formData.debt_checked,
-                    debt_checked_by_name: formData.debt_checked_by_name,
+                    debt_checked_by_name: formData.debt_checked_by_name ?? undefined,
                 });
                 if (errors.length > 0) {
                     showAfterSaleValidationToast(errors);
