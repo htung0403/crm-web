@@ -400,6 +400,7 @@ export function EmployeesPage() {
     const [showOrderDetail, setShowOrderDetail] = useState(false);
     const [showDeptDialog, setShowDeptDialog] = useState(false);
     const [showTitleDialog, setShowTitleDialog] = useState(false);
+    const [confirmAction, setConfirmAction] = useState<{ type: 'deactivate' | 'delete'; employee: Employee } | null>(null);
     const [deptForm, setDeptForm] = useState({ name: '', description: '', status: 'active' as 'active' | 'inactive' });
     const [titleForm, setTitleForm] = useState({ name: '', description: '', status: 'active' as 'active' | 'inactive' });
     const [savingDept, setSavingDept] = useState(false);
@@ -609,8 +610,7 @@ export function EmployeesPage() {
         setShowForm(true);
     };
 
-    const handleDeactivateEmployee = async (emp: Employee) => {
-        if (!confirm(`Xác nhận ngừng làm việc cho "${emp.name}"?`)) return;
+    const executeDeactivateEmployee = async (emp: Employee) => {
         try {
             await updateUser(emp.id, { status: 'inactive' } as any);
             toast.success('Đã cập nhật trạng thái nghỉ việc');
@@ -622,9 +622,7 @@ export function EmployeesPage() {
         }
     };
 
-    const handleDeleteEmployee = async (emp: Employee) => {
-        if (!canDelete) return;
-        if (!confirm(`Bạn có chắc muốn xóa nhân viên "${emp.name}"?`)) return;
+    const executeDeleteEmployee = async (emp: Employee) => {
         try {
             await deleteUser(emp.id);
             toast.success('Đã xóa nhân viên!');
@@ -634,6 +632,23 @@ export function EmployeesPage() {
         } catch {
             toast.error('Lỗi khi xóa');
         }
+    };
+
+    const handleDeactivateEmployee = (emp: Employee) => {
+        setConfirmAction({ type: 'deactivate', employee: emp });
+    };
+
+    const handleDeleteEmployee = (emp: Employee) => {
+        if (!canDelete) return;
+        setConfirmAction({ type: 'delete', employee: emp });
+    };
+
+    const handleConfirmEmployeeAction = async () => {
+        if (!confirmAction) return;
+        const action = confirmAction;
+        setConfirmAction(null);
+        if (action.type === 'deactivate') await executeDeactivateEmployee(action.employee);
+        else await executeDeleteEmployee(action.employee);
     };
 
     const getDepartmentName = (deptId?: string) => {
@@ -940,7 +955,7 @@ export function EmployeesPage() {
                                     )}
                                     {columnVisibility.timekeepingCode && (
                                         <td className="px-4 py-[13px] text-gray-800 font-medium text-[13px]">
-                                            {Math.floor(Math.random() * 30 + 1)}
+                                            {(emp as any).attendance_code || (emp as any).employee_code || `NV${String(emp.id || '').slice(0, 6).toUpperCase()}`}
                                         </td>
                                     )}
                                     {columnVisibility.name && (
@@ -1400,6 +1415,32 @@ export function EmployeesPage() {
                     setSelectedOrder(null);
                 }}
             />
+
+            <Dialog open={!!confirmAction} onOpenChange={(open) => !open && setConfirmAction(null)}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="text-[17px] font-bold text-gray-900">
+                            {confirmAction?.type === 'delete' ? 'Xác nhận xóa nhân viên' : 'Xác nhận ngừng làm việc'}
+                        </DialogTitle>
+                        <DialogDescription className="text-[13px] text-gray-600">
+                            {confirmAction?.type === 'delete'
+                                ? `Bạn có chắc muốn xóa nhân viên "${confirmAction.employee.name}"? Hành động này không thể hoàn tác.`
+                                : `Xác nhận chuyển "${confirmAction?.employee.name}" sang trạng thái ngừng làm việc?`}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setConfirmAction(null)} className="text-[13px]">
+                            Hủy
+                        </Button>
+                        <Button
+                            onClick={handleConfirmEmployeeAction}
+                            className={confirmAction?.type === 'delete' ? 'bg-red-600 hover:bg-red-700 text-white text-[13px]' : 'bg-blue-600 hover:bg-blue-700 text-white text-[13px]'}
+                        >
+                            {confirmAction?.type === 'delete' ? 'Xóa nhân viên' : 'Ngừng làm việc'}
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             {/* Dialog Thêm mới phòng ban */}
             <Dialog open={showDeptDialog} onOpenChange={setShowDeptDialog}>

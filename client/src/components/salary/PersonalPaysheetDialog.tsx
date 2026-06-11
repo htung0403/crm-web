@@ -57,9 +57,11 @@ export function PersonalPaysheetDialog({ open, onOpenChange, record, plCode, onR
     // Resolve department
     const deptName = departments.find(d => d.id === record.user?.department)?.name || record.user?.department || '--';
 
-    const gross = record.gross_salary || (record.hourly_wage + record.commission + record.bonus);
+    const gross = record.net_salary || 0;
     const paid = record.status === 'paid' ? record.net_salary : 0;
     const remaining = gross - paid;
+    const employeeCode = record.user?.employee_code || record.employee_code || '--';
+    const standardWorkDays = record.standard_work_days || record.salary_config?.standard_work_days || record.company_policy?.standard_work_days || 26;
 
     // Default to pay full remaining if opened
     useEffect(() => {
@@ -160,7 +162,7 @@ export function PersonalPaysheetDialog({ open, onOpenChange, record, plCode, onR
         const headers = ['Khoản mục', 'Giá trị (VND)'];
         const rows = [
             ['Nhân viên', record.user?.name || '--'],
-            ['Mã nhân viên', record.user?.employee_code || '--'],
+            ['Mã nhân viên', employeeCode],
             ['Tháng/Năm', `${record.month}/${record.year}`],
             ['Lương chính', record.base_salary || 0],
             ['Hoa hồng', record.commission || 0],
@@ -249,7 +251,7 @@ export function PersonalPaysheetDialog({ open, onOpenChange, record, plCode, onR
 
         <div class="info-grid">
             <div class="info-item"><span class="info-label">Nhân viên:</span><span class="info-value">${record.user?.name || '--'}</span></div>
-            <div class="info-item"><span class="info-label">Mã NV:</span><span class="info-value">${record.user?.employee_code || '--'}</span></div>
+            <div class="info-item"><span class="info-label">Mã NV:</span><span class="info-value">${employeeCode}</span></div>
             <div class="info-item"><span class="info-label">Phòng ban:</span><span class="info-value">${record.department?.name || '--'}</span></div>
             <div class="info-item"><span class="info-label">Ngày in:</span><span class="info-value">${new Date().toLocaleDateString('vi-VN')}</span></div>
         </div>
@@ -460,7 +462,7 @@ export function PersonalPaysheetDialog({ open, onOpenChange, record, plCode, onR
                             {/* Left Column - Readonly */}
                             <div className="flex-1 space-y-4">
                                 <div className="flex">
-                                    <div className="w-[120px] text-[13px] text-gray-600 font-medium">NV000001:</div>
+                                    <div className="w-[120px] text-[13px] text-gray-600 font-medium">{employeeCode}:</div>
                                     <div className="flex-1 text-[13px] font-semibold text-gray-800 uppercase">{record.user?.name || '--'}</div>
                                 </div>
                                 <div className="flex">
@@ -494,7 +496,7 @@ export function PersonalPaysheetDialog({ open, onOpenChange, record, plCode, onR
                                 </div>
                                 <div className="flex items-center">
                                     <div className="w-[120px] text-[13px] text-gray-600">Ngày công chuẩn:</div>
-                                    <div className="flex-1 text-[13px] text-gray-800">30</div>
+                                    <div className="flex-1 text-[13px] text-gray-800">{standardWorkDays}</div>
                                 </div>
                                 <div className="flex mt-2">
                                     <div className="w-[120px] text-[13px] text-gray-400 italic">Ghi chú</div>

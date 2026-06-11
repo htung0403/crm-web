@@ -487,48 +487,54 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
         const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
         const endDate = new Date(year, month, 0).toISOString().split('T')[0];
 
-        const configBase = salaryConfig?.base_amount || user.base_salary || 15000000;
+        const configBase = Number(salaryConfig?.base_amount || user.base_salary || 0);
         const configType = salaryConfig?.salary_type || 'standard_day';
-        const hourlyRate = user.hourly_rate || Math.floor(configBase / 176);
+        const standardWorkDays = 26;
+        const hourlyRate = Number(user.hourly_rate || Math.floor(configBase / (standardWorkDays * 8)) || 0);
 
         // ── 2. Tính giờ công từ TIMESHEETS ───────────────────────
-        let totalHours = 176; // Default 22 days * 8 hours
+        let totalHours = 0;
         let overtimeHours = 0;
-        let daysWorked = 22; // Mặc định 22 ngày công chuẩn
+        let daysWorked = 0;
         try {
             // Query timesheets table (new schema: check_in, check_out, status, schedule_date)
             const { data: timesheets } = await supabaseAdmin
                 .from('timesheets')
                 .select('check_in, check_out, status, schedule_date')
                 .eq('user_id', user_id)
+                .eq('status', 'approved')
                 .gte('schedule_date', startDate)
                 .lte('schedule_date', endDate);
 
             if (timesheets && timesheets.length > 0) {
                 let workedHours = 0;
-                daysWorked = timesheets.filter(t => t.check_in && t.status !== 'day_off').length;
+                const workedDates = new Set<string>();
                 for (const t of timesheets) {
-                    if (t.check_in && t.check_out && t.status !== 'day_off') {
+                    if (t.check_in && t.check_out) {
                         const checkIn = new Date(t.check_in);
                         const checkOut = new Date(t.check_out);
                         const hours = (checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60);
                         workedHours += Math.min(hours, 12); // Cap at 12h per day
+                        if (t.schedule_date) workedDates.add(t.schedule_date);
                     }
                 }
+                daysWorked = workedDates.size;
                 totalHours = Math.round(workedHours * 100) / 100;
-                // Overtime = anything above 8h * working days
-                const standardDays = timesheets.filter(t => t.status !== 'day_off').length;
-                const standardHours = standardDays * 8;
-                overtimeHours = Math.max(0, Math.round((totalHours - standardHours) * 100) / 100);
+                overtimeHours = timesheets.reduce((sum: number, t: any) => {
+                    if (!t.check_in || !t.check_out) return sum;
+                    const hours = (new Date(t.check_out).getTime() - new Date(t.check_in).getTime()) / (1000 * 60 * 60);
+                    return sum + Math.max(0, Math.min(hours, 12) - 8);
+                }, 0);
             }
         } catch (e) {
-            console.log('[Salary] Timesheets table error, using defaults');
+            console.log('[Salary] Timesheets table error, using zero approved attendance');
         }
 
         let actualBasePay = configBase;
-        if (configType === 'hourly' || configType === 'standard_day') {
-            const standardWorkedHours = Math.max(0, totalHours - overtimeHours);
-            actualBasePay = Math.round(standardWorkedHours * hourlyRate);
+        if (configType === 'hourly') {
+            actualBasePay = Math.round(totalHours * hourlyRate);
+        } else if (configType === 'standard_day') {
+            actualBasePay = Math.round((configBase / standardWorkDays) * daysWorked);
         } else if (configType === 'shift') {
             // For shift based, standard base pay uses hours for now unless strict shift tables are provided
             const standardWorkedHours = Math.max(0, totalHours - overtimeHours);
@@ -777,14 +783,15 @@ router.post('/calculate', authenticate, requireAccountant, async (req: Authentic
         }
 
         // Nhân hệ số KPI vào phần Hoa hồng trước khi cộng vào Lương Gross
-        totalCommission = Math.floor(totalCommission * (kpiFactor / 100));
+        if (totalCommission > 0) {
+            totalCommission = Math.floor(totalCommission * (kpiFactor / 100));
+        }
         const grossSalary = baseSalary + overtimePay + totalCommission + totalBonus;
 
         // ── 8. Tính KHẤU TRỪ ─────────────────────────────────────
-        const socialInsurance = Math.floor(baseSalary * 0.08);   // 8% lương cơ bản
-        const healthInsurance = Math.floor(baseSalary * 0.015);  // 1.5% lương cơ bản
-        const taxableIncome = grossSalary - 11000000;            // Giảm trừ gia cảnh 11M
-        const personalTax = taxableIncome > 0 ? Math.floor(taxableIncome * 0.05) : 0;
+        const socialInsurance = 0;
+        const healthInsurance = 0;
+        const personalTax = 0;
 
         // ── 7.5. Tính KHẤU TRỪ THỦ CÔNG ──────────────────────────
         let manualDeduction = 0;
@@ -1186,14 +1193,14 @@ async function generatePCCOde(): Promise<string> {
 router.patch('/:id/pay', authenticate, requireAccountant, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { payment_method, payment_date, notes } = req.body;
+        const { payment_method, payment_date, notes, amount } = req.body;
 
         // 1. Lấy thông tin phiếu lương
         const { data: salary, error: fetchError } = await supabaseAdmin
             .from('salary_records')
             .select(`
                 *,
-                user:users!salary_records_user_id_fkey(name)
+                user:users!salary_records_user_id_fkey(name, employee_code, phone)
             `)
             .eq('id', id)
             .single();
@@ -1206,7 +1213,10 @@ router.patch('/:id/pay', authenticate, requireAccountant, async (req: Authentica
             throw new ApiError('Phiếu lương này đã được thanh toán', 400);
         }
 
-        const netSalary = (salary.gross_salary || 0) - (salary.deduction || 0);
+        const requestedAmount = Number(amount);
+        const netSalary = Number.isFinite(requestedAmount) && requestedAmount > 0
+            ? requestedAmount
+            : Number(salary.net_salary || 0);
         const code = await generatePCCOde();
 
         // 2. Tạo phiếu chi (Transaction)

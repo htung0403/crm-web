@@ -28,6 +28,91 @@ function parseMoneyValue(value: unknown): number {
     return 0;
 }
 
+function toNumber(value: unknown, fallback = 0): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+async function resolveSalaryBasis(userId: string, userData: any) {
+    let salaryConfig: any = null;
+    try {
+        const { data } = await supabaseAdmin
+            .from('salary_configs')
+            .select('salary_type, base_amount, overtime_enabled, allowance_enabled, allowance_amount, commission_enabled')
+            .eq('user_id', userId)
+            .maybeSingle();
+        salaryConfig = data || null;
+    } catch (error) {
+        console.error(`[PayrollBatch] Salary config lookup failed for ${userId}:`, error);
+    }
+
+    const configuredBase = toNumber(salaryConfig?.base_amount);
+    const userBase = toNumber(userData?.base_salary);
+    const baseAmount = configuredBase > 0 ? configuredBase : userBase;
+    const standardWorkDays = 26;
+    const salaryType = salaryConfig?.salary_type || (userData?.hourly_rate ? 'hourly' : 'standard_day');
+    const hourlyRate = toNumber(userData?.hourly_rate) || Math.floor(baseAmount / (standardWorkDays * 8));
+
+    return {
+        salaryConfig,
+        salaryType,
+        baseAmount,
+        standardWorkDays,
+        hourlyRate,
+    };
+}
+
+async function resolveApprovedAttendanceSalary(params: {
+    userId: string;
+    startDate: string;
+    endDate: string;
+    baseAmount: number;
+    salaryType: string;
+    standardWorkDays: number;
+    hourlyRate: number;
+    overtimeEnabled: boolean;
+}) {
+    const { userId, startDate, endDate, baseAmount, salaryType, standardWorkDays, hourlyRate, overtimeEnabled } = params;
+    let totalHours = 0;
+    let workedDays = 0;
+    let overtimeHours = 0;
+
+    try {
+        const { data: timesheets } = await supabaseAdmin
+            .from('timesheets')
+            .select('check_in, check_out, status, schedule_date')
+            .eq('user_id', userId)
+            .eq('status', 'approved')
+            .gte('schedule_date', startDate)
+            .lte('schedule_date', endDate);
+
+        const workedDates = new Set<string>();
+        for (const t of timesheets || []) {
+            if (!t.check_in || !t.check_out) continue;
+            const hours = (new Date(t.check_out).getTime() - new Date(t.check_in).getTime()) / (1000 * 60 * 60);
+            if (!Number.isFinite(hours) || hours <= 0) continue;
+            const cappedHours = Math.min(hours, 12);
+            totalHours += cappedHours;
+            if (t.schedule_date) workedDates.add(t.schedule_date);
+            overtimeHours += Math.max(0, cappedHours - 8);
+        }
+        workedDays = workedDates.size;
+    } catch (error) {
+        console.error(`[PayrollBatch] Approved timesheet lookup failed for ${userId}:`, error);
+    }
+
+    totalHours = Math.round(totalHours * 100) / 100;
+    overtimeHours = overtimeEnabled ? Math.round(overtimeHours * 100) / 100 : 0;
+
+    const baseSalary = salaryType === 'hourly'
+        ? Math.round(totalHours * hourlyRate)
+        : Math.round((baseAmount / standardWorkDays) * workedDays);
+    const hourlyWage = Math.round(totalHours * hourlyRate);
+    const overtimePay = overtimeEnabled ? Math.round(overtimeHours * hourlyRate * 1.5) : 0;
+
+    return { totalHours, workedDays, overtimeHours, baseSalary, hourlyWage, overtimePay };
+}
+
 function setTechKpiPolicyMarker(notes: string | null | undefined, enabled: boolean): string | null {
     const lines = String(notes || '')
         .split('\n')
@@ -214,7 +299,7 @@ async function recalculateBatchTotals(batchId: string) {
 
     if (!records) return;
 
-    const totalSalary = records.reduce((s, r) => s + (r.gross_salary || r.net_salary + r.deduction), 0);
+        const totalSalary = records.reduce((s, r) => s + (r.net_salary || 0), 0);
     const totalPaid = records.reduce((s, r) => s + (r.status === 'paid' ? r.net_salary : 0), 0);
 
     await supabaseAdmin
@@ -338,8 +423,8 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
 
                 if (!userData) continue;
 
-                const baseSalary = userData.base_salary || 15000000;
-                const hourlyRate = userData.hourly_rate || Math.floor(baseSalary / 176);
+                const salaryBasis = await resolveSalaryBasis(user.id, userData);
+                const { salaryConfig, salaryType, baseAmount, standardWorkDays, hourlyRate } = salaryBasis;
 
                 // ── Commission breakdown ──
                 let serviceCommission = 0, productCommission = 0, referralCommission = 0;
@@ -465,33 +550,20 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
                     } catch(e){}
                 }
 
-                let totalCommission = serviceCommission + productCommission + referralCommission;
+                let totalCommission = (salaryConfig?.commission_enabled === false) ? 0 : serviceCommission + productCommission + referralCommission;
 
                 // ── Timesheets ──
-                let totalHours = 176, overtimeHours = 0;
-                try {
-                    const { data: timesheets } = await supabaseAdmin
-                        .from('timesheets')
-                        .select('check_in, check_out, status, schedule_date')
-                        .eq('user_id', user.id)
-                        .gte('schedule_date', startDate)
-                        .lte('schedule_date', endDate);
-                    if (timesheets && timesheets.length > 0) {
-                        let workedHours = 0;
-                        for (const t of timesheets) {
-                            if (t.check_in && t.check_out && t.status !== 'day_off') {
-                                const hours = (new Date(t.check_out).getTime() - new Date(t.check_in).getTime()) / (1000 * 60 * 60);
-                                workedHours += Math.min(hours, 12);
-                            }
-                        }
-                        totalHours = Math.round(workedHours * 100) / 100;
-                        const standardDays = timesheets.filter(t => t.status !== 'day_off').length;
-                        overtimeHours = Math.max(0, Math.round((totalHours - standardDays * 8) * 100) / 100);
-                    }
-                } catch (e) { /* ignore */ }
-
-                const hourlyWage = Math.round(totalHours * hourlyRate);
-                const overtimePay = Math.round(overtimeHours * hourlyRate * 1.5);
+                const attendanceSalary = await resolveApprovedAttendanceSalary({
+                    userId: user.id,
+                    startDate,
+                    endDate,
+                    baseAmount,
+                    salaryType,
+                    standardWorkDays,
+                    hourlyRate,
+                    overtimeEnabled: !!salaryConfig?.overtime_enabled,
+                });
+                const { totalHours, overtimeHours, baseSalary, hourlyWage, overtimePay } = attendanceSalary;
 
                 // ── KPI (from kpi_monthly locked records) ──
                 const monthKey = `${year}-${String(month).padStart(2, '0')}`;
@@ -553,16 +625,16 @@ router.post('/generate', authenticate, requireAccountant, async (req: Authentica
                 } catch (e) { /* ignore */ }
 
                 // ── Final calculation (aligned with salary.ts formula) ──
-                totalCommission = serviceCommission + productCommission + referralCommission;
-                if (!(applyTechKpiPolicy && userData.role === 'technician')) {
+                totalCommission = (salaryConfig?.commission_enabled === false) ? 0 : serviceCommission + productCommission + referralCommission;
+                if (totalCommission > 0 && !(applyTechKpiPolicy && userData.role === 'technician')) {
                     totalCommission = Math.floor(totalCommission * (kpiFactor / 100));
                 }
-                const totalBonus = kpiBonus + totalRewards + kpiTeamleadBonus + kpiManagementBonus;
+                const allowance = salaryConfig?.allowance_enabled ? toNumber(salaryConfig.allowance_amount) : 0;
+                const totalBonus = kpiBonus + totalRewards + kpiTeamleadBonus + kpiManagementBonus + allowance;
                 const grossSalary = baseSalary + overtimePay + totalCommission + totalBonus;
-                const socialInsurance = Math.floor(baseSalary * 0.08);
-                const healthInsurance = Math.floor(baseSalary * 0.015);
-                const taxableIncome = grossSalary - 11000000;
-                const personalTax = taxableIncome > 0 ? Math.floor(taxableIncome * 0.05) : 0;
+                const socialInsurance = 0;
+                const healthInsurance = 0;
+                const personalTax = 0;
                 const totalDeduction = socialInsurance + healthInsurance + personalTax + totalAdvances + totalViolationAmount + kpiPenalty;
                 const netSalary = grossSalary - totalDeduction;
 
@@ -792,8 +864,8 @@ router.post('/:id/recalculate', authenticate, requireAccountant, async (req: Aut
 
                 if (!userData) continue;
 
-                const baseSalary = userData.base_salary || 15000000;
-                const hourlyRate = userData.hourly_rate || Math.floor(baseSalary / 176);
+                const salaryBasis = await resolveSalaryBasis(userId, userData);
+                const { salaryConfig, salaryType, baseAmount, standardWorkDays, hourlyRate } = salaryBasis;
 
                 // ── Commission breakdown ──
                 let serviceCommission = 0, productCommission = 0, referralCommission = 0;
@@ -896,33 +968,20 @@ router.post('/:id/recalculate', authenticate, requireAccountant, async (req: Aut
                     } catch (e) { }
                 }
 
-                let totalCommission = serviceCommission + productCommission + referralCommission;
+                let totalCommission = (salaryConfig?.commission_enabled === false) ? 0 : serviceCommission + productCommission + referralCommission;
 
                 // ── Timesheets ──
-                let totalHours = 176, overtimeHours = 0;
-                try {
-                    const { data: timesheets } = await supabaseAdmin
-                        .from('timesheets')
-                        .select('check_in, check_out, status, schedule_date')
-                        .eq('user_id', userId)
-                        .gte('schedule_date', startDate)
-                        .lte('schedule_date', endDate);
-                    if (timesheets && timesheets.length > 0) {
-                        let workedHours = 0;
-                        for (const t of timesheets) {
-                            if (t.check_in && t.check_out && t.status !== 'day_off') {
-                                const hours = (new Date(t.check_out).getTime() - new Date(t.check_in).getTime()) / (1000 * 60 * 60);
-                                workedHours += Math.min(hours, 12);
-                            }
-                        }
-                        totalHours = Math.round(workedHours * 100) / 100;
-                        const standardDays = timesheets.filter(t => t.status !== 'day_off').length;
-                        overtimeHours = Math.max(0, Math.round((totalHours - standardDays * 8) * 100) / 100);
-                    }
-                } catch (e) { /* ignore */ }
-
-                const hourlyWage = Math.round(totalHours * hourlyRate);
-                const overtimePay = Math.round(overtimeHours * hourlyRate * 1.5);
+                const attendanceSalary = await resolveApprovedAttendanceSalary({
+                    userId,
+                    startDate,
+                    endDate,
+                    baseAmount,
+                    salaryType,
+                    standardWorkDays,
+                    hourlyRate,
+                    overtimeEnabled: !!salaryConfig?.overtime_enabled,
+                });
+                const { totalHours, overtimeHours, baseSalary, hourlyWage, overtimePay } = attendanceSalary;
 
                 // ── KPI ──
                 let kpiAchievement = 0, kpiBonus = 0, kpiPenalty = 0, kpiFactor = 100.0;
@@ -1018,16 +1077,16 @@ router.post('/:id/recalculate', authenticate, requireAccountant, async (req: Aut
                 } catch (e) { /* ignore */ }
 
                 // ── Final calculation ──
-                totalCommission = serviceCommission + productCommission + referralCommission;
-                if (!(applyTechKpiPolicy && userData.role === 'technician')) {
+                totalCommission = (salaryConfig?.commission_enabled === false) ? 0 : serviceCommission + productCommission + referralCommission;
+                if (totalCommission > 0 && !(applyTechKpiPolicy && userData.role === 'technician')) {
                     totalCommission = Math.floor(totalCommission * (kpiFactor / 100));
                 }
-                const totalBonus = kpiBonus + totalRewards + manualBonus;
+                const allowance = salaryConfig?.allowance_enabled ? toNumber(salaryConfig.allowance_amount) : 0;
+                const totalBonus = kpiBonus + totalRewards + kpiTeamleadBonus + kpiManagementBonus + manualBonus + allowance;
                 const grossSalary = baseSalary + overtimePay + totalCommission + totalBonus;
-                const socialInsurance = Math.floor(baseSalary * 0.08);
-                const healthInsurance = Math.floor(baseSalary * 0.015);
-                const taxableIncome = grossSalary - 11000000;
-                const personalTax = taxableIncome > 0 ? Math.floor(taxableIncome * 0.05) : 0;
+                const socialInsurance = 0;
+                const healthInsurance = 0;
+                const personalTax = 0;
                 const totalDeduction = socialInsurance + healthInsurance + personalTax + totalAdvances + totalViolationAmount + kpiPenalty + manualDeduction;
                 const netSalary = grossSalary - totalDeduction;
 

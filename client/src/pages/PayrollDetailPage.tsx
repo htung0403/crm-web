@@ -16,6 +16,7 @@ import { BusinessCommissionDetailDialog } from '@/components/salary/BusinessComm
 import { BonusDetailDialog } from '@/components/salary/BonusDetailDialog';
 import { DeductionDetailDialog } from '@/components/salary/DeductionDetailDialog';
 import { PersonalPaysheetDialog } from '@/components/salary/PersonalPaysheetDialog';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 // ========== STATUS CONFIG ==========
 const salaryStatusConfig = {
@@ -190,7 +191,7 @@ function PayrollInfoDrawer({
                             <p className="text-[11px] text-gray-400 mb-1">Ngày công chuẩn :</p>
                             <Input
                                 type="number"
-                                defaultValue={new Date(batch.year, batch.month, 0).getDate()}
+                                defaultValue={(batch as any).standard_work_days || (batch as any).company_policy?.standard_work_days || 26}
                                 className="h-[34px] text-[13px] border-gray-200 w-[80px]"
                             />
                         </div>
@@ -249,6 +250,7 @@ export function PayrollDetailPage() {
     const [deductionRecord, setDeductionRecord] = useState<SalaryRecord | null>(null);
     const [selectedPaysheetRecord, setSelectedPaysheetRecord] = useState<{ record: SalaryRecord, plCode: string } | null>(null);
     const [isPaysheetDialogOpen, setIsPaysheetDialogOpen] = useState(false);
+    const [confirmLockOpen, setConfirmLockOpen] = useState(false);
 
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
@@ -275,9 +277,9 @@ export function PayrollDetailPage() {
     // Lock period
     const lockPeriod = useCallback(async () => {
         if (!batch || !id) return;
-        if (!confirm('Khóa kỳ lương? Sau khi khóa sẽ không thể chỉnh sửa chấm công, ứng lương, vi phạm trong kỳ này.')) return;
         try {
             await payrollBatchesApi.updateStatus(id, 'locked');
+            setConfirmLockOpen(false);
             fetchData();
         } catch (e) {
             console.error('Error locking period:', e);
@@ -306,7 +308,7 @@ export function PayrollDetailPage() {
     const totalAdvances = filteredRecords.reduce((s, r) => s + (r.advances || 0), 0);
     // UI deduction visually excludes advances since it has its own column
     const totalDeduction = filteredRecords.reduce((s, r) => s + ((r.deduction || 0) - (r.advances || 0)), 0);
-    const totalGross = filteredRecords.reduce((s, r) => s + (r.gross_salary || r.net_salary + r.deduction), 0);
+    const totalGross = filteredRecords.reduce((s, r) => s + (r.net_salary || 0), 0);
     const totalPaidEmp = filteredRecords.reduce((s, r) => s + (r.status === 'paid' ? r.net_salary : 0), 0);
     const totalRemaining = totalGross - totalPaidEmp;
 
@@ -400,7 +402,7 @@ export function PayrollDetailPage() {
                     {batch.status === 'paid' && (
                         <Button
                             className="h-[34px] px-3 text-[13px] bg-gray-600 hover:bg-gray-700 text-white gap-1.5 rounded-lg"
-                            onClick={lockPeriod}
+                            onClick={() => setConfirmLockOpen(true)}
                         >
                             <Lock className="h-3.5 w-3.5" />
                             Khóa kỳ
@@ -462,9 +464,9 @@ export function PayrollDetailPage() {
                         ) : (
                             paginated.map((record, idx) => {
                                 const stt = (currentPage - 1) * pageSize + idx + 1;
-                                const gross = record.gross_salary || (record.hourly_wage + record.commission + record.bonus);
-                                const paid = record.status === 'paid' ? record.net_salary : 0;
-                                const remaining = gross - paid;
+    const gross = record.net_salary || 0;
+    const paid = record.status === 'paid' ? record.net_salary : 0;
+    const remaining = gross - paid;
                                 const empCode = record.user?.employee_code || `NV${String(stt).padStart(6, '0')}`;
 
                                 return (
@@ -632,6 +634,25 @@ export function PayrollDetailPage() {
                 onClose={() => setDrawerOpen(false)}
                 batch={batch}
             />
+
+            <Dialog open={confirmLockOpen} onOpenChange={setConfirmLockOpen}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="text-[17px] font-bold text-gray-900">Khóa kỳ lương?</DialogTitle>
+                    </DialogHeader>
+                    <div className="text-[13px] text-gray-600">
+                        Sau khi khóa, hệ thống không thể chỉnh sửa chấm công, ứng lương hoặc vi phạm trong kỳ này.
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setConfirmLockOpen(false)} className="text-[13px]">
+                            Hủy
+                        </Button>
+                        <Button onClick={lockPeriod} className="bg-gray-700 hover:bg-gray-800 text-white text-[13px]">
+                            Khóa kỳ
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             <UpdateBaseSalaryDialog
                 open={!!editRecord}

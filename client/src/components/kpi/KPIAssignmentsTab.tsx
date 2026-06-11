@@ -31,6 +31,18 @@ function deriveCompensationBucket(policyCode: string): string {
     return BUCKET_MAP[policyCode] || 'secondary';
 }
 
+function policyMatchesEmployee(policy: any, employeeRole: string): boolean {
+    const role = String(employeeRole || '').toLowerCase();
+    const policyRole = String(policy.role || '').toLowerCase();
+    const policyCode = String(policy.code || '').toUpperCase();
+
+    if (policyRole === 'all' || policyRole === role) return true;
+    if (role === 'technician') return policyRole.includes('tech') || policyRole.includes('ky') || policyCode.includes('KYTHUAT') || policyCode.includes('TECH');
+    if (role === 'sale') return policyRole.includes('sale') || policyCode.includes('SALE');
+    if (role === 'manager') return policyRole.includes('manager') || policyRole.includes('quan') || policyCode.includes('QUAN') || policyCode.includes('MANAGER');
+    return false;
+}
+
 export function KPIAssignmentsTab() {
     const {
         employeeAssignments,
@@ -244,7 +256,7 @@ export function KPIAssignmentsTab() {
                                         const secondaryAssignments = getSecondaryAssignments(emp);
                                         const assignedSecondaryIds = new Set(secondaryAssignments.map(a => a.policy_id));
                                         const availableSecondaryPolicies = availablePolicies.filter((p: any) =>
-                                            (p.role === 'all' || p.role === emp.role || p.role === 'manager') &&
+                                            (policyMatchesEmployee(p, emp.role) || String(p.role || '').toLowerCase() === 'manager') &&
                                             p.id !== currentPrimaryId &&
                                             !assignedSecondaryIds.has(p.id),
                                         );
@@ -279,7 +291,7 @@ export function KPIAssignmentsTab() {
                                                         <SelectContent>
                                                             <SelectItem value="none">-- Không gán --</SelectItem>
                                                             {availablePolicies
-                                                                .filter((p: any) => p.role === 'all' || p.role === emp.role)
+                                                                .filter((p: any) => policyMatchesEmployee(p, emp.role))
                                                                 .map((policy: any) => (
                                                                     <SelectItem key={policy.id} value={policy.id}>
                                                                         {policy.name} ({policy.code})

@@ -22,6 +22,7 @@ interface CommissionRule {
     category: string;
     from_amount: number;
     commission_type: string;
+    amount?: number;
     sort_order: number;
 }
 
@@ -403,6 +404,14 @@ export function EmployeeSalaryTab({ employeeId }: Props) {
     }, [fetchConfig]);
 
     const handleSave = async () => {
+        const invalidFixedCommission = config.commission_enabled && config.commission_rules.some(rule =>
+            ['fixed_percent', 'fixed_amount'].includes(rule.commission_type) && (!rule.amount || rule.amount <= 0)
+        );
+        if (invalidFixedCommission) {
+            toast.error('Hoa hồng cố định phải nhập giá trị > 0');
+            return;
+        }
+
         setSaving(true);
         try {
             await api.put(`/salary-configs/${employeeId}`, {
@@ -543,7 +552,7 @@ export function EmployeeSalaryTab({ employeeId }: Props) {
             ...prev,
             commission_rules: [
                 ...prev.commission_rules,
-                { category: 'sales_consulting', from_amount: 0, commission_type: 'shared_table', sort_order: prev.commission_rules.length },
+                { category: 'sales_consulting', from_amount: 0, commission_type: 'shared_table', amount: 0, sort_order: prev.commission_rules.length },
             ],
         }));
     };
@@ -1147,37 +1156,56 @@ export function EmployeeSalaryTab({ employeeId }: Props) {
                                                 </div>
                                             </td>
                                             <td className="px-4 py-2.5">
-                                                <Select 
-                                                    value={rule.commission_type || 'shared_table'} 
-                                                    onValueChange={(v) => {
-                                                        if (v === 'add_new_commission_table') {
-                                                            setCurrentRuleIndex(i);
-                                                            setIsCommissionDialogOpen(true);
-                                                        } else {
-                                                            updateCommissionRule(i, 'commission_type', v);
-                                                        }
-                                                    }}
-                                                >
-                                                    <SelectTrigger className="w-[200px] h-9 text-[13px] bg-white border-gray-200">
-                                                        <SelectValue />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        {(!commissionTables.some(t => t.id === 'shared_table' || t.id === 'common')) && (
-                                                            <SelectItem value="shared_table">Bảng hoa hồng chung</SelectItem>
-                                                        )}
-                                                        {commissionTables.map(table => (
-                                                            <SelectItem key={table.id} value={table.id}>{table.name}</SelectItem>
-                                                        ))}
-                                                        {Object.entries(COMMISSION_TYPES).filter(([k]) => k !== 'shared_table').map(([k, v]) => (
-                                                            <SelectItem key={k} value={k}>{v}</SelectItem>
-                                                        ))}
-                                                        <div className="border-t border-gray-100 mt-1 pt-1">
-                                                            <SelectItem value="add_new_commission_table" className="text-blue-600 font-medium cursor-pointer">
-                                                                + Thêm bảng hoa hồng
-                                                            </SelectItem>
+                                                <div className="flex items-center gap-2">
+                                                    <Select 
+                                                        value={rule.commission_type || 'shared_table'} 
+                                                        onValueChange={(v) => {
+                                                            if (v === 'add_new_commission_table') {
+                                                                setCurrentRuleIndex(i);
+                                                                setIsCommissionDialogOpen(true);
+                                                            } else {
+                                                                updateCommissionRule(i, 'commission_type', v);
+                                                            }
+                                                        }}
+                                                    >
+                                                        <SelectTrigger className="w-[200px] h-9 text-[13px] bg-white border-gray-200">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            {(!commissionTables.some(t => t.id === 'shared_table' || t.id === 'common')) && (
+                                                                <SelectItem value="shared_table">Bảng hoa hồng chung</SelectItem>
+                                                            )}
+                                                            {commissionTables.map(table => (
+                                                                <SelectItem key={table.id} value={table.id}>{table.name}</SelectItem>
+                                                            ))}
+                                                            {Object.entries(COMMISSION_TYPES).filter(([k]) => k !== 'shared_table').map(([k, v]) => (
+                                                                <SelectItem key={k} value={k}>{v}</SelectItem>
+                                                            ))}
+                                                            <div className="border-t border-gray-100 mt-1 pt-1">
+                                                                <SelectItem value="add_new_commission_table" className="text-blue-600 font-medium cursor-pointer">
+                                                                    + Thêm bảng hoa hồng
+                                                                </SelectItem>
+                                                            </div>
+                                                        </SelectContent>
+                                                    </Select>
+                                                    {['fixed_percent', 'fixed_amount'].includes(rule.commission_type) && (
+                                                        <div className="flex items-center border border-gray-200 rounded-md bg-white overflow-hidden">
+                                                            <input
+                                                                type="text"
+                                                                className="w-[90px] px-3 py-1.5 text-right text-[13px] outline-none"
+                                                                value={rule.commission_type === 'fixed_amount' ? fmtMoney(rule.amount || 0) : (rule.amount || '')}
+                                                                onChange={e => {
+                                                                    const raw = e.target.value.replace(/[^\d]/g, '');
+                                                                    updateCommissionRule(i, 'amount', parseInt(raw) || 0);
+                                                                }}
+                                                                placeholder="> 0"
+                                                            />
+                                                            <span className="px-2 text-[12px] text-gray-500 bg-gray-50 border-l border-gray-100">
+                                                                {rule.commission_type === 'fixed_percent' ? '%' : 'đ'}
+                                                            </span>
                                                         </div>
-                                                    </SelectContent>
-                                                </Select>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="px-2 py-2.5 text-center">
                                                 <button

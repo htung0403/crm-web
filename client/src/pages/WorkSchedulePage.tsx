@@ -157,7 +157,9 @@ export function WorkSchedulePage() {
             return {
                 userId: user.id, name: user.name,
                 employeeCode: (user as any).employee_code || '',
-                role: user.role, salary: user.salary || 0, schedulesByDate: byDate,
+                role: user.role,
+                salary: Number((user as any).base_salary || (user as any).baseAmount || (user as any).salary || 0),
+                schedulesByDate: byDate,
             };
         });
     }, [users, schedules]);

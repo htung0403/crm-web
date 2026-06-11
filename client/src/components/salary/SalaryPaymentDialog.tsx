@@ -27,7 +27,7 @@ export function SalaryPaymentDialog({ open, onClose, record, onSuccess }: Salary
 
     useEffect(() => {
         if (record) {
-            const net = (record.gross_salary || 0) - (record.deduction || 0);
+            const net = record.net_salary || 0;
             setPayAmount(net);
             setNotes(`Chi lương cho nhân viên ${record.user?.name || ''} tháng ${record.month}/${record.year}`);
         }
@@ -41,6 +41,7 @@ export function SalaryPaymentDialog({ open, onClose, record, onSuccess }: Salary
             const res = await salaryApi.pay(record.id, {
                 payment_method: method,
                 payment_date: new Date(date).toISOString(),
+                amount: payAmount,
                 notes: notes
             });
 

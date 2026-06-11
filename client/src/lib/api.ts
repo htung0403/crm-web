@@ -738,7 +738,7 @@ export const salaryApi = {
     approve: (id: string) =>
         api.patch<ApiResponse<{ salary: any }>>(`/salary/${id}/approve`),
 
-    pay: (id: string, data?: { payment_method?: string, payment_date?: string, notes?: string }) =>
+    pay: (id: string, data?: { payment_method?: string, payment_date?: string, amount?: number, notes?: string }) =>
         api.patch<ApiResponse<{ salary: any }>>(`/salary/${id}/pay`, data),
 };
 

@@ -625,7 +625,7 @@ function PayslipTable({ batchId }: { batchId: string }) {
     const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
     const paginated = records.slice((page - 1) * pageSize, page * pageSize);
 
-    const totalSalary = records.reduce((s, r) => s + (r.gross_salary ?? (r.net_salary + r.deduction)), 0);
+    const totalSalary = records.reduce((s, r) => s + (r.net_salary ?? 0), 0);
     const totalPaidEmp = records.reduce((s, r) => s + (r.status === 'paid' ? r.net_salary : 0), 0);
     const totalRemaining = totalSalary - totalPaidEmp;
 
@@ -696,9 +696,9 @@ function PayslipTable({ batchId }: { batchId: string }) {
                         </tr>
                     ) : (
                         paginated.map((record, idx) => {
-                            const gross = record.gross_salary ?? (record.hourly_wage + record.commission + record.bonus);
-                            const paid = record.status === 'paid' ? record.net_salary : 0;
-                            const remaining = gross - paid;
+    const gross = record.net_salary ?? 0;
+    const paid = record.status === 'paid' ? record.net_salary : 0;
+    const remaining = gross - paid;
                             const plCode = `PL${String(totalItems - ((page - 1) * pageSize + idx) + 140).padStart(6, '0')}`;
                             const hasTechAudit = Boolean(record.tech_commission_policy_applied);
                             const serviceFeeText = hasTechAudit ? formatCurrency(Number(record.tech_service_fee_total || 0)) : '--';
@@ -808,6 +808,7 @@ function PaymentHistoryTable() {
 function ExpandedRowDetail({ batch, onReload, onViewDetail }: { batch: PayrollBatch; onReload: () => void; onViewDetail: () => void }) {
     const [activeTab, setActiveTab] = useState<ExpandedTab>('info');
     const [recalculating, setRecalculating] = useState(false);
+    const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
     const tabs: { key: ExpandedTab; label: string }[] = [
         { key: 'info', label: 'Thông tin' },
@@ -816,6 +817,16 @@ function ExpandedRowDetail({ batch, onReload, onViewDetail }: { batch: PayrollBa
     ];
 
     const statusLabel = salaryStatusConfig[batch.status]?.label || batch.status;
+
+    const handleDeleteBatch = async () => {
+        try {
+            await payrollBatchesApi.cancel(batch.id);
+            setConfirmDeleteOpen(false);
+            onReload();
+        } catch (e: any) {
+            alert(e.response?.data?.message || 'Có lỗi xảy ra khi xóa');
+        }
+    };
 
     return (
         <div className="bg-[#fafbfc] border-b-2 border-gray-200">
@@ -923,16 +934,7 @@ function ExpandedRowDetail({ batch, onReload, onViewDetail }: { batch: PayrollBa
                             <Button 
                                 variant="ghost" 
                                 className="text-[13px] text-gray-500 hover:text-red-500 gap-1.5 h-[34px] px-3"
-                                onClick={async () => {
-                                    if (window.confirm('Bạn có chắc chắn muốn xóa bảng lương này? Hành động này không thể hoàn tác.')) {
-                                        try {
-                                            await payrollBatchesApi.cancel(batch.id);
-                                            onReload();
-                                        } catch (e: any) {
-                                            alert(e.response?.data?.message || 'Có lỗi xảy ra khi xóa');
-                                        }
-                                    }
-                                }}
+                                onClick={() => setConfirmDeleteOpen(true)}
                             >
                                 <Trash2 className="h-3.5 w-3.5" />
                                 Xóa bảng lương
@@ -987,6 +989,25 @@ function ExpandedRowDetail({ batch, onReload, onViewDetail }: { batch: PayrollBa
             {activeTab === 'history' && (
                 <PaymentHistoryTable />
             )}
+
+            <Dialog open={confirmDeleteOpen} onOpenChange={setConfirmDeleteOpen}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="text-[17px] font-bold text-gray-900">Xác nhận xóa bảng lương</DialogTitle>
+                    </DialogHeader>
+                    <div className="text-[13px] text-gray-600">
+                        Bạn có chắc chắn muốn xóa bảng lương <span className="font-semibold text-gray-900">{batch.code}</span>? Hành động này không thể hoàn tác.
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setConfirmDeleteOpen(false)} className="text-[13px]">
+                            Hủy
+                        </Button>
+                        <Button onClick={handleDeleteBatch} className="bg-red-600 hover:bg-red-700 text-white text-[13px]">
+                            Xóa bảng lương
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
