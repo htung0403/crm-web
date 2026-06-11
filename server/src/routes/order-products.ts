@@ -333,9 +333,11 @@ router.patch('/services/:serviceId/assign', authenticate, async (req: Authentica
         const primaryTechId = techAssignments[0].technician_id;
         const { data: beforeAssignService } = await supabaseAdmin
             .from('order_product_services')
-            .select('technician_id')
+            .select('technician_id, technician:users!order_product_services_technician_id_fkey(department_id, department, departments!department_id(id, name))')
             .eq('id', serviceId)
             .maybeSingle();
+        const beforeTechnician = Array.isArray(beforeAssignService?.technician) ? beforeAssignService.technician[0] : beforeAssignService?.technician;
+        const beforeDepartment = Array.isArray(beforeTechnician?.departments) ? beforeTechnician.departments[0] : beforeTechnician?.departments;
 
         // Update main service record
         const { data: service, error } = await supabaseAdmin
@@ -378,13 +380,23 @@ router.patch('/services/:serviceId/assign', authenticate, async (req: Authentica
             for (const assignment of techAssignments) {
                 const { data: technician } = await supabaseAdmin
                     .from('users')
-                    .select('id, name, role, telegram_chat_id')
+                    .select('id, name, role, telegram_chat_id, department_id, department, departments!department_id(id, name)')
                     .eq('id', assignment.technician_id)
                     .maybeSingle();
 
                 if (!technician?.id) continue;
+                const department = Array.isArray(technician.departments) ? technician.departments[0] : technician.departments;
+                const room = {
+                    id: technician.department_id || null,
+                    name: department?.name || technician.department || null,
+                };
                 notifyCrmMasterUser(beforeAssignService?.technician_id && beforeAssignService.technician_id !== technician.id ? 'workflow.item.technician_changed' : 'workflow.item.assigned', {
                     ...basePayload,
+                    item: {
+                        ...basePayload.item,
+                        room_id: room.id,
+                        room_name: room.name,
+                    },
                     target_user_id: technician.id,
                     target_role: 'technician',
                     channel: 'telegram',
@@ -393,8 +405,35 @@ router.patch('/services/:serviceId/assign', authenticate, async (req: Authentica
                         name: technician.name,
                         role: technician.role || 'technician',
                         telegram_chat_id: technician.telegram_chat_id || null,
+                        room_id: room.id,
+                        room_name: room.name,
                     },
                 });
+                const previousRoomId = beforeTechnician?.department_id || null;
+                const previousRoomName = beforeDepartment?.name || beforeTechnician?.department || null;
+                if (room.id && room.id !== previousRoomId) {
+                    notifyCrmMasterUser('workflow.item.room_changed', {
+                        ...basePayload,
+                        item: {
+                            ...basePayload.item,
+                            room_id: room.id,
+                            room_name: room.name,
+                            previous_room_id: previousRoomId,
+                            previous_room_name: previousRoomName,
+                        },
+                        target_user_id: technician.id,
+                        target_role: 'technician',
+                        channel: 'telegram',
+                        staff: {
+                            id: technician.id,
+                            name: technician.name,
+                            role: technician.role || 'technician',
+                            telegram_chat_id: technician.telegram_chat_id || null,
+                            room_id: room.id,
+                            room_name: room.name,
+                        },
+                    });
+                }
             }
         }
 

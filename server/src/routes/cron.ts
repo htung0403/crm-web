@@ -348,7 +348,7 @@ router.get('/check-return-due-reminders', verifyCronSecret, async (req: Request,
         const { data: orders, error: ordersError } = allOrderIds.length > 0
             ? await supabaseAdmin
                 .from('orders')
-                .select('id, order_code, sales_id')
+                .select('id, order_code, sales_id, customer:customers(id, name, phone)')
                 .in('id', allOrderIds)
             : { data: [], error: null as any };
 
@@ -451,6 +451,7 @@ router.get('/check-return-due-reminders', verifyCronSecret, async (req: Request,
 
         for (const product of dueProducts) {
             const orderObj = orderById.get(product.order_id);
+            const customerObj = Array.isArray(orderObj?.customer) ? orderObj.customer[0] : orderObj?.customer;
             const saleUser = orderObj?.sales_id ? saleById.get(orderObj.sales_id) : null;
             const services = servicesByProductId.get(product.id) || [];
 
@@ -472,6 +473,8 @@ router.get('/check-return-due-reminders', verifyCronSecret, async (req: Request,
             const payload = {
                 order_id: orderObj?.id || product.order_id,
                 order_code: orderObj?.order_code || 'N/A',
+                customer_name: customerObj?.name || null,
+                customer_phone: customerObj?.phone || null,
                 order_product_id: product.id,
                 product_code: product.product_code || null,
                 product_name: product.name || 'N/A',
@@ -492,6 +495,7 @@ router.get('/check-return-due-reminders', verifyCronSecret, async (req: Request,
                 entity_type: 'order_product',
                 entity_id: product.id,
                 order_code: payload.order_code,
+                customer_name: payload.customer_name,
                 due_at: payload.due_at,
                 sale_tele: payload.tele_id_sale,
                 technician_count: payload.tele_ids_technician.length,

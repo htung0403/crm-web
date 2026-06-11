@@ -82,7 +82,7 @@ export async function getServiceNotificationContext(serviceId: string) {
                     sales_user:users!orders_sales_id_fkey(id, name, role, telegram_chat_id)
                 )
             ),
-            technician:users!order_product_services_technician_id_fkey(id, name, role, telegram_chat_id)
+            technician:users!order_product_services_technician_id_fkey(id, name, role, telegram_chat_id, department_id, department, departments!department_id(id, name))
         `)
         .eq('id', serviceId)
         .maybeSingle();
@@ -111,6 +111,7 @@ export async function getServiceNotificationContext(serviceId: string) {
 
 export function buildServiceEventBase(context: any) {
     const orderCodeOrId = context.order?.order_code || context.order?.id;
+    const department = Array.isArray(context.technician?.departments) ? context.technician.departments[0] : context.technician?.departments;
     return {
         order: context.order ? {
             id: context.order.id,
@@ -124,6 +125,8 @@ export function buildServiceEventBase(context: any) {
             product_code: context.orderProduct?.product_code || null,
             deadline_at: context.orderProduct?.due_at || context.order?.due_at || null,
             note: context.service.notes || null,
+            room_id: context.technician?.department_id || null,
+            room_name: department?.name || context.technician?.department || null,
         },
         customer: context.customer ? {
             name: context.customer.name,
