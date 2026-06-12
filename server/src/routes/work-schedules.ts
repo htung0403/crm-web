@@ -122,8 +122,9 @@ router.get('/', async (req: Request, res: Response, next: NextFunction): Promise
             .select(`
                 *,
                 shift:shifts(*),
-                user:users!work_schedules_user_id_fkey(id, name, email, phone, role, avatar, status, employee_code, salary, department_id)
+                user:users!inner(id, name, email, phone, role, avatar, status, employee_code, salary, base_salary, hourly_rate, department_id)
             `)
+            .eq('user.status', 'active')
             .gte('schedule_date', start_date as string)
             .lte('schedule_date', end_date as string)
             .order('schedule_date', { ascending: true });
@@ -353,3 +354,4 @@ router.post('/bulk-delete', async (req: Request, res: Response, next: NextFuncti
 
 export { router as workSchedulesRouter };
 export default router;
+

@@ -60,6 +60,13 @@ export function PersonalPaysheetDialog({ open, onOpenChange, record, plCode, onR
     const gross = record.net_salary || 0;
     const paid = record.status === 'paid' ? record.net_salary : 0;
     const remaining = gross - paid;
+    const salaryTypeLabel = 'Theo ngày công chuẩn';
+    const hasKpiDetails = Boolean(
+        Number(record.kpi_primary_bonus || 0) > 0
+        || Number(record.teamlead_bonus || 0) > 0
+        || Number(record.management_bonus || 0) > 0
+        || (record.kpi_secondary_details?.length || 0) > 0
+    );
     const employeeCode = record.user?.employee_code || record.employee_code || '--';
     const standardWorkDays = record.standard_work_days || record.salary_config?.standard_work_days || record.company_policy?.standard_work_days || 26;
 
@@ -475,7 +482,7 @@ export function PersonalPaysheetDialog({ open, onOpenChange, record, plCode, onR
                                 </div>
                                 <div className="flex items-center">
                                     <div className="w-[120px] text-[13px] text-gray-600">Loại lương chính:</div>
-                                    <div className="flex-1 text-[13px] text-gray-800">Cố định</div>
+                                    <div className="flex-1 text-[13px] text-gray-800">{salaryTypeLabel}</div>
                                 </div>
                                 <div className="flex">
                                     <div className="w-[120px] text-[13px] text-gray-600">Trạng thái:</div>
@@ -538,7 +545,7 @@ export function PersonalPaysheetDialog({ open, onOpenChange, record, plCode, onR
                                         />
                                     </div>
                                 </div>
-                                {(record.kpi_primary_bonus || record.teamlead_bonus || record.management_bonus) && (
+                                {hasKpiDetails && (
                                     <div className="mt-3 pt-3 border-t border-gray-100">
                                         <div className="text-[11px] font-semibold text-gray-500 mb-2 uppercase">Chi tiết KPI</div>
                                         {record.kpi_primary_score && (
@@ -808,3 +815,4 @@ export function PersonalPaysheetDialog({ open, onOpenChange, record, plCode, onR
         </Dialog>
     );
 }
+

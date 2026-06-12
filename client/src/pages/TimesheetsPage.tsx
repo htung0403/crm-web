@@ -238,7 +238,7 @@ export function TimesheetsPage() {
                     userId: ws.user_id,
                     name: ws.user?.name || '',
                     employeeCode: (ws.user as any)?.employee_code || '',
-                    salaryType: 'Theo giờ làm việc',
+                    salaryType: 'Theo ngày công chuẩn',
                     onTime: 0,
                     dayOff: 0,
                     late: 0,
@@ -256,7 +256,7 @@ export function TimesheetsPage() {
                     userId: u.id,
                     name: u.name || '',
                     employeeCode: (u as any)?.employee_code || '',
-                    salaryType: 'Theo giờ làm việc',
+                    salaryType: 'Theo ngày công chuẩn',
                     onTime: 0,
                     dayOff: 0,
                     late: 0,
@@ -1034,3 +1034,4 @@ function ShiftGroupRows({
         </>
     );
 }
+

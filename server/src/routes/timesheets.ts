@@ -17,7 +17,7 @@ const router = Router();
 const timesheetSelect = `
     *,
     shift:shifts(*),
-    user:users!timesheets_user_id_fkey(id, name, email, role, avatar, employee_code)
+    user:users!timesheets_user_id_fkey(id, name, email, role, avatar, status, employee_code)
 `;
 
 type ShiftSummary = { id: string; name: string; start_time: string; end_time: string };
@@ -258,9 +258,10 @@ router.get('/', async (req: Request, res: Response, next: NextFunction): Promise
             .select(`
                 *,
                 shift:shifts(*),
-                user:users!timesheets_user_id_fkey(id, name, email, phone, role, avatar, status, employee_code, salary, department_id),
+                user:users!inner(id, name, email, phone, role, avatar, status, employee_code, salary, base_salary, hourly_rate, department_id),
                 approver:users!timesheets_approved_by_fkey(id, name)
             `)
+            .eq('user.status', 'active')
             .gte('schedule_date', start_date as string)
             .lte('schedule_date', end_date as string)
             .order('schedule_date', { ascending: true });
@@ -385,10 +386,12 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
             return;
         }
 
-        // Fetch work schedules for the date range
+        // Fetch work schedules for active employees only. This keeps deleted employees
+        // out of attendance while allowing newly scheduled active employees in.
         const { data: schedules, error: schedError } = await supabase
             .from('work_schedules')
-            .select('user_id, shift_id, schedule_date')
+            .select('user_id, shift_id, schedule_date, user:users!inner(id, status)')
+            .eq('user.status', 'active')
             .gte('schedule_date', start_date)
             .lte('schedule_date', end_date);
 
@@ -434,3 +437,4 @@ router.delete('/:id', async (req: Request, res: Response, next: NextFunction): P
 
 export { router as timesheetsRouter };
 export default router;
+

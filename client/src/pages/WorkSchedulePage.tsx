@@ -14,6 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn, formatNumber } from '@/lib/utils';
+import { salaryConfigsApi } from '@/lib/api';
 import { useUsers } from '@/hooks/useUsers';
 import { useWorkSchedules, type Shift, type WorkSchedule } from '@/hooks/useWorkSchedules';
 import { toast } from 'sonner';
@@ -110,9 +111,19 @@ export function WorkSchedulePage() {
 
     // Delete confirmation state
     const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [salaryConfigsByUser, setSalaryConfigsByUser] = useState<Record<string, any>>({});
     const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
     useEffect(() => { fetchUsers(); fetchShifts(); }, []);
+
+    useEffect(() => {
+        salaryConfigsApi.getAll()
+            .then(res => {
+                const configs = res.data?.data?.configs || [];
+                setSalaryConfigsByUser(Object.fromEntries(configs.map((config: any) => [config.user_id, config])));
+            })
+            .catch(() => setSalaryConfigsByUser({}));
+    }, []);
 
     // Pre-select user from URL search params (e.g. ?userId=xxx)
     useEffect(() => {
@@ -158,11 +169,11 @@ export function WorkSchedulePage() {
                 userId: user.id, name: user.name,
                 employeeCode: (user as any).employee_code || '',
                 role: user.role,
-                salary: Number((user as any).base_salary || (user as any).baseAmount || (user as any).salary || 0),
+                salary: Number(salaryConfigsByUser[user.id]?.base_amount || (user as any).base_salary || (user as any).baseAmount || (user as any).salary || 0),
                 schedulesByDate: byDate,
             };
         });
-    }, [users, schedules]);
+    }, [users, schedules, salaryConfigsByUser]);
 
     const filteredRows = useMemo(() => {
         if (selectedUserIds.length === 0) return employeeRows;
@@ -570,3 +581,4 @@ export function WorkSchedulePage() {
         </div>
     );
 }
+

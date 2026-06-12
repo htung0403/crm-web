@@ -49,7 +49,7 @@ function parseOptionalUuid(value: unknown): string | null | undefined {
 }
 
 const USER_DETAIL_SELECT =
-    'id, email, name, role, phone, avatar, department, department_id, departments!department_id(name), status, created_at, last_login, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes';
+    'id, email, name, role, phone, avatar, department, department_id, departments!department_id(name), status, created_at, last_login, salary, base_salary, hourly_rate, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes';
 
 async function assertTelegramChatIdAvailable(userId: string, telegramChatId: string | null) {
     if (!telegramChatId) return;
@@ -167,7 +167,7 @@ router.get('/', authenticate, requireManager, async (req: AuthenticatedRequest, 
 
         let query = supabaseAdmin
             .from('users')
-            .select('id, email, name, role, phone, avatar, department, department_id, departments!department_id(name), status, created_at, last_login, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes')
+            .select(USER_DETAIL_SELECT)
             .order('created_at', { ascending: false });
 
         if (role) query = query.eq('role', role);
@@ -231,14 +231,15 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
 
         const normalizedEmail = email.toLowerCase().trim();
 
-        // Check if email already exists
+        // Check if email already exists. Soft-deleted/inactive employees may be
+        // reactivated so their email can be reused without breaking history.
         const { data: existingUser } = await supabaseAdmin
             .from('users')
-            .select('id')
+            .select('id, status, timekeeping_code')
             .eq('email', normalizedEmail)
-            .single();
+            .maybeSingle();
 
-        if (existingUser) {
+        if (existingUser && existingUser.status === 'active') {
             throw new ApiError('Email đã tồn tại trong hệ thống', 400);
         }
 
@@ -258,10 +259,7 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
         }
         const timekeepingCode = `CC${nt.toString().padStart(4, '0')}`;
 
-        // Insert user record into users table
-        const { data: user, error: insertError } = await supabaseAdmin
-            .from('users')
-            .insert({
+        const userPayload = {
                 email: normalizedEmail,
                 password_hash: passwordHash,
                 name,
@@ -271,13 +269,13 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
                 department_id: departmentId || null,
                 avatar: avatar || null,
                 salary: salary || 0,
+                base_salary: salary || 0,
                 commission: commission || 0,
                 bank_account: bankAccount || null,
                 bank_name: bankName || null,
                 telegram_chat_id: normalizeTelegramChatId(telegramChatId),
                 status: 'active',
-                created_at: new Date().toISOString(),
-                timekeeping_code: timekeepingCode,
+                timekeeping_code: existingUser?.timekeeping_code || timekeepingCode,
                 dob: dob || null,
                 gender: gender || null,
                 identity_card: identityCard || null,
@@ -289,9 +287,16 @@ router.post('/', authenticate, requireManager, async (req: AuthenticatedRequest,
                 facebook: facebook || null,
                 address: address || null,
                 mobile_device: mobileDevice || null,
-                notes: notes || null
-            })
-            .select('id, email, name, role, phone, avatar, department, status, created_at, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes')
+                notes: notes || null,
+                updated_at: new Date().toISOString()
+        };
+
+        const userMutation = existingUser
+            ? supabaseAdmin.from('users').update(userPayload).eq('id', existingUser.id)
+            : supabaseAdmin.from('users').insert({ ...userPayload, created_at: new Date().toISOString() });
+
+        const { data: user, error: insertError } = await userMutation
+            .select(USER_DETAIL_SELECT)
             .single();
 
         if (insertError) {
@@ -337,7 +342,7 @@ router.get('/:id', authenticate, async (req: AuthenticatedRequest, res, next) =>
 
         const { data: user, error } = await supabaseAdmin
             .from('users')
-            .select('id, email, name, role, phone, avatar, department, status, created_at, last_login, salary, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes')
+            .select('id, email, name, role, phone, avatar, department, status, created_at, last_login, salary, base_salary, hourly_rate, commission, bank_account, bank_name, telegram_chat_id, employee_code, timekeeping_code, dob, gender, identity_card, job_title_id, join_date, payroll_branch_id, working_branch_id, kiotviet_account, facebook, address, mobile_device, notes')
             .eq('id', id)
             .single();
 
@@ -496,4 +501,6 @@ router.delete('/:id', authenticate, requireManager, async (req: AuthenticatedReq
 });
 
 export { router as usersRouter };
+
+
 
