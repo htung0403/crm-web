@@ -190,13 +190,20 @@ body {
   .kanban-scroll-container {
     display: flex;
     overflow-x: auto;
+    overflow-y: visible;
     scroll-snap-type: x mandatory;
     -webkit-overflow-scrolling: touch;
     scroll-behavior: smooth;
     gap: 12px;
     padding-bottom: 12px;
-    touch-action: pan-x;
+    touch-action: pan-x pan-y;
     overscroll-behavior-x: contain;
+    overscroll-behavior-y: auto;
+  }
+
+  .kanban-scroll-container.no-scrollbar {
+    touch-action: pan-x pan-y;
+    overscroll-behavior-y: auto;
   }
 
   .kanban-scroll-container::-webkit-scrollbar {
@@ -205,9 +212,9 @@ body {
 
   .kanban-scroll-container > div {
     scroll-snap-align: start;
-    flex: 0 0 calc(100vw - 32px);
-    min-width: calc(100vw - 32px);
-    max-width: calc(100vw - 32px);
+    flex: 0 0 min(100%, calc(100vw - 28px));
+    min-width: min(100%, calc(100vw - 28px));
+    max-width: min(100%, calc(100vw - 28px));
   }
 
   /* Touch-friendly cards: always show action buttons */

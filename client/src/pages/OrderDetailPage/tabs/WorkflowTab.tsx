@@ -20,7 +20,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { canOperateWorkflow } from '@/lib/sensitivePermissions';
 import {
     MobileKanbanColumnTabs,
-    MobileKanbanMoveBar,
     buildKanbanDropResult,
     type MobileKanbanColumn,
 } from '@/components/kanban/mobileKanban';
@@ -110,7 +109,7 @@ const WorkflowCard = memo(({
                     {...provided.draggableProps}
                     {...(isPhoneView ? {} : provided.dragHandleProps)}
                     className={cn(
-                        "bg-white rounded-xl shadow-sm p-4 mb-3 border-l-4 transition-all",
+                        "bg-white rounded-xl shadow-sm p-3 mb-3 border-l-4 transition-all sm:p-4",
                         isCardDragDisabled && !isPhoneView ? "cursor-not-allowed opacity-75" : isPhoneView ? "cursor-pointer" : "cursor-grab active:cursor-grabbing",
                         snapshot.isDragging ? "shadow-lg ring-2 ring-primary/20 scale-105" : "",
                         itemLate && roomId !== 'done' ? (
@@ -122,19 +121,19 @@ const WorkflowCard = memo(({
                     )}
                     onClick={() => onCardClick(group, roomId)}
                 >
-                    <div className="flex justify-between items-start mb-2">
+                    <div className="flex min-w-0 justify-between items-start mb-2">
                         <span className="text-xs font-semibold text-gray-400">#{orderCode ?? cardKey?.slice(0, 8)}</span>
                     </div>
 
-                    <div className="space-y-2 mb-3">
+                    <div className="min-w-0 space-y-2 mb-3">
                         {productImages?.length > 0 && (
-                            <div className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50 aspect-video w-full max-h-24">
+                            <div className="rounded-lg overflow-hidden border border-gray-200 bg-gray-50 aspect-video w-full max-h-24 sm:max-h-28">
                                 <img src={productImages[0]} alt={productName} className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                             </div>
                         )}
-                        <h3 className="font-bold text-gray-800 text-[13px] flex items-center gap-1.5 flex-wrap">
+                        <h3 className="font-bold text-gray-800 text-[13px] flex min-w-0 items-center gap-1.5 flex-wrap">
                             <ShoppingBag className="h-3.5 w-3.5 shrink-0 text-primary" />
-                            <span className="truncate flex-1">{productName}</span>
+                            <span className="min-w-0 flex-1 truncate">{productName}</span>
                             {extensionRequest && (
                                 <Badge
                                     variant="outline"
@@ -159,13 +158,13 @@ const WorkflowCard = memo(({
                         {hasProductDetails && (
                             <div className="grid grid-cols-1 gap-1 text-[11px] text-gray-600">
                                 {productItem?.product_type && (
-                                    <div className="flex items-center gap-1.5"><Tag className="h-3 w-3 shrink-0 text-muted-foreground" /><span>Loại: {productItem.product_type}</span></div>
+                                    <div className="flex min-w-0 items-center gap-1.5"><Tag className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="min-w-0 truncate">Loại: {productItem.product_type}</span></div>
                                 )}
                                 {productItem?.product_brand && (
-                                    <div className="flex items-center gap-1.5"><Tag className="h-3 w-3 shrink-0 text-muted-foreground" /><span>Hãng: {productItem.product_brand}</span></div>
+                                    <div className="flex min-w-0 items-center gap-1.5"><Tag className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="min-w-0 truncate">Hãng: {productItem.product_brand}</span></div>
                                 )}
                                 {productItem?.product_notes && (
-                                    <div className="flex items-center gap-1.5"><FileText className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="line-clamp-1">Ghi chú: {productItem.product_notes}</span></div>
+                                    <div className="flex min-w-0 items-center gap-1.5"><FileText className="h-3 w-3 shrink-0 text-muted-foreground" /><span className="min-w-0 line-clamp-1">Ghi chú: {productItem.product_notes}</span></div>
                                 )}
                             </div>
                         )}
@@ -181,26 +180,26 @@ const WorkflowCard = memo(({
                                 ? svcTechnicians.map((t: any) => t.technician?.name).filter(Boolean).join(', ') || '—'
                                 : svcTechSingle?.name || '—';
                             return (
-                                <li key={svc.id} className={cn("rounded-md px-2 py-1", isLeadService ? "bg-primary/5 border border-primary/20" : "")}>
-                                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-gray-700">
+                                <li key={svc.id} className={cn("min-w-0 rounded-md px-2 py-1", isLeadService ? "bg-primary/5 border border-primary/20" : "")}>
+                                    <div className="flex min-w-0 items-center gap-1.5 text-[11px] font-medium text-gray-700">
                                         <Wrench className="h-3 w-3 shrink-0 text-primary/60" />
-                                        <span className="truncate">{svc.item_name}</span>
+                                        <span className="min-w-0 truncate">{svc.item_name}</span>
                                     </div>
                                     <div
-                                        className="flex items-center gap-1.5 text-[10px] text-gray-500 mt-0.5 cursor-pointer hover:text-primary transition-colors"
+                                        className="flex min-w-0 items-center gap-1.5 text-[10px] text-gray-500 mt-0.5 cursor-pointer hover:text-primary transition-colors"
                                         title="Nhấn để phân công/đổi kỹ thuật viên"
                                         onClick={(e) => { e.stopPropagation(); handleOpenAssignDialog(svc); }}
                                     >
                                         <UserIcon className="h-2.5 w-2.5 shrink-0" />
-                                        <span className="truncate">KT: {techNames}</span>
+                                        <span className="min-w-0 truncate">KT: {techNames}</span>
                                     </div>
                                     <div
-                                        className="flex items-center gap-1.5 text-[10px] text-amber-500 mt-0.5 cursor-pointer hover:text-amber-600 transition-colors"
+                                        className="flex min-w-0 items-center gap-1.5 text-[10px] text-amber-500 mt-0.5 cursor-pointer hover:text-amber-600 transition-colors"
                                         title="Nhấn để phân công/đổi kinh doanh"
                                         onClick={(e) => { e.stopPropagation(); handleOpenSaleAssignDialog(svc); }}
                                     >
                                         <Tag className="h-2.5 w-2.5 shrink-0" />
-                                        <span className="truncate">Sale: {(svc as any).sales?.length > 0 ? (svc as any).sales.map((s: any) => s.sale?.name || (s as any).name).join(', ') : '—'}</span>
+                                        <span className="min-w-0 truncate">Sale: {(svc as any).sales?.length > 0 ? (svc as any).sales.map((s: any) => s.sale?.name || (s as any).name).join(', ') : '—'}</span>
                                     </div>
                                     {isLeadService && currentStep && (
                                         <div className="mt-1.5 pt-1.5 border-t border-primary/10">
@@ -212,26 +211,6 @@ const WorkflowCard = memo(({
                             );
                         })}
                     </ul>
-
-                    {onWorkflowMove && workflowColumns.length > 0 && roomId !== 'done' && roomId !== 'fail' && (
-                        <div className="max-md:block hidden">
-                            <MobileKanbanMoveBar
-                                columns={workflowColumns}
-                                currentColumnId={roomId}
-                                draggableId={cardKey}
-                                onMove={onWorkflowMove}
-                                disabled={!canDragWorkflow || isSlaPaused}
-                                disabledMessage={
-                                    isSlaPaused
-                                        ? 'Đang chờ duyệt — không thể chuyển bước'
-                                        : 'Chỉ Kỹ thuật/Quản lý mới chuyển bước trên Kanban'
-                                }
-                                sourceIndex={index}
-                                embedded
-                                allowColumnJump
-                            />
-                        </div>
-                    )}
 
                     {roomId !== 'done' && roomId !== 'fail' && (
                         <>
@@ -316,46 +295,80 @@ const WorkflowCard = memo(({
                                                 'Gia hạn'}
                                     </span>
                                 </button>
-                                {roomId === 'waiting' && (
-                                    <button
-                                        type="button"
-                                        disabled={!canDragWorkflow}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            if (!canDragWorkflow) return;
-                                            handleOpenBackwardMove(group);
-                                        }}
-                                        className={cn(
-                                            "col-span-3 mt-1 inline-flex items-center justify-center p-1 px-1 rounded-md text-[9px] font-bold transition-all h-7 bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100",
-                                            !canDragWorkflow && "opacity-50 cursor-not-allowed",
-                                        )}
-                                    >
-                                        <ExternalLink className="h-3 w-3 mr-1" />
-                                        <span className="truncate">Trả về Sales</span>
-                                    </button>
-                                )}
-                                {onWorkflowMove && nextCol && (
+                                {onWorkflowMove && (prevCol || nextCol) && (
                                     <div
-                                        className="col-span-3 mt-2 max-md:block hidden space-y-1.5"
+                                        className="col-span-3 mt-2 hidden max-md:block"
                                         onClick={(e) => e.stopPropagation()}
                                     >
-                                        <Button
-                                            type="button"
-                                            className="h-10 w-full gap-1.5 text-xs font-bold shadow-sm"
-                                            onClick={() => tryMoveTo(nextCol.id)}
-                                        >
-                                            Chuyển sang {nextCol.title}
-                                            <ChevronRight className="h-4 w-4 shrink-0" />
-                                        </Button>
-                                        {prevCol && (
+                                        <div className="rounded-lg border border-primary/20 bg-primary/5 p-2.5">
+                                            <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-primary">
+                                                Chuyển trạng thái
+                                            </p>
+                                            <div className="grid grid-cols-[44px_minmax(0,1fr)_44px] items-center gap-2">
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    size="icon"
+                                                    disabled={!prevCol || !canDragWorkflow || isSlaPaused}
+                                                    className="h-10 w-11 rounded-lg border-primary/25 bg-white text-primary disabled:opacity-40"
+                                                    aria-label={prevCol ? `Về ${prevCol.title}` : 'Không có bước trước'}
+                                                    onClick={() => prevCol && tryMoveTo(prevCol.id)}
+                                                >
+                                                    <ChevronLeft className="h-4 w-4" />
+                                                </Button>
+                                                <select
+                                                    className="h-10 min-w-0 rounded-lg border border-input bg-white px-3 text-center text-xs font-semibold text-foreground shadow-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
+                                                    defaultValue=""
+                                                    disabled={!canDragWorkflow || isSlaPaused}
+                                                    aria-label="Chọn phòng chuyển trạng thái"
+                                                    onChange={(e) => {
+                                                        const destId = e.target.value;
+                                                        if (destId) tryMoveTo(destId);
+                                                        e.target.value = '';
+                                                    }}
+                                                >
+                                                    <option value="" disabled>
+                                                        Chọn phòng khác...
+                                                    </option>
+                                                    {workflowColumns
+                                                        .filter((column) => column.id !== roomId)
+                                                        .map((column) => (
+                                                            <option key={column.id} value={column.id}>
+                                                                {column.title}
+                                                            </option>
+                                                        ))}
+                                                </select>
+                                                <Button
+                                                    type="button"
+                                                    size="icon"
+                                                    disabled={!nextCol || !canDragWorkflow || isSlaPaused}
+                                                    className="h-10 w-11 rounded-lg shadow-sm disabled:opacity-40"
+                                                    aria-label={nextCol ? `Sang ${nextCol.title}` : 'Không có bước sau'}
+                                                    onClick={() => nextCol && tryMoveTo(nextCol.id)}
+                                                >
+                                                    <ChevronRight className="h-4 w-4" />
+                                                </Button>
+                                            </div>
+                                            <div className="mt-1.5 grid grid-cols-[44px_minmax(0,1fr)_44px] gap-2 text-[10px] text-muted-foreground">
+                                                <span className="truncate text-center">{prevCol ? prevCol.title : '—'}</span>
+                                                <span className="truncate text-center font-medium text-primary">{roomId === 'done' || roomId === 'fail' ? 'Đã kết thúc' : 'Đang ở bước này'}</span>
+                                                <span className="truncate text-center">{nextCol ? nextCol.title : '—'}</span>
+                                            </div>
+                                        </div>
+                                        {roomId === 'waiting' && (
                                             <Button
                                                 type="button"
                                                 variant="outline"
-                                                className="h-8 w-full gap-1 text-[11px]"
-                                                onClick={() => tryMoveTo(prevCol.id)}
+                                                disabled={!canDragWorkflow}
+                                                className="mt-2 h-9 w-full gap-1 text-[11px] border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100 disabled:opacity-50"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    if (!canDragWorkflow) return;
+                                                    handleOpenBackwardMove(group);
+                                                }}
                                             >
-                                                <ChevronLeft className="h-3.5 w-3.5 shrink-0" />
-                                                Về {prevCol.title}
+                                                <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                                                Trả về Sales
                                             </Button>
                                         )}
                                     </div>
@@ -519,6 +532,7 @@ export function WorkflowTab({
     const [viewLogData, setViewLogData] = useState<any>(null);
     const [mobileRoomId, setMobileRoomId] = useState('waiting');
     const mobileScrollRef = useRef<HTMLDivElement>(null);
+    const mobileRoomInitializedRef = useRef(false);
 
     const canDragWorkflow = canOperateWorkflow(user);
 
@@ -526,9 +540,9 @@ export function WorkflowTab({
         setMobileRoomId(roomId);
         const container = mobileScrollRef.current;
         if (!container) return;
-        const el = container.querySelector(`[data-kanban-col="${roomId}"]`);
+        const el = container.querySelector<HTMLElement>(`[data-kanban-col="${roomId}"]`);
         if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
+            container.scrollTo({ left: el.offsetLeft - container.offsetLeft, behavior: 'smooth' });
         }
     }, []);
 
@@ -647,12 +661,16 @@ export function WorkflowTab({
         [rooms]
     );
 
-    // Mobile: tự chọn cột có card
+    // Mobile: chỉ tự chọn cột có card lần đầu, không ép người dùng quay lại khi bấm cột rỗng.
     useEffect(() => {
+        if (mobileRoomInitializedRef.current) return;
+        if (!filteredGroups.length) return;
+
+        mobileRoomInitializedRef.current = true;
         if ((groupsByRoom[mobileRoomId] || []).length > 0) return;
         const firstWithCards = rooms.find((r) => (groupsByRoom[r.id] || []).length > 0);
         if (firstWithCards) scrollToWorkflowRoom(firstWithCards.id);
-    }, [groupsByRoom, mobileRoomId, rooms, scrollToWorkflowRoom]);
+    }, [filteredGroups.length, groupsByRoom, mobileRoomId, rooms, scrollToWorkflowRoom]);
 
     useEffect(() => {
         const container = mobileScrollRef.current;
