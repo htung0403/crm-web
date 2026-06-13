@@ -471,6 +471,7 @@ export function AftersaleTab({
 
     const [mobileAfterCol, setMobileAfterCol] = useState<string>('after1');
     const mobileScrollRef = useRef<HTMLDivElement>(null);
+    const mobileAfterInitializedRef = useRef(false);
     const afterColumns: MobileKanbanColumn[] = AFTER_COLS.map((c) => ({
         id: c.id,
         title: AFTER_COL_TAB_LABELS[c.id],
@@ -480,9 +481,9 @@ export function AftersaleTab({
         setMobileAfterCol(colId);
         const container = mobileScrollRef.current;
         if (!container) return;
-        const el = container.querySelector(`[data-kanban-col="${colId}"]`);
+        const el = container.querySelector<HTMLElement>(`[data-kanban-col="${colId}"]`);
         if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
+            container.scrollTo({ left: el.offsetLeft - container.offsetLeft, behavior: 'smooth' });
         }
     }, []);
 
@@ -512,6 +513,10 @@ export function AftersaleTab({
     );
 
     useEffect(() => {
+        if (mobileAfterInitializedRef.current) return;
+        if (!groups.length) return;
+
+        mobileAfterInitializedRef.current = true;
         if (getColGroupCount(mobileAfterCol) > 0) return;
         const firstWithCards = AFTER_COLS.find((c) => getColGroupCount(c.id) > 0);
         if (firstWithCards) scrollToAfterColumn(firstWithCards.id);
@@ -707,7 +712,7 @@ export function AftersaleTab({
                                 />
                                 <div
                                     ref={mobileScrollRef}
-                                    className="flex snap-x snap-mandatory gap-3 overflow-x-auto overscroll-x-contain pb-2 touch-pan-x no-scrollbar -mx-1 px-1"
+                                    className="flex snap-x snap-mandatory gap-3 overflow-x-auto overflow-y-visible overscroll-x-contain overscroll-y-auto pb-2 no-scrollbar -mx-1 px-1 [touch-action:pan-x_pan-y]"
                                 >
                                     {AFTER_COLS.map((col) => {
                                         const colGroups = groups.filter(
