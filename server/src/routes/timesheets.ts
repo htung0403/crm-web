@@ -258,7 +258,7 @@ router.get('/', async (req: Request, res: Response, next: NextFunction): Promise
             .select(`
                 *,
                 shift:shifts(*),
-                user:users!inner(id, name, email, phone, role, avatar, status, employee_code, salary, base_salary, hourly_rate, department_id),
+                user:users!timesheets_user_id_fkey!inner(id, name, email, phone, role, avatar, status, employee_code, salary, base_salary, hourly_rate, department_id),
                 approver:users!timesheets_approved_by_fkey(id, name)
             `)
             .eq('user.status', 'active')
@@ -360,6 +360,7 @@ router.post('/approve', async (req: Request, res: Response, next: NextFunction):
         const { data, error } = await supabase
             .from('timesheets')
             .update({
+                status: 'approved',
                 approved_by: approved_by || null,
                 approved_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
@@ -390,7 +391,7 @@ router.post('/generate', async (req: Request, res: Response, next: NextFunction)
         // out of attendance while allowing newly scheduled active employees in.
         const { data: schedules, error: schedError } = await supabase
             .from('work_schedules')
-            .select('user_id, shift_id, schedule_date, user:users!inner(id, status)')
+            .select('user_id, shift_id, schedule_date, user:users!work_schedules_user_id_fkey!inner(id, status)')
             .eq('user.status', 'active')
             .gte('schedule_date', start_date)
             .lte('schedule_date', end_date);

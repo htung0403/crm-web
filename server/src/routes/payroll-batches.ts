@@ -88,12 +88,12 @@ async function resolveApprovedAttendanceSalary(params: {
 
         const workedDates = new Set<string>();
         for (const t of timesheets || []) {
+            if (t.schedule_date) workedDates.add(t.schedule_date);
             if (!t.check_in || !t.check_out) continue;
             const hours = (new Date(t.check_out).getTime() - new Date(t.check_in).getTime()) / (1000 * 60 * 60);
             if (!Number.isFinite(hours) || hours <= 0) continue;
             const cappedHours = Math.min(hours, 12);
             totalHours += cappedHours;
-            if (t.schedule_date) workedDates.add(t.schedule_date);
             overtimeHours += Math.max(0, cappedHours - 8);
         }
         workedDays = workedDates.size;
