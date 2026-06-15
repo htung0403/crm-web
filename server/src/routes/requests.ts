@@ -100,12 +100,22 @@ router.patch('/accessories/:id', authenticate, async (req: AuthenticatedRequest,
         }
 
         if (status) {
-            fireWebhook('accessory.status_changed', {
+            fireWebhook('accessory.status.changed', {
                 accessory_id: id,
                 old_status: current.status,
                 new_status: status,
                 notes: notes || null,
             });
+
+            if (status === 'need_buy' || status === 'rejected') {
+                fireWebhook(status === 'need_buy' ? 'accessory.approved' : 'accessory.rejected', {
+                    accessory_id: id,
+                    old_status: current.status,
+                    new_status: status,
+                    notes: notes || null,
+                    metadata: metadata || current.metadata || {},
+                });
+            }
 
             if (status === 'delivered_to_tech') {
                 const technicianId = (metadata || current.metadata || {})?.technician_id;
@@ -134,7 +144,7 @@ router.patch('/partners/:id', authenticate, async (req: AuthenticatedRequest, re
 
         const { data: current, error: fetchError } = await supabaseAdmin
             .from('order_item_partner')
-            .select('id, status, notes, order_item_id, order_product_id, order_product_service_id')
+            .select('id, status, notes, metadata, order_item_id, order_product_id, order_product_service_id')
             .eq('id', id)
             .single();
 
@@ -176,12 +186,22 @@ router.patch('/partners/:id', authenticate, async (req: AuthenticatedRequest, re
         }
 
         if (status) {
-            fireWebhook('partner.status_changed', {
+            fireWebhook('partner.status.changed', {
                 partner_id: id,
                 old_status: current.status,
                 new_status: status,
                 notes: notes || null,
             });
+
+            if (status === 'ship_to_partner' || status === 'rejected') {
+                fireWebhook(status === 'ship_to_partner' ? 'partner.approved' : 'partner.rejected', {
+                    partner_id: id,
+                    old_status: current.status,
+                    new_status: status,
+                    notes: notes || null,
+                    metadata: metadata || current.metadata || {},
+                });
+            }
         }
 
         res.json({ status: 'success', data });
@@ -431,7 +451,7 @@ router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, 
 
         // 🔔 WH5: Fire webhook — Gia hạn (status change)
         if (status) {
-            fireWebhook('extension.status_changed', {
+            fireWebhook('extension.status.changed', {
                 extension_id: id,
                 new_status: status,
                 customer_result: customer_result || null,
@@ -446,6 +466,18 @@ router.patch('/extensions/:id', authenticate, async (req: AuthenticatedRequest, 
                 channel: 'telegram',
                 order: { id: data.order_id },
                 new_deadline: data.new_due_at || new_due_at || null,
+                approver_id: userId || null,
+                extension_id: id,
+            });
+        }
+
+        if (status === 'rejected' && data?.requested_by) {
+            notifyCrmMasterUser('extension.rejected', {
+                target_user_id: data.requested_by,
+                target_role: 'sale',
+                channel: 'telegram',
+                order: { id: data.order_id },
+                customer_result: customer_result || null,
                 approver_id: userId || null,
                 extension_id: id,
             });

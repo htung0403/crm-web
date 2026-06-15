@@ -82,6 +82,7 @@ function normalizeUser(user: any) {
 }
 
 function normalizeService(service: any, orderProduct: any, order: any) {
+    const customer = firstRelation(order?.customer);
     const technicians = (service.technicians || [])
         .map((row: any) => normalizeUser(firstRelation(row.technician)))
         .filter(Boolean);
@@ -110,6 +111,15 @@ function normalizeService(service: any, orderProduct: any, order: any) {
         status: service.status,
         order_id: order?.id || orderProduct.order_id,
         order_code: order?.order_code || null,
+        customer_id: customer?.id || null,
+        customer_name: customer?.name || null,
+        customer_phone: customer?.phone || null,
+        customer: customer ? {
+            id: customer.id,
+            name: customer.name,
+            phone: customer.phone,
+            zalo_user_id: customer.zalo_user_id || customer.customer_zalo_user_id || null,
+        } : null,
         product_image_url: getFirstImage(orderProduct.images),
         technician: technicianList[0] || null,
         technicians: technicianList,

@@ -83,7 +83,7 @@ router.post('/income', authenticate, async (req: AuthenticatedRequest, res, next
         }
 
         notifyFinanceEvent({
-            event: 'finance.transaction.created',
+            event: 'receipt.created',
             title: 'Phiếu thu mới',
             message: `${req.user!.name} đã tạo phiếu thu ${transaction.code}`,
             actor: req.user!,
@@ -143,7 +143,7 @@ router.post('/expense', authenticate, async (req: AuthenticatedRequest, res, nex
         }
 
         notifyFinanceEvent({
-            event: 'finance.transaction.created',
+            event: 'payment_voucher.created',
             title: 'Phiếu chi mới',
             message: `${req.user!.name} đã tạo phiếu chi ${transaction.code}`,
             actor: req.user!,

@@ -2406,7 +2406,7 @@ router.post('/:id/payments', authenticate, async (req: AuthenticatedRequest, res
         } else {
             console.log(`Created transaction ${transCode} for order ${order.order_code} payment`);
             await notifyFinanceEvent({
-                event: 'transaction.created',
+                event: 'receipt.created',
                 title: 'Phiếu thu mới',
                 message: `${req.user!.name} đã tạo phiếu thu ${transCode}`,
                 actor: req.user!,
@@ -2480,7 +2480,7 @@ router.post('/:id/payments', authenticate, async (req: AuthenticatedRequest, res
 // =====================================================
 // ORDER EXTENSION REQUESTS (Xin gia hạn)
 // =====================================================
-const EXTENSION_STATUSES = ['requested', 'sale_contacted', 'manager_approved', 'notified_tech', 'kpi_recorded'];
+const EXTENSION_STATUSES = ['requested', 'sale_contacted', 'manager_approved', 'notified_tech', 'kpi_recorded', 'rejected'];
 
 router.post('/:id/extension-request', authenticate, async (req: AuthenticatedRequest, res, next) => {
     try {
@@ -2509,6 +2509,16 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
             .single();
 
         if (error) throw new ApiError('Lỗi tạo yêu cầu gia hạn: ' + error.message, 500);
+
+        const context = await getOrderNotificationContext(id);
+        if (context) {
+            notifyOrderSalesUser('extension.request.created', context, {
+                requester_id: req.user!.id,
+                extension_request: row,
+                reason: reason.trim(),
+                new_deadline: new_due_at || null,
+            });
+        }
 
         res.status(201).json({
             status: 'success',
@@ -2555,6 +2565,20 @@ router.patch('/:id/extension-request', authenticate, async (req: AuthenticatedRe
             .single();
 
         if (error) throw new ApiError('Lỗi cập nhật: ' + error.message, 500);
+
+        if (status === 'manager_approved' || status === 'rejected') {
+            const context = await getOrderNotificationContext(id);
+            if (context) {
+                notifyOrderSalesUser(status === 'manager_approved' ? 'extension.approved' : 'extension.rejected', context, {
+                    requester_id: updated.requested_by || null,
+                    approver_id: req.user?.id || null,
+                    extension_request: updated,
+                    customer_result: updated.customer_result || customer_result || null,
+                    new_deadline: updated.new_due_at || new_due_at || null,
+                    valid_reason: typeof updated.valid_reason === 'boolean' ? updated.valid_reason : valid_reason,
+                });
+            }
+        }
 
         // Removed global order due_at update
         
@@ -2672,6 +2696,7 @@ router.post('/:id/debt-check', authenticate, async (req: AuthenticatedRequest, r
             notifyOrderSalesUser('aftersale.debt_check.started', context, {
                 requester_id: req.user!.id,
                 notes: notes || null,
+                customer_phone: context.customer?.phone || null,
             });
         }
 

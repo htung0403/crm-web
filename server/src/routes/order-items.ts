@@ -210,7 +210,7 @@ router.post('/accessories', authenticate, async (req: AuthenticatedRequest, res,
             contextItemName = (ctx as any)?.item_name || orderProduct?.name || contextItemName;
         }
 
-        fireWebhook('accessory.requested', {
+        fireWebhook('accessory.request.created', {
             accessory_id: data.id,
             order_code: orderCode,
             item_name: contextItemName,
@@ -1229,7 +1229,7 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
         // 🔔 WH4: Fire webhook — Kỹ thuật xin gia hạn
         const { data: orderForWh } = await supabaseAdmin.from('orders').select('order_code').eq('id', orderId).single();
         const { data: techUser } = await supabaseAdmin.from('users').select('name').eq('id', req.user!.id).single();
-        fireWebhook('extension.requested', {
+        fireWebhook('extension.request.created', {
             order_code: orderForWh?.order_code || 'N/A',
             technician_name: techUser?.name || 'N/A',
             item_name: itemName,
@@ -1739,7 +1739,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
                     req.user?.id
                 );
 
-                fireWebhook('accessory.status_changed', {
+                fireWebhook('accessory.status.changed', {
                     accessory_id: existing.id,
                     old_status: oldStatus || null,
                     new_status: status,
@@ -1751,7 +1751,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
             }
 
             if (status === 'requested' && oldStatus !== 'requested') {
-                fireWebhook('accessory.requested', {
+            fireWebhook('accessory.request.created', {
                     accessory_id: existing.id,
                     order_item_id: entity.order_item_id,
                     order_product_service_id: entity.order_product_service_id,
@@ -1786,7 +1786,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
                 req.user?.id
             );
 
-            fireWebhook('accessory.requested', {
+            fireWebhook('accessory.request.created', {
                 accessory_id: inserted.id,
                 order_item_id: entity.order_item_id,
                 order_product_service_id: entity.order_product_service_id,
@@ -1891,7 +1891,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
                     req.user?.id
                 );
 
-                fireWebhook('partner.status_changed', {
+                fireWebhook('partner.status.changed', {
                     partner_id: existing.id,
                     old_status: oldStatus || null,
                     new_status: status,
@@ -1902,7 +1902,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
             }
 
             if (status === 'requested' && oldStatus !== 'requested') {
-                fireWebhook('partner.requested', {
+                fireWebhook('partner.request.created', {
                     partner_id: existing.id,
                     order_item_id: entity.order_item_id,
                     order_product_service_id: entity.order_product_service_id,
@@ -1935,7 +1935,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
                 req.user?.id
             );
 
-            fireWebhook('partner.requested', {
+                fireWebhook('partner.request.created', {
                 partner_id: inserted.id,
                 order_item_id: entity.order_item_id,
                 order_product_service_id: entity.order_product_service_id,
@@ -2607,7 +2607,7 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
         // 🔔 WH4: Fire webhook — Kỹ thuật xin gia hạn (endpoint #2)
         const { data: orderForWh2 } = await supabaseAdmin.from('orders').select('order_code').eq('id', orderId).single();
         const { data: techUser2 } = await supabaseAdmin.from('users').select('name').eq('id', userId!).single();
-        fireWebhook('extension.requested', {
+        fireWebhook('extension.request.created', {
             order_code: orderForWh2?.order_code || 'N/A',
             technician_name: techUser2?.name || 'N/A',
             item_name: itemName,
