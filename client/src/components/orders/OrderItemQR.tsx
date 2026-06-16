@@ -12,8 +12,8 @@ interface OrderItemQRProps {
 }
 
 export function OrderItemQRDialog({ itemCode, itemName, orderCode, open, onClose }: OrderItemQRProps) {
-    // Generate the full URL for the QR code
-    const qrUrl = `${window.location.origin}/task/${encodeURIComponent(itemCode)}`;
+    // QR chỉ chứa mã item để thiết bị quét không nhận diện thành link localhost.
+    const qrValue = itemCode;
 
     const handlePrint = () => {
         const printWindow = window.open('', '_blank');
@@ -67,7 +67,7 @@ export function OrderItemQRDialog({ itemCode, itemName, orderCode, open, onClose
                         <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
                         <script>
                             new QRCode(document.getElementById("qr"), {
-                                text: "${qrUrl}",
+                                text: decodeURIComponent("${encodeURIComponent(itemCode)}"),
                                 width: 200,
                                 height: 200,
                             });
@@ -117,7 +117,7 @@ export function OrderItemQRDialog({ itemCode, itemName, orderCode, open, onClose
 
                     <div id={`qr-${itemCode}`} className="p-4 bg-white rounded-lg border">
                         <QRCodeSVG
-                            value={qrUrl}
+                            value={qrValue}
                             size={200}
                             level="H"
                             includeMargin
@@ -146,12 +146,12 @@ export function OrderItemQRDialog({ itemCode, itemName, orderCode, open, onClose
 
 // Simple QR code display for inline use
 export function OrderItemQR({ itemCode, size = 80 }: { itemCode: string; size?: number }) {
-    const qrUrl = `${window.location.origin}/task/${encodeURIComponent(itemCode)}`;
+    const qrValue = itemCode;
 
     return (
         <div className="inline-block p-1 bg-white rounded border">
             <QRCodeSVG
-                value={qrUrl}
+                value={qrValue}
                 size={size}
                 level="M"
             />

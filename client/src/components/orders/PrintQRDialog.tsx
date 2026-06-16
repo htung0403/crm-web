@@ -97,8 +97,8 @@ export function PrintQRDialog({ order, open, onClose }: PrintQRDialogProps) {
         const qrScripts = itemsToPrint
             .filter((item: OrderItem): item is OrderItemWithCode => Boolean(item.item_code))
             .map((item: OrderItemWithCode) => {
-                const qrUrl = `${window.location.origin}/task/${encodeURIComponent(item.item_code)}`;
-                return `new QRCode(document.getElementById("qr-${item.id}"), { text: "${qrUrl}", width: 120, height: 120, correctLevel: QRCode.CorrectLevel.M });`;
+                const qrCodeValue = encodeURIComponent(order.order_code);
+                return `new QRCode(document.getElementById("qr-${item.id}"), { text: decodeURIComponent("${qrCodeValue}"), width: 120, height: 120, correctLevel: QRCode.CorrectLevel.M });`;
             }).join('\n');
 
         printWindow.document.write(`
@@ -295,7 +295,7 @@ export function PrintQRDialog({ order, open, onClose }: PrintQRDialogProps) {
                     {/* Items List with QR Codes */}
                     <div className="space-y-3" ref={printRef}>
                         {productQRItems.map((item: OrderItem, index: number) => {
-                            const qrUrl = item.item_code ? `${window.location.origin}/task/${encodeURIComponent(item.item_code)}` : null;
+                            const qrValue = item.item_code ? order.order_code : null;
                             const isSelected = selectedItems.includes(item.id);
 
                             return (
@@ -311,9 +311,9 @@ export function PrintQRDialog({ order, open, onClose }: PrintQRDialogProps) {
 
                                     {/* QR Code */}
                                     <div className="flex-shrink-0">
-                                        {qrUrl ? (
+                                        {qrValue ? (
                                             <div className="p-1 bg-white border rounded">
-                                                <QRCodeSVG value={qrUrl} size={70} level="M" />
+                                                <QRCodeSVG value={qrValue} size={70} level="M" />
                                             </div>
                                         ) : (
                                             <div className="w-[70px] h-[70px] bg-muted rounded flex items-center justify-center">

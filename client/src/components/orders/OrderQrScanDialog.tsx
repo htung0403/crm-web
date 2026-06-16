@@ -83,6 +83,16 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
         }
 
         try {
+            if (!window.isSecureContext) {
+                setHasCamera(false);
+                setError('Trình duyệt chặn camera vì kết nối không an toàn. Vui lòng dùng HTTPS.');
+                return;
+            }
+            if (!navigator.mediaDevices?.getUserMedia) {
+                setHasCamera(false);
+                setError('Trình duyệt hiện tại không hỗ trợ camera.');
+                return;
+            }
             setError(null);
             handledRef.current = false;
             const cameraConfig = await pickCameraId();
@@ -108,6 +118,11 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
             setIsScanning(false);
             scannerRef.current = null;
             const message = err instanceof Error ? err.message : 'Không thể bật camera';
+            if (/notallowed|permission|denied|notreadable|notfound/i.test(message)) {
+                setHasCamera(false);
+                setError('Không thể bật camera. Hãy cấp quyền camera cho trình duyệt rồi thử lại.');
+                return;
+            }
             if (/environment|not found|overconstrained/i.test(message)) {
                 try {
                     const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, { verbose: false });
@@ -140,35 +155,12 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
             setManualCode('');
             return;
         }
-
-        let cancelled = false;
-
-        const boot = async () => {
-            try {
-                if (!navigator.mediaDevices?.getUserMedia) {
-                    throw new Error('Trình duyệt không hỗ trợ camera');
-                }
-                await navigator.mediaDevices.getUserMedia({ video: true });
-                if (cancelled) return;
-                setHasCamera(true);
-                await new Promise((r) => setTimeout(r, 400));
-                if (cancelled) return;
-                await startScanner();
-            } catch {
-                if (!cancelled) {
-                    setHasCamera(false);
-                    setError('Không truy cập được camera. Cho phép quyền camera hoặc nhập mã thủ công.');
-                }
-            }
-        };
-
-        void boot();
-
+        setHasCamera(true);
+        setError(null);
         return () => {
-            cancelled = true;
             void stopScanner();
         };
-    }, [open, startScanner, stopScanner]);
+    }, [open, stopScanner]);
 
     const submitManual = () => {
         const code = parseScannedCode(manualCode);
@@ -208,7 +200,7 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
                                     <CameraOff className="h-10 w-10 text-muted-foreground" />
                                 )}
                                 <p className="text-xs text-muted-foreground">
-                                    {hasCamera ? 'Đang bật camera…' : 'Dùng ô nhập mã bên dưới'}
+                                    {hasCamera ? 'Nhấn "Bật camera" để bắt đầu quét' : 'Dùng ô nhập mã bên dưới'}
                                 </p>
                             </div>
                         )}
