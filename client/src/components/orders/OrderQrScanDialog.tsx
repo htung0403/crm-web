@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Html5Qrcode, type CameraDevice } from 'html5-qrcode';
+import { Html5Qrcode, Html5QrcodeSupportedFormats, type CameraDevice } from 'html5-qrcode';
 import { AlertCircle, Camera, CameraOff, QrCode } from 'lucide-react';
 import {
     Dialog,
@@ -102,14 +102,22 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
             await scanner.start(
                 cameraConfig,
                 {
-                    fps: 20,
+                    fps: 30,
                     qrbox: (viewfinderWidth, viewfinderHeight) => {
                         const edge = Math.min(viewfinderWidth, viewfinderHeight);
-                        const size = Math.max(140, Math.min(320, Math.floor(edge * 0.9)));
+                        const size = Math.max(120, Math.min(280, Math.floor(edge * 0.72)));
                         return { width: size, height: size };
                     },
                     aspectRatio: 1,
                     disableFlip: false,
+                    formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+                    experimentalFeatures: {
+                        useBarCodeDetectorIfSupported: true,
+                    },
+                    videoConstraints: {
+                        facingMode: 'environment',
+                        advanced: [{ focusMode: 'continuous' as any }],
+                    },
                 },
                 (text) => handleDecoded(text),
                 () => {},
@@ -131,9 +139,17 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
                     await scanner.start(
                         { facingMode: 'user' },
                         {
-                            fps: 20,
-                            qrbox: { width: 240, height: 240 },
+                            fps: 24,
+                            qrbox: { width: 220, height: 220 },
                             disableFlip: false,
+                            formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+                            experimentalFeatures: {
+                                useBarCodeDetectorIfSupported: true,
+                            },
+                            videoConstraints: {
+                                facingMode: 'user',
+                                advanced: [{ focusMode: 'continuous' as any }],
+                            },
                         },
                         (text) => handleDecoded(text),
                         () => {},
@@ -235,7 +251,6 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
                             <Button
                                 className="flex-1"
                                 onClick={() => void startScanner()}
-                                disabled={!hasCamera}
                             >
                                 <Camera className="mr-2 h-4 w-4" />
                                 Bật lại camera
