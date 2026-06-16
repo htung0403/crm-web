@@ -190,6 +190,19 @@ export function OrdersPage() {
             return;
         }
 
+        // Fallback: tìm trực tiếp từ server theo mã đơn/mã HĐ
+        try {
+            const searchResp = await ordersApi.getAll({ search: code, page: 1, limit: 1 });
+            const found = searchResp.data?.data?.orders?.[0];
+            if (found?.id) {
+                navigate(`/orders/${found.id}`);
+                toast.success(`Đã tìm thấy đơn ${found.order_code ?? code}`);
+                return;
+            }
+        } catch {
+            // ignore and continue to product-code fallback
+        }
+
         try {
             const response = await orderProductsApi.getByCode(code);
             const product = response.data?.data;

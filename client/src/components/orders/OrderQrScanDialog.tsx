@@ -102,13 +102,14 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
             await scanner.start(
                 cameraConfig,
                 {
-                    fps: 12,
+                    fps: 20,
                     qrbox: (viewfinderWidth, viewfinderHeight) => {
                         const edge = Math.min(viewfinderWidth, viewfinderHeight);
-                        const size = Math.max(180, Math.floor(edge * 0.75));
+                        const size = Math.max(140, Math.min(320, Math.floor(edge * 0.9)));
                         return { width: size, height: size };
                     },
                     aspectRatio: 1,
+                    disableFlip: false,
                 },
                 (text) => handleDecoded(text),
                 () => {},
@@ -130,8 +131,9 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
                     await scanner.start(
                         { facingMode: 'user' },
                         {
-                            fps: 12,
-                            qrbox: { width: 220, height: 220 },
+                            fps: 20,
+                            qrbox: { width: 240, height: 240 },
+                            disableFlip: false,
                         },
                         (text) => handleDecoded(text),
                         () => {},
