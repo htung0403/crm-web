@@ -14,6 +14,20 @@ import { parseScannedCode } from '@/lib/parseQrCode';
 
 const SCANNER_ELEMENT_ID = 'orders-qr-scanner';
 
+type FocusModeConstraint = MediaTrackConstraintSet & {
+    focusMode?: 'continuous';
+};
+
+const CONTINUOUS_FOCUS_CONSTRAINT: FocusModeConstraint = { focusMode: 'continuous' };
+
+const SCANNER_CONFIG = {
+    verbose: false,
+    formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+    experimentalFeatures: {
+        useBarCodeDetectorIfSupported: true,
+    },
+};
+
 async function pickCameraId(): Promise<string | { facingMode: string }> {
     try {
         const cameras: CameraDevice[] = await Html5Qrcode.getCameras();
@@ -96,7 +110,7 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
             setError(null);
             handledRef.current = false;
             const cameraConfig = await pickCameraId();
-            const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, { verbose: false });
+            const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, SCANNER_CONFIG);
             scannerRef.current = scanner;
 
             await scanner.start(
@@ -110,13 +124,9 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
                     },
                     aspectRatio: 1,
                     disableFlip: false,
-                    formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-                    experimentalFeatures: {
-                        useBarCodeDetectorIfSupported: true,
-                    },
                     videoConstraints: {
                         facingMode: 'environment',
-                        advanced: [{ focusMode: 'continuous' as any }],
+                        advanced: [CONTINUOUS_FOCUS_CONSTRAINT],
                     },
                 },
                 (text) => handleDecoded(text),
@@ -134,7 +144,7 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
             }
             if (/environment|not found|overconstrained/i.test(message)) {
                 try {
-                    const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, { verbose: false });
+                    const scanner = new Html5Qrcode(SCANNER_ELEMENT_ID, SCANNER_CONFIG);
                     scannerRef.current = scanner;
                     await scanner.start(
                         { facingMode: 'user' },
@@ -142,13 +152,9 @@ export function OrderQrScanDialog({ open, onOpenChange, onScan }: OrderQrScanDia
                             fps: 24,
                             qrbox: { width: 220, height: 220 },
                             disableFlip: false,
-                            formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-                            experimentalFeatures: {
-                                useBarCodeDetectorIfSupported: true,
-                            },
                             videoConstraints: {
                                 facingMode: 'user',
-                                advanced: [{ focusMode: 'continuous' as any }],
+                                advanced: [CONTINUOUS_FOCUS_CONSTRAINT],
                             },
                         },
                         (text) => handleDecoded(text),
