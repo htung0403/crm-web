@@ -212,6 +212,9 @@ router.post('/accessories', authenticate, async (req: AuthenticatedRequest, res,
 
         fireWebhook('accessory.request.created', {
             accessory_id: data.id,
+            order_item_id: order_item_id || null,
+            order_product_id: order_product_id || null,
+            order_product_service_id: order_product_service_id || null,
             order_code: orderCode,
             item_name: contextItemName,
             accessory_name: itemName,
@@ -1456,6 +1459,53 @@ router.patch('/steps/:stepId/complete', authenticate, async (req: AuthenticatedR
             console.error('order_workflow_step_log insert error:', logErr);
         }
 
+        try {
+            const managers = await getManagerRecipients();
+            if (step.order_product_service_id) {
+                const context = await getServiceNotificationContext(step.order_product_service_id);
+                if (context) {
+                    const basePayload = buildServiceEventBase(context);
+                    for (const manager of managers) {
+                        notifyCrmMasterUser('workflow.item.completed_step', {
+                            ...basePayload,
+                            target_user_id: manager.id,
+                            target_role: manager.role || 'manager',
+                            channel: 'telegram',
+                            item: { ...basePayload.item, step_id: step.id, step_name: step.step_name, step_order: step.step_order, note: notes || null },
+                        });
+                    }
+                }
+            } else if (step.order_item_id) {
+                const { data: itemForEvent } = await supabaseAdmin
+                    .from('order_items')
+                    .select('id, item_name, item_code, notes, order:orders(id, order_code, due_at, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id))')
+                    .eq('id', step.order_item_id)
+                    .maybeSingle();
+                const order = Array.isArray((itemForEvent as any)?.order) ? (itemForEvent as any).order[0] : (itemForEvent as any)?.order;
+                for (const manager of managers) {
+                    notifyCrmMasterUser('workflow.item.completed_step', {
+                        target_user_id: manager.id,
+                        target_role: manager.role || 'manager',
+                        channel: 'telegram',
+                        order: order ? { id: order.id, order_code: order.order_code, return_due_at: order.due_at || null } : null,
+                        item: {
+                            id: step.order_item_id,
+                            service_name: (itemForEvent as any)?.item_name || null,
+                            product_code: (itemForEvent as any)?.item_code || null,
+                            step_id: step.id,
+                            step_name: step.step_name,
+                            step_order: step.step_order,
+                            note: notes || null,
+                        },
+                        customer: order?.customer || null,
+                        links: { crm_url: buildCrmOrderUrl(order?.order_code || order?.id) },
+                    });
+                }
+            }
+        } catch (eventErr) {
+            console.error('[WorkflowStepComplete] webhook error:', eventErr);
+        }
+
         const isV2 = !!step.order_product_service_id;
         const itemFilter = isV2
             ? { order_product_service_id: step.order_product_service_id }
@@ -1748,18 +1798,57 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
                     order_product_id: payload.order_product_id,
                     order_product_service_id: entity.order_product_service_id,
                 });
+
+                for (const manager of await getManagerRecipients()) {
+                    notifyCrmMasterUser('accessory.status.changed', {
+                        target_user_id: manager.id,
+                        target_role: manager.role || 'manager',
+                        channel: 'telegram',
+                        item: {
+                            id,
+                            order_item_id: entity.order_item_id,
+                            order_product_id: payload.order_product_id,
+                            order_product_service_id: entity.order_product_service_id,
+                            service_name: metadata?.item_name || (existing.metadata as any)?.item_name || 'Phụ kiện',
+                            note: notes || null,
+                        },
+                        accessory_id: existing.id,
+                        old_status: oldStatus || null,
+                        new_status: status,
+                        requester_id: req.user?.id || null,
+                    });
+                }
             }
 
             if (status === 'requested' && oldStatus !== 'requested') {
-            fireWebhook('accessory.request.created', {
+                fireWebhook('accessory.request.created', {
                     accessory_id: existing.id,
                     order_item_id: entity.order_item_id,
+                    order_product_id: payload.order_product_id,
                     order_product_service_id: entity.order_product_service_id,
                     accessory_name: metadata?.item_name || (existing.metadata as any)?.item_name || 'Phụ kiện',
                     notes: notes || null,
                     metadata: metadata || existing.metadata || {},
                     requested_by: req.user?.id || null,
                 });
+
+                for (const manager of await getManagerRecipients()) {
+                    notifyCrmMasterUser('accessory.request.created', {
+                        target_user_id: manager.id,
+                        target_role: manager.role || 'manager',
+                        channel: 'telegram',
+                        item: {
+                            id,
+                            order_item_id: entity.order_item_id,
+                            order_product_id: payload.order_product_id,
+                            order_product_service_id: entity.order_product_service_id,
+                            service_name: metadata?.item_name || (existing.metadata as any)?.item_name || 'Phụ kiện',
+                            note: notes || null,
+                        },
+                        accessory_id: existing.id,
+                        requester_id: req.user?.id || null,
+                    });
+                }
             }
 
             return res.json({ status: 'success', data: updated, message: 'Đã cập nhật trạng thái mua phụ kiện' });
@@ -1801,7 +1890,15 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
                     target_user_id: manager.id,
                     target_role: manager.role || 'manager',
                     channel: 'telegram',
-                    item: { id, service_name: itemName, note: notes || null },
+                    item: {
+                        id,
+                        order_item_id: entity.order_item_id,
+                        order_product_id: payload.order_product_id,
+                        order_product_service_id: entity.order_product_service_id,
+                        service_name: itemName,
+                        note: notes || null,
+                    },
+                    accessory_id: inserted.id,
                     requester_id: req.user?.id || null,
                 });
             }
@@ -1899,17 +1996,90 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
                     order_item_id: entity.order_item_id,
                     order_product_service_id: entity.order_product_service_id,
                 });
+
+                for (const manager of await getManagerRecipients()) {
+                    notifyCrmMasterUser('partner.status.changed', {
+                        target_user_id: manager.id,
+                        target_role: manager.role || 'manager',
+                        channel: 'telegram',
+                        item: {
+                            id,
+                            order_item_id: entity.order_item_id,
+                            order_product_id: payload.order_product_id,
+                            order_product_service_id: entity.order_product_service_id,
+                            service_name: metadata?.item_name || null,
+                            note: notes || null,
+                        },
+                        partner_id: existing.id,
+                        old_status: oldStatus || null,
+                        new_status: status,
+                        requester_id: req.user?.id || null,
+                    });
+                }
+
+                if (status === 'ship_to_partner' || status === 'rejected') {
+                    const event = status === 'ship_to_partner' ? 'partner.approved' : 'partner.rejected';
+                    fireWebhook(event, {
+                        partner_id: existing.id,
+                        old_status: oldStatus || null,
+                        new_status: status,
+                        notes: notes || null,
+                        order_item_id: entity.order_item_id,
+                        order_product_id: payload.order_product_id,
+                        order_product_service_id: entity.order_product_service_id,
+                    });
+
+                    for (const manager of await getManagerRecipients()) {
+                        notifyCrmMasterUser(event, {
+                            target_user_id: manager.id,
+                            target_role: manager.role || 'manager',
+                            channel: 'telegram',
+                            item: {
+                                id,
+                                order_item_id: entity.order_item_id,
+                                order_product_id: payload.order_product_id,
+                                order_product_service_id: entity.order_product_service_id,
+                                service_name: metadata?.item_name || null,
+                                note: notes || null,
+                            },
+                            partner_id: existing.id,
+                            old_status: oldStatus || null,
+                            new_status: status,
+                            requester_id: req.user?.id || null,
+                        });
+                    }
+                }
             }
 
             if (status === 'requested' && oldStatus !== 'requested') {
                 fireWebhook('partner.request.created', {
                     partner_id: existing.id,
                     order_item_id: entity.order_item_id,
+                    order_product_id: payload.order_product_id,
                     order_product_service_id: entity.order_product_service_id,
                     notes: notes || null,
                     metadata: metadata || existing.metadata || {},
                     requested_by: req.user?.id || null,
                 });
+
+                for (const manager of await getManagerRecipients()) {
+                    notifyCrmMasterUser('partner.request.created', {
+                        target_user_id: manager.id,
+                        target_role: manager.role || 'manager',
+                        channel: 'telegram',
+                        item: {
+                            id,
+                            order_item_id: entity.order_item_id,
+                            order_product_id: payload.order_product_id,
+                            order_product_service_id: entity.order_product_service_id,
+                            service_name: metadata?.item_name || null,
+                            note: notes || null,
+                        },
+                        partner_id: existing.id,
+                        partner: metadata?.partner || metadata?.partner_name || null,
+                        requester_id: req.user?.id || null,
+                    });
+                }
             }
 
             return res.json({ status: 'success', data: updated, message: 'Đã cập nhật trạng thái gửi đối tác' });
@@ -1935,9 +2105,10 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
                 req.user?.id
             );
 
-                fireWebhook('partner.request.created', {
+            fireWebhook('partner.request.created', {
                 partner_id: inserted.id,
                 order_item_id: entity.order_item_id,
+                order_product_id: payload.order_product_id,
                 order_product_service_id: entity.order_product_service_id,
                 notes: notes || null,
                 metadata: metadata || {},
@@ -1949,7 +2120,15 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
                     target_user_id: manager.id,
                     target_role: manager.role || 'manager',
                     channel: 'telegram',
-                    item: { id, service_name: metadata?.item_name || null, note: notes || null },
+                    item: {
+                        id,
+                        order_item_id: entity.order_item_id,
+                        order_product_id: payload.order_product_id,
+                        order_product_service_id: entity.order_product_service_id,
+                        service_name: metadata?.item_name || null,
+                        note: notes || null,
+                    },
+                    partner_id: inserted.id,
                     partner: metadata?.partner || metadata?.partner_name || null,
                     requester_id: req.user?.id || null,
                 });
@@ -2174,6 +2353,7 @@ router.patch(['/:id/change-room', '/:id/transfer-room'], authenticate, async (re
 
         // c. Get Transition details
         const activeItemStep = steps.find(s => ['assigned', 'in_progress', 'started'].includes(s.status));
+        const previousTechnicianId = activeItemStep?.technician_id || null;
         const previousTechRoom = isV1 ? (v1Item as any)?.tech_room : (v2Item as any)?.tech_room;
         const fromRoom = getTechRoomDisplayName(previousTechRoom) || (activeItemStep as any)?.department?.name || activeItemStep?.step_name || 'Khởi tạo';
         const toRoom = targetDept?.name || deptSearch;
@@ -2328,6 +2508,44 @@ router.patch(['/:id/change-room', '/:id/transfer-room'], authenticate, async (re
                         role: technician.role || 'technician',
                         telegram_chat_id: technician.telegram_chat_id || null,
                     },
+                });
+
+                if (previousTechnicianId && previousTechnicianId !== technician_id) {
+                    for (const manager of await getManagerRecipients()) {
+                        notifyCrmMasterUser('workflow.item.technician_changed', {
+                            ...basePayload,
+                            target_user_id: manager.id,
+                            target_role: manager.role || 'manager',
+                            channel: 'telegram',
+                            item: { ...basePayload.item, from_room: fromRoom, room_name: toRoom, note: finalNotes || null },
+                            old_technician_id: previousTechnicianId,
+                            new_technician_id: technician_id,
+                        });
+                    }
+                }
+            }
+        } else {
+            const directOrder = isV1
+                ? (Array.isArray((v1Item as any)?.order) ? (v1Item as any).order[0] : (v1Item as any)?.order)
+                : (Array.isArray((v2Item as any)?.order_product?.order) ? (v2Item as any).order_product.order[0] : (v2Item as any)?.order_product?.order);
+            const directProduct = (v2Item as any)?.order_product;
+            for (const manager of await getManagerRecipients()) {
+                notifyCrmMasterUser('workflow.item.waiting_assignment', {
+                    target_user_id: manager.id,
+                    target_role: manager.role || 'manager',
+                    channel: 'telegram',
+                    order: directOrder ? { id: directOrder.id, order_code: directOrder.order_code } : null,
+                    item: {
+                        id,
+                        service_name: (v1Item as any)?.item_name || (v2Item as any)?.item_name || directProduct?.name || null,
+                        product_name: directProduct?.name || null,
+                        product_code: directProduct?.product_code || null,
+                        from_room: fromRoom,
+                        room_name: toRoom,
+                        room_id: targetDept?.id || null,
+                        note: finalNotes || null,
+                    },
+                    links: { crm_url: buildCrmOrderUrl(directOrder?.order_code || directOrder?.id) },
                 });
             }
         }

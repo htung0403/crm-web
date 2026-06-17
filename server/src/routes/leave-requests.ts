@@ -2,6 +2,7 @@ import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import { authenticate, requireManager } from '../middleware/auth.js';
+import { getManagerRecipients, notifyCrmMasterUser } from '../utils/n8nCrmEvents.js';
 
 dotenv.config();
 
@@ -10,6 +11,31 @@ const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '';
 
 const supabase = createClient(supabaseUrl, supabaseKey);
+
+async function notifyLeaveLateEvent(event: string, request: any, actor?: any) {
+    const recipients = event === 'leave_late.request.created'
+        ? await getManagerRecipients()
+        : [{ id: request.user_id, role: 'staff' }];
+
+    for (const recipient of recipients) {
+        if (!recipient?.id) continue;
+        notifyCrmMasterUser(event, {
+            target_user_id: recipient.id,
+            target_role: recipient.role || 'manager',
+            channel: 'telegram',
+            item: {
+                id: request.id,
+                type: request.type,
+                sub_type: request.sub_type,
+                status: request.status,
+                start_time: request.start_time,
+                end_time: request.end_time || null,
+                note: request.reason || null,
+            },
+            staff: actor ? { id: actor.id, name: actor.name, role: actor.role } : { id: request.user_id, role: 'staff' },
+        });
+    }
+}
 
 // Debug logging
 router.use((req, res, next) => {
@@ -75,6 +101,8 @@ router.post('/', async (req, res) => {
             throw error;
         }
 
+        await notifyLeaveLateEvent('leave_late.request.created', data, { id: user_id, role: 'staff' });
+
         res.status(201).json(data);
     } catch (error: any) {
         console.error('Error creating leave request:', error);
@@ -110,6 +138,8 @@ router.patch('/:id/status', authenticate, requireManager, async (req, res) => {
         if (error) {
             throw error;
         }
+
+        await notifyLeaveLateEvent(status === 'approved' ? 'leave_late.approved' : 'leave_late.rejected', data, (req as any).user);
 
         res.json(data);
     } catch (error: any) {

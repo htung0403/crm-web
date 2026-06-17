@@ -4,7 +4,7 @@ import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { requireAnyViewAccess } from '../middleware/viewAccess.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { fireWebhook } from '../utils/webhookNotifier.js';
-import { notifyCrmMasterUser } from '../utils/n8nCrmEvents.js';
+import { buildCrmOrderUrl, getManagerRecipients, notifyCrmMasterUser } from '../utils/n8nCrmEvents.js';
 import {
     logAccessoryStatusChange,
     logExtensionStatusChange,
@@ -16,6 +16,36 @@ const router = Router();
 console.log('🚀 Requests Router Loaded');
 
 router.use(authenticate);
+
+function buildRequestItemPayload(row: any, notes?: string | null) {
+    return {
+        id: row.id,
+        order_item_id: row.order_item_id || null,
+        order_product_id: row.order_product_id || null,
+        order_product_service_id: row.order_product_service_id || null,
+        status: row.status || null,
+        note: notes ?? row.notes ?? null,
+    };
+}
+
+async function notifyManagersAndActor(event: string, actor: any, row: any, extra: Record<string, any> = {}) {
+    const recipients = await getManagerRecipients();
+    if (actor?.id && !recipients.some((recipient) => recipient.id === actor.id)) {
+        recipients.push(actor);
+    }
+
+    for (const recipient of recipients) {
+        notifyCrmMasterUser(event, {
+            target_user_id: recipient.id,
+            target_role: recipient.role || 'manager',
+            channel: 'telegram',
+            item: buildRequestItemPayload(row, extra.notes),
+            staff: actor ? { id: actor.id, name: actor.name, role: actor.role, telegram_chat_id: actor.telegram_chat_id || null } : null,
+            links: row.metadata?.order_code ? { crm_url: buildCrmOrderUrl(row.metadata.order_code) } : null,
+            ...extra,
+        });
+    }
+}
 
 const ACCESSORY_REQUIRED_FIELDS: Record<string, string[]> = {
     need_buy: ['photos_purchase', 'photos_transfer'],
@@ -117,14 +147,36 @@ router.patch('/accessories/:id', authenticate, async (req: AuthenticatedRequest,
                 });
             }
 
+            await notifyManagersAndActor('accessory.status.changed', req.user, data, {
+                accessory_id: id,
+                old_status: current.status,
+                new_status: status,
+                notes: notes || null,
+                metadata: metadata || current.metadata || {},
+            });
+
+            if (status === 'need_buy' || status === 'rejected') {
+                await notifyManagersAndActor(status === 'need_buy' ? 'accessory.approved' : 'accessory.rejected', req.user, data, {
+                    accessory_id: id,
+                    old_status: current.status,
+                    new_status: status,
+                    notes: notes || null,
+                    metadata: metadata || current.metadata || {},
+                });
+            }
+
             if (status === 'delivered_to_tech') {
                 const technicianId = (metadata || current.metadata || {})?.technician_id;
                 if (technicianId) {
-                    notifyCrmMasterUser('accessory.approved', {
+                    notifyCrmMasterUser('accessory.status.changed', {
                         target_user_id: technicianId,
                         target_role: 'technician',
                         channel: 'telegram',
-                        item: { id, service_name: (metadata || current.metadata || {})?.item_name || 'Phụ kiện', note: notes || null },
+                        item: buildRequestItemPayload(data, notes || null),
+                        accessory_id: id,
+                        old_status: current.status,
+                        new_status: status,
+                        metadata: metadata || current.metadata || {},
                     });
                 }
             }
@@ -195,6 +247,24 @@ router.patch('/partners/:id', authenticate, async (req: AuthenticatedRequest, re
 
             if (status === 'ship_to_partner' || status === 'rejected') {
                 fireWebhook(status === 'ship_to_partner' ? 'partner.approved' : 'partner.rejected', {
+                    partner_id: id,
+                    old_status: current.status,
+                    new_status: status,
+                    notes: notes || null,
+                    metadata: metadata || current.metadata || {},
+                });
+            }
+
+            await notifyManagersAndActor('partner.status.changed', req.user, data, {
+                partner_id: id,
+                old_status: current.status,
+                new_status: status,
+                notes: notes || null,
+                metadata: metadata || current.metadata || {},
+            });
+
+            if (status === 'ship_to_partner' || status === 'rejected') {
+                await notifyManagersAndActor(status === 'ship_to_partner' ? 'partner.approved' : 'partner.rejected', req.user, data, {
                     partner_id: id,
                     old_status: current.status,
                     new_status: status,

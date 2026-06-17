@@ -2661,7 +2661,12 @@ router.post('/:id/accessory-request', authenticate, async (req: AuthenticatedReq
             notifyOrderSalesUser('accessory.request.created', context, {
                 requester_id: req.user!.id,
                 accessory_request: accessory,
-                item: { id: order_item_id || order_product_service_id || null, note: notes || null },
+                item: {
+                    id: order_item_id || order_product_service_id || null,
+                    order_item_id: order_item_id || null,
+                    order_product_service_id: order_product_service_id || null,
+                    note: notes || null,
+                },
             });
         }
 

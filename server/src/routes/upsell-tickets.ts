@@ -70,6 +70,12 @@ router.post(
         const { customer_items, sale_items } = upsellData;
 
         if (isOrderEditTicket) {
+            const { data: orderForEvent } = await supabaseAdmin
+                .from('orders')
+                .select('id, order_code, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id)')
+                .eq('id', id)
+                .maybeSingle();
+
             const updatePayload = upsellData?.update_payload;
             if (!updatePayload || typeof updatePayload !== 'object') {
                 throw new ApiError('Ticket sửa đơn không có dữ liệu cập nhật hợp lệ', 400);
@@ -91,7 +97,8 @@ router.post(
                 target_user_id: ticket.sales_id,
                 target_role: 'sale',
                 channel: 'telegram',
-                order: { id, order_code: null },
+                order: { id, order_code: orderForEvent?.order_code || null },
+                customer: orderForEvent?.customer || null,
                 approver_id: userId,
                 ticket_id: ticketId,
             });
