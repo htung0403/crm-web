@@ -429,5 +429,6 @@ export async function processInvoiceCancellation(
 
     if (options.cancelRelatedPayments !== false && invoice.order_id) {
         await cancelRelatedPaymentsForInvoice(invoice as Parameters<typeof cancelRelatedPaymentsForInvoice>[0]);
+        await syncOrderPayment(invoice.order_id);
     }
 }

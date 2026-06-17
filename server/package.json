@@ -9,6 +9,7 @@
         "start": "node dist/index.js",
         "seed": "tsx scripts/seedUsers.ts",
         "create-admin": "tsx scripts/createAdmin.ts",
+        "backfill:cancelled-invoices": "tsx src/scripts/backfillCancelledInvoicePayments.ts",
         "lint": "eslint src --ext .ts"
     },
     "dependencies": {

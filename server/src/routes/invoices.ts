@@ -260,9 +260,8 @@ router.post('/', authenticate, async (req: AuthenticatedRequest, res, next) => {
 router.patch('/:id/status', authenticate, requireAccountant, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        const { status, cancel_related_payments } = req.body as {
+        const { status } = req.body as {
             status?: string;
-            cancel_related_payments?: boolean;
         };
 
         const validStatuses = ['draft', 'pending', 'paid', 'cancelled'];
@@ -285,30 +284,7 @@ router.patch('/:id/status', authenticate, requireAccountant, async (req: Authent
         }
 
         if (status === 'cancelled') {
-            const shouldCancelPayments = cancel_related_payments !== false;
-            if (!shouldCancelPayments && existing.order_id) {
-                const [{ count: payCount }, { count: transCount }] = await Promise.all([
-                    supabaseAdmin
-                        .from('payment_records')
-                        .select('*', { count: 'exact', head: true })
-                        .eq('order_id', existing.order_id)
-                        .eq('transaction_status', 'approved'),
-                    supabaseAdmin
-                        .from('transactions')
-                        .select('*', { count: 'exact', head: true })
-                        .eq('order_id', existing.order_id)
-                        .eq('status', 'approved'),
-                ]);
-                if ((payCount || 0) > 0 || (transCount || 0) > 0) {
-                    throw new ApiError(
-                        'Hóa đơn đã có thanh toán. Vui lòng chọn hủy các phiếu thanh toán liên quan.',
-                        400,
-                    );
-                }
-            }
-            if (shouldCancelPayments) {
-                await processInvoiceCancellation(id, { cancelRelatedPayments: true });
-            }
+            await processInvoiceCancellation(id, { cancelRelatedPayments: true });
         }
 
         const updateData: Record<string, any> = {
