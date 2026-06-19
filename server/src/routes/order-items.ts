@@ -3,7 +3,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { checkAndCompleteOrder } from '../utils/orderHelper.js';
-import { fireWebhook } from '../utils/webhookNotifier.js';
+import { fireWebhook, notifyCrmMaster } from '../utils/webhookNotifier.js';
 import { logAccessoryStatusChange, logPartnerStatusChange } from '../utils/workflowRequestLog.js';
 import {
     buildServiceEventBase,
@@ -24,6 +24,11 @@ import {
     firePickupInfoWebhook,
 } from '../utils/orderStaffHelper.js';
 import { extractSalesStepLogContent } from '../utils/salesStepLogContent.js';
+
+function emitRequestWebhook(event: string, payload: Record<string, any>) {
+    fireWebhook(event, payload);
+    notifyCrmMaster(event, payload);
+}
 
 async function resolveSalesStepData(
     entityType: 'order_item' | 'order_product_service' | 'order_product',
@@ -210,7 +215,7 @@ router.post('/accessories', authenticate, async (req: AuthenticatedRequest, res,
             contextItemName = (ctx as any)?.item_name || orderProduct?.name || contextItemName;
         }
 
-        fireWebhook('accessory.request.created', {
+        emitRequestWebhook('accessory.request.created', {
             accessory_id: data.id,
             order_item_id: order_item_id || null,
             order_product_id: order_product_id || null,
@@ -1789,7 +1794,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
                     req.user?.id
                 );
 
-                fireWebhook('accessory.status.changed', {
+                emitRequestWebhook('accessory.status.changed', {
                     accessory_id: existing.id,
                     old_status: oldStatus || null,
                     new_status: status,
@@ -1821,7 +1826,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
             }
 
             if (status === 'requested' && oldStatus !== 'requested') {
-                fireWebhook('accessory.request.created', {
+                emitRequestWebhook('accessory.request.created', {
                     accessory_id: existing.id,
                     order_item_id: entity.order_item_id,
                     order_product_id: payload.order_product_id,
@@ -1875,7 +1880,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
                 req.user?.id
             );
 
-            fireWebhook('accessory.request.created', {
+            emitRequestWebhook('accessory.request.created', {
                 accessory_id: inserted.id,
                 order_item_id: entity.order_item_id,
                 order_product_service_id: entity.order_product_service_id,
@@ -1988,7 +1993,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
                     req.user?.id
                 );
 
-                fireWebhook('partner.status.changed', {
+                emitRequestWebhook('partner.status.changed', {
                     partner_id: existing.id,
                     old_status: oldStatus || null,
                     new_status: status,
@@ -2019,7 +2024,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
 
                 if (status === 'ship_to_partner' || status === 'rejected') {
                     const event = status === 'ship_to_partner' ? 'partner.approved' : 'partner.rejected';
-                    fireWebhook(event, {
+                    emitRequestWebhook(event, {
                         partner_id: existing.id,
                         old_status: oldStatus || null,
                         new_status: status,
@@ -2052,7 +2057,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
             }
 
             if (status === 'requested' && oldStatus !== 'requested') {
-                fireWebhook('partner.request.created', {
+                emitRequestWebhook('partner.request.created', {
                     partner_id: existing.id,
                     order_item_id: entity.order_item_id,
                     order_product_id: payload.order_product_id,
@@ -2105,7 +2110,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
                 req.user?.id
             );
 
-            fireWebhook('partner.request.created', {
+            emitRequestWebhook('partner.request.created', {
                 partner_id: inserted.id,
                 order_item_id: entity.order_item_id,
                 order_product_id: payload.order_product_id,
@@ -2866,6 +2871,8 @@ router.post('/:id/extension-request', authenticate, async (req: AuthenticatedReq
 });
 
 export default router;
+
+
 
 
 

@@ -3,7 +3,7 @@ import { supabaseAdmin } from '../config/supabase.js';
 import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { requireAnyViewAccess } from '../middleware/viewAccess.js';
 import { ApiError } from '../middleware/errorHandler.js';
-import { fireWebhook } from '../utils/webhookNotifier.js';
+import { fireWebhook, notifyCrmMaster } from '../utils/webhookNotifier.js';
 import { buildCrmOrderUrl, getManagerRecipients, notifyCrmMasterUser } from '../utils/n8nCrmEvents.js';
 import {
     logAccessoryStatusChange,
@@ -16,6 +16,11 @@ const router = Router();
 console.log('🚀 Requests Router Loaded');
 
 router.use(authenticate);
+
+function emitRequestWebhook(event: string, payload: Record<string, any>) {
+    fireWebhook(event, payload);
+    notifyCrmMaster(event, payload);
+}
 
 function buildRequestItemPayload(row: any, notes?: string | null) {
     return {
@@ -130,7 +135,7 @@ router.patch('/accessories/:id', authenticate, async (req: AuthenticatedRequest,
         }
 
         if (status) {
-            fireWebhook('accessory.status.changed', {
+            emitRequestWebhook('accessory.status.changed', {
                 accessory_id: id,
                 old_status: current.status,
                 new_status: status,
@@ -138,7 +143,7 @@ router.patch('/accessories/:id', authenticate, async (req: AuthenticatedRequest,
             });
 
             if (status === 'need_buy' || status === 'rejected') {
-                fireWebhook(status === 'need_buy' ? 'accessory.approved' : 'accessory.rejected', {
+                emitRequestWebhook(status === 'need_buy' ? 'accessory.approved' : 'accessory.rejected', {
                     accessory_id: id,
                     old_status: current.status,
                     new_status: status,
@@ -238,7 +243,7 @@ router.patch('/partners/:id', authenticate, async (req: AuthenticatedRequest, re
         }
 
         if (status) {
-            fireWebhook('partner.status.changed', {
+            emitRequestWebhook('partner.status.changed', {
                 partner_id: id,
                 old_status: current.status,
                 new_status: status,
@@ -246,7 +251,7 @@ router.patch('/partners/:id', authenticate, async (req: AuthenticatedRequest, re
             });
 
             if (status === 'ship_to_partner' || status === 'rejected') {
-                fireWebhook(status === 'ship_to_partner' ? 'partner.approved' : 'partner.rejected', {
+                emitRequestWebhook(status === 'ship_to_partner' ? 'partner.approved' : 'partner.rejected', {
                     partner_id: id,
                     old_status: current.status,
                     new_status: status,

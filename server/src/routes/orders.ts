@@ -2670,6 +2670,16 @@ router.post('/:id/accessory-request', authenticate, async (req: AuthenticatedReq
             });
         }
 
+        notifyCrmMaster('accessory.request.created', {
+            accessory_id: accessory.id,
+            order_id: orderId,
+            order_item_id: order_item_id || null,
+            order_product_service_id: order_product_service_id || null,
+            notes: notes || null,
+            metadata: metadata || {},
+            requested_by: req.user?.id || null,
+        });
+
         res.status(201).json({ status: 'success', data: accessory, message: 'Đã tạo yêu cầu phụ kiện' });
     } catch (error) {
         next(error);
