@@ -9,8 +9,10 @@ import {
     buildServiceEventBase,
     buildCrmOrderUrl,
     getManagerRecipients,
+    buildRequestWorkflowPayload,
     getServiceNotificationContext,
     notifyCrmMasterUser,
+    resolveRequestNotificationContext,
 } from '../utils/n8nCrmEvents.js';
 import {
     AFTER_SALE_STAGE_ORDER,
@@ -28,6 +30,26 @@ import { extractSalesStepLogContent } from '../utils/salesStepLogContent.js';
 function emitRequestWebhook(event: string, payload: Record<string, any>) {
     fireWebhook(event, payload);
     notifyCrmMaster(event, payload);
+}
+
+async function notifyWorkflowRequestEvent(event: string, request: Record<string, any>, extra: Record<string, any> = {}) {
+    const context = await resolveRequestNotificationContext(request);
+    const payload = buildRequestWorkflowPayload(event, request, context, extra);
+    if (!payload.target_user_id) {
+        const manager = (await getManagerRecipients())[0];
+        if (!manager) return;
+        payload.target_user_id = manager.id;
+        payload.target_role = manager.role || 'manager';
+    }
+    notifyCrmMasterUser(event, {
+        ...payload,
+        [event.startsWith('accessory.') ? 'accessory' : 'partner']: {
+            id: request.id,
+            name: request.metadata?.accessory_name || request.metadata?.partner_name || request.metadata?.item_name || null,
+            price_estimate: request.metadata?.price_estimate || request.metadata?.cost || null,
+            eta: request.metadata?.eta || null,
+        },
+    });
 }
 
 async function resolveSalesStepData(
@@ -215,18 +237,13 @@ router.post('/accessories', authenticate, async (req: AuthenticatedRequest, res,
             contextItemName = (ctx as any)?.item_name || orderProduct?.name || contextItemName;
         }
 
-        emitRequestWebhook('accessory.request.created', {
-            accessory_id: data.id,
+        await notifyWorkflowRequestEvent('accessory.request.created', {
+            ...data,
             order_item_id: order_item_id || null,
             order_product_id: order_product_id || null,
             order_product_service_id: order_product_service_id || null,
-            order_code: orderCode,
-            item_name: contextItemName,
-            accessory_name: itemName,
-            notes: notes || null,
-            metadata: metadata || {},
-            requested_by: userId || null,
-        });
+            metadata: { ...(metadata || {}), order_code: orderCode, item_name: contextItemName, accessory_name: itemName },
+        }, { notes: notes || null });
 
         res.status(201).json({ status: 'success', data });
     } catch (e) {
@@ -1794,66 +1811,25 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
                     req.user?.id
                 );
 
-                emitRequestWebhook('accessory.status.changed', {
-                    accessory_id: existing.id,
-                    old_status: oldStatus || null,
-                    new_status: status,
-                    notes: notes || null,
-                    order_item_id: entity.order_item_id,
-                    order_product_id: payload.order_product_id,
-                    order_product_service_id: entity.order_product_service_id,
-                });
-
-                for (const manager of await getManagerRecipients()) {
-                    notifyCrmMasterUser('accessory.status.changed', {
-                        target_user_id: manager.id,
-                        target_role: manager.role || 'manager',
-                        channel: 'telegram',
-                        item: {
-                            id,
-                            order_item_id: entity.order_item_id,
-                            order_product_id: payload.order_product_id,
-                            order_product_service_id: entity.order_product_service_id,
-                            service_name: metadata?.item_name || (existing.metadata as any)?.item_name || 'Phụ kiện',
-                            note: notes || null,
-                        },
-                        accessory_id: existing.id,
-                        old_status: oldStatus || null,
-                        new_status: status,
-                        requester_id: req.user?.id || null,
-                    });
+                if (status === 'need_buy' || status === 'rejected') {
+                    await notifyWorkflowRequestEvent(status === 'need_buy' ? 'accessory.approved' : 'accessory.rejected', {
+                        ...updated,
+                        order_item_id: entity.order_item_id,
+                        order_product_id: payload.order_product_id,
+                        order_product_service_id: entity.order_product_service_id,
+                        metadata: metadata || existing.metadata || {},
+                    }, { old_status: oldStatus || null, new_status: status, notes: notes || null });
                 }
             }
 
             if (status === 'requested' && oldStatus !== 'requested') {
-                emitRequestWebhook('accessory.request.created', {
-                    accessory_id: existing.id,
+                await notifyWorkflowRequestEvent('accessory.request.created', {
+                    ...updated,
                     order_item_id: entity.order_item_id,
                     order_product_id: payload.order_product_id,
                     order_product_service_id: entity.order_product_service_id,
-                    accessory_name: metadata?.item_name || (existing.metadata as any)?.item_name || 'Phụ kiện',
-                    notes: notes || null,
                     metadata: metadata || existing.metadata || {},
-                    requested_by: req.user?.id || null,
-                });
-
-                for (const manager of await getManagerRecipients()) {
-                    notifyCrmMasterUser('accessory.request.created', {
-                        target_user_id: manager.id,
-                        target_role: manager.role || 'manager',
-                        channel: 'telegram',
-                        item: {
-                            id,
-                            order_item_id: entity.order_item_id,
-                            order_product_id: payload.order_product_id,
-                            order_product_service_id: entity.order_product_service_id,
-                            service_name: metadata?.item_name || (existing.metadata as any)?.item_name || 'Phụ kiện',
-                            note: notes || null,
-                        },
-                        accessory_id: existing.id,
-                        requester_id: req.user?.id || null,
-                    });
-                }
+                }, { notes: notes || null });
             }
 
             return res.json({ status: 'success', data: updated, message: 'Đã cập nhật trạng thái mua phụ kiện' });
@@ -1880,33 +1856,7 @@ router.patch('/:id/accessory', authenticate, async (req: AuthenticatedRequest, r
                 req.user?.id
             );
 
-            emitRequestWebhook('accessory.request.created', {
-                accessory_id: inserted.id,
-                order_item_id: entity.order_item_id,
-                order_product_service_id: entity.order_product_service_id,
-                accessory_name: itemName,
-                notes: notes || null,
-                metadata: metadata || {},
-                requested_by: req.user?.id || null,
-            });
-
-            for (const manager of await getManagerRecipients()) {
-                notifyCrmMasterUser('accessory.request.created', {
-                    target_user_id: manager.id,
-                    target_role: manager.role || 'manager',
-                    channel: 'telegram',
-                    item: {
-                        id,
-                        order_item_id: entity.order_item_id,
-                        order_product_id: payload.order_product_id,
-                        order_product_service_id: entity.order_product_service_id,
-                        service_name: itemName,
-                        note: notes || null,
-                    },
-                    accessory_id: inserted.id,
-                    requester_id: req.user?.id || null,
-                });
-            }
+            await notifyWorkflowRequestEvent('accessory.request.created', inserted, { notes: notes || null });
         }
 
         res.json({
@@ -1993,98 +1943,26 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
                     req.user?.id
                 );
 
-                emitRequestWebhook('partner.status.changed', {
-                    partner_id: existing.id,
-                    old_status: oldStatus || null,
-                    new_status: status,
-                    notes: notes || null,
-                    order_item_id: entity.order_item_id,
-                    order_product_service_id: entity.order_product_service_id,
-                });
-
-                for (const manager of await getManagerRecipients()) {
-                    notifyCrmMasterUser('partner.status.changed', {
-                        target_user_id: manager.id,
-                        target_role: manager.role || 'manager',
-                        channel: 'telegram',
-                        item: {
-                            id,
-                            order_item_id: entity.order_item_id,
-                            order_product_id: payload.order_product_id,
-                            order_product_service_id: entity.order_product_service_id,
-                            service_name: metadata?.item_name || null,
-                            note: notes || null,
-                        },
-                        partner_id: existing.id,
-                        old_status: oldStatus || null,
-                        new_status: status,
-                        requester_id: req.user?.id || null,
-                    });
-                }
-
                 if (status === 'ship_to_partner' || status === 'rejected') {
                     const event = status === 'ship_to_partner' ? 'partner.approved' : 'partner.rejected';
-                    emitRequestWebhook(event, {
-                        partner_id: existing.id,
-                        old_status: oldStatus || null,
-                        new_status: status,
-                        notes: notes || null,
+                    await notifyWorkflowRequestEvent(event, {
+                        ...updated,
                         order_item_id: entity.order_item_id,
                         order_product_id: payload.order_product_id,
                         order_product_service_id: entity.order_product_service_id,
-                    });
-
-                    for (const manager of await getManagerRecipients()) {
-                        notifyCrmMasterUser(event, {
-                            target_user_id: manager.id,
-                            target_role: manager.role || 'manager',
-                            channel: 'telegram',
-                            item: {
-                                id,
-                                order_item_id: entity.order_item_id,
-                                order_product_id: payload.order_product_id,
-                                order_product_service_id: entity.order_product_service_id,
-                                service_name: metadata?.item_name || null,
-                                note: notes || null,
-                            },
-                            partner_id: existing.id,
-                            old_status: oldStatus || null,
-                            new_status: status,
-                            requester_id: req.user?.id || null,
-                        });
-                    }
+                        metadata: metadata || existing.metadata || {},
+                    }, { old_status: oldStatus || null, new_status: status, notes: notes || null });
                 }
             }
 
             if (status === 'requested' && oldStatus !== 'requested') {
-                emitRequestWebhook('partner.request.created', {
-                    partner_id: existing.id,
+                await notifyWorkflowRequestEvent('partner.request.created', {
+                    ...updated,
                     order_item_id: entity.order_item_id,
                     order_product_id: payload.order_product_id,
                     order_product_service_id: entity.order_product_service_id,
-                    notes: notes || null,
                     metadata: metadata || existing.metadata || {},
-                    requested_by: req.user?.id || null,
-                });
-
-                for (const manager of await getManagerRecipients()) {
-                    notifyCrmMasterUser('partner.request.created', {
-                        target_user_id: manager.id,
-                        target_role: manager.role || 'manager',
-                        channel: 'telegram',
-                        item: {
-                            id,
-                            order_item_id: entity.order_item_id,
-                            order_product_id: payload.order_product_id,
-                            order_product_service_id: entity.order_product_service_id,
-                            service_name: metadata?.item_name || null,
-                            note: notes || null,
-                        },
-                        partner_id: existing.id,
-                        partner: metadata?.partner || metadata?.partner_name || null,
-                        requester_id: req.user?.id || null,
-                    });
-                }
+                }, { notes: notes || null });
             }
 
             return res.json({ status: 'success', data: updated, message: 'Đã cập nhật trạng thái gửi đối tác' });
@@ -2110,34 +1988,7 @@ router.patch('/:id/partner', authenticate, async (req: AuthenticatedRequest, res
                 req.user?.id
             );
 
-            emitRequestWebhook('partner.request.created', {
-                partner_id: inserted.id,
-                order_item_id: entity.order_item_id,
-                order_product_id: payload.order_product_id,
-                order_product_service_id: entity.order_product_service_id,
-                notes: notes || null,
-                metadata: metadata || {},
-                requested_by: req.user?.id || null,
-            });
-
-            for (const manager of await getManagerRecipients()) {
-                notifyCrmMasterUser('partner.request.created', {
-                    target_user_id: manager.id,
-                    target_role: manager.role || 'manager',
-                    channel: 'telegram',
-                    item: {
-                        id,
-                        order_item_id: entity.order_item_id,
-                        order_product_id: payload.order_product_id,
-                        order_product_service_id: entity.order_product_service_id,
-                        service_name: metadata?.item_name || null,
-                        note: notes || null,
-                    },
-                    partner_id: inserted.id,
-                    partner: metadata?.partner || metadata?.partner_name || null,
-                    requester_id: req.user?.id || null,
-                });
-            }
+            await notifyWorkflowRequestEvent('partner.request.created', inserted, { notes: notes || null });
         }
 
         res.json({

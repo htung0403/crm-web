@@ -18,6 +18,9 @@ export type CrmMasterEventPayload = {
     [key: string]: any;
 };
 
+const recentCrmMasterEventIds = new Map<string, number>();
+const CRM_MASTER_DEDUPE_TTL_MS = 5 * 60 * 1000;
+
 function firstRelation<T = any>(value: T | T[] | null | undefined): T | null {
     return Array.isArray(value) ? (value[0] ?? null) : (value ?? null);
 }
@@ -42,9 +45,20 @@ export function buildCrmOrderUrl(orderCodeOrId?: string | null): string | null {
 }
 
 export function notifyCrmMasterUser(event: string, payload: CrmMasterEventPayload): void {
+    const eventId = payload.event_id || uuidv4();
+    const now = Date.now();
+    for (const [key, expiresAt] of recentCrmMasterEventIds) {
+        if (expiresAt <= now) recentCrmMasterEventIds.delete(key);
+    }
+    if (recentCrmMasterEventIds.has(eventId)) {
+        console.warn(`[CrmMasterEvent] Skip duplicate ${event}: ${eventId}`);
+        return;
+    }
+    recentCrmMasterEventIds.set(eventId, now + CRM_MASTER_DEDUPE_TTL_MS);
+
     const body = {
         event,
-        event_id: uuidv4(),
+        event_id: eventId,
         created_at: new Date().toISOString(),
         channel: payload.channel || 'telegram',
         ...payload,
@@ -53,6 +67,98 @@ export function notifyCrmMasterUser(event: string, payload: CrmMasterEventPayloa
     fireCrmMasterWebhook(event, body).catch((err) => {
         console.error(`[CrmMasterEvent] Failed to fire ${event}:`, err);
     });
+}
+
+export async function resolveRequestNotificationContext(entity: {
+    order_item_id?: string | null;
+    order_product_id?: string | null;
+    order_product_service_id?: string | null;
+}) {
+    let serviceId = entity.order_product_service_id || null;
+    let service: any = null;
+    let orderProduct: any = null;
+    let order: any = null;
+    let customer: any = null;
+    let technician: any = null;
+
+    if (serviceId) {
+        const context = await getServiceNotificationContext(serviceId);
+        if (context) {
+            service = context.service;
+            orderProduct = context.orderProduct;
+            order = context.order;
+            customer = context.customer;
+            technician = context.technician;
+        }
+    }
+
+    if (!service && entity.order_product_id) {
+        const { data } = await supabaseAdmin
+            .from('order_products')
+            .select(`
+                id, order_id, product_code, name, images, due_at,
+                order:orders(id, order_code, due_at, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id)),
+                services:order_product_services(id, item_name, technician_id, technician:users!order_product_services_technician_id_fkey(id, name, role, telegram_chat_id))
+            `)
+            .eq('id', entity.order_product_id)
+            .maybeSingle();
+        orderProduct = data;
+        order = firstRelation(data?.order);
+        customer = firstRelation(order?.customer);
+        service = Array.isArray(data?.services) ? (data.services[0] ?? null) : null;
+        serviceId = service?.id || null;
+        technician = firstRelation(service?.technician);
+    }
+
+    if (!order && entity.order_item_id) {
+        const { data } = await supabaseAdmin
+            .from('order_items')
+            .select('id, item_name, item_code, order:orders(id, order_code, customer:customers(id, name, phone, zalo_user_id, customer_zalo_user_id))')
+            .eq('id', entity.order_item_id)
+            .maybeSingle();
+        service = data;
+        order = firstRelation((data as any)?.order);
+        customer = firstRelation(order?.customer);
+    }
+
+    return { serviceId, service, orderProduct, order, customer, technician };
+}
+
+export function buildRequestWorkflowPayload(event: string, request: Record<string, any>, context: any, opts: Record<string, any> = {}) {
+    const metadata = request.metadata || {};
+    const serviceName = context.service?.item_name || metadata.item_name || context.orderProduct?.name || null;
+    const productName = context.orderProduct?.name || metadata.product_name || metadata.item_name || null;
+    const orderCode = context.order?.order_code || metadata.order_code || null;
+    const targetUserId = context.technician?.id || request.target_user_id || opts.target_user_id || null;
+
+    return {
+        event,
+        event_id: opts.event_id || `${event}:${request.id}:${opts.old_status || 'none'}:${opts.new_status || request.status || 'none'}`,
+        occurred_at: opts.occurred_at || new Date().toISOString(),
+        target_user_id: targetUserId,
+        target_role: context.technician ? 'technician' : (opts.target_role || 'manager'),
+        channel: 'telegram' as const,
+        order_item_id: request.order_item_id || null,
+        order_product_id: request.order_product_id || context.orderProduct?.id || null,
+        order_product_service_id: request.order_product_service_id || context.serviceId || null,
+        order_code: orderCode,
+        customer_name: context.customer?.name || metadata.customer_name || null,
+        service_name: serviceName,
+        order: context.order ? { order_id: context.order.id, order_code: orderCode } : { order_code: orderCode },
+        item: {
+            order_item_id: request.order_item_id || null,
+            order_product_id: request.order_product_id || context.orderProduct?.id || null,
+            order_product_service_id: request.order_product_service_id || context.serviceId || null,
+            service_name: serviceName,
+            product_name: productName,
+        },
+        customer: context.customer ? { name: context.customer.name, phone: context.customer.phone || null } : { name: metadata.customer_name || null },
+        staff: context.technician ? { technician: context.technician } : null,
+        links: orderCode ? { crm_url: buildCrmOrderUrl(orderCode) } : null,
+        old_status: opts.old_status || null,
+        new_status: opts.new_status || request.status || null,
+        notes: opts.notes ?? request.notes ?? null,
+    };
 }
 
 export async function getManagerRecipients(): Promise<any[]> {

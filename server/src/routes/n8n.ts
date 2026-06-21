@@ -200,10 +200,12 @@ router.get('/cron-data', verifyN8nSecret, async (req: Request, res: Response, ne
             if (!order) continue;
             const customer = firstRelation(order.customer);
             const salesUser = normalizeUser(firstRelation(order.sales_user));
+            const productImageUrl = getFirstImage(product.images);
             const current = ordersById.get(order.id) || {
                 id: order.id,
                 order_code: order.order_code,
                 return_due_at: product.due_at || order.due_at || null,
+                product_image_url: productImageUrl,
                 customer: customer ? {
                     id: customer.id,
                     name: customer.name,
@@ -213,6 +215,7 @@ router.get('/cron-data', verifyN8nSecret, async (req: Request, res: Response, ne
                 sales_user: salesUser,
                 items: [],
             };
+            if (!current.product_image_url && productImageUrl) current.product_image_url = productImageUrl;
             current.items.push(...(product.services || []).map((service: any) => normalizeService(service, product, order)));
             ordersById.set(order.id, current);
         }

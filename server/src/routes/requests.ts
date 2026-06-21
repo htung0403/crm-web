@@ -4,7 +4,7 @@ import { authenticate, AuthenticatedRequest } from '../middleware/auth.js';
 import { requireAnyViewAccess } from '../middleware/viewAccess.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { fireWebhook, notifyCrmMaster } from '../utils/webhookNotifier.js';
-import { buildCrmOrderUrl, getManagerRecipients, notifyCrmMasterUser } from '../utils/n8nCrmEvents.js';
+import { buildCrmOrderUrl, buildRequestWorkflowPayload, getManagerRecipients, notifyCrmMasterUser, resolveRequestNotificationContext } from '../utils/n8nCrmEvents.js';
 import {
     logAccessoryStatusChange,
     logExtensionStatusChange,
@@ -20,6 +20,26 @@ router.use(authenticate);
 function emitRequestWebhook(event: string, payload: Record<string, any>) {
     fireWebhook(event, payload);
     notifyCrmMaster(event, payload);
+}
+
+async function notifyWorkflowRequestEvent(event: string, request: Record<string, any>, extra: Record<string, any> = {}) {
+    const context = await resolveRequestNotificationContext(request);
+    const payload = buildRequestWorkflowPayload(event, request, context, extra);
+    if (!payload.target_user_id) {
+        const manager = (await getManagerRecipients())[0];
+        if (!manager) return;
+        payload.target_user_id = manager.id;
+        payload.target_role = manager.role || 'manager';
+    }
+    notifyCrmMasterUser(event, {
+        ...payload,
+        [event.startsWith('accessory.') ? 'accessory' : 'partner']: {
+            id: request.id,
+            name: request.metadata?.accessory_name || request.metadata?.partner_name || request.metadata?.item_name || null,
+            price_estimate: request.metadata?.price_estimate || request.metadata?.cost || null,
+            eta: request.metadata?.eta || null,
+        },
+    });
 }
 
 function buildRequestItemPayload(row: any, notes?: string | null) {
@@ -134,39 +154,12 @@ router.patch('/accessories/:id', authenticate, async (req: AuthenticatedRequest,
             );
         }
 
-        if (status) {
-            emitRequestWebhook('accessory.status.changed', {
-                accessory_id: id,
-                old_status: current.status,
-                new_status: status,
-                notes: notes || null,
-            });
-
+        if (status && status !== current.status) {
             if (status === 'need_buy' || status === 'rejected') {
-                emitRequestWebhook(status === 'need_buy' ? 'accessory.approved' : 'accessory.rejected', {
-                    accessory_id: id,
+                await notifyWorkflowRequestEvent(status === 'need_buy' ? 'accessory.approved' : 'accessory.rejected', data, {
                     old_status: current.status,
                     new_status: status,
                     notes: notes || null,
-                    metadata: metadata || current.metadata || {},
-                });
-            }
-
-            await notifyManagersAndActor('accessory.status.changed', req.user, data, {
-                accessory_id: id,
-                old_status: current.status,
-                new_status: status,
-                notes: notes || null,
-                metadata: metadata || current.metadata || {},
-            });
-
-            if (status === 'need_buy' || status === 'rejected') {
-                await notifyManagersAndActor(status === 'need_buy' ? 'accessory.approved' : 'accessory.rejected', req.user, data, {
-                    accessory_id: id,
-                    old_status: current.status,
-                    new_status: status,
-                    notes: notes || null,
-                    metadata: metadata || current.metadata || {},
                 });
             }
 
@@ -242,39 +235,12 @@ router.patch('/partners/:id', authenticate, async (req: AuthenticatedRequest, re
             );
         }
 
-        if (status) {
-            emitRequestWebhook('partner.status.changed', {
-                partner_id: id,
-                old_status: current.status,
-                new_status: status,
-                notes: notes || null,
-            });
-
+        if (status && status !== current.status) {
             if (status === 'ship_to_partner' || status === 'rejected') {
-                emitRequestWebhook(status === 'ship_to_partner' ? 'partner.approved' : 'partner.rejected', {
-                    partner_id: id,
+                await notifyWorkflowRequestEvent(status === 'ship_to_partner' ? 'partner.approved' : 'partner.rejected', data, {
                     old_status: current.status,
                     new_status: status,
                     notes: notes || null,
-                    metadata: metadata || current.metadata || {},
-                });
-            }
-
-            await notifyManagersAndActor('partner.status.changed', req.user, data, {
-                partner_id: id,
-                old_status: current.status,
-                new_status: status,
-                notes: notes || null,
-                metadata: metadata || current.metadata || {},
-            });
-
-            if (status === 'ship_to_partner' || status === 'rejected') {
-                await notifyManagersAndActor(status === 'ship_to_partner' ? 'partner.approved' : 'partner.rejected', req.user, data, {
-                    partner_id: id,
-                    old_status: current.status,
-                    new_status: status,
-                    notes: notes || null,
-                    metadata: metadata || current.metadata || {},
                 });
             }
         }
