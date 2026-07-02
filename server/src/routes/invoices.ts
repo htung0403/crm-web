@@ -2,9 +2,9 @@ import { Router } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
 import { authenticate, AuthenticatedRequest, requireAccountant } from '../middleware/auth.js';
-import { syncOrderPayment } from '../utils/orderHelper.js';
 import { processInvoicePayment, processInvoiceCancellation } from '../utils/billingHelper.js';
 import { notifyFinanceEvent } from '../utils/financeNotifications.js';
+import { deleteOrderCascade } from '../utils/orderDeletionHelper.js';
 
 
 const router = Router();
@@ -371,14 +371,13 @@ router.delete('/:id', authenticate, requireAccountant, async (req: Authenticated
         }
 
         if (invoice.order_id) {
+            await deleteOrderCascade(invoice.order_id);
+        } else {
             await processInvoiceCancellation(id, { cancelRelatedPayments: true });
-            await syncOrderPayment(invoice.order_id);
-        }
-
-        const { error } = await supabaseAdmin.from('invoices').delete().eq('id', id);
-
-        if (error) {
-            throw new ApiError('Lỗi khi xóa hóa đơn: ' + error.message, 500);
+            const { error } = await supabaseAdmin.from('invoices').delete().eq('id', id);
+            if (error) {
+                throw new ApiError('Lỗi khi xóa hóa đơn: ' + error.message, 500);
+            }
         }
 
         notifyFinanceEvent({

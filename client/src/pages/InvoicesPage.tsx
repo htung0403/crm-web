@@ -429,17 +429,17 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
             return;
         }
 
-        if (
-            !window.confirm(
-                `Bạn có chắc muốn xóa hóa đơn "${inv.invoice_code}"? Hành động này không thể hoàn tác.`
-            )
-        ) {
+        const deleteMessage = inv.order_id
+            ? `Bạn có chắc muốn xóa hóa đơn "${inv.invoice_code}"? Thao tác này sẽ xóa luôn đơn hàng liên kết và toàn bộ dữ liệu liên quan. Hành động này không thể hoàn tác.`
+            : `Bạn có chắc muốn xóa hóa đơn "${inv.invoice_code}"? Hành động này không thể hoàn tác.`;
+
+        if (!window.confirm(deleteMessage)) {
             return;
         }
 
         try {
             await invoicesApi.delete(invoiceId);
-            toast.success('Đã xóa hóa đơn');
+            toast.success(inv.order_id ? 'Đã xóa hóa đơn và toàn bộ dữ liệu liên quan' : 'Đã xóa hóa đơn');
             if (selectedInvoice?.id === invoiceId) {
                 setShowInvoiceDetail(false);
                 setSelectedInvoice(null);

@@ -13,6 +13,7 @@ import { notifyFinanceEvent } from '../utils/financeNotifications.js';
 import { notifyCrmMaster } from '../utils/webhookNotifier.js';
 import { buildCrmOrderUrl, getManagerRecipients, notifyCrmMasterUser } from '../utils/n8nCrmEvents.js';
 import { fetchOrderPaymentRecords, insertPaymentRecord } from '../utils/paymentRecordsHelper.js';
+import { deleteOrderCascade } from '../utils/orderDeletionHelper.js';
 
 
 const router = Router();
@@ -2724,27 +2725,7 @@ router.post('/:id/debt-check', authenticate, async (req: AuthenticatedRequest, r
 router.delete('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-
-        // Chỉ xóa được đơn hàng pending
-        const { data: order } = await supabaseAdmin
-            .from('orders')
-            .select('status')
-            .eq('id', id)
-            .single();
-
-        if (order?.status !== 'before_sale') {
-            throw new ApiError('Chỉ có thể xóa đơn hàng ở trạng thái Before Sale', 400);
-        }
-
-        // Xóa order items trước
-        await supabaseAdmin.from('order_items').delete().eq('order_id', id);
-
-        // Xóa order
-        const { error } = await supabaseAdmin.from('orders').delete().eq('id', id);
-
-        if (error) {
-            throw new ApiError('Lỗi khi xóa đơn hàng', 500);
-        }
+        await deleteOrderCascade(id, { allowStatuses: ['before_sale'] });
 
         res.json({
             status: 'success',
