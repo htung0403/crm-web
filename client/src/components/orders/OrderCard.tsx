@@ -1,7 +1,8 @@
 import { Draggable } from '@hello-pangea/dnd';
-import { Calendar, User, Wrench } from 'lucide-react';
+import { Calendar, Trash2, User, Wrench } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
 import type { Order, OrderItem } from '@/hooks/useOrders';
 import { columns, getRoomDeadlineDisplay } from './constants';
 import { formatDate } from '@/lib/utils';
@@ -19,9 +20,10 @@ interface OrderCardProps {
     index: number;
     onClick: () => void;
     draggable?: boolean;
+    onDelete?: (order: Order) => void;
 }
 
-export function OrderCard({ draggableId, order, productGroup, columnId, index, onClick, draggable = true }: OrderCardProps) {
+export function OrderCard({ draggableId, order, productGroup, columnId, index, onClick, draggable = true, onDelete }: OrderCardProps) {
     const { product, services } = productGroup;
 
     const effectiveProduct = product;
@@ -110,7 +112,6 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
             onClick={onClick}
             className={`kanban-card p-3 rounded-xl bg-white border shadow-sm cursor-pointer text-sm ${isDragging ? 'shadow-lg ring-2 ring-primary/20' : ''}`}
         >
-                    {/* Header: Ảnh + Mã SP + Trạng thái */}
                     <div className="flex gap-2 mb-2">
                         <Avatar className="h-12 w-12 shrink-0 rounded-lg overflow-hidden bg-muted">
                             {productImage ? (
@@ -143,6 +144,21 @@ export function OrderCard({ draggableId, order, productGroup, columnId, index, o
                                 {displayName}
                             </div>
                         </div>
+                        {onDelete && (
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                title="Xóa đơn hàng"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDelete(order);
+                                }}
+                            >
+                                <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                        )}
                     </div>
 
                     {/* Dịch vụ sử dụng */}

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { supabaseAdmin } from '../config/supabase.js';
 import { ApiError } from '../middleware/errorHandler.js';
-import { authenticate, AuthenticatedRequest, requireSale } from '../middleware/auth.js';
+import { authenticate, AuthenticatedRequest, authorize, requireSale } from '../middleware/auth.js';
 import { checkAndCompleteOrder } from '../utils/orderHelper.js';
 import { autoCreateInvoice, syncInvoiceWithOrder } from '../utils/billingHelper.js';
 import {
@@ -2722,10 +2722,10 @@ router.post('/:id/debt-check', authenticate, async (req: AuthenticatedRequest, r
     }
 });
 // Delete order
-router.delete('/:id', authenticate, requireSale, async (req: AuthenticatedRequest, res, next) => {
+router.delete('/:id', authenticate, authorize('sale', 'manager', 'admin', 'accountant'), async (req: AuthenticatedRequest, res, next) => {
     try {
         const { id } = req.params;
-        await deleteOrderCascade(id, { allowStatuses: ['before_sale'] });
+        await deleteOrderCascade(id);
 
         res.json({
             status: 'success',

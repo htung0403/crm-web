@@ -6,6 +6,7 @@ import {
     Circle,
     Eye,
     Pencil,
+    Trash2,
     User,
     Wrench,
 } from 'lucide-react';
@@ -116,6 +117,7 @@ function MobileOrderCard({
     onView,
     onEdit,
     onMarkDone,
+    onDelete,
 }: {
     order: Order;
     group: ProductGroup;
@@ -126,6 +128,7 @@ function MobileOrderCard({
     onView: () => void;
     onEdit?: () => void;
     onMarkDone?: () => void;
+    onDelete?: () => void;
 }) {
     const product = group.product;
     const services = group.services || [];
@@ -235,7 +238,7 @@ function MobileOrderCard({
             </div>
 
             {/* Actions */}
-            <div className="grid grid-cols-3 gap-1.5 border-t border-slate-100 p-2">
+            <div className={cn('grid gap-1.5 border-t border-slate-100 p-2', onDelete ? 'grid-cols-4' : 'grid-cols-3')}>
                 <Button
                     variant="outline"
                     size="sm"
@@ -286,6 +289,20 @@ function MobileOrderCard({
                         Xong
                     </Button>
                 )}
+                {onDelete ? (
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 gap-1 px-0 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            onDelete();
+                        }}
+                    >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Xóa
+                    </Button>
+                ) : null}
             </div>
             {onStatusMove && statusColumns.length > 1 && (
                 <MobileKanbanMoveBar
@@ -309,6 +326,7 @@ export function MobileOrdersKanban({
     onViewOrder,
     onEditOrder,
     onMarkDone,
+    onDeleteOrder,
     onStatusMove,
 }: MobileOrdersKanbanProps) {
     const [internalIndex, setInternalIndex] = React.useState(0);
@@ -382,6 +400,7 @@ export function MobileOrdersKanban({
                             onMarkDone={
                                 onMarkDone ? () => onMarkDone(item.order, item.group) : undefined
                             }
+                            onDelete={onDeleteOrder ? () => onDeleteOrder(item.order) : undefined}
                         />
                     ))
                 )}

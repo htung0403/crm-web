@@ -5,7 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ordersApi, leadsApi, invoicesApi, customersApi } from '@/lib/api';
+import { ordersApi, leadsApi, invoicesApi, customersApi, transactionsApi } from '@/lib/api';
 import { formatCurrency } from '@/lib/utils';
 import type { User } from '@/types';
 
@@ -47,6 +47,7 @@ interface DashboardStats {
     totalLeads: number;
     newLeads: number;
     nurturingLeads: number;
+    convertedLeads: number;
     totalCustomers: number;
     totalRevenue: number;
     paidInvoices: number;
@@ -122,6 +123,7 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
         totalLeads: 0,
         newLeads: 0,
         nurturingLeads: 0,
+        convertedLeads: 0,
         totalCustomers: 0,
         totalRevenue: 0,
         paidInvoices: 0
@@ -135,74 +137,97 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
     const fetchDashboardData = useCallback(async () => {
         setLoading(true);
         try {
-            // Fetch all data in parallel
-            const [ordersRes, leadsRes, invoicesRes, customersRes] = await Promise.all([
-                ordersApi.getAll({ limit: 100 }),
-                leadsApi.getAll({ limit: 100 }),
-                invoicesApi.getAll({ limit: 500 }),
-                customersApi.getAll({ limit: 1 }) // Just to get count
+            const getTotal = (response: { data?: { data?: { pagination?: { total?: number } } } }) =>
+                response.data?.data?.pagination?.total ?? 0;
+
+            const [
+                ordersRecentRes,
+                beforeSaleRes,
+                inProgressRes,
+                doneRes,
+                afterSaleRes,
+                leadsRecentRes,
+                leadsTotalRes,
+                leadsNewRes,
+                leadsNurturingPhotoRes,
+                leadsNurturingPriceRes,
+                leadsConvertedRes,
+                paidInvoicesRes,
+                customersRes,
+                incomeSummaryRes,
+            ] = await Promise.all([
+                ordersApi.getAll({ limit: 5 }),
+                ordersApi.getAll({ status: 'before_sale', limit: 1 }),
+                ordersApi.getAll({ status: 'in_progress', limit: 1 }),
+                ordersApi.getAll({ status: 'done', limit: 1 }),
+                ordersApi.getAll({ status: 'after_sale', limit: 1 }),
+                leadsApi.getAll({ limit: 5 }),
+                leadsApi.getAll({ limit: 1 }),
+                leadsApi.getAll({ status: 'xac_dinh_nhu_cau', limit: 1 }),
+                leadsApi.getAll({ status: 'hen_gui_anh', limit: 1 }),
+                leadsApi.getAll({ status: 'dam_phan_gia', limit: 1 }),
+                leadsApi.getAll({ status: 'chot_don', limit: 1 }),
+                invoicesApi.getAll({ status: 'paid', limit: 500 }),
+                customersApi.getAll({ limit: 1 }),
+                transactionsApi.getSummary(),
             ]);
 
-            const ordersData = ordersRes.data.data?.orders || [];
-            const leadsData = leadsRes.data.data?.leads || [];
-            const invoicesData = invoicesRes.data.data?.invoices || [];
-            const customersTotal = ordersRes.data.data?.pagination?.total || 0;
+            const ordersData = ordersRecentRes.data.data?.orders || [];
+            const leadsData = leadsRecentRes.data.data?.leads || [];
+            const paidInvoices = paidInvoicesRes.data.data?.invoices || [];
+            const totalRevenue = incomeSummaryRes.data.data?.totalIncome
+                ?? paidInvoices.reduce((sum: number, invoice: { total_amount?: number }) => sum + (invoice.total_amount || 0), 0);
 
-            setOrders(ordersData);
-            setLeads(leadsData);
-
-            // Calculate stats
-            const paidInvoices = invoicesData.filter((i: any) => i.status === 'paid');
-            const totalRevenue = paidInvoices.reduce((sum: number, i: any) => sum + (i.total_amount || 0), 0);
-
-            // Calculate monthly revenue (last 12 months)
             const monthlyData: Record<string, { revenue: number; orders: number }> = {};
             const monthNames = ['Th1', 'Th2', 'Th3', 'Th4', 'Th5', 'Th6', 'Th7', 'Th8', 'Th9', 'Th10', 'Th11', 'Th12'];
 
-            // Initialize last 6 months
             for (let i = 5; i >= 0; i--) {
                 const date = new Date();
                 date.setMonth(date.getMonth() - i);
                 const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-                const monthLabel = `${monthNames[date.getMonth()]}/${date.getFullYear().toString().slice(-2)}`;
                 monthlyData[key] = { revenue: 0, orders: 0 };
             }
 
-            // Aggregate paid invoices by month
-            paidInvoices.forEach((invoice: any) => {
-                const paidDate = new Date(invoice.paid_at || invoice.created_at);
+            paidInvoices.forEach((invoice: { paid_at?: string; created_at?: string; total_amount?: number }) => {
+                const paidDate = new Date(invoice.paid_at || invoice.created_at || '');
+                if (Number.isNaN(paidDate.getTime())) return;
                 const key = `${paidDate.getFullYear()}-${String(paidDate.getMonth() + 1).padStart(2, '0')}`;
-                if (monthlyData[key]) {
-                    monthlyData[key].revenue += invoice.total_amount || 0;
-                    monthlyData[key].orders += 1;
-                }
+                if (!monthlyData[key]) return;
+                monthlyData[key].revenue += invoice.total_amount || 0;
+                monthlyData[key].orders += 1;
             });
 
-            // Convert to array for chart
             const monthlyRevenueData = Object.entries(monthlyData)
                 .sort(([a], [b]) => a.localeCompare(b))
                 .map(([key, data]) => {
-                    const [year, month] = key.split('-');
+                    const [, month] = key.split('-');
                     return {
-                        month: `${monthNames[parseInt(month) - 1]}`,
+                        month: `${monthNames[parseInt(month, 10) - 1]}`,
                         revenue: data.revenue,
-                        orders: data.orders
+                        orders: data.orders,
                     };
                 });
 
+            setOrders(ordersData);
+            setLeads(leadsData);
             setMonthlyRevenue(monthlyRevenueData);
+            const pendingOrders = getTotal(beforeSaleRes);
+            const processingOrders = getTotal(inProgressRes);
+            const completedOrders = getTotal(doneRes) + getTotal(afterSaleRes);
 
             setStats({
-                totalOrders: ordersData.length,
-                pendingOrders: ordersData.filter((o: Order) => o.status === 'before_sale').length,
-                processingOrders: ordersData.filter((o: Order) => o.status === 'in_progress').length,
-                completedOrders: ordersData.filter((o: Order) => o.status === 'after_sale').length,
-                totalLeads: leadsData.length,
-                newLeads: leadsData.filter((l: Lead) => l.status === 'new').length,
-                nurturingLeads: leadsData.filter((l: Lead) => l.status === 'nurturing').length,
-                totalCustomers: customersRes.data.data?.pagination?.total || 0,
+                // Đơn đang cần xử lý (không tính đơn đã hoàn thiện / lịch sử)
+                totalOrders: pendingOrders + processingOrders,
+                pendingOrders,
+                processingOrders,
+                completedOrders,
+                totalLeads: getTotal(leadsTotalRes),
+                newLeads: getTotal(leadsNewRes),
+                nurturingLeads: getTotal(leadsNurturingPhotoRes) + getTotal(leadsNurturingPriceRes),
+                convertedLeads: getTotal(leadsConvertedRes),
+                totalCustomers: getTotal(customersRes),
                 totalRevenue,
-                paidInvoices: paidInvoices.length
+                paidInvoices: getTotal(paidInvoicesRes),
             });
         } catch (error) {
             console.error('Error fetching dashboard data:', error);
@@ -218,10 +243,8 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
     // Derived stats
     const conversionRate = useMemo(() => {
         if (stats.totalLeads === 0) return 0;
-        // Assume converted leads are those not in new/nurturing status
-        const convertedLeads = leads.filter(l => l.status === 'converted').length;
-        return Math.round((convertedLeads / stats.totalLeads) * 100);
-    }, [leads, stats.totalLeads]);
+        return Math.round((stats.convertedLeads / stats.totalLeads) * 100);
+    }, [stats.convertedLeads, stats.totalLeads]);
 
     const getStatusLabel = (status: string) => {
         const labels: Record<string, string> = {
@@ -281,7 +304,7 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
             {canViewFinance ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                     <StatCard
-                        title="Tổng đơn hàng"
+                        title="Đơn đang xử lý"
                         value={stats.totalOrders.toString()}
                         icon={<ShoppingCart className="h-6 w-6" />}
                         color="blue"
@@ -430,7 +453,11 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
                         ) : (
                             <div className="space-y-4">
                                 {orders.slice(0, 5).map((order) => (
-                                    <div key={order.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors cursor-pointer">
+                                    <div
+                                        key={order.id}
+                                        className="flex items-center justify-between p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors cursor-pointer"
+                                        onClick={() => navigate(`/orders/${order.id}`)}
+                                    >
                                         <div className="flex items-center gap-3">
                                             <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-medium">
                                                 {order.customer?.name?.charAt(0) || 'K'}

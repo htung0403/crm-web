@@ -73,7 +73,7 @@ export function OrdersPage() {
 
     // Fetch data on mount and when navigating back to this page
     useEffect(() => {
-        fetchOrders();
+        fetchOrders({ limit: 500 });
         fetchCustomers({ status: 'active' }); // Only fetch active customers
         fetchProducts({ status: 'active' });
         fetchServices({ status: 'active' });
@@ -88,7 +88,7 @@ export function OrdersPage() {
     useEffect(() => {
         const handleVisibilityChange = () => {
             if (!document.hidden) {
-                fetchOrders();
+                fetchOrders({ limit: 500 });
             }
         };
 
@@ -399,12 +399,14 @@ export function OrdersPage() {
 
     const handleDeleteOrder = async (order: Order) => {
         if (!canDelete) return;
-        const confirmed = window.confirm(`Xóa đơn hàng ${order.order_code}?`);
+        const confirmed = window.confirm(
+            `Bạn có chắc muốn xóa đơn hàng "${order.order_code}"? Thao tác này sẽ xóa toàn bộ hóa đơn, yêu cầu, công việc kỹ thuật và dữ liệu liên quan. Hành động này không thể hoàn tác.`,
+        );
         if (!confirmed) return;
 
         try {
             await deleteOrder(order.id);
-            toast.success('Đã xóa đơn hàng');
+            toast.success('Đã xóa đơn hàng và toàn bộ dữ liệu liên quan');
             await fetchOrders();
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Lỗi khi xóa đơn hàng';
@@ -671,6 +673,7 @@ export function OrdersPage() {
                                                                 index={index}
                                                                 draggable={false}
                                                                 onClick={() => navigate(`/orders/${order.id}`)}
+                                                                onDelete={canDelete ? handleDeleteOrder : undefined}
                                                             />
                                                         ))}
                                                         {filteredCards.length === 0 && (

@@ -712,7 +712,7 @@ export function ReportsPage() {
                 {/* Sales Report */}
                 <TabsContent value="sales" className="space-y-6">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                        <StatCard title="Tổng đơn hàng" value={salesData.totalOrders.toString()} icon={ShoppingCart} color="blue" />
+                        <StatCard title="Đơn trong kỳ" value={salesData.totalOrders.toString()} icon={ShoppingCart} color="blue" />
                         <StatCard title="Khách hàng" value={salesData.totalCustomers.toString()} icon={Users} color="green" />
                         <StatCard title="Giá trị TB/đơn" value={salesData.avgOrderValue} icon={DollarSign} color="purple" />
                         <StatCard title="Tổng doanh thu" value={revenueData.total} icon={Target} color="amber" />

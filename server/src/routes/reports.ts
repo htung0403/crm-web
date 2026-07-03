@@ -1406,7 +1406,7 @@ router.get('/summary', authenticate, async (req: AuthenticatedRequest, res, next
                     }),
                 },
                 sales: {
-                    totalOrders: currentOrders?.length || 0,
+                    totalOrders: currentOrders?.filter(o => o.status !== 'cancelled').length || 0,
                     totalCustomers: uniqueCustomers,
                     avgOrderValue: currentOrders?.length ? Math.round(currentRevenue / currentOrders.length) : 0,
                     topProducts,
