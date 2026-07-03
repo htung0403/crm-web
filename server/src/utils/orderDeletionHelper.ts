@@ -99,19 +99,16 @@ export async function deleteOrderCascade(orderId: string, options: DeleteOrderCa
 
     const orderServiceIds = (orderServices || []).map(service => service.id);
 
-    const stepQueries: Promise<any>[] = [];
+    const stepResults: { data: { id: string }[] | null }[] = [];
     if (orderItemIds.length > 0) {
-        stepQueries.push(
-            supabaseAdmin.from('order_item_steps').select('id').in('order_item_id', orderItemIds),
-        );
+        const { data } = await supabaseAdmin.from('order_item_steps').select('id').in('order_item_id', orderItemIds);
+        stepResults.push({ data });
     }
     if (orderServiceIds.length > 0) {
-        stepQueries.push(
-            supabaseAdmin.from('order_item_steps').select('id').in('order_product_service_id', orderServiceIds),
-        );
+        const { data } = await supabaseAdmin.from('order_item_steps').select('id').in('order_product_service_id', orderServiceIds);
+        stepResults.push({ data });
     }
 
-    const stepResults = await Promise.all(stepQueries);
     const orderStepIds = stepResults.flatMap(result => (result.data || []).map((step: { id: string }) => step.id));
 
     const { data: invoices, error: invoicesError } = await supabaseAdmin

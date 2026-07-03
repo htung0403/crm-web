@@ -5,6 +5,7 @@ import { authenticate, AuthenticatedRequest, requireAccountant } from '../middle
 import { processInvoicePayment, processInvoiceCancellation } from '../utils/billingHelper.js';
 import { notifyFinanceEvent } from '../utils/financeNotifications.js';
 import { deleteOrderCascade } from '../utils/orderDeletionHelper.js';
+import { syncOrderPayment } from '../utils/orderHelper.js';
 
 
 const router = Router();
