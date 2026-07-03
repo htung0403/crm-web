@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { TrendingUp, TrendingDown, Wallet, PiggyBank, DollarSign, Banknote, Lock, Users, ShoppingCart, FileText, Loader2 } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, PiggyBank, DollarSign, Lock, Users, ShoppingCart, FileText, Loader2 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { ordersApi, leadsApi, invoicesApi, customersApi, transactionsApi } from '@/lib/api';
+import { ordersApi, leadsApi, customersApi, transactionsApi, reportsApi } from '@/lib/api';
+import { getChartPresetRange } from '@/components/reports/chartDateRange';
 import { formatCurrency } from '@/lib/utils';
 import type { User } from '@/types';
 
@@ -50,7 +51,37 @@ interface DashboardStats {
     convertedLeads: number;
     totalCustomers: number;
     totalRevenue: number;
+    totalExpense: number;
+    netProfit: number;
     paidInvoices: number;
+}
+
+function localDateStr(date: Date): string {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
+
+function buildMonthRanges(count: number) {
+    const ranges: { label: string; start_date: string; end_date: string }[] = [];
+    const today = new Date();
+
+    for (let i = count - 1; i >= 0; i--) {
+        const anchor = new Date(today.getFullYear(), today.getMonth() - i, 1);
+        const start = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+        const end = i === 0
+            ? today
+            : new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0);
+
+        ranges.push({
+            label: `Th${anchor.getMonth() + 1}`,
+            start_date: localDateStr(start),
+            end_date: localDateStr(end),
+        });
+    }
+
+    return ranges;
 }
 
 interface MonthlyRevenue {
@@ -126,6 +157,8 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
         convertedLeads: 0,
         totalCustomers: 0,
         totalRevenue: 0,
+        totalExpense: 0,
+        netProfit: 0,
         paidInvoices: 0
     });
 
@@ -140,6 +173,9 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
             const getTotal = (response: { data?: { data?: { pagination?: { total?: number } } } }) =>
                 response.data?.data?.pagination?.total ?? 0;
 
+            const thisMonth = getChartPresetRange('this_month');
+            const chartMonths = buildMonthRanges(6);
+
             const [
                 ordersRecentRes,
                 beforeSaleRes,
@@ -152,9 +188,10 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
                 leadsNurturingPhotoRes,
                 leadsNurturingPriceRes,
                 leadsConvertedRes,
-                paidInvoicesRes,
                 customersRes,
-                incomeSummaryRes,
+                monthFinanceRes,
+                dashboardReportRes,
+                ...monthChartResList
             ] = await Promise.all([
                 ordersApi.getAll({ limit: 5 }),
                 ordersApi.getAll({ status: 'before_sale', limit: 1 }),
@@ -167,46 +204,35 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
                 leadsApi.getAll({ status: 'hen_gui_anh', limit: 1 }),
                 leadsApi.getAll({ status: 'dam_phan_gia', limit: 1 }),
                 leadsApi.getAll({ status: 'chot_don', limit: 1 }),
-                invoicesApi.getAll({ status: 'paid', limit: 500 }),
                 customersApi.getAll({ limit: 1 }),
-                transactionsApi.getSummary(),
+                transactionsApi.getSummary({ start_date: thisMonth.from, end_date: thisMonth.to }),
+                reportsApi.getDashboard({
+                    chart_range: 'this_month',
+                    from_date: thisMonth.from,
+                    to_date: thisMonth.to,
+                    group_by: 'day',
+                }),
+                ...chartMonths.map((month) =>
+                    transactionsApi.getSummary({ start_date: month.start_date, end_date: month.end_date }),
+                ),
             ]);
 
             const ordersData = ordersRecentRes.data.data?.orders || [];
             const leadsData = leadsRecentRes.data.data?.leads || [];
-            const paidInvoices = paidInvoicesRes.data.data?.invoices || [];
-            const totalRevenue = incomeSummaryRes.data.data?.totalIncome
-                ?? paidInvoices.reduce((sum: number, invoice: { total_amount?: number }) => sum + (invoice.total_amount || 0), 0);
+            const monthFinance = monthFinanceRes.data.data;
+            const dashboardReport = dashboardReportRes.data?.data;
+            const totalRevenue = monthFinance?.totalIncome ?? 0;
+            const totalExpense = monthFinance?.totalExpense ?? 0;
+            const netProfit = monthFinance?.balance ?? 0;
+            const paidInvoices = dashboardReport?.charts?.netRevenue?.invoiceCount
+                ?? monthFinance?.incomeCount
+                ?? 0;
 
-            const monthlyData: Record<string, { revenue: number; orders: number }> = {};
-            const monthNames = ['Th1', 'Th2', 'Th3', 'Th4', 'Th5', 'Th6', 'Th7', 'Th8', 'Th9', 'Th10', 'Th11', 'Th12'];
-
-            for (let i = 5; i >= 0; i--) {
-                const date = new Date();
-                date.setMonth(date.getMonth() - i);
-                const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-                monthlyData[key] = { revenue: 0, orders: 0 };
-            }
-
-            paidInvoices.forEach((invoice: { paid_at?: string; created_at?: string; total_amount?: number }) => {
-                const paidDate = new Date(invoice.paid_at || invoice.created_at || '');
-                if (Number.isNaN(paidDate.getTime())) return;
-                const key = `${paidDate.getFullYear()}-${String(paidDate.getMonth() + 1).padStart(2, '0')}`;
-                if (!monthlyData[key]) return;
-                monthlyData[key].revenue += invoice.total_amount || 0;
-                monthlyData[key].orders += 1;
-            });
-
-            const monthlyRevenueData = Object.entries(monthlyData)
-                .sort(([a], [b]) => a.localeCompare(b))
-                .map(([key, data]) => {
-                    const [, month] = key.split('-');
-                    return {
-                        month: `${monthNames[parseInt(month, 10) - 1]}`,
-                        revenue: data.revenue,
-                        orders: data.orders,
-                    };
-                });
+            const monthlyRevenueData = chartMonths.map((month, index) => ({
+                month: month.label,
+                revenue: monthChartResList[index]?.data?.data?.totalIncome ?? 0,
+                orders: monthChartResList[index]?.data?.data?.incomeCount ?? 0,
+            }));
 
             setOrders(ordersData);
             setLeads(leadsData);
@@ -227,7 +253,9 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
                 convertedLeads: getTotal(leadsConvertedRes),
                 totalCustomers: getTotal(customersRes),
                 totalRevenue,
-                paidInvoices: getTotal(paidInvoicesRes),
+                totalExpense,
+                netProfit,
+                paidInvoices,
             });
         } catch (error) {
             console.error('Error fetching dashboard data:', error);
@@ -310,15 +338,21 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
                         color="blue"
                     />
                     <StatCard
-                        title="Doanh thu"
+                        title="Doanh thu tháng này"
                         value={formatCurrency(stats.totalRevenue)}
                         icon={<TrendingUp className="h-6 w-6" />}
                         color="green"
                     />
                     <StatCard
-                        title="Hóa đơn đã TT"
-                        value={stats.paidInvoices.toString()}
-                        icon={<FileText className="h-6 w-6" />}
+                        title="Chi phí tháng này"
+                        value={formatCurrency(stats.totalExpense)}
+                        icon={<Wallet className="h-6 w-6" />}
+                        color="red"
+                    />
+                    <StatCard
+                        title="Lợi nhuận tháng này"
+                        value={formatCurrency(stats.netProfit)}
+                        icon={<PiggyBank className="h-6 w-6" />}
                         color="purple"
                     />
                     <StatCard
@@ -326,12 +360,6 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
                         value={stats.totalCustomers.toString()}
                         icon={<Users className="h-6 w-6" />}
                         color="yellow"
-                    />
-                    <StatCard
-                        title="Tổng Lead"
-                        value={stats.totalLeads.toString()}
-                        icon={<Banknote className="h-6 w-6" />}
-                        color="red"
                     />
                 </div>
             ) : (
@@ -525,7 +553,7 @@ export function DashboardPage({ currentUser }: DashboardPageProps) {
             {canViewFinance && (
                 <Card>
                     <CardHeader>
-                        <CardTitle>Biểu đồ doanh thu theo tháng</CardTitle>
+                        <CardTitle>Doanh thu theo tháng (phiếu thu đã duyệt)</CardTitle>
                     </CardHeader>
                     <CardContent>
                         {monthlyRevenue.length > 0 ? (
