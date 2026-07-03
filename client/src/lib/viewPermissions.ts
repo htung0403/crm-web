@@ -167,7 +167,7 @@ const TECH_VIEWS_RESTRICT_SALE_EDIT = new Set([
 const VIEW_ROLE_DELETE: Partial<Record<string, UserRole[]>> = {
     leads: ['admin', 'manager'],
     customers: ['admin', 'manager'],
-    orders: ['admin', 'manager'],
+    orders: ['admin', 'manager', 'accountant', 'sale'],
     invoices: ['admin', 'manager', 'accountant'],
     income: ['admin', 'manager', 'accountant'],
     expense: ['admin', 'manager', 'accountant'],

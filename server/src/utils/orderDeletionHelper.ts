@@ -54,6 +54,22 @@ export async function deleteOrderCascade(orderId: string, options: DeleteOrderCa
         throw new ApiError('Không thể lấy danh sách hạng mục đơn hàng', 500);
     }
 
+    // Xóa dữ liệu tham chiếu trực tiếp tới order (tránh FK chặn xóa orders)
+    await Promise.all([
+        deleteByFilter(
+            'upsell_tickets',
+            query => query.eq('order_id', orderId),
+            'Không thể xóa ticket upsell liên quan đơn hàng',
+            { optional: true },
+        ),
+        deleteByFilter(
+            'order_care_warranty_log',
+            query => query.eq('order_id', orderId),
+            'Không thể xóa log bảo hành/chăm sóc của đơn hàng',
+            { optional: true },
+        ),
+    ]);
+
     const { data: orderProducts, error: orderProductsError } = await supabaseAdmin
         .from('order_products')
         .select('id, product_code')
@@ -157,11 +173,13 @@ export async function deleteOrderCascade(orderId: string, options: DeleteOrderCa
                 'order_item_technicians',
                 query => query.in('order_item_id', orderItemIds),
                 'Không thể xóa phân công kỹ thuật của hạng mục đơn hàng',
+                { optional: true },
             ),
             deleteByFilter(
                 'order_item_sales',
                 query => query.in('order_item_id', orderItemIds),
                 'Không thể xóa phân công sale của hạng mục đơn hàng',
+                { optional: true },
             ),
         ]);
     }
@@ -184,11 +202,13 @@ export async function deleteOrderCascade(orderId: string, options: DeleteOrderCa
                 'order_product_service_technicians',
                 query => query.in('order_product_service_id', orderServiceIds),
                 'Không thể xóa phân công kỹ thuật của dịch vụ đơn hàng',
+                { optional: true },
             ),
             deleteByFilter(
                 'order_product_service_sales',
                 query => query.in('order_product_service_id', orderServiceIds),
                 'Không thể xóa phân công sale của dịch vụ đơn hàng',
+                { optional: true },
             ),
         ]);
     }
@@ -272,11 +292,13 @@ export async function deleteOrderCascade(orderId: string, options: DeleteOrderCa
             'transactions',
             query => query.eq('order_id', orderId),
             'Không thể xóa chứng từ thanh toán liên quan đơn hàng',
+            { optional: true },
         ),
         deleteByFilter(
             'payment_records',
             query => query.eq('order_id', orderId),
             'Không thể xóa phiếu thu liên quan đơn hàng',
+            { optional: true },
         ),
     ]);
 
@@ -298,25 +320,41 @@ export async function deleteOrderCascade(orderId: string, options: DeleteOrderCa
     }
 
     if (invoiceIds.length > 0) {
-        await Promise.all([
-            deleteByFilter(
-                'commissions',
-                query => query.in('invoice_id', invoiceIds),
-                'Không thể xóa hoa hồng liên quan hóa đơn',
-                { optional: true },
-            ),
-            deleteByFilter(
-                'finance_transactions',
-                query => query.in('invoice_id', invoiceIds),
-                'Không thể xóa giao dịch tài chính liên quan hóa đơn',
-                { optional: true },
-            ),
-        ]);
-    }
+        await deleteByFilter(
+            'commissions',
+            query => query.in('invoice_id', invoiceIds),
+            'Không thể xóa hoa hồng liên quan hóa đơn',
+            { optional: true },
+        );
 
-    if (invoiceIds.length > 0) {
+        const { error: financeDeleteError } = await supabaseAdmin
+            .from('finance_transactions')
+            .delete()
+            .in('invoice_id', invoiceIds);
+
+        if (financeDeleteError) {
+            const now = new Date().toISOString();
+            await supabaseAdmin
+                .from('finance_transactions')
+                .update({ status: 'cancelled', updated_at: now })
+                .in('invoice_id', invoiceIds);
+
+            const { error: financeRetryError } = await supabaseAdmin
+                .from('finance_transactions')
+                .delete()
+                .in('invoice_id', invoiceIds);
+
+            if (financeRetryError) {
+                console.error('[OrderDeleteCascade] finance_transactions delete error:', financeRetryError);
+                throw new ApiError('Không thể xóa giao dịch tài chính liên quan hóa đơn', 500);
+            }
+        }
+
         const { error } = await supabaseAdmin.from('invoices').delete().eq('order_id', orderId);
-        if (error) throw new ApiError('Không thể xóa hóa đơn liên quan đơn hàng', 500);
+        if (error) {
+            console.error('[OrderDeleteCascade] invoices delete error:', error);
+            throw new ApiError('Không thể xóa hóa đơn liên quan đơn hàng', 500);
+        }
     }
 
     if (orderServiceIds.length > 0) {
@@ -339,7 +377,11 @@ export async function deleteOrderCascade(orderId: string, options: DeleteOrderCa
 
     const { error: deleteOrderError } = await supabaseAdmin.from('orders').delete().eq('id', orderId);
     if (deleteOrderError) {
-        throw new ApiError('Không thể xóa đơn hàng', 500);
+        console.error('[OrderDeleteCascade] orders delete error:', deleteOrderError);
+        throw new ApiError(
+            `Không thể xóa đơn hàng: ${deleteOrderError.message || 'còn dữ liệu liên quan'}`,
+            500,
+        );
     }
 
     return order;

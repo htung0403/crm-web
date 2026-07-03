@@ -407,7 +407,7 @@ export function OrdersPage() {
         try {
             await deleteOrder(order.id);
             toast.success('Đã xóa đơn hàng và toàn bộ dữ liệu liên quan');
-            await fetchOrders();
+            await fetchOrders({ limit: 500 });
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Lỗi khi xóa đơn hàng';
             toast.error(message);
