@@ -366,10 +366,6 @@ router.delete('/:id', authenticate, requireAccountant, async (req: Authenticated
             throw new ApiError('Không tìm thấy hóa đơn', 404);
         }
 
-        if (invoice.status === 'paid') {
-            throw new ApiError('Không thể xóa hóa đơn đã thanh toán', 400);
-        }
-
         if (invoice.order_id) {
             await deleteOrderCascade(invoice.order_id);
         } else {

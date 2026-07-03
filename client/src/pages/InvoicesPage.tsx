@@ -424,11 +424,6 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
         const inv = invoices.find((i) => i.id === invoiceId);
         if (!inv) return;
 
-        if (inv.status === 'paid') {
-            toast.error('Không thể xóa hóa đơn đã thanh toán');
-            return;
-        }
-
         const deleteMessage = inv.order_id
             ? `Bạn có chắc muốn xóa hóa đơn "${inv.invoice_code}"? Thao tác này sẽ xóa luôn đơn hàng liên kết và toàn bộ dữ liệu liên quan. Hành động này không thể hoàn tác.`
             : `Bạn có chắc muốn xóa hóa đơn "${inv.invoice_code}"? Hành động này không thể hoàn tác.`;
@@ -700,7 +695,7 @@ export function InvoicesPage({ currentUser }: InvoicesPageProps) {
                                                                 <Pencil className="h-4 w-4" />
                                                             </Button>
                                                         )}
-                                                        {canDelete && inv.status !== 'paid' && (
+                                                        {canDelete && (
                                                             <Button
                                                                 variant="ghost"
                                                                 size="sm"

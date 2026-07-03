@@ -552,9 +552,9 @@ export function InvoiceDetailDialog({
                 </Tabs>
 
                 {/* Actions */}
-                {(canEdit || canDelete) && invoice.status !== 'cancelled' && (
+                {(canEdit || canDelete) && (
                     <div className="flex flex-nowrap items-center justify-end gap-1 border-t px-3 py-2 sm:gap-2 sm:px-6 sm:pb-4">
-                        {canDelete && onDelete && invoice.status !== 'paid' && (
+                        {canDelete && onDelete && (
                             <Button
                                 variant="outline"
                                 size="sm"
@@ -565,7 +565,7 @@ export function InvoiceDetailDialog({
                                 Xóa
                             </Button>
                         )}
-                        {canEdit && (
+                        {canEdit && invoice.status !== 'cancelled' && (
                             <>
                                 <Button
                                     variant="outline"

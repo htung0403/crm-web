@@ -142,7 +142,7 @@ export function MobileInvoicesList({ invoices, loading, onView, onEdit, onDelete
                                                 Sửa
                                             </Button>
                                         )}
-                                        {onDelete && invoice.status !== 'paid' && (
+                                        {onDelete && (
                                             <Button
                                                 variant="outline"
                                                 size="sm"
